@@ -3,6 +3,7 @@ import { db } from '$lib/server/db'
 import { conversations, dreamCycles, memories, messages } from '$lib/server/db/schema'
 import { extractAndPersist } from '$lib/server/memory/extract'
 import { pruneMemories, decayMemories } from '$lib/server/memory/store'
+import { generateTitleAndCategory } from '$lib/server/chat/titlegen'
 
 type DreamConfig = {
 	decayLambda: number
@@ -18,6 +19,34 @@ const DEFAULT_DREAM_CONFIG: DreamConfig = {
 	topCount: 24,
 	conversationLimit: 12,
 	lookbackHours: 72,
+}
+
+export async function categorizeConversations(conversationIds: string[]) {
+	let categorized = 0
+	for (const id of conversationIds) {
+		try {
+			const msgs = await db
+				.select({ role: messages.role, content: messages.content })
+				.from(messages)
+				.where(eq(messages.conversationId, id))
+				.orderBy(desc(messages.createdAt))
+				.limit(10)
+
+			const userAssistant = msgs.reverse().filter((m) => m.role === 'user' || m.role === 'assistant') as Array<{
+				role: 'user' | 'assistant'
+				content: string
+			}>
+
+			if (userAssistant.length === 0) continue
+
+			const { title, category } = await generateTitleAndCategory(userAssistant)
+			await db.update(conversations).set({ title, category }).where(eq(conversations.id, id))
+			categorized++
+		} catch {
+			// Non-critical — skip this conversation
+		}
+	}
+	return categorized
 }
 
 export async function condenseMemories(config: Partial<DreamConfig> = {}) {
@@ -60,6 +89,7 @@ export async function condenseMemories(config: Partial<DreamConfig> = {}) {
 
 	return {
 		recentConversationsProcessed: recentConversations.length,
+		recentConversationIds: recentConversations.map((c) => c.id),
 		extractedCount,
 		prunedCount,
 		top,
@@ -81,8 +111,9 @@ export async function runDreamCycle(config: Partial<DreamConfig> = {}) {
 		.returning()
 
 	const result = await condenseMemories(config)
+	const categorizedCount = await categorizeConversations(result.recentConversationIds)
 	const endedAt = new Date()
-	const summary = `Processed ${result.recentConversationsProcessed} conversations, extracted ${result.extractedCount} memories, pruned ${result.prunedCount}.`
+	const summary = `Processed ${result.recentConversationsProcessed} conversations, extracted ${result.extractedCount} memories, pruned ${result.prunedCount}, categorized ${categorizedCount} conversations.`
 
 	await db
 		.update(dreamCycles)

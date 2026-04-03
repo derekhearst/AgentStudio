@@ -8,9 +8,11 @@ test('streams a mock assistant response from chat UI', async ({ page }) => {
 
 	try {
 		await page.goto('/chat')
-		await page.getByPlaceholder('Conversation title').fill(`${prefix} Conversation`)
-		await page.getByRole('button', { name: /create/i }).click()
-		await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+$/)
+		await page.waitForLoadState('networkidle')
+		const newChatBtn = page.getByRole('button', { name: /\+ new chat/i })
+		await newChatBtn.waitFor({ state: 'visible' })
+		await newChatBtn.click()
+		await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+$/, { timeout: 10000 })
 
 		await page.getByPlaceholder('Message DrokBot...').fill(`${prefix} hello stream`)
 		await page

@@ -6,6 +6,7 @@ import { streamChat, type LlmMessage } from '$lib/server/llm/openrouter'
 import { extractAndPersist } from '$lib/server/memory/extract'
 import { assembleContext } from '$lib/server/memory/context'
 import { bumpAccessCount } from '$lib/server/memory/store'
+import { generateTitle } from '$lib/server/chat/titlegen'
 
 const encoder = new TextEncoder()
 
@@ -68,6 +69,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		.from(messages)
 		.where(eq(messages.conversationId, body.conversationId))
 		.orderBy(asc(messages.createdAt))
+
+	const isFirstExchange = historyRows.length === 0 && !body.regenerate
 
 	const llmMessages: LlmMessage[] = historyRows
 		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
@@ -157,6 +160,17 @@ export const POST: RequestHandler = async ({ request }) => {
 						updatedAt: new Date(),
 					})
 					.where(eq(conversations.id, body.conversationId))
+
+				if (isFirstExchange && body.content) {
+					void generateTitle([
+						{ role: 'user', content: body.content.trim() },
+						{ role: 'assistant', content: assistantContent || '' },
+					])
+						.then((title) => db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId)))
+						.catch(() => {
+							// Non-critical — title stays as default
+						})
+				}
 
 				const extractionMessages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string }> = []
 				if (!body.regenerate && body.content?.trim()) {

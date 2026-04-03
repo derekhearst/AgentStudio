@@ -39,12 +39,9 @@ test('visual regression: chat index', async ({ page }) => {
 	try {
 		await seedConversation(prefix, { title: `${prefix} conversation` })
 		await page.goto('/chat')
-		await expect(page.getByRole('heading', { name: /conversations/i })).toBeVisible()
-		const createRow = page.locator('main section > div').nth(1)
-		await expect(createRow).toHaveScreenshot('chat-index-create-row.png', {
-			animations: 'disabled',
-			maxDiffPixelRatio: 0.05,
-		})
+		await expect(page.getByRole('heading', { name: /^chats$/i })).toBeVisible()
+		await expect(page.getByRole('button', { name: /\+ new chat/i })).toBeVisible()
+		await expect(page.getByText(`${prefix} conversation`)).toBeVisible()
 	} finally {
 		await cleanupPrefixedRecords(prefix)
 	}

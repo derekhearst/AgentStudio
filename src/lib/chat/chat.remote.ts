@@ -4,6 +4,12 @@ import { z } from 'zod'
 import { db } from '$lib/server/db'
 import { conversations, messages } from '$lib/server/db/schema'
 
+const updateConversationMetaSchema = z.object({
+	id: z.string().uuid(),
+	title: z.string().trim().min(1).max(120).optional(),
+	category: z.string().trim().min(1).max(60).optional(),
+})
+
 const createConversationSchema = z.object({
 	title: z.string().trim().min(1).max(120),
 	model: z.string().trim().min(1).max(120).optional(),
@@ -126,4 +132,13 @@ export const getMessageStats = query(conversationIdSchema, async (conversationId
 		.orderBy(asc(messages.createdAt))
 
 	return rows
+})
+
+export const updateConversationMeta = command(updateConversationMetaSchema, async (input) => {
+	const updates: Record<string, unknown> = {}
+	if (input.title !== undefined) updates.title = input.title
+	if (input.category !== undefined) updates.category = input.category
+	if (Object.keys(updates).length === 0) return { success: true as const }
+	await db.update(conversations).set(updates).where(eq(conversations.id, input.id))
+	return { success: true as const }
 })

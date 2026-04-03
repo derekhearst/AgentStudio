@@ -31,6 +31,7 @@ export const users = pgTable('users', {
 export const conversations = pgTable('conversations', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	title: text('title').notNull(),
+	category: text('category'),
 	userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 	model: text('model').notNull().default('anthropic/claude-sonnet-4'),
 	totalTokens: integer('total_tokens').notNull().default(0),

@@ -9,6 +9,7 @@ test('creates an agent through the UI and toggles its status', async ({ page }) 
 
 	try {
 		await page.goto('/agents/new')
+		await page.waitForLoadState('networkidle')
 		await page.getByLabel('Name').fill(name)
 		await page.getByLabel('Role').fill(`${prefix} role`)
 		await page.getByLabel('Model').fill('openai/gpt-4o-mini')

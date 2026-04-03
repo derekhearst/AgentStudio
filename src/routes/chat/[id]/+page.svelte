@@ -8,7 +8,6 @@
 	} from '$lib/chat/chat.remote';
 	import ChatInput from '$lib/components/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/components/chat/ContextWindow.svelte';
-	import ConversationTimeline from '$lib/components/chat/ConversationTimeline.svelte';
 	import MessageBubble from '$lib/components/chat/MessageBubble.svelte';
 
 	const conversationId = $derived(page.params.id ?? '');
@@ -16,6 +15,7 @@
 	let streaming = $state(false);
 	let streamError = $state<string | null>(null);
 	let draftAssistant = $state('');
+	let pendingMessageId = $state<string | null>(null);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 
@@ -24,7 +24,6 @@
 	});
 
 	const messages = $derived(conversationData?.messages ?? []);
-	const timelineItems = $derived(messages.map((m) => ({ id: m.id, role: m.role, createdAt: m.createdAt })));
 
 	const usedTokens = $derived(stats.reduce((sum, row) => sum + row.tokensIn + row.tokensOut, 0));
 
@@ -59,6 +58,7 @@
 		streaming = true;
 		streamError = null;
 		draftAssistant = '';
+		pendingMessageId = null;
 		try {
 			const response = await fetch(`/chat/${conversationId}/stream`, {
 				method: 'POST',
@@ -94,8 +94,13 @@
 						draftAssistant += payload.content ?? '';
 					}
 
-					if (eventName === 'done' && payload.error) {
-						streamError = payload.error;
+					if (eventName === 'done') {
+						if (payload.error) {
+							streamError = payload.error;
+						} else if (payload.messageId) {
+							// Keep draft visible until refreshAll() completes
+							pendingMessageId = payload.messageId;
+						}
 					}
 				}
 			}
@@ -105,6 +110,7 @@
 		} finally {
 			streaming = false;
 			draftAssistant = '';
+			pendingMessageId = null;
 		}
 	}
 
@@ -131,49 +137,46 @@
 {#if !conversationData}
 	<p class="text-sm opacity-70">Conversation not found.</p>
 {:else}
-	<section class="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
-		<ConversationTimeline items={timelineItems} onJump={handleTimelineJump} />
+	<section class="mx-auto flex max-w-3xl flex-col gap-4 py-4">
+		<header class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<h1 class="text-xl font-semibold">{conversationData.conversation.title}</h1>
+			<p class="mt-1 text-sm opacity-70">Model: {model}</p>
+		</header>
 
-		<div class="space-y-4">
-			<header class="rounded-2xl border border-base-300 bg-base-100 p-4">
-				<h1 class="text-xl font-semibold">{conversationData.conversation.title}</h1>
-				<p class="mt-1 text-sm opacity-70">Model: {model}</p>
-			</header>
+		<ContextWindow
+			used={usedTokens}
+			total={128000}
+			reserved={8000}
+			breakdown={{ system: 10, memories: 12, tools: 8, messages: 55, results: 15 }}
+			onCompact={compactContext}
+		/>
 
-			<ContextWindow
-				used={usedTokens}
-				total={128000}
-				reserved={8000}
-				breakdown={{ system: 10, memories: 12, tools: 8, messages: 55, results: 15 }}
-				onCompact={compactContext}
-			/>
+		<div class="max-h-[60vh] space-y-3 overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-4">
+			{#each messages as message (message.id)}
+				<MessageBubble message={message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
+			{/each}
 
-			<div class="max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-4">
-				{#each messages as message (message.id)}
-					<MessageBubble message={message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
-				{/each}
-
-				{#if draftAssistant}
-					<article class="chat chat-start">
-						<div class="chat-header text-xs opacity-60">assistant (streaming)</div>
-						<div class="chat-bubble chat-bubble-neutral whitespace-pre-wrap">{draftAssistant}</div>
-					</article>
-				{/if}
-			</div>
-
-			{#if streamError}
-				<p class="text-sm text-error">{streamError}</p>
+			{#if draftAssistant && (streaming || pendingMessageId !== null)}
+				<article class="chat chat-start">
+					<div class="chat-header text-xs opacity-60">assistant {streaming ? '(streaming…)' : ''}</div>
+					<div class="chat-bubble chat-bubble-neutral whitespace-pre-wrap">{draftAssistant}</div>
+				</article>
 			{/if}
-
-			<ChatInput
-				busy={streaming}
-				model={model}
-				onModelChange={(next) => {
-					model = next;
-				}}
-				onSubmit={(content) => streamMessage(content, false)}
-				estimatedRemaining={Math.max(0, 128000 - usedTokens)}
-			/>
 		</div>
+
+		{#if streamError}
+			<p class="text-sm text-error">{streamError}</p>
+		{/if}
+
+		<ChatInput
+			busy={streaming}
+			model={model}
+			onModelChange={(next) => {
+				model = next;
+			}}
+			onSubmit={(content) => streamMessage(content, false)}
+			estimatedRemaining={Math.max(0, 128000 - usedTokens)}
+		/>
 	</section>
 {/if}
+
