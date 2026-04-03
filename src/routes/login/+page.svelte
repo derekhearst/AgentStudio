@@ -1,5 +1,12 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { loginAction } from './data.remote';
+
+	$effect(() => {
+		if (loginAction.result?.success) {
+			void goto('/');
+		}
+	});
 </script>
 
 <div class="min-h-screen flex items-center justify-center bg-base-200 px-4">

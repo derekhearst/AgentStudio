@@ -12,7 +12,9 @@ Build a self-hosted SvelteKit PWA for autonomous AI agents with chat, tool use, 
 - Phase 4 completed
 - Phase 5 completed: storage/retrieval, relation-aware extraction, dream-cycle persistence, chat memory-context injection, and memory explorer UI are implemented
 - Phase 6 completed: orchestration engine/scheduler with tool loop, retries, delegation, queue drain, and full agent/task management UI workflows are implemented
-- Phase 7 in progress: PWA shell (service worker + manifest), push subscription storage, push delivery backend, and settings notification controls are implemented
+- Phase 7 completed in code: PWA shell (service worker + manifest), push subscription storage, push delivery backend, and settings notification controls are implemented
+- Phase 8 completed: persisted app settings (default model, theme, notification preferences, dream cycle configuration) and settings UI wiring are implemented
+- Phase 9 completed: Playwright E2E config plus expanded seeded UI coverage for auth, dashboard, chat, agents, tasks, memory, settings, and PWA flows are implemented and passing, including mocked external integration flows and visual regression snapshots
 
 Key architectural rule:
 

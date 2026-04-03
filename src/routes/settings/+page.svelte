@@ -10,9 +10,11 @@
 		subscribePush,
 		unsubscribePush
 	} from '$lib/notifications/notifications.remote';
+	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings/settings.remote';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
+	type SettingsRow = Awaited<ReturnType<typeof getSettings>>;
 
 	type BeforeInstallPromptEvent = Event & {
 		prompt: () => Promise<void>;
@@ -29,6 +31,7 @@
 	let testBody = $state('A delegated task is waiting for your approval.');
 	let testUrl = $state('/tasks');
 	let statusMessage = $state('');
+	let settings = $state<SettingsRow | null>(null);
 
 	onMount(() => {
 		void refresh();
@@ -44,10 +47,54 @@
 	});
 
 	async function refresh() {
-		const [feed, subs] = await Promise.all([listNotificationFeed(), listSubscriptions()]);
+		const [feed, subs, appSettings] = await Promise.all([
+			listNotificationFeed(),
+			listSubscriptions(),
+			getSettings()
+		]);
 		notifications = feed;
 		subscriptions = subs;
+		settings = appSettings;
 		pushEnabled = subs.length > 0;
+	}
+
+	function applyTheme(theme: 'drokbot' | 'drokbot-night') {
+		if (!browser) return;
+		document.documentElement.setAttribute('data-theme', theme);
+		localStorage.setItem('drokbot-theme', theme);
+	}
+
+	async function saveSettings() {
+		if (!settings || busy) return;
+		busy = true;
+		statusMessage = '';
+		try {
+			const updated = await updateAppSettings({
+				defaultModel: settings.defaultModel,
+				theme: settings.theme as 'drokbot' | 'drokbot-night',
+				notificationPrefs: settings.notificationPrefs,
+				dreamConfig: settings.dreamConfig
+			});
+			settings = updated;
+			applyTheme(updated.theme as 'drokbot' | 'drokbot-night');
+			statusMessage = 'Settings saved.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function resetSettingsToDefault() {
+		if (busy) return;
+		busy = true;
+		statusMessage = '';
+		try {
+			const updated = await resetAppSettings();
+			settings = updated;
+			applyTheme(updated.theme as 'drokbot' | 'drokbot-night');
+			statusMessage = 'Settings reset to defaults.';
+		} finally {
+			busy = false;
+		}
 	}
 
 	function base64ToUint8Array(value: string) {
@@ -155,15 +202,106 @@
 		await installPromptEvent.userChoice;
 		installPromptEvent = null;
 	}
+
+	function updateDreamAutoRun(autoRun: boolean) {
+		if (!settings) return;
+		settings = {
+			...settings,
+			dreamConfig: {
+				...settings.dreamConfig,
+				autoRun
+			}
+		};
+	}
 </script>
 
 <section class="space-y-5">
 	<header class="rounded-2xl border border-base-300 bg-base-100 p-4">
 		<h1 class="text-3xl font-bold">Settings</h1>
 		<p class="text-sm text-base-content/70">
-			Phase 7 controls for PWA install and push notifications.
+			Phase 8 settings plus Phase 7 controls for PWA install and push notifications.
 		</p>
 	</header>
+
+	{#if settings}
+		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<h2 class="text-lg font-semibold">General Preferences</h2>
+			<div class="mt-3 grid gap-3 md:grid-cols-2">
+				<label class="form-control">
+					<span class="label-text">Default Model</span>
+					<input class="input input-bordered" bind:value={settings.defaultModel} />
+				</label>
+				<label class="form-control">
+					<span class="label-text">Theme</span>
+					<select class="select select-bordered" bind:value={settings.theme}>
+						<option value="drokbot">drokbot</option>
+						<option value="drokbot-night">drokbot-night</option>
+					</select>
+				</label>
+				<label class="form-control">
+					<span class="label-text">Dream Auto Run</span>
+					<select
+						class="select select-bordered"
+						value={settings.dreamConfig.autoRun ? 'true' : 'false'}
+						onchange={(e) => {
+							updateDreamAutoRun((e.currentTarget as HTMLSelectElement).value === 'true');
+						}}
+					>
+						<option value="true">enabled</option>
+						<option value="false">disabled</option>
+					</select>
+				</label>
+				<label class="form-control">
+					<span class="label-text">Dream Frequency (hours)</span>
+					<input
+						type="number"
+						class="input input-bordered"
+						min="1"
+						max="720"
+						bind:value={settings.dreamConfig.frequencyHours}
+					/>
+				</label>
+				<label class="form-control md:col-span-2">
+					<span class="label-text">Dream Aggressiveness ({settings.dreamConfig.aggressiveness.toFixed(2)})</span>
+					<input
+						type="range"
+						min="0"
+						max="1"
+						step="0.05"
+						class="range"
+						bind:value={settings.dreamConfig.aggressiveness}
+					/>
+				</label>
+			</div>
+
+			<div class="mt-4">
+				<h3 class="font-medium">Notification Preferences</h3>
+				<div class="mt-2 grid gap-2 md:grid-cols-2">
+					<label class="label cursor-pointer justify-start gap-2">
+						<input type="checkbox" class="checkbox" bind:checked={settings.notificationPrefs.taskCompleted} />
+						<span class="label-text">Task completed alerts</span>
+					</label>
+					<label class="label cursor-pointer justify-start gap-2">
+						<input type="checkbox" class="checkbox" bind:checked={settings.notificationPrefs.needsInput} />
+						<span class="label-text">Needs input alerts</span>
+					</label>
+					<label class="label cursor-pointer justify-start gap-2">
+						<input type="checkbox" class="checkbox" bind:checked={settings.notificationPrefs.dreamSummary} />
+						<span class="label-text">Dream summary alerts</span>
+					</label>
+					<label class="label cursor-pointer justify-start gap-2">
+						<input type="checkbox" class="checkbox" bind:checked={settings.notificationPrefs.agentErrors} />
+						<span class="label-text">Agent error alerts</span>
+					</label>
+				</div>
+			</div>
+
+			<div class="mt-4 flex flex-wrap gap-2">
+				<button class="btn btn-primary" type="button" onclick={saveSettings} disabled={busy}>Save Settings</button>
+				<button class="btn btn-outline" type="button" onclick={resetSettingsToDefault} disabled={busy}>Reset Defaults</button>
+			</div>
+		</section>
+	{/if}
 
 	<section class="grid gap-4 lg:grid-cols-2">
 		<article class="rounded-2xl border border-base-300 bg-base-100 p-4">

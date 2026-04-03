@@ -1,15 +1,17 @@
-import { fail } from '@sveltejs/kit'
+import { invalid } from '@sveltejs/kit'
 import { form, getRequestEvent } from '$app/server'
+import { z } from 'zod'
 import { isValidPassword, setSessionCookie } from '$lib/server/auth'
 
-export const loginAction = form(async () => {
+const loginSchema = z.object({
+	password: z.string().min(1),
+})
+
+export const loginAction = form(loginSchema, async ({ password }) => {
 	const event = getRequestEvent()
-	const formData = await event.request.formData()
-	const passwordValue = formData.get('password')
-	const password = typeof passwordValue === 'string' ? passwordValue : ''
 
 	if (!password || !isValidPassword(password)) {
-		return fail(400, { error: 'Invalid password' })
+		invalid('Invalid password')
 	}
 
 	setSessionCookie(event.cookies)

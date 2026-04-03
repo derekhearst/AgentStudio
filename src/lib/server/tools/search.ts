@@ -16,6 +16,18 @@ function buildAuthHeader() {
 }
 
 export async function webSearch(query: string, limit = 8): Promise<SearchResult[]> {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return [
+			{
+				title: `Mock result for ${query}`,
+				url: 'https://example.com/mock-result',
+				snippet: 'Deterministic mock search result for E2E execution.',
+				engine: 'mock',
+				score: 1,
+			},
+		].slice(0, limit)
+	}
+
 	if (!env.SEARXNG_URL) {
 		throw new Error('SEARXNG_URL is not configured')
 	}

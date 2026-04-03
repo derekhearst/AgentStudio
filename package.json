@@ -11,6 +11,7 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:e2e": "playwright test",
+		"test:e2e:live": "node scripts/run-e2e-live.mjs",
 		"test": "bun run test:e2e",
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",

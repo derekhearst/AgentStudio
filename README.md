@@ -16,6 +16,10 @@ You can create specialized agents, assign tasks, and review results in a branch-
 
 The memory system stores, retrieves, and consolidates facts over time using PostgreSQL + pgvector. Periodic dream cycles merge duplicates, resolve contradictions, and prune stale knowledge.
 
+### Dashboard and Settings
+
+The home dashboard now shows live system totals, task status distribution, and recent activity across conversations and tasks. Settings persist default model, theme, notification preferences, and dream-cycle behavior in the database.
+
 ## Tech Stack
 
 - SvelteKit (Svelte 5, TypeScript)
@@ -62,6 +66,18 @@ bun run dev
 bun run check
 bun run test:e2e
 ```
+
+For opt-in live provider checks (real OpenRouter calls, no E2E mocks):
+
+```sh
+bun run test:e2e:live
+```
+
+Notes:
+
+- `bun run test:e2e` runs deterministic mocked external integrations for stable CI/local execution.
+- `bun run test:e2e:live` runs only `@live` tests with `PLAYWRIGHT_LIVE=1`, which disables external mocks.
+- Live tests require a valid `OPENROUTER_API_KEY` with account access; provider auth errors (for example `User not found`) indicate credential/account issues rather than app test harness issues.
 
 ## Docs
 

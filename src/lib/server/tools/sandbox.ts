@@ -33,6 +33,17 @@ function assertOk<Success>(response: { ok: boolean; body?: Success; error?: unkn
 }
 
 export async function execShell(command: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			success: true,
+			command,
+			status: 'completed',
+			exitCode: 0,
+			output: `MOCK_SHELL_OUTPUT: ${command}`,
+			raw: { mocked: true },
+		}
+	}
+
 	const client = getClient()
 	const response = await client.shell.execCommand({
 		command,
@@ -52,6 +63,13 @@ export async function execShell(command: string) {
 }
 
 export async function readFile(path: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			path,
+			content: `MOCK_FILE_CONTENT for ${path}`,
+		}
+	}
+
 	const client = getClient()
 	const response = await client.file.readFile({ file: path })
 	const body = assertOk(response)
@@ -62,6 +80,14 @@ export async function readFile(path: string) {
 }
 
 export async function writeFile(path: string, content: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			success: true,
+			path,
+			message: `MOCK_FILE_WRITE (${content.length} chars)`,
+		}
+	}
+
 	const client = getClient()
 	const response = await client.file.writeFile({ file: path, content })
 	const body = assertOk(response)
@@ -73,6 +99,16 @@ export async function writeFile(path: string, content: string) {
 }
 
 export async function execCode(code: string, language: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			success: true,
+			result: {
+				language,
+				stdout: `MOCK_CODE_OUTPUT: ${code.slice(0, 60)}`,
+			},
+		}
+	}
+
 	const client = getClient()
 	const response = await client.code.executeCode({
 		language: language as never,
@@ -86,6 +122,13 @@ export async function execCode(code: string, language: string) {
 }
 
 export async function browserNavigate(url: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			success: true,
+			url,
+		}
+	}
+
 	const client = getClient()
 	const response = await client.browserPage.navigate({ url })
 	const body = assertOk(response)
@@ -96,6 +139,13 @@ export async function browserNavigate(url: string) {
 }
 
 export async function browserScreenshot(url?: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			mimeType: 'image/png',
+			imageBase64: '',
+		}
+	}
+
 	const client = getClient()
 	if (url) {
 		await browserNavigate(url)
@@ -110,6 +160,14 @@ export async function browserScreenshot(url?: string) {
 }
 
 export async function getSandboxStatus() {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			success: true,
+			message: 'Sandbox reachable (mock)',
+			stats: { mocked: true },
+		}
+	}
+
 	const client = getClient()
 	const response = await client.shell.getSessionStats()
 	const body = assertOk(response)

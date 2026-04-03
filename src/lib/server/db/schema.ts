@@ -153,3 +153,29 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
+
+export const appSettings = pgTable('app_settings', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+	defaultModel: text('default_model').notNull().default('anthropic/claude-sonnet-4'),
+	notificationPrefs: jsonb('notification_prefs')
+		.$type<{
+			taskCompleted: boolean
+			needsInput: boolean
+			dreamSummary: boolean
+			agentErrors: boolean
+		}>()
+		.notNull()
+		.default({ taskCompleted: true, needsInput: true, dreamSummary: true, agentErrors: true }),
+	dreamConfig: jsonb('dream_config')
+		.$type<{
+			autoRun: boolean
+			frequencyHours: number
+			aggressiveness: number
+		}>()
+		.notNull()
+		.default({ autoRun: false, frequencyHours: 24, aggressiveness: 0.5 }),
+	theme: text('theme').notNull().default('drokbot'),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})

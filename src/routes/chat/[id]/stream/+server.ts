@@ -94,7 +94,13 @@ export const POST: RequestHandler = async ({ request }) => {
 		async start(controller) {
 			try {
 				for await (const chunk of stream) {
-					const content = chunk.choices?.[0]?.delta?.content
+					const delta = chunk.choices?.[0]?.delta as
+						| {
+								content?: string
+								toolCalls?: Array<{ id?: string; function?: { name?: string; arguments?: string } }>
+						  }
+						| undefined
+					const content = delta?.content
 					if (content) {
 						if (firstTokenAt === null) {
 							firstTokenAt = Date.now()
@@ -103,7 +109,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						controller.enqueue(sse('delta', { content }))
 					}
 
-					const toolCall = chunk.choices?.[0]?.delta?.toolCalls?.[0]
+					const toolCall = delta?.toolCalls?.[0]
 					if (toolCall) {
 						controller.enqueue(
 							sse('tool_call', {

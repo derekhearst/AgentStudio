@@ -23,15 +23,25 @@ async function getTaskBranch(taskId: string) {
 		throw new Error('Task not found')
 	}
 
-	if (!task.gitBranch) {
+	return task.gitBranch ?? null
+}
+
+async function requireTaskBranch(taskId: string) {
+	const branch = await getTaskBranch(taskId)
+	if (!branch) {
 		throw new Error('Task has no git branch')
 	}
-
-	return task.gitBranch
+	return branch
 }
 
 export const getTaskDiff = query(taskIdSchema, async (taskId) => {
 	const branch = await getTaskBranch(taskId)
+	if (!branch) {
+		return {
+			branch: null,
+			diff: '',
+		}
+	}
 	return {
 		branch,
 		diff: await getDiff(branch),
@@ -40,6 +50,12 @@ export const getTaskDiff = query(taskIdSchema, async (taskId) => {
 
 export const getChangedFiles = query(taskIdSchema, async (taskId) => {
 	const branch = await getTaskBranch(taskId)
+	if (!branch) {
+		return {
+			branch: null,
+			files: [],
+		}
+	}
 	return {
 		branch,
 		files: await getFileChanges(branch),
@@ -47,7 +63,7 @@ export const getChangedFiles = query(taskIdSchema, async (taskId) => {
 })
 
 export const approveChanges = command(taskIdSchema, async (taskId) => {
-	const branch = await getTaskBranch(taskId)
+	const branch = await requireTaskBranch(taskId)
 	await mergeBranch(branch)
 	await db.update(agentTasks).set({ status: 'completed', completedAt: new Date() }).where(eq(agentTasks.id, taskId))
 
@@ -58,7 +74,7 @@ export const approveChanges = command(taskIdSchema, async (taskId) => {
 })
 
 export const rejectChanges = command(taskIdSchema, async (taskId) => {
-	const branch = await getTaskBranch(taskId)
+	const branch = await requireTaskBranch(taskId)
 	await discardBranch(branch)
 	await db.update(agentTasks).set({ status: 'failed', completedAt: new Date() }).where(eq(agentTasks.id, taskId))
 
