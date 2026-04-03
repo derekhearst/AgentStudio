@@ -102,15 +102,15 @@ export async function createNotificationRecord(payload: PushPayload, userId?: st
 }
 
 export async function listNotifications(limit = 100) {
-	return db.select().from(notifications).orderBy(desc(notifications.createdAt)).limit(Math.max(1, Math.min(limit, 500)))
+	return db
+		.select()
+		.from(notifications)
+		.orderBy(desc(notifications.createdAt))
+		.limit(Math.max(1, Math.min(limit, 500)))
 }
 
 export async function markNotificationRead(notificationId: string, read = true) {
-	const [updated] = await db
-		.update(notifications)
-		.set({ read })
-		.where(eq(notifications.id, notificationId))
-		.returning()
+	const [updated] = await db.update(notifications).set({ read }).where(eq(notifications.id, notificationId)).returning()
 	return updated
 }
 

@@ -1,7 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="DrokBot icon">
-  <rect width="512" height="512" rx="112" fill="#0f3d3e"/>
-  <rect x="58" y="58" width="396" height="396" rx="92" fill="#f4f3ef"/>
-  <circle cx="198" cy="228" r="40" fill="#0f3d3e"/>
-  <circle cx="314" cy="228" r="40" fill="#0f3d3e"/>
-  <path d="M152 334c28 30 60 44 104 44 44 0 76-14 104-44" stroke="#0f3d3e" stroke-width="30" fill="none" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img"
+  aria-label="DrokBot icon">
+  <rect width="512" height="512" rx="112" fill="#0f3d3e" />
+  <rect x="58" y="58" width="396" height="396" rx="92" fill="#f4f3ef" />
+  <circle cx="198" cy="228" r="40" fill="#0f3d3e" />
+  <circle cx="314" cy="228" r="40" fill="#0f3d3e" />
+  <path d="M152 334c28 30 60 44 104 44 44 0 76-14 104-44" stroke="#0f3d3e" stroke-width="30"
+    fill="none" stroke-linecap="round" />
 </svg>
