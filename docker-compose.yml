@@ -1,10 +1,10 @@
 services:
   drokbot:
-    build: .
+    image: ghcr.io/derekhearst/drokbot:latest
     container_name: drokbot
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "1234:3000"
     volumes:
       - /mnt/Apps/Apps/drokbot/workspace:/workspace
     environment:
@@ -22,3 +22,17 @@ services:
     security_opt:
       - seccomp:unconfined
     shm_size: 1gb
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower-drokbot
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_LABEL_ENABLE=true
+    command: --interval 300
