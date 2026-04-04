@@ -12,6 +12,7 @@
 	let mobileSidebarOpen = $state(false);
 
 	const isLoginRoute = $derived(page.url.pathname.startsWith('/login'));
+	const isChatRoute = $derived(page.url.pathname.startsWith('/chat'));
 
 	function closeSidebar() {
 		mobileSidebarOpen = false;
@@ -33,8 +34,8 @@
 	<div class="drawer lg:drawer-open">
 		<input id="app-drawer" type="checkbox" class="drawer-toggle" bind:checked={mobileSidebarOpen} />
 
-		<div class="drawer-content flex min-h-screen flex-col">
-			<header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
+		<div class="drawer-content flex h-screen flex-col overflow-hidden">
+			<header class="shrink-0 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
 				<div class="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 sm:px-6">
 					<div class="flex items-center gap-3">
 						<label for="app-drawer" class="btn btn-ghost btn-square lg:hidden" aria-label="Open menu">
@@ -53,14 +54,16 @@
 				</div>
 			</header>
 
-			<div class="mx-auto grid w-full max-w-[1600px] flex-1 gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-				<main class="flex min-h-0 flex-col rounded-3xl border border-base-300 bg-base-100/85 p-4 shadow-sm sm:p-6">
+			<div class="mx-auto grid min-h-0 w-full max-w-[1600px] flex-1 grid-rows-[1fr] gap-4 p-4 sm:p-6 {isChatRoute ? 'xl:grid-cols-[minmax(0,1fr)_320px]' : ''}">
+				<main class="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-base-300 bg-base-100/85 p-4 shadow-sm sm:p-6">
 					{@render children()}
 				</main>
 
-				<aside class="hidden rounded-3xl border border-base-300 bg-base-100/80 p-4 shadow-sm xl:block">
-					<RecentChats />
-				</aside>
+				{#if isChatRoute}
+					<aside class="hidden overflow-y-auto rounded-3xl border border-base-300 bg-base-100/80 p-4 shadow-sm xl:block">
+						<RecentChats />
+					</aside>
+				{/if}
 			</div>
 		</div>
 

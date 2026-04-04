@@ -1,3 +1,5 @@
+<svelte:head><title>Activity | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listActivity } from '$lib/activity/activity.remote';

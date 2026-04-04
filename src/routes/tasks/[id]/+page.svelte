@@ -1,3 +1,5 @@
+<svelte:head><title>{detail?.task.title ?? 'Task'} | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';

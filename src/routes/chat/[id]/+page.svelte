@@ -1,5 +1,8 @@
+<svelte:head><title>{conversationData?.conversation.title ?? 'Chat'} | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { page } from '$app/state';
+	import { tick } from 'svelte';
 	import {
 		deleteMessagesAfter,
 		editMessage,
@@ -18,6 +21,21 @@
 	let pendingMessageId = $state<string | null>(null);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
+	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
+
+	async function scrollToBottom() {
+		await tick();
+		if (messagesEl) {
+			messagesEl.scrollTop = messagesEl.scrollHeight;
+		}
+	}
+
+	$effect(() => {
+		// Auto-scroll when messages change or during streaming
+		void messages.length;
+		void draftAssistant;
+		scrollToBottom();
+	});
 
 	$effect(() => {
 		void loadConversationState();
@@ -137,8 +155,8 @@
 {#if !conversationData}
 	<p class="text-sm opacity-70">Conversation not found.</p>
 {:else}
-	<section class="mx-auto flex max-w-3xl flex-col gap-4 py-4">
-		<header class="rounded-2xl border border-base-300 bg-base-100 p-4">
+	<section class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-4 py-4">
+		<header class="shrink-0 rounded-2xl border border-base-300 bg-base-100 p-4">
 			<h1 class="text-xl font-semibold">{conversationData.conversation.title}</h1>
 			<p class="mt-1 text-sm opacity-70">Model: {model}</p>
 		</header>
@@ -151,7 +169,7 @@
 			onCompact={compactContext}
 		/>
 
-		<div class="max-h-[60vh] space-y-3 overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-4">
+		<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-4">
 			{#each messages as message (message.id)}
 				<MessageBubble message={message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
 			{/each}

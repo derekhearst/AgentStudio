@@ -1,3 +1,5 @@
+<svelte:head><title>Login | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { loginAction } from './data.remote';

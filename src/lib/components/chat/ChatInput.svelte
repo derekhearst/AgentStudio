@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
+
 	let {
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
@@ -12,12 +14,6 @@
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
 	}>();
-
-	const models = [
-		'anthropic/claude-sonnet-4',
-		'anthropic/claude-opus-4',
-		'openai/gpt-4o-mini'
-	];
 
 	let value = $state('');
 
@@ -33,15 +29,12 @@
 <form class="space-y-2" onsubmit={submit}>
 	<div class="flex flex-wrap items-center gap-2 text-xs opacity-70">
 		<span>Model</span>
-		<select
-			class="select select-xs select-bordered"
+		<ModelSelector
 			value={model}
-			onchange={(event) => onModelChange?.((event.currentTarget as HTMLSelectElement).value)}
-		>
-			{#each models as option (option)}
-				<option value={option}>{option}</option>
-			{/each}
-		</select>
+			size="xs"
+			class="w-64"
+			onchange={(id: string) => onModelChange?.(id)}
+		/>
 		<span>Estimated remaining: {estimatedRemaining.toLocaleString()} tokens</span>
 	</div>
 

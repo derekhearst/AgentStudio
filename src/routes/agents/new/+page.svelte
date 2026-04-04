@@ -1,6 +1,9 @@
+<svelte:head><title>New Agent | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { createAgent } from '$lib/agents/agents.remote';
+	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
 
 	let name = $state('');
 	let role = $state('Research and implementation specialist');
@@ -51,10 +54,10 @@
 			<span class="label-text">Role</span>
 			<input class="input input-bordered" bind:value={role} />
 		</label>
-		<label class="form-control">
+		<div class="form-control">
 			<span class="label-text">Model</span>
-			<input class="input input-bordered" bind:value={model} />
-		</label>
+			<ModelSelector value={model} onchange={(id: string) => (model = id)} />
+		</div>
 		<label class="form-control">
 			<span class="label-text">System prompt</span>
 			<textarea class="textarea textarea-bordered h-40" bind:value={systemPrompt}></textarea>

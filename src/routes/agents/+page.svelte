@@ -1,3 +1,5 @@
+<svelte:head><title>Agents | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {

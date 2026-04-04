@@ -1,3 +1,5 @@
+<svelte:head><title>Review | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listTasks, setTaskStatus, requestChanges } from '$lib/tasks/tasks.remote';

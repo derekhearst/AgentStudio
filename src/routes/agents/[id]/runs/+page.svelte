@@ -1,3 +1,5 @@
+<svelte:head><title>{agentData?.agent.name ?? 'Agent'} Runs | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';

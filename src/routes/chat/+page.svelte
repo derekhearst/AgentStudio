@@ -1,3 +1,5 @@
+<svelte:head><title>Chat | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { createConversation, getConversations } from '$lib/chat/chat.remote';

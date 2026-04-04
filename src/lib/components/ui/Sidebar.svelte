@@ -19,8 +19,7 @@
 				{ href: '/chat', label: 'Chat' },
 				{ href: '/agents', label: 'Agents' },
 				{ href: '/tasks', label: 'Tasks' },
-				{ href: '/review', label: 'Review Queue' },
-				{ href: '/browse', label: 'Browse' }
+				{ href: '/review', label: 'Review Queue' }
 			]
 		},
 		{

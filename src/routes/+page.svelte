@@ -1,3 +1,5 @@
+<svelte:head><title>Dashboard | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getDashboardSummary } from '$lib/dashboard/dashboard.remote';

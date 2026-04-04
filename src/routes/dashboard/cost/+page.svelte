@@ -1,3 +1,5 @@
+<svelte:head><title>Cost Dashboard | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getCostSummary, getBudgetStatus } from '$lib/dashboard/cost.remote';

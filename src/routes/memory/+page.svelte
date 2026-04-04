@@ -1,3 +1,5 @@
+<svelte:head><title>Memory | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listDreamCyclesQuery, runDreamCycleCommand } from '$lib/memory/dream.remote';

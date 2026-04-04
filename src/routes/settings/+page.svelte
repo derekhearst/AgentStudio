@@ -1,3 +1,5 @@
+<svelte:head><title>Settings | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
@@ -11,6 +13,7 @@
 		unsubscribePush
 	} from '$lib/notifications/notifications.remote';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings/settings.remote';
+	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -228,10 +231,10 @@
 		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">
 			<h2 class="text-lg font-semibold">General Preferences</h2>
 			<div class="mt-3 grid gap-3 md:grid-cols-2">
-				<label class="form-control">
+				<div class="form-control">
 					<span class="label-text">Default Model</span>
-					<input class="input input-bordered" bind:value={settings.defaultModel} />
-				</label>
+					<ModelSelector value={settings.defaultModel} onchange={(id: string) => { if (settings) settings.defaultModel = id }} />
+				</div>
 				<label class="form-control">
 					<span class="label-text">Theme</span>
 					<select class="select select-bordered" bind:value={settings.theme}>

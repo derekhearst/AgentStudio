@@ -1,3 +1,5 @@
+<svelte:head><title>Tasks | DrokBot</title></svelte:head>
+
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getAgentChoices, runSchedulerTickCommand } from '$lib/agents/agents.remote';
