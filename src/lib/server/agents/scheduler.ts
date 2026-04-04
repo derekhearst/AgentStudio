@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { db } from '$lib/server/db'
 import { agentRuns, agents, agentTasks } from '$lib/server/db/schema'
 import { executeAgentTask } from '$lib/server/agents/engine'
@@ -32,7 +32,7 @@ export async function runSchedulerTick(options: SchedulerOptions = {}) {
 	const queue = await db
 		.select()
 		.from(agentTasks)
-		.where(eq(agentTasks.status, 'pending'))
+		.where(inArray(agentTasks.status, ['pending', 'changes_requested']))
 		.orderBy(desc(agentTasks.priority), asc(agentTasks.createdAt))
 		.limit(availableSlots * 3)
 

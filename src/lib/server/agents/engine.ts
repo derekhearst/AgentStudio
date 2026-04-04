@@ -4,6 +4,7 @@ import { db } from '$lib/server/db'
 import { agentRuns, agents, agentTasks } from '$lib/server/db/schema'
 import { chat } from '$lib/server/llm/openrouter'
 import { executeTool, type ToolCall, type ToolName } from '$lib/server/llm/tools'
+import { emitActivity } from '$lib/server/activity/emit'
 
 type CreateAgentTaskInput = {
 	agentId: string
@@ -26,6 +27,7 @@ const toolLoopSchema = z.object({
 					'memory_search',
 					'create_task',
 					'delegate_to_agent',
+					'image_generate',
 				]),
 				arguments: z.record(z.string(), z.unknown()).default({}),
 			}),
@@ -68,6 +70,18 @@ function parseToolLoop(content: string): PlannedToolLoop {
 	}
 }
 
+function classifyReviewType(execution: {
+	summary: string
+	toolResults: Array<{ call: { name: string }; result: unknown }>
+}): 'heavy' | 'quick' | 'informational' {
+	const hasCodeTools = execution.toolResults.some((r) =>
+		['code_execute', 'file_write', 'file_read'].includes(r.call.name),
+	)
+	if (hasCodeTools) return 'heavy'
+	if (execution.summary.length < 500 && execution.toolResults.length <= 1) return 'quick'
+	return 'informational'
+}
+
 async function runToolLoopForTask(agent: typeof agents.$inferSelect, task: typeof agentTasks.$inferSelect) {
 	const plannerResponse = await chat(
 		[
@@ -78,7 +92,7 @@ async function runToolLoopForTask(agent: typeof agents.$inferSelect, task: typeo
 					`Your role: ${agent.role}`,
 					'You may request up to 3 tools and optionally delegate work.',
 					'Return strict JSON with keys: analysis, toolCalls, delegate, finalSummary.',
-					'Tool names: web_search, code_execute, file_read, file_write, browser_screenshot, memory_search, create_task, delegate_to_agent.',
+					'Tool names: web_search, code_execute, file_read, file_write, browser_screenshot, memory_search, create_task, delegate_to_agent, image_generate.',
 				].join('\n'),
 			},
 			{
@@ -170,6 +184,12 @@ export async function createAgentTask(input: CreateAgentTaskInput) {
 			result: {},
 		})
 		.returning()
+
+	void emitActivity('task_created', `Task created: ${task.title}`, {
+		entityId: task.id,
+		entityType: 'task',
+		metadata: { agentId: input.agentId, priority: task.priority },
+	})
 
 	return task
 }
@@ -272,11 +292,14 @@ export async function executeAgentTask(taskId: string) {
 				preview: execution.summary.slice(0, 240),
 			}
 
+			const reviewType = classifyReviewType(execution)
+
 			await db
 				.update(agentTasks)
 				.set({
 					status: 'review',
 					completedAt: new Date(),
+					reviewType,
 					result: {
 						runId: run.id,
 						summary: execution.summary,
@@ -299,6 +322,12 @@ export async function executeAgentTask(taskId: string) {
 				.where(eq(agentRuns.id, run.id))
 
 			await db.update(agents).set({ status: 'idle' }).where(eq(agents.id, agent.id))
+
+			void emitActivity('task_status_changed', `Task moved to review: ${task.title}`, {
+				entityId: task.id,
+				entityType: 'task',
+				metadata: { status: 'review', reviewType, agentId: agent.id, runId: run.id },
+			})
 
 			return {
 				taskId: task.id,
@@ -345,6 +374,13 @@ export async function executeAgentTask(taskId: string) {
 		.where(eq(agentRuns.id, run.id))
 
 	await db.update(agents).set({ status: 'idle' }).where(eq(agents.id, agent.id))
+
+	void emitActivity('task_status_changed', `Task failed: ${task.title}`, {
+		entityId: task.id,
+		entityType: 'task',
+		metadata: { status: 'failed', agentId: agent.id, error: lastError?.message },
+	})
+
 	throw lastError ?? new Error('Task execution failed')
 }
 

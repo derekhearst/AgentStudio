@@ -15,6 +15,10 @@ export const DEFAULT_SETTINGS = {
 		frequencyHours: 24,
 		aggressiveness: 0.5,
 	},
+	budgetConfig: {
+		dailyLimit: null as number | null,
+		monthlyLimit: null as number | null,
+	},
 	theme: 'drokbot',
 } as const
 
@@ -49,6 +53,10 @@ export async function updateSettings(input: {
 		frequencyHours?: number
 		aggressiveness?: number
 	}
+	budgetConfig?: {
+		dailyLimit?: number | null
+		monthlyLimit?: number | null
+	}
 }) {
 	const current = await getOrCreateSettings()
 	const [updated] = await db
@@ -63,6 +71,10 @@ export async function updateSettings(input: {
 			dreamConfig: {
 				...current.dreamConfig,
 				...(input.dreamConfig ?? {}),
+			},
+			budgetConfig: {
+				...(current.budgetConfig ?? DEFAULT_SETTINGS.budgetConfig),
+				...(input.budgetConfig ?? {}),
 			},
 			updatedAt: new Date(),
 		})
@@ -85,6 +97,7 @@ export async function resetSettings() {
 			theme: DEFAULT_SETTINGS.theme,
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
 			dreamConfig: DEFAULT_SETTINGS.dreamConfig,
+			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, existing.id))

@@ -18,13 +18,17 @@
 				{ href: '/', label: 'Dashboard' },
 				{ href: '/chat', label: 'Chat' },
 				{ href: '/agents', label: 'Agents' },
-				{ href: '/tasks', label: 'Tasks' }
+				{ href: '/tasks', label: 'Tasks' },
+				{ href: '/review', label: 'Review Queue' },
+				{ href: '/browse', label: 'Browse' }
 			]
 		},
 		{
 			title: 'Knowledge',
 			links: [
 				{ href: '/memory', label: 'Memory' },
+				{ href: '/activity', label: 'Activity' },
+				{ href: '/dashboard/cost', label: 'Cost' },
 				{ href: '/settings', label: 'Settings' }
 			]
 		}

@@ -1,0 +1,24 @@
+services:
+  drokbot:
+    build: .
+    container_name: drokbot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /mnt/Apps/Apps/drokbot/workspace:/workspace
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - SEARXNG_URL=${SEARXNG_URL}
+      - SEARXNG_PASSWORD=${SEARXNG_PASSWORD}
+      - SANDBOX_WORKSPACE=/workspace
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - ORIGIN=${ORIGIN}
+      - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+      - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    security_opt:
+      - seccomp:unconfined
+    shm_size: 1gb

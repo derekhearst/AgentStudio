@@ -50,7 +50,7 @@ cp .env.example .env
 - `OPENROUTER_API_KEY`
 - `AUTH_PASSWORD`
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
-- `SANDBOX_URL`
+- `SANDBOX_WORKSPACE` (defaults to `/workspace` in Docker, use `.sandbox` for local dev)
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
 

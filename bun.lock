@@ -5,9 +5,9 @@
     "": {
       "name": "drokbot",
       "dependencies": {
-        "@agent-infra/sandbox": "^1.0.15",
         "@openrouter/sdk": "^0.11.2",
         "daisyui": "^5.5.19",
+        "playwright": "^1.59.1",
         "web-push": "^3.6.7",
         "zod": "^4.3.6",
       },
@@ -31,8 +31,6 @@
     },
   },
   "packages": {
-    "@agent-infra/sandbox": ["@agent-infra/sandbox@1.0.15", "", {}, "sha512-lHjQNEWgfsYoUVigffw1HfjUe7ebQ8jFp9EXRiAZxBqKmmE/YYUMAKFOtynexEnwcRa9HvvOHn5+B10wC8aBPg=="],
-
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 
     "@esbuild-kit/core-utils": ["@esbuild-kit/core-utils@3.3.2", "", { "dependencies": { "esbuild": "~0.18.20", "source-map-support": "^0.5.21" } }, "sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ=="],

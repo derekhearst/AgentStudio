@@ -73,7 +73,8 @@
 				defaultModel: settings.defaultModel,
 				theme: settings.theme as 'drokbot' | 'drokbot-night',
 				notificationPrefs: settings.notificationPrefs,
-				dreamConfig: settings.dreamConfig
+				dreamConfig: settings.dreamConfig,
+				budgetConfig: settings.budgetConfig,
 			});
 			settings = updated;
 			applyTheme(updated.theme as 'drokbot' | 'drokbot-night');
@@ -292,6 +293,45 @@
 					<label class="label cursor-pointer justify-start gap-2">
 						<input type="checkbox" class="checkbox" bind:checked={settings.notificationPrefs.agentErrors} />
 						<span class="label-text">Agent error alerts</span>
+					</label>
+				</div>
+			</div>
+
+			<div class="mt-4">
+				<h3 class="font-medium">Budget Limits</h3>
+				<p class="text-xs text-base-content/60">Set spending limits. Leave blank for no limit. Alerts trigger at 80% and 100%.</p>
+				<div class="mt-2 grid gap-3 md:grid-cols-2">
+					<label class="form-control">
+						<span class="label-text">Daily Limit ($)</span>
+						<input
+							type="number"
+							class="input input-bordered"
+							min="0"
+							step="0.01"
+							placeholder="No limit"
+							value={settings.budgetConfig?.dailyLimit ?? ''}
+							onchange={(e) => {
+								if (!settings) return;
+								const val = (e.currentTarget as HTMLInputElement).value;
+								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit: val ? Number(val) : null } };
+							}}
+						/>
+					</label>
+					<label class="form-control">
+						<span class="label-text">Monthly Limit ($)</span>
+						<input
+							type="number"
+							class="input input-bordered"
+							min="0"
+							step="0.01"
+							placeholder="No limit"
+							value={settings.budgetConfig?.monthlyLimit ?? ''}
+							onchange={(e) => {
+								if (!settings) return;
+								const val = (e.currentTarget as HTMLInputElement).value;
+								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit: val ? Number(val) : null } };
+							}}
+						/>
 					</label>
 				</div>
 			</div>

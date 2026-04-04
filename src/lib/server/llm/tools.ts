@@ -3,6 +3,7 @@ import { webSearch } from '$lib/server/tools/search'
 import { browserNavigate, browserScreenshot, execCode, execShell, readFile, writeFile } from '$lib/server/tools/sandbox'
 import { searchMemories } from '$lib/server/memory/store'
 import { createTaskForAvailableAgent, delegateTaskToAgent } from '$lib/server/agents/engine'
+import { generateImage } from '$lib/server/tools/imagegen'
 
 export const toolSchemas = {
 	web_search: z.object({ query: z.string().min(1) }),
@@ -13,6 +14,11 @@ export const toolSchemas = {
 	memory_search: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).default(5) }),
 	create_task: z.object({ title: z.string().min(1), description: z.string().min(1) }),
 	delegate_to_agent: z.object({ agentId: z.string().uuid(), task: z.string().min(1) }),
+	image_generate: z.object({
+		prompt: z.string().min(1).max(2000),
+		model: z.enum(['flux', 'sdxl', 'dall-e']).default('flux'),
+		size: z.enum(['256x256', '512x512', '1024x1024']).default('1024x1024'),
+	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
@@ -100,6 +106,18 @@ export async function executeTool(call: ToolCall) {
 				tool: call.name,
 				input,
 				result: task,
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'image_generate') {
+			const input = toolSchemas.image_generate.parse(call.arguments)
+			const result = await generateImage(input.prompt, input.model, input.size)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result,
 				executionMs: Date.now() - startedAt,
 			}
 		}

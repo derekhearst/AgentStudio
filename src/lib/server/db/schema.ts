@@ -20,7 +20,24 @@ export const memoryRelationTypeEnum = pgEnum('memory_relation_type', [
 	'part_of',
 ])
 export const agentStatusEnum = pgEnum('agent_status', ['active', 'paused', 'idle'])
-export const taskStatusEnum = pgEnum('task_status', ['pending', 'running', 'completed', 'failed', 'review'])
+export const taskStatusEnum = pgEnum('task_status', [
+	'pending',
+	'running',
+	'completed',
+	'failed',
+	'review',
+	'changes_requested',
+])
+export const reviewTypeEnum = pgEnum('review_type', ['heavy', 'quick', 'informational'])
+export const activityEventTypeEnum = pgEnum('activity_event_type', [
+	'task_created',
+	'task_status_changed',
+	'agent_action',
+	'memory_created',
+	'dream_cycle',
+	'chat_started',
+	'review_action',
+])
 
 export const users = pgTable('users', {
 	id: uuid('id').primaryKey().defaultRandom(),
@@ -49,6 +66,10 @@ export const messages = pgTable('messages', {
 	content: text('content').notNull(),
 	metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 	toolCalls: jsonb('tool_calls').$type<Array<Record<string, unknown>>>().notNull().default([]),
+	attachments: jsonb('attachments')
+		.$type<Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>>()
+		.notNull()
+		.default([]),
 	model: text('model'),
 	tokensIn: integer('tokens_in').notNull().default(0),
 	tokensOut: integer('tokens_out').notNull().default(0),
@@ -108,6 +129,7 @@ export const agentTasks = pgTable('agent_tasks', {
 	priority: integer('priority').notNull().default(2),
 	result: jsonb('result').$type<Record<string, unknown>>().notNull().default({}),
 	gitBranch: text('git_branch'),
+	reviewType: reviewTypeEnum('review_type'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	completedAt: timestamp('completed_at', { withTimezone: true }),
 })
@@ -176,7 +198,46 @@ export const appSettings = pgTable('app_settings', {
 		}>()
 		.notNull()
 		.default({ autoRun: false, frequencyHours: 24, aggressiveness: 0.5 }),
+	budgetConfig: jsonb('budget_config')
+		.$type<{
+			dailyLimit: number | null
+			monthlyLimit: number | null
+		}>()
+		.notNull()
+		.default({ dailyLimit: null, monthlyLimit: null }),
 	theme: text('theme').notNull().default('drokbot'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+// --- Phase A: Activity Feed ---
+export const activityEvents = pgTable('activity_events', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	type: activityEventTypeEnum('type').notNull(),
+	entityId: text('entity_id'),
+	entityType: text('entity_type'),
+	summary: text('summary').notNull(),
+	metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+// --- Phase B: Task Comments & Task Messages ---
+export const taskComments = pgTable('task_comments', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	taskId: uuid('task_id')
+		.notNull()
+		.references(() => agentTasks.id, { onDelete: 'cascade' }),
+	role: messageRoleEnum('role').notNull().default('user'),
+	content: text('content').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
+export const taskMessages = pgTable('task_messages', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	taskId: uuid('task_id')
+		.notNull()
+		.references(() => agentTasks.id, { onDelete: 'cascade' }),
+	role: messageRoleEnum('role').notNull(),
+	content: text('content').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })

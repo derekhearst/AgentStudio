@@ -163,26 +163,20 @@ Four interconnected pillars based on the sleep-time compute concept:
 
 **Out of scope (future):**
 
-- Multi-user support
-- Agent marketplace / template sharing
 - Voice input/output
-- OAuth / SSO
 - Integrated IDE (sandbox handles code execution)
 - Cost dashboard / billing
+
 * Smart model routing — auto-select cheap vs frontier models based on query complexity, budget-aware downgrade
 * Cost dashboard — daily/weekly/monthly spend by model, per-conversation cost, tool cost breakdown, budget alerts
 * Agent run trace viewer — full step-by-step visualization of autonomous task runs with tool calls, timing, and cost per step
 * Svelte artifact system — interactive components rendered inline in chat, with promotion workflow to permanent features
 * Interactive browse mode — split UI with live browser viewport for watching agent navigate, Stagehand + Playwright
-* Lightpanda integration — lightweight headless browser for bulk content extraction from search results
-* Coding session ingestion — ingest transcripts from external harnesses (Forge Code, Claude Code) into memory pipeline
 * MCP endpoint — expose tools and memory as MCP server so external clients can connect
 * Scheduled agent templates — pre-built configs for common loops (repo monitoring, competitor research, feed summaries)
-* Voice input/output — Web Speech API + TTS models, eventual Raspberry Pi home assistant endpoint
 * A2A protocol support — agent-to-agent communication standard for structured handoffs between research and coding agents
 * Image generation — Flux/SDXL models via OpenRouter or Replicate API inline in chat
 * File uploads with vision — drag in PDFs, images, spreadsheets for model analysis
-* Coding harness — built-in CLI agent with VS Code Remote integration for reviewing agent work
 * Self-improvement loop — research agent finds features, coding agent implements them, user approves via task board
 * Agent teams — persistent collaborative groups with shared objectives, role-based coordination, dependency-aware scheduling, shared context/artifacts, and team-level observability. Multiple teams run concurrently across different domains.
 * Design generation — agent produces multiple wireframe/UI variations as Svelte artifacts for user selection on the task board, chosen design feeds back into implementation

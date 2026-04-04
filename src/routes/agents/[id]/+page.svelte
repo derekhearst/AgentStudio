@@ -93,6 +93,7 @@
 					<button class="btn btn-xs" type="button" onclick={() => changeStatus('active')}>Activate</button>
 					<button class="btn btn-xs" type="button" onclick={() => changeStatus('idle')}>Idle</button>
 					<button class="btn btn-xs btn-warning" type="button" onclick={() => changeStatus('paused')}>Pause</button>
+					<a class="btn btn-xs btn-outline" href="/agents/{agentId}/runs">Run History</a>
 				</div>
 			</div>
 			<p class="mt-2 text-xs text-base-content/70">Status: {data.agent.status}</p>

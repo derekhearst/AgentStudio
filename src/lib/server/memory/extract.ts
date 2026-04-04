@@ -1,5 +1,6 @@
 import { chat } from '$lib/server/llm/openrouter'
 import { createMemory, createMemoryRelation, searchMemories } from '$lib/server/memory/store'
+import { emitActivity } from '$lib/server/activity/emit'
 
 type ConversationMessage = {
 	role: 'user' | 'assistant' | 'system' | 'tool'
@@ -141,6 +142,11 @@ export async function extractAndPersist(messages: ConversationMessage[]) {
 		const row = await createMemory(memory.content, memory.category, memory.importance)
 		await createRelations(row.id, row.content, row.importance)
 		created.push(row)
+		void emitActivity('memory_created', `Memory extracted: ${memory.content.slice(0, 100)}`, {
+			entityId: row.id,
+			entityType: 'memory',
+			metadata: { category: memory.category, importance: memory.importance },
+		})
 	}
 	return created
 }

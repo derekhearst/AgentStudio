@@ -6,32 +6,15 @@
 	import { onMount } from 'svelte';
 	import Sidebar from '$lib/components/ui/Sidebar.svelte';
 	import ThemeToggle from '$lib/components/ui/ThemeToggle.svelte';
-	import ColorChip from '$lib/components/ui/ColorChip.svelte';
-	import CommandInput from '$lib/components/ui/CommandInput.svelte';
+	import RecentChats from '$lib/components/ui/RecentChats.svelte';
 
 	let { children } = $props();
 	let mobileSidebarOpen = $state(false);
 
 	const isLoginRoute = $derived(page.url.pathname.startsWith('/login'));
 
-	type SpotlightCard = {
-		name: string;
-		status: string;
-		tone: 'warning' | 'info' | 'success';
-	};
-
-	const spotlightProjects: SpotlightCard[] = [
-		{ name: 'Context Compactor', status: 'in progress', tone: 'warning' as const },
-		{ name: 'Dream Cycle Engine', status: 'queued', tone: 'info' as const },
-		{ name: 'Tool Telemetry', status: 'active', tone: 'success' as const }
-	];
-
 	function closeSidebar() {
 		mobileSidebarOpen = false;
-	}
-
-	function handleQuickPrompt(value: string) {
-		console.log('Quick prompt:', value);
 	}
 
 	onMount(() => {
@@ -50,7 +33,7 @@
 	<div class="drawer lg:drawer-open">
 		<input id="app-drawer" type="checkbox" class="drawer-toggle" bind:checked={mobileSidebarOpen} />
 
-		<div class="drawer-content min-h-screen">
+		<div class="drawer-content flex min-h-screen flex-col">
 			<header class="sticky top-0 z-20 border-b border-base-300 bg-base-100/85 backdrop-blur-md">
 				<div class="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 sm:px-6">
 					<div class="flex items-center gap-3">
@@ -70,30 +53,13 @@
 				</div>
 			</header>
 
-			<div class="mx-auto grid w-full max-w-[1600px] gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-				<main class="rounded-3xl border border-base-300 bg-base-100/85 p-4 shadow-sm sm:p-6">
+			<div class="mx-auto grid w-full max-w-[1600px] flex-1 gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+				<main class="flex min-h-0 flex-col rounded-3xl border border-base-300 bg-base-100/85 p-4 shadow-sm sm:p-6">
 					{@render children()}
 				</main>
 
 				<aside class="hidden rounded-3xl border border-base-300 bg-base-100/80 p-4 shadow-sm xl:block">
-					<h2 class="text-xs font-semibold uppercase tracking-[0.16em] text-base-content/55">Spotlight</h2>
-					<div class="mt-3 space-y-3">
-						{#each spotlightProjects as item (item.name)}
-							<article class="rounded-2xl border border-base-300 bg-base-100 p-3">
-								<div class="flex items-center justify-between gap-2">
-									<h3 class="font-medium">{item.name}</h3>
-									<ColorChip label={item.status} tone={item.tone} />
-								</div>
-							</article>
-						{/each}
-					</div>
-
-					<div class="mt-5">
-						<h2 class="text-xs font-semibold uppercase tracking-[0.16em] text-base-content/55">Quick Command</h2>
-						<div class="mt-3">
-							<CommandInput onSubmit={handleQuickPrompt} />
-						</div>
-					</div>
+					<RecentChats />
 				</aside>
 			</div>
 		</div>

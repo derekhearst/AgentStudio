@@ -25,6 +25,12 @@ const settingsUpdateSchema = z.object({
 			aggressiveness: z.number().min(0).max(1).optional(),
 		})
 		.optional(),
+	budgetConfig: z
+		.object({
+			dailyLimit: z.number().min(0).nullable().optional(),
+			monthlyLimit: z.number().min(0).nullable().optional(),
+		})
+		.optional(),
 })
 
 export const getSettings = query(async () => {

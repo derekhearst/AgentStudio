@@ -3,9 +3,13 @@ import { env } from '$env/dynamic/private'
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
+type TextContent = { type: 'text'; text: string }
+type ImageContent = { type: 'image_url'; image_url: { url: string } }
+type MessageContent = string | Array<TextContent | ImageContent>
+
 export type LlmMessage = {
 	role: ChatRole
-	content: string
+	content: MessageContent
 }
 
 function toChatMessages(messages: LlmMessage[]) {
@@ -14,7 +18,7 @@ function toChatMessages(messages: LlmMessage[]) {
 		.map((message) => ({
 			role: message.role,
 			content: message.content,
-		})) as Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+		})) as Array<{ role: 'system' | 'user' | 'assistant'; content: MessageContent }>
 }
 
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'

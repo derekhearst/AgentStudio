@@ -10,7 +10,7 @@
 	let agents = $state<AgentChoice[]>([]);
 	let busy = $state(false);
 
-	const columns: Array<TaskRow['status']> = ['pending', 'running', 'review', 'completed', 'failed'];
+	const columns: Array<TaskRow['status']> = ['pending', 'running', 'review', 'changes_requested', 'completed', 'failed'];
 
 	onMount(() => {
 		void refresh();
@@ -62,7 +62,7 @@
 		</div>
 	</header>
 
-	<div class="grid gap-3 xl:grid-cols-5">
+	<div class="grid gap-3 xl:grid-cols-6">
 		{#each columns as status (status)}
 			<section class="rounded-2xl border border-base-300 bg-base-100 p-3">
 				<h2 class="mb-2 text-sm font-semibold uppercase tracking-wide">{status}</h2>

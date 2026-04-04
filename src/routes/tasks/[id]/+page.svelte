@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { getAgentChoices, runTaskNow } from '$lib/agents/agents.remote';
-	import { getTask, reassignTask, setTaskStatus } from '$lib/tasks/tasks.remote';
+	import { getTask, reassignTask, setTaskStatus, requestChanges, getTaskComments, getTaskMessages, addTaskMessage } from '$lib/tasks/tasks.remote';
 	import { approveChanges, getChangedFiles, getTaskDiff, rejectChanges, requestRevision } from '$lib/tasks/review.remote';
 
 	const taskId = $derived(page.params.id ?? '');
@@ -10,6 +10,8 @@
 	type TaskDetail = Awaited<ReturnType<typeof getTask>>;
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
 	type ChangedFile = Awaited<ReturnType<typeof getChangedFiles>>['files'][number];
+	type TaskComment = Awaited<ReturnType<typeof getTaskComments>>[number];
+	type TaskMessage = Awaited<ReturnType<typeof getTaskMessages>>[number];
 
 	let detail = $state<TaskDetail | null>(null);
 	let agents = $state<AgentChoice[]>([]);
@@ -20,15 +22,30 @@
 	let busy = $state(false);
 	let reviewError = $state<string | null>(null);
 
+	// Phase B1: Changes Requested
+	let changesComment = $state('');
+	let comments = $state<TaskComment[]>([]);
+
+	// Phase B2: Task Chat Thread
+	let threadMessages = $state<TaskMessage[]>([]);
+	let newThreadMessage = $state('');
+
 	onMount(() => {
 		void refresh();
 	});
 
 	async function refresh() {
 		if (!taskId) return;
-		const [taskDetail, agentRows] = await Promise.all([getTask(taskId), getAgentChoices()]);
+		const [taskDetail, agentRows, commentRows, messageRows] = await Promise.all([
+			getTask(taskId),
+			getAgentChoices(),
+			getTaskComments(taskId),
+			getTaskMessages(taskId),
+		]);
 		detail = taskDetail;
 		agents = agentRows;
+		comments = commentRows;
+		threadMessages = messageRows;
 		selectedAgent = taskDetail?.task.agentId ?? '';
 		await loadReviewArtifacts();
 	}
@@ -58,9 +75,23 @@
 		}
 	}
 
-	async function setStatus(status: 'pending' | 'running' | 'review' | 'completed' | 'failed') {
+	async function setStatus(status: 'pending' | 'running' | 'review' | 'completed' | 'failed' | 'changes_requested') {
 		if (!taskId) return;
 		await setTaskStatus({ taskId, status });
+		await refresh();
+	}
+
+	async function submitChangesRequest() {
+		if (!taskId || !changesComment.trim()) return;
+		await requestChanges({ taskId, comment: changesComment.trim() });
+		changesComment = '';
+		await refresh();
+	}
+
+	async function sendThreadMessage() {
+		if (!taskId || !newThreadMessage.trim()) return;
+		await addTaskMessage({ taskId, content: newThreadMessage.trim() });
+		newThreadMessage = '';
 		await refresh();
 	}
 
@@ -100,12 +131,16 @@
 			<p class="mt-1 text-sm text-base-content/70">{detail.task.description}</p>
 			<p class="mt-1 text-xs text-base-content/60">
 				status {detail.task.status} | priority {detail.task.priority} | agent {detail.agent?.name ?? 'unknown'}
+				{#if detail.task.reviewType}
+					| review type <span class="badge badge-xs">{detail.task.reviewType}</span>
+				{/if}
 			</p>
 			<div class="mt-3 flex flex-wrap gap-1">
 				<button class="btn btn-xs" type="button" onclick={runTask} disabled={busy}>Run</button>
 				<button class="btn btn-xs" type="button" onclick={() => setStatus('pending')}>Pending</button>
 				<button class="btn btn-xs" type="button" onclick={() => setStatus('review')}>Review</button>
 				<button class="btn btn-xs" type="button" onclick={() => setStatus('completed')}>Done</button>
+				<button class="btn btn-xs btn-warning btn-outline" type="button" onclick={() => setStatus('changes_requested')}>Request Changes</button>
 				<button class="btn btn-xs btn-error btn-outline" type="button" onclick={() => setStatus('failed')}>Fail</button>
 			</div>
 		</header>
@@ -156,6 +191,66 @@
 		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">
 			<h2 class="font-semibold">Diff</h2>
 			<pre class="mt-2 max-h-[420px] overflow-auto rounded border border-base-300 bg-base-50 p-3 text-xs">{diff || 'No diff available'}</pre>
+		</section>
+
+		<!-- Changes Requested Comments -->
+		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<h2 class="font-semibold">Change Requests</h2>
+			{#if comments.length === 0}
+				<p class="mt-2 text-sm text-base-content/70">No change requests yet.</p>
+			{:else}
+				<div class="mt-2 space-y-2">
+					{#each comments as comment (comment.id)}
+						<div class="rounded-xl border border-base-300 bg-base-50 p-3 text-sm">
+							<p class="text-xs text-base-content/55">{comment.role} · {new Date(comment.createdAt).toLocaleString()}</p>
+							<p class="mt-1">{comment.content}</p>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			<div class="mt-3">
+				<textarea
+					class="textarea textarea-bordered h-20 w-full"
+					bind:value={changesComment}
+					placeholder="Describe changes needed..."
+				></textarea>
+				<button class="btn btn-warning btn-sm mt-2" type="button" onclick={submitChangesRequest} disabled={!changesComment.trim()}>
+					Request Changes
+				</button>
+			</div>
+		</section>
+
+		<!-- Task Chat Thread -->
+		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<h2 class="font-semibold">Task Thread</h2>
+			{#if threadMessages.length === 0}
+				<p class="mt-2 text-sm text-base-content/70">No messages yet. Start a conversation about this task.</p>
+			{:else}
+				<div class="mt-2 max-h-80 space-y-2 overflow-y-auto">
+					{#each threadMessages as msg (msg.id)}
+						<div class="flex gap-2" class:flex-row-reverse={msg.role === 'user'}>
+							<div
+								class="max-w-[80%] rounded-xl p-3 text-sm"
+								class:bg-primary={msg.role === 'user'}
+								class:text-primary-content={msg.role === 'user'}
+								class:bg-base-200={msg.role !== 'user'}
+							>
+								<p>{msg.content}</p>
+								<p class="mt-1 text-xs opacity-60">{new Date(msg.createdAt).toLocaleTimeString()}</p>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{/if}
+			<div class="mt-3 flex gap-2">
+				<input
+					class="input input-bordered flex-1"
+					bind:value={newThreadMessage}
+					placeholder="Message about this task..."
+					onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadMessage(); } }}
+				/>
+				<button class="btn btn-primary btn-sm" type="button" onclick={sendThreadMessage} disabled={!newThreadMessage.trim()}>Send</button>
+			</div>
 		</section>
 
 		<section class="rounded-2xl border border-base-300 bg-base-100 p-4">

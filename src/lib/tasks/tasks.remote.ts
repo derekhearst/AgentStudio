@@ -2,13 +2,13 @@ import { command, query } from '$app/server'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/server/db'
-import { agentTasks, agents } from '$lib/server/db/schema'
+import { agentTasks, agents, taskComments, taskMessages } from '$lib/server/db/schema'
 
 const taskIdSchema = z.string().uuid()
 
 const setTaskStatusSchema = z.object({
 	taskId: z.string().uuid(),
-	status: z.enum(['pending', 'running', 'review', 'completed', 'failed']),
+	status: z.enum(['pending', 'running', 'review', 'completed', 'failed', 'changes_requested']),
 })
 
 const setTaskPrioritySchema = z.object({
@@ -22,7 +22,7 @@ const reassignTaskSchema = z.object({
 })
 
 const listTasksSchema = z.object({
-	status: z.enum(['pending', 'running', 'review', 'completed', 'failed']).optional(),
+	status: z.enum(['pending', 'running', 'review', 'completed', 'failed', 'changes_requested']).optional(),
 	agentId: z.string().uuid().optional(),
 	limit: z.number().int().min(1).max(500).optional(),
 })
@@ -88,4 +88,45 @@ export const reassignTask = command(reassignTaskSchema, async ({ taskId, agentId
 		.where(eq(agentTasks.id, taskId))
 		.returning()
 	return updated
+})
+
+// --- Phase B1: Changes Requested ---
+const requestChangesSchema = z.object({
+	taskId: z.string().uuid(),
+	comment: z.string().trim().min(1).max(4000),
+})
+
+export const requestChanges = command(requestChangesSchema, async ({ taskId, comment }) => {
+	await db.insert(taskComments).values({
+		taskId,
+		role: 'user',
+		content: comment,
+	})
+
+	const [updated] = await db
+		.update(agentTasks)
+		.set({ status: 'changes_requested', completedAt: null })
+		.where(eq(agentTasks.id, taskId))
+		.returning()
+
+	return updated
+})
+
+export const getTaskComments = query(taskIdSchema, async (taskId) => {
+	return db.select().from(taskComments).where(eq(taskComments.taskId, taskId)).orderBy(asc(taskComments.createdAt))
+})
+
+// --- Phase B2: Task-Level Chat Threads ---
+const addTaskMessageSchema = z.object({
+	taskId: z.string().uuid(),
+	content: z.string().trim().min(1).max(8000),
+})
+
+export const getTaskMessages = query(taskIdSchema, async (taskId) => {
+	return db.select().from(taskMessages).where(eq(taskMessages.taskId, taskId)).orderBy(asc(taskMessages.createdAt))
+})
+
+export const addTaskMessage = command(addTaskMessageSchema, async ({ taskId, content }) => {
+	const [msg] = await db.insert(taskMessages).values({ taskId, role: 'user', content }).returning()
+	return msg
 })

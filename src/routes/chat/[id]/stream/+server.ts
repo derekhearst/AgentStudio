@@ -3,10 +3,12 @@ import { and, asc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/server/db'
 import { conversations, messages } from '$lib/server/db/schema'
 import { streamChat, type LlmMessage } from '$lib/server/llm/openrouter'
+import { routeModel } from '$lib/server/llm/router'
 import { extractAndPersist } from '$lib/server/memory/extract'
 import { assembleContext } from '$lib/server/memory/context'
 import { bumpAccessCount } from '$lib/server/memory/store'
 import { generateTitle } from '$lib/server/chat/titlegen'
+import { emitActivity } from '$lib/server/activity/emit'
 
 const encoder = new TextEncoder()
 
@@ -15,6 +17,7 @@ type StreamPayload = {
 	content?: string
 	model?: string
 	regenerate?: boolean
+	attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
 }
 
 function sse(name: string, payload: unknown) {
@@ -34,6 +37,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const model = body.model ?? conversation.model
+	const routing = await routeModel({
+		content: body.content ?? '',
+		explicitModel: body.model ?? undefined,
+	})
+	const routedModel = body.model ? model : routing.model
 	let parentMessageId: string | null = null
 
 	if (!body.regenerate) {
@@ -50,6 +58,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				model,
 				metadata: {},
 				toolCalls: [],
+				attachments: body.attachments ?? [],
 			})
 			.returning()
 
@@ -65,16 +74,38 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const historyRows = await db
-		.select({ role: messages.role, content: messages.content })
+		.select({ role: messages.role, content: messages.content, attachments: messages.attachments })
 		.from(messages)
 		.where(eq(messages.conversationId, body.conversationId))
 		.orderBy(asc(messages.createdAt))
 
 	const isFirstExchange = historyRows.length === 0 && !body.regenerate
 
+	if (isFirstExchange) {
+		void emitActivity('chat_started', `Chat started: ${conversation.title}`, {
+			entityId: body.conversationId,
+			entityType: 'conversation',
+		})
+	}
+
 	const llmMessages: LlmMessage[] = historyRows
 		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
-		.map((row) => ({ role: row.role, content: row.content }))
+		.map((row) => {
+			const imageAttachments = (row.attachments ?? []).filter((a) => a.mimeType.startsWith('image/'))
+			if (imageAttachments.length > 0 && row.role === 'user') {
+				return {
+					role: row.role,
+					content: [
+						{ type: 'text' as const, text: row.content },
+						...imageAttachments.map((a) => ({
+							type: 'image_url' as const,
+							image_url: { url: a.url },
+						})),
+					],
+				}
+			}
+			return { role: row.role, content: row.content }
+		})
 
 	const memoryContext = await assembleContext(body.content ?? conversation.title)
 	if (memoryContext.memories.length > 0) {
@@ -91,7 +122,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	let promptTokens = 0
 	let completionTokens = 0
 
-	const stream = await streamChat(llmMessages, model)
+	const stream = await streamChat(llmMessages, routedModel)
 
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
@@ -139,7 +170,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						conversationId: body.conversationId,
 						role: 'assistant',
 						content: assistantContent || '(no output)',
-						model,
+						model: routedModel,
 						parentMessageId,
 						tokensIn: promptTokens,
 						tokensOut: completionTokens,
@@ -147,7 +178,9 @@ export const POST: RequestHandler = async ({ request }) => {
 						totalMs,
 						tokensPerSec,
 						cost: '0',
-						metadata: {},
+						metadata: {
+							routing: { tier: routing.tier, reason: routing.reason, budgetDowngraded: routing.budgetDowngraded },
+						},
 						toolCalls: [],
 					})
 					.returning()
@@ -155,7 +188,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				await db
 					.update(conversations)
 					.set({
-						model,
+						model: routedModel,
 						totalTokens: conversation.totalTokens + promptTokens + completionTokens,
 						updatedAt: new Date(),
 					})
@@ -183,13 +216,14 @@ export const POST: RequestHandler = async ({ request }) => {
 
 				controller.enqueue(
 					sse('metrics', {
-						model,
+						model: routedModel,
 						tokensIn: promptTokens,
 						tokensOut: completionTokens,
 						ttftMs,
 						totalMs,
 						tokensPerSec,
 						cost: 0,
+						routing: { tier: routing.tier, reason: routing.reason, budgetDowngraded: routing.budgetDowngraded },
 					}),
 				)
 				controller.enqueue(sse('done', { messageId: assistantMessage.id }))
