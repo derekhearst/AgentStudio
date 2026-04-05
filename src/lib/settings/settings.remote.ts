@@ -47,6 +47,7 @@ const settingsUpdateSchema = z.object({
 		.object({
 			reservedResponsePct: z.number().min(10).max(40).optional(),
 			autoCompactThresholdPct: z.number().min(40).max(95).optional(),
+			compactionModel: z.string().trim().min(1).max(120).optional(),
 		})
 		.optional(),
 	toolConfig: z

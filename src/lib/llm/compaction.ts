@@ -2,9 +2,15 @@ import { chat, type LlmMessage } from '$lib/llm/openrouter'
 import { estimateTokens, getContextWindowSize } from '$lib/llm/capabilities'
 import { getOrCreateSettings } from '$lib/settings/settings'
 
-const COMPACTION_SUMMARY_MODEL = 'openai/gpt-4o-mini'
+const DEFAULT_COMPACTION_MODEL = 'openai/gpt-4o-mini'
 const KEEP_RECENT_MESSAGES = 6
 const MIN_MESSAGES_FOR_COMPACTION = 10
+
+async function getCompactionModel(): Promise<string> {
+	const settings = await getOrCreateSettings()
+	const contextConfig = settings.contextConfig as { compactionModel?: string } | undefined
+	return contextConfig?.compactionModel || DEFAULT_COMPACTION_MODEL
+}
 
 /**
  * Estimate total tokens for a message array.
@@ -93,6 +99,8 @@ export async function compactMessages(messages: LlmMessage[]): Promise<{
 		})
 		.join('\n\n')
 
+	const compactionModel = await getCompactionModel()
+
 	const summaryResponse = await chat(
 		[
 			{
@@ -111,7 +119,7 @@ Write in third-person past tense. Be concise but don't lose critical details. Ke
 				content: `Summarize this conversation history:\n\n${earlyText}`,
 			},
 		],
-		COMPACTION_SUMMARY_MODEL,
+		compactionModel,
 	)
 
 	const summary = summaryResponse.content as string

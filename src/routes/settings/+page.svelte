@@ -43,7 +43,7 @@
 	const sections = [
 		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
 		{ id: 'prompt', keywords: 'system prompt custom instructions' },
-		{ id: 'context', keywords: 'context window reserved response compact threshold' },
+		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model' },
 		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
@@ -482,6 +482,25 @@
 						bind:value={settings.contextConfig.autoCompactThresholdPct}
 					/>
 					<p class="mt-1.5 text-xs text-base-content/35">Auto-compaction triggers when a model switch would exceed this</p>
+				</div>
+				<div class="border-t border-base-content/[.06]"></div>
+
+				<!-- Compaction Model -->
+				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5">
+					<div>
+						<p class="text-sm font-medium">Compaction Model</p>
+						<p class="mt-0.5 text-xs text-base-content/40">Model used to summarize conversations during auto-compaction</p>
+					</div>
+					<div class="w-full sm:w-64">
+						<ModelSelector
+							value={settings.contextConfig.compactionModel}
+							showChevron={false}
+							showBrowseBadge={false}
+							onchange={(id: string) => {
+								if (settings) settings.contextConfig.compactionModel = id;
+							}}
+						/>
+					</div>
 				</div>
 			</div>
 		</section>
