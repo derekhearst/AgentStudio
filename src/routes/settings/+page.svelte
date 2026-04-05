@@ -646,27 +646,8 @@
 			</div>
 		</div>
 	</section>
+	{/if}
 
-	<!-- ════════════════════════════════════════════════
-	     STICKY SAVE BAR
-	     ════════════════════════════════════════════════ -->
 	</div><!-- end max-w-2xl -->
-	</div><!-- end flex-1 -->
-
-	<div class="sticky bottom-0 -mx-2 mt-4 flex items-center justify-between bg-base-100/90 px-4 py-3 backdrop-blur-xl sm:-mx-4 sm:px-6 xl:-mx-6">
-		{#if statusMessage}
-			<p class="text-sm font-medium text-success">{statusMessage}</p>
-		{:else}
-			<span></span>
-		{/if}
-		<div class="flex gap-2">
-			<button class="btn btn-ghost btn-sm" type="button" onclick={resetSettingsToDefault} disabled={busy}>Reset Defaults</button>
-			<button class="btn btn-primary btn-sm" type="button" onclick={saveSettings} disabled={busy}>
-				{#if busy}
-					<span class="loading loading-spinner loading-xs"></span>
-				{/if}
-				Save Changes
-			</button>
-		</div>
-	</div>
+	</div><!-- end scroll -->
 </section>

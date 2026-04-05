@@ -129,6 +129,44 @@ body::after {
 	}
 }
 
+/* Staggered chat list entrance */
+@keyframes chat-item-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.chat-list-item {
+	animation: chat-item-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger each item by 30ms via nth-child */
+.chat-list-item:nth-child(1) { animation-delay: 0ms; }
+.chat-list-item:nth-child(2) { animation-delay: 30ms; }
+.chat-list-item:nth-child(3) { animation-delay: 60ms; }
+.chat-list-item:nth-child(4) { animation-delay: 90ms; }
+.chat-list-item:nth-child(5) { animation-delay: 120ms; }
+.chat-list-item:nth-child(6) { animation-delay: 150ms; }
+.chat-list-item:nth-child(7) { animation-delay: 180ms; }
+.chat-list-item:nth-child(8) { animation-delay: 210ms; }
+.chat-list-item:nth-child(9) { animation-delay: 240ms; }
+.chat-list-item:nth-child(10) { animation-delay: 270ms; }
+.chat-list-item:nth-child(n+11) { animation-delay: 300ms; }
+
+/* View all button pulse */
+.view-all-btn {
+	transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.view-all-btn:hover {
+	letter-spacing: 0.02em;
+}
+
 @keyframes ambient-shift {
 	0% {
 		background-position:
@@ -164,5 +202,9 @@ body::after {
 
 	body::after {
 		opacity: 0;
+	}
+
+	.chat-list-item {
+		animation: none;
 	}
 }

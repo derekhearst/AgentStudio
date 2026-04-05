@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 
 	let {
@@ -19,22 +20,35 @@
 
 	let value = $state('');
 	let recording = $state(false);
+	let transcribing = $state(false);
 	let speechSupported = $state(false);
+	let useNativeSpeech = false;
 	let recognition: SpeechRecognition | null = null;
+	let mediaRecorder: MediaRecorder | null = null;
+	let audioChunks: Blob[] = [];
 	let baseText = '';
 
-	// Check browser support on mount
-	$effect(() => {
-		speechSupported = typeof window !== 'undefined' &&
-			!!(window.SpeechRecognition || window.webkitSpeechRecognition);
+	onMount(() => {
+		const hasNative = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+		const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+		useNativeSpeech = hasNative;
+		speechSupported = hasNative || hasMediaRecorder;
 	});
 
 	function toggleRecording() {
-		if (recording && recognition) {
-			recognition.stop();
+		if (recording) {
+			stopRecording();
 			return;
 		}
+		if (useNativeSpeech) {
+			startNativeSpeech();
+		} else {
+			startMediaRecorder();
+		}
+	}
 
+	// --- Native Web Speech API (Chrome/Edge/Safari) ---
+	function startNativeSpeech() {
 		const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
 		if (!SpeechAPI) return;
 
@@ -78,11 +92,74 @@
 		recording = true;
 	}
 
+	// --- MediaRecorder + server transcription (Firefox fallback) ---
+	async function startMediaRecorder() {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			audioChunks = [];
+			mediaRecorder = new MediaRecorder(stream, { mimeType: getSupportedMimeType() });
+
+			mediaRecorder.ondataavailable = (e) => {
+				if (e.data.size > 0) audioChunks.push(e.data);
+			};
+
+			mediaRecorder.onstop = async () => {
+				stream.getTracks().forEach((t) => t.stop());
+				if (audioChunks.length === 0) return;
+
+				const blob = new Blob(audioChunks, { type: mediaRecorder?.mimeType ?? 'audio/webm' });
+				audioChunks = [];
+				mediaRecorder = null;
+				await transcribeAudio(blob);
+			};
+
+			mediaRecorder.start();
+			recording = true;
+		} catch (err) {
+			console.warn('Microphone access denied:', err);
+		}
+	}
+
+	function getSupportedMimeType(): string {
+		const types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+		return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? 'audio/webm';
+	}
+
+	async function transcribeAudio(blob: Blob) {
+		transcribing = true;
+		try {
+			const form = new FormData();
+			form.append('audio', blob, 'recording.webm');
+			const res = await fetch('/api/transcribe', { method: 'POST', body: form });
+			if (!res.ok) {
+				console.error('Transcription failed:', res.status);
+				return;
+			}
+			const { transcript } = await res.json();
+			if (transcript) {
+				value += (value && !value.endsWith(' ') ? ' ' : '') + transcript;
+			}
+		} catch (err) {
+			console.error('Transcription error:', err);
+		} finally {
+			transcribing = false;
+		}
+	}
+
+	function stopRecording() {
+		if (recognition) {
+			recognition.stop();
+			recognition = null;
+		}
+		if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+			mediaRecorder.stop();
+		}
+		recording = false;
+	}
+
 	async function handleSubmit(content: string) {
 		if (!content.trim() || busy) return;
-		if (recording && recognition) {
-			recognition.stop();
-		}
+		stopRecording();
 		const msg = content;
 		value = '';
 		baseText = '';
@@ -96,6 +173,7 @@
 		{busy}
 		{model}
 		{recording}
+		{transcribing}
 		{speechSupported}
 		placeholder="Message DrokBot..."
 		onSubmit={(content) => handleSubmit(content)}

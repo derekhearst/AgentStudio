@@ -29,9 +29,40 @@
 	})
 	let search = $state('')
 	let open = $state(false)
+	let closing = $state(false)
+	let ready = $state(false)
 	let settingsOpen = $state(false)
+	let settingsClosing = $state(false)
 	let inputEl: HTMLInputElement | undefined = $state()
 	let settingsRef: HTMLDivElement | undefined = $state()
+
+	function openModal() {
+		open = true
+		ready = false
+		requestAnimationFrame(() => {
+			ready = true
+		})
+	}
+
+	function closeModal() {
+		if (closing) return
+		closing = true
+		setTimeout(() => {
+			open = false
+			closing = false
+			ready = false
+			search = ''
+		}, 150)
+	}
+
+	function closeSettings() {
+		if (settingsClosing) return
+		settingsClosing = true
+		setTimeout(() => {
+			settingsOpen = false
+			settingsClosing = false
+		}, 120)
+	}
 
 	type SortKey = 'name' | 'price' | 'context' | 'newest' | 'oldest'
 	let sortBy: SortKey = $state('name')
@@ -58,23 +89,23 @@
 	$effect(() => {
 		if (!open) {
 			settingsOpen = false
+			settingsClosing = false
 			return
 		}
 
 		const handleKeydown = (e: KeyboardEvent) => {
 			if (e.key === 'Escape') {
 				if (settingsOpen) {
-					settingsOpen = false
+					closeSettings()
 				} else {
-					open = false
-					search = ''
+					closeModal()
 				}
 			}
 		}
 
 		const handleClickOutside = (e: MouseEvent) => {
-			if (settingsOpen && settingsRef && !settingsRef.contains(e.target as Node)) {
-				settingsOpen = false
+			if (settingsOpen && !settingsClosing && settingsRef && !settingsRef.contains(e.target as Node)) {
+				closeSettings()
 			}
 		}
 
@@ -202,8 +233,7 @@
 	})
 
 	function selectModel(id: string) {
-		open = false
-		search = ''
+		closeModal()
 		onchange?.(id)
 	}
 
@@ -290,7 +320,7 @@
 			: `input input-bordered flex w-full items-center justify-between gap-2 text-left ${sizeClass}`
 		}"
 		onclick={() => {
-			open = true
+			openModal()
 		}}
 	>
 		<span class="truncate">{selectedLabel}</span>
@@ -306,16 +336,15 @@
 		<div class="fixed inset-0 z-1000 overflow-hidden">
 			<button
 				type="button"
-				class="absolute inset-0 bg-black/65"
+				class="modal-backdrop absolute inset-0 bg-black/65"
+				class:modal-backdrop-closing={closing}
 				aria-label="Close model selector"
-				onclick={() => {
-					open = false
-					search = ''
-				}}
+				onclick={closeModal}
 			></button>
 
 			<div
-				class="relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden bg-base-100 shadow-2xl sm:mt-[6vh] sm:h-[82vh] sm:w-[96vw] sm:max-w-6xl sm:rounded-2xl sm:border sm:border-base-300"
+				class="modal-panel relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden bg-base-100 shadow-2xl sm:mt-[6vh] sm:h-[82vh] sm:w-[96vw] sm:max-w-6xl sm:rounded-2xl sm:border sm:border-base-300"
+				class:modal-panel-closing={closing}
 				style="background-color: Canvas; color: CanvasText; opacity: 1"
 			>
 				<!-- Top bar: search + settings + count + close -->
@@ -347,7 +376,8 @@
 
 						{#if settingsOpen}
 							<div
-								class="absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-base-300 bg-base-100 p-3 shadow-xl sm:w-72"
+								class="settings-dropdown absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-base-300 bg-base-100 p-3 shadow-xl sm:w-72"
+								class:settings-dropdown-closing={settingsClosing}
 								style="background-color: Canvas"
 							>
 								<!-- Sort -->
@@ -412,10 +442,7 @@
 					<button
 						type="button"
 						class="btn btn-ghost btn-xs sm:btn-sm"
-						onclick={() => {
-							open = false
-							search = ''
-						}}
+						onclick={closeModal}
 					>
 						✕
 					</button>
@@ -426,11 +453,11 @@
 					class="min-h-0 flex-1 overflow-y-auto p-2 sm:p-4"
 					style="background-color: Canvas"
 				>
-					{#if filtered.length === 0}
+					{#if filtered.length === 0 && ready}
 						<div class="rounded-xl border border-dashed border-base-300 p-4 text-center text-sm text-base-content/55 sm:p-6 sm:text-base">
 							No models found for that search.
 						</div>
-					{:else if grouped}
+					{:else if grouped && ready}
 						{#each grouped as group (group.creator)}
 							<div class="mb-4">
 								<h3 class="mb-2 px-1 text-sm font-semibold capitalize text-base-content/70 sm:text-base">{group.creator}</h3>
@@ -441,7 +468,7 @@
 								</div>
 							</div>
 						{/each}
-					{:else}
+					{:else if ready}
 						<div class="grid grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-2 xl:grid-cols-3 {gridSizeClass}">
 							{#each sorted as m (m.id)}
 								{@render modelCard(m)}
@@ -453,3 +480,72 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.modal-backdrop {
+		animation: fadeIn 150ms ease-out;
+		will-change: opacity;
+	}
+	.modal-backdrop-closing {
+		animation: fadeOut 150ms ease-in forwards;
+		will-change: opacity;
+	}
+	.modal-panel {
+		animation: slideUp 200ms ease-out;
+		will-change: transform, opacity;
+	}
+	.modal-panel-closing {
+		animation: slideDown 150ms ease-in forwards;
+		will-change: transform, opacity;
+	}
+	@media (min-width: 640px) {
+		.modal-panel {
+			animation: scaleIn 200ms ease-out;
+		}
+		.modal-panel-closing {
+			animation: scaleOut 150ms ease-in forwards;
+		}
+	}
+	.settings-dropdown {
+		animation: dropIn 150ms ease-out;
+		transform-origin: top right;
+		will-change: transform, opacity;
+	}
+	.settings-dropdown-closing {
+		animation: dropOut 120ms ease-in forwards;
+		transform-origin: top right;
+		will-change: transform, opacity;
+	}
+	@keyframes fadeIn {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+	@keyframes fadeOut {
+		from { opacity: 1; }
+		to { opacity: 0; }
+	}
+	@keyframes scaleIn {
+		from { opacity: 0; transform: scale(0.95); }
+		to { opacity: 1; transform: scale(1); }
+	}
+	@keyframes scaleOut {
+		from { opacity: 1; transform: scale(1); }
+		to { opacity: 0; transform: scale(0.95); }
+	}
+	@keyframes slideUp {
+		from { opacity: 0; transform: translateY(100%); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+	@keyframes slideDown {
+		from { opacity: 1; transform: translateY(0); }
+		to { opacity: 0; transform: translateY(100%); }
+	}
+	@keyframes dropIn {
+		from { opacity: 0; transform: scale(0.9) translateY(-4px); }
+		to { opacity: 1; transform: scale(1) translateY(0); }
+	}
+	@keyframes dropOut {
+		from { opacity: 1; transform: scale(1) translateY(0); }
+		to { opacity: 0; transform: scale(0.9) translateY(-4px); }
+	}
+</style>

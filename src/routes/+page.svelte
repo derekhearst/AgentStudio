@@ -3,6 +3,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { tick } from 'svelte';
+	import { fade, fly, scale } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
 	import { createConversation, getConversations } from '$lib/chat';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 
@@ -110,7 +112,7 @@
 
 {#if expanded}
 	<!-- Expanded session view -->
-	<div class="flex min-h-0 flex-1 flex-col px-2 pt-4 sm:px-0 lg:hidden">
+	<div class="flex min-h-0 flex-1 flex-col px-2 pt-4 sm:px-0 lg:hidden" in:fly={{ y: 60, duration: 350, easing: cubicOut }} out:fade={{ duration: 180 }}>
 		<div class="mx-auto flex w-full max-w-2xl flex-1 flex-col space-y-3 overflow-hidden">
 			<!-- Sticky header -->
 			<div class="shrink-0 space-y-3">
@@ -158,7 +160,7 @@
 								{#each group.items as chat (chat.id)}
 									<a
 										href={`/chat/${chat.id}`}
-										class="block rounded-xl px-2.5 py-2 text-sm transition-colors hover:bg-base-200"
+										class="chat-list-item block rounded-xl px-2.5 py-2 text-sm transition-colors hover:bg-base-200"
 									>
 										<span class="line-clamp-1 font-medium">{chat.title}</span>
 										<span class="mt-0.5 line-clamp-1 text-xs text-base-content/50">
@@ -175,8 +177,9 @@
 	</div>
 {/if}
 
+{#if !expanded}
 <!-- Default new-chat view -->
-<div class="flex flex-1 flex-col items-center px-2 pt-12 sm:justify-center sm:px-0 sm:pt-0" class:hidden={expanded}>
+<div class="flex flex-1 flex-col items-center px-2 pt-12 sm:justify-center sm:px-0 sm:pt-0" in:fade={{ duration: 250, delay: 80 }} out:scale={{ start: 0.97, duration: 200, opacity: 0 }}>
 	<div class="w-full max-w-2xl space-y-4 text-center sm:space-y-8">
 		<!-- Greeting -->
 		<div>
@@ -224,7 +227,7 @@
 				{#if recentChats.length > 5}
 					<button
 						type="button"
-						class="btn btn-ghost btn-sm w-full text-base-content/50"
+						class="btn btn-ghost btn-sm w-full text-base-content/50 view-all-btn"
 						onclick={() => (expanded = true)}
 					>
 						View all {recentChats.length} chats
@@ -234,3 +237,4 @@
 		{/if}
 	</div>
 </div>
+{/if}

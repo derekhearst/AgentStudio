@@ -7,6 +7,7 @@
 		model = 'anthropic/claude-sonnet-4',
 		placeholder = 'Message DrokBot...',
 		recording = false,
+		transcribing = false,
 		speechSupported = false,
 		onSubmit,
 		onModelChange,
@@ -20,6 +21,7 @@
 		model?: string
 		placeholder?: string
 		recording?: boolean
+		transcribing?: boolean
 		speechSupported?: boolean
 		onSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
@@ -84,12 +86,16 @@
 						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-error" style="animation-delay: 0.4s"></span>
 						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-error" style="animation-delay: 0.8s"></span>
 					{/if}
+					{#if transcribing}
+						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-info" style="animation-delay: 0s"></span>
+						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-info" style="animation-delay: 0.4s"></span>
+					{/if}
 					<button
 						type="button"
-						class="btn btn-sm btn-circle relative z-10 transition-colors duration-200 {recording ? 'btn-error text-error-content mic-pulse' : 'btn-ghost'}"
-						aria-label={recording ? 'Stop recording' : 'Voice input'}
-						title={recording ? 'Stop recording' : 'Voice input'}
-						disabled={busy}
+						class="btn btn-sm btn-circle relative z-10 transition-colors duration-200 {recording ? 'btn-error text-error-content mic-pulse' : transcribing ? 'btn-info text-info-content' : 'btn-ghost'}"
+						aria-label={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
+						title={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
+						disabled={busy || transcribing}
 						onclick={() => onMicClick?.()}
 					>
 						<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -100,6 +106,22 @@
 						</svg>
 					</button>
 				</div>
+			{:else}
+				<button
+					type="button"
+					class="btn btn-ghost btn-sm btn-circle opacity-30 cursor-not-allowed"
+					aria-label="Voice input unavailable"
+					title="Voice input not supported in this browser. Use Chrome, Edge, or Safari."
+					disabled
+				>
+					<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<rect x="9" y="2" width="6" height="12" rx="3"></rect>
+						<path d="M5 10a7 7 0 0 0 14 0"></path>
+						<line x1="12" y1="17" x2="12" y2="22"></line>
+						<line x1="8" y1="22" x2="16" y2="22"></line>
+						<line x1="3" y1="3" x2="21" y2="21"></line>
+					</svg>
+				</button>
 			{/if}
 			{#if busy}
 				<button
