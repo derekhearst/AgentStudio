@@ -11,7 +11,7 @@ const createUserSchema = z.object({
 		.trim()
 		.min(3)
 		.max(32)
-		.regex(/^[a-z0-9_-]+$/, 'Username must be lowercase and contain only letters, numbers, underscore, or hyphen'),
+		.regex(/^[a-zA-Z0-9_-]+$/, 'Username must contain only letters, numbers, underscore, or hyphen'),
 	name: z.string().trim().min(1).max(64).optional(),
 	role: z.enum(['admin', 'user']).default('user'),
 })

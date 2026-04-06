@@ -66,18 +66,33 @@ body::before {
 	z-index: 0;
 	background:
 		radial-gradient(
-			circle 200px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-primary) 36%, transparent) 0%,
-			color-mix(in oklab, var(--color-primary) 12%, transparent) 50%,
+			circle 220px at var(--cursor-x) var(--cursor-y),
+			color-mix(in oklab, var(--color-primary) 32%, transparent) 0%,
+			color-mix(in oklab, var(--color-primary) 29%, transparent) 8%,
+			color-mix(in oklab, var(--color-primary) 26%, transparent) 16%,
+			color-mix(in oklab, var(--color-primary) 22%, transparent) 24%,
+			color-mix(in oklab, var(--color-primary) 18%, transparent) 32%,
+			color-mix(in oklab, var(--color-primary) 14%, transparent) 42%,
+			color-mix(in oklab, var(--color-primary) 10%, transparent) 52%,
+			color-mix(in oklab, var(--color-primary) 6%, transparent) 64%,
+			color-mix(in oklab, var(--color-primary) 3%, transparent) 78%,
+			color-mix(in oklab, var(--color-primary) 1%, transparent) 90%,
 			transparent 100%
 		),
 		radial-gradient(
-			circle 480px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-secondary) 10%, transparent) 0%,
-			color-mix(in oklab, var(--color-accent) 4%, transparent) 50%,
+			circle 500px at var(--cursor-x) var(--cursor-y),
+			color-mix(in oklab, var(--color-secondary) 9%, transparent) 0%,
+			color-mix(in oklab, var(--color-secondary) 8%, transparent) 10%,
+			color-mix(in oklab, var(--color-secondary) 7%, transparent) 20%,
+			color-mix(in oklab, var(--color-secondary) 5%, transparent) 30%,
+			color-mix(in oklab, var(--color-accent) 4%, transparent) 40%,
+			color-mix(in oklab, var(--color-accent) 3%, transparent) 50%,
+			color-mix(in oklab, var(--color-accent) 2%, transparent) 62%,
+			color-mix(in oklab, var(--color-accent) 1%, transparent) 75%,
+			color-mix(in oklab, var(--color-accent) 0.5%, transparent) 88%,
 			transparent 100%
 		);
-	filter: blur(40px) saturate(120%);
+	filter: blur(60px) saturate(120%);
 	opacity: calc(var(--cursor-energy) * 0.7);
 	transition: opacity 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -98,14 +113,33 @@ body::after {
 	view-transition-name: chat-composer-shell;
 }
 
+/* Mobile: keep composer full-width with small side padding */
+@media (max-width: 1279px) {
+	.chat-composer-transition {
+		max-width: none;
+		min-width: 0;
+		margin-inline: 0;
+		padding-inline: 0.5rem;
+	}
+}
+
 /* Below lg: chat and home pages go truly edge-to-edge */
 @media (max-width: 1023px) {
 	.mobile-chat-main {
-		padding: 0 !important;
+		padding: 0.5rem 0 0 !important;
 		border: none !important;
 		border-radius: 0 !important;
 		background: transparent !important;
 		box-shadow: none !important;
+	}
+}
+
+/* Desktop: floating sidebar */
+@media (min-width: 1280px) {
+	.drawer.xl\:drawer-open > .drawer-side {
+		background: transparent;
+		padding: 0.75rem;
+		padding-right: 0;
 	}
 }
 

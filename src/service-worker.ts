@@ -68,8 +68,8 @@ self.addEventListener('push', (event) => {
 	event.waitUntil(
 		self.registration.showNotification(title, {
 			body,
-			icon: '/icon-192.svg',
-			badge: '/icon-192.svg',
+			icon: '/icon.svg',
+			badge: '/icon.svg',
 			data: {
 				url: payload.url ?? '/tasks',
 			},

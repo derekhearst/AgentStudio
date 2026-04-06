@@ -1,5 +1,5 @@
 <script lang="ts">
-	import Avatar from './Avatar.svelte';
+	import favicon from '$lib/assets/favicon.svg';
 
 	let {
 		activePath = '/',
@@ -12,12 +12,12 @@
 	}
 </script>
 
-<aside class="flex h-full w-56 flex-col border-r border-base-300 bg-base-100/95 backdrop-blur-sm">
+<aside class="flex h-full w-56 flex-col bg-base-100/85 backdrop-blur-sm xl:rounded-2xl xl:border xl:border-base-300/50 xl:shadow-lg xl:shadow-black/20">
 	<!-- Brand / user header -->
-	<div class="flex items-center gap-2.5 border-b border-base-300 px-3 py-3">
-		<Avatar name="Derek" size="sm" />
+	<div class="flex items-center gap-2.5 border-b border-base-300/50 px-3 py-3 xl:rounded-t-2xl">
+		<img src={favicon} alt="Agent Studio" class="size-8 shrink-0" />
 		<div class="min-w-0">
-			<p class="truncate text-sm font-semibold leading-tight">AGENTSTUDIO</p>
+			<p class="truncate text-sm leading-tight"><span class="font-light tracking-wide">Agent</span><span class="font-bold">Studio</span></p>
 			<p class="truncate text-[10px] opacity-50">Autonomous Agent Console</p>
 		</div>
 	</div>

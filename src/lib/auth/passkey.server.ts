@@ -7,9 +7,15 @@ import {
 	type AuthenticationResponseJSON,
 	type RegistrationResponseJSON,
 } from '@simplewebauthn/server'
+import { env } from '$env/dynamic/private'
 import { db } from '$lib/db.server'
 import { authChallenges, userPasskeys, users } from '$lib/auth/auth.schema'
-import { consumeBootstrapClaim, createSessionForUser, touchUserLastLogin, validateBootstrapClaim } from '$lib/auth/auth.server'
+import {
+	consumeBootstrapClaim,
+	createSessionForUser,
+	touchUserLastLogin,
+	validateBootstrapClaim,
+} from '$lib/auth/auth.server'
 import type { Cookies } from '@sveltejs/kit'
 
 const CHALLENGE_TTL_MS = 1000 * 60 * 10
@@ -36,9 +42,12 @@ async function getActiveUser(userId: string) {
 }
 
 async function requiresBootstrapClaim(userId: string) {
+	const bootstrapUsername = env.USER_NAME
+	if (!bootstrapUsername) return false
+
 	const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
 	if (!user) return false
-	if (user.username !== 'admin' || user.claimedAt) return false
+	if (user.username !== bootstrapUsername || user.claimedAt) return false
 
 	const [claimedUser] = await db
 		.select({ id: users.id })

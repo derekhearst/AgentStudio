@@ -32,7 +32,7 @@
 	}
 
 	async function createUser() {
-		const normalized = username.trim().toLowerCase();
+		const normalized = username.trim();
 		if (!normalized) return;
 		await createUserCommand({ username: normalized, name: name.trim() || undefined, role });
 		username = '';
@@ -122,7 +122,7 @@
 <dialog class="modal" open={showCreate}>
 	<div class="modal-box">
 		<h3 class="text-lg font-semibold">Create account</h3>
-		<p class="mt-1 text-sm opacity-70">Usernames must be lowercase and will be claimed on first passkey registration.</p>
+		<p class="mt-1 text-sm opacity-70">Usernames will be claimed on first passkey registration.</p>
 		<div class="mt-4 space-y-3">
 			<label class="form-control">
 				<span class="label-text">Username</span>

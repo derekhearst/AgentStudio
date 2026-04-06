@@ -15,10 +15,10 @@ import * as activitySchema from '$lib/activity/activity.schema'
 import * as artifactsSchema from '$lib/artifacts/artifacts.schema'
 import * as llmUsageSchema from '$lib/cost/usage.schema'
 import * as skillsSchema from '$lib/skills/skills.schema'
+import { readMigrationFiles } from 'drizzle-orm/migrator'
 
-if (!env.DATABASE_URL) throw new Error('DATABASE_URL is not set')
-
-const client = postgres(env.DATABASE_URL)
+const databaseUrl = env.DATABASE_URL
+const skipDatabaseInitialization = building
 
 const schema = {
 	...authSchema,
@@ -31,6 +31,65 @@ const schema = {
 	...artifactsSchema,
 	...llmUsageSchema,
 	...skillsSchema,
+}
+
+const MIGRATIONS_SCHEMA = 'drizzle'
+const MIGRATIONS_TABLE = '__drizzle_migrations'
+
+const QUIET_DB_NOTICE_CODES = new Set(['01000', '42710', '42P06', '42P07'])
+
+type PostgresNotice = {
+	code?: string
+	message?: string
+	severity?: string
+	severity_local?: string
+}
+
+function handleDatabaseNotice(notice: PostgresNotice) {
+	if (notice.code && QUIET_DB_NOTICE_CODES.has(notice.code)) {
+		return
+	}
+
+	const severity = notice.severity ?? notice.severity_local ?? 'NOTICE'
+	const message = notice.message ?? 'PostgreSQL notice'
+	console.warn(`[db] ${severity}: ${message}`)
+}
+
+function createDatabaseClient(url: string) {
+	return postgres(url, {
+		onnotice: handleDatabaseNotice,
+	})
+}
+
+function createDatabase(connection: ReturnType<typeof createDatabaseClient>) {
+	return drizzle(connection, { schema })
+}
+
+type Database = ReturnType<typeof createDatabase>
+
+function createUnavailableDatabase(): Database {
+	return new Proxy(
+		{},
+		{
+			get() {
+				throw new Error('Database is unavailable during build because DATABASE_URL is not set')
+			},
+		},
+	) as Database
+}
+
+if (!databaseUrl && !skipDatabaseInitialization) {
+	throw new Error('DATABASE_URL is not set')
+}
+
+const client = skipDatabaseInitialization ? null : createDatabaseClient(databaseUrl!)
+
+function getRuntimeClient() {
+	if (!client) {
+		throw new Error('Database client is unavailable because DATABASE_URL is not set')
+	}
+
+	return client
 }
 
 function getTargetDatabaseName(databaseUrl: string) {
@@ -59,6 +118,7 @@ async function ensureDatabaseExists(databaseUrl: string) {
 	const adminClient = postgres(getBootstrapDatabaseUrl(databaseUrl), {
 		max: 1,
 		prepare: false,
+		onnotice: handleDatabaseNotice,
 	})
 
 	try {
@@ -73,7 +133,10 @@ async function ensureDatabaseExists(databaseUrl: string) {
 		if (!existingDatabase[0]?.exists) {
 			console.log(`[db] Creating database ${databaseName}`)
 			await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
+			return true
 		}
+
+		return false
 	} finally {
 		await adminClient.end({ timeout: 5 })
 	}
@@ -89,20 +152,138 @@ function getMigrationsFolder() {
 	return migrationsFolder
 }
 
-async function bootstrapDatabase() {
-	await ensureDatabaseExists(env.DATABASE_URL)
+async function hasAppliedMigrations() {
+	const runtimeClient = getRuntimeClient()
+	const [migrationTable] = await runtimeClient<{ exists: boolean }[]>`
+		SELECT EXISTS(
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = ${MIGRATIONS_SCHEMA}
+				AND table_name = ${MIGRATIONS_TABLE}
+		) AS "exists"
+	`
 
-	console.log('[db] Ensuring required extensions are installed')
-	await client.unsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto')
-	await client.unsafe('CREATE EXTENSION IF NOT EXISTS vector')
+	if (!migrationTable?.exists) {
+		return false
+	}
 
-	console.log('[db] Applying migrations')
-	const bootstrapDb = drizzle(client, { schema })
-	await migrate(bootstrapDb, { migrationsFolder: getMigrationsFolder() })
-	console.log('[db] Database ready')
+	const migrationRows = await runtimeClient<{ count: number }[]>`
+		SELECT COUNT(*)::int AS "count"
+		FROM "drizzle"."__drizzle_migrations"
+	`
+
+	return (migrationRows[0]?.count ?? 0) > 0
 }
 
-const databaseReadyPromise = building ? Promise.resolve() : bootstrapDatabase()
+async function getLastAppliedMigrationMillis() {
+	const runtimeClient = getRuntimeClient()
+	const [row] = await runtimeClient<{ createdAt: number | null }[]>`
+		SELECT MAX(created_at)::bigint AS "createdAt"
+		FROM "drizzle"."__drizzle_migrations"
+	`
+
+	return row?.createdAt ?? null
+}
+
+function getLatestLocalMigrationMillis() {
+	const migrations = readMigrationFiles({ migrationsFolder: getMigrationsFolder() })
+	return migrations.at(-1)?.folderMillis ?? null
+}
+
+async function hasExistingAppSchemaObjects() {
+	const runtimeClient = getRuntimeClient()
+	const [existingTables] = await runtimeClient<{ exists: boolean }[]>`
+		SELECT EXISTS(
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema IN ('public', ${MIGRATIONS_SCHEMA})
+				AND table_type = 'BASE TABLE'
+		) AS "exists"
+	`
+
+	if (existingTables?.exists) {
+		return true
+	}
+
+	const [existingEnums] = await runtimeClient<{ exists: boolean }[]>`
+		SELECT EXISTS(
+			SELECT 1
+			FROM pg_type types
+			INNER JOIN pg_namespace namespaces ON namespaces.oid = types.typnamespace
+			WHERE namespaces.nspname = 'public'
+				AND types.typtype = 'e'
+		) AS "exists"
+	`
+
+	return existingEnums?.exists ?? false
+}
+
+async function resetAppSchemas() {
+	const runtimeClient = getRuntimeClient()
+	console.warn(
+		'[db] No Drizzle migrations were recorded; resetting existing app schemas before applying bundled migrations',
+	)
+	await runtimeClient.unsafe(`DROP SCHEMA IF EXISTS ${MIGRATIONS_SCHEMA} CASCADE`)
+	await runtimeClient.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
+	await runtimeClient.unsafe('CREATE SCHEMA public')
+}
+
+async function reconcileLegacySchemaState() {
+	const migrationsApplied = await hasAppliedMigrations()
+	if (migrationsApplied) {
+		return false
+	}
+
+	const hasExistingSchema = await hasExistingAppSchemaObjects()
+	if (!hasExistingSchema) {
+		return false
+	}
+
+	await resetAppSchemas()
+	return true
+}
+
+async function ensureRequiredExtensions() {
+	const runtimeClient = getRuntimeClient()
+	await runtimeClient.unsafe('CREATE EXTENSION IF NOT EXISTS pgcrypto')
+	await runtimeClient.unsafe('CREATE EXTENSION IF NOT EXISTS vector')
+	await runtimeClient.unsafe(`CREATE SCHEMA IF NOT EXISTS ${MIGRATIONS_SCHEMA}`)
+}
+
+async function bootstrapDatabase() {
+	if (!client || !databaseUrl) {
+		return
+	}
+
+	const createdDatabase = await ensureDatabaseExists(databaseUrl)
+	const resetLegacySchema = await reconcileLegacySchemaState()
+	await ensureRequiredExtensions()
+
+	const latestLocalMigrationMillis = getLatestLocalMigrationMillis()
+	const lastAppliedMigrationMillis = await getLastAppliedMigrationMillis()
+	const hasPendingMigrations =
+		latestLocalMigrationMillis !== null
+		&& (lastAppliedMigrationMillis === null || lastAppliedMigrationMillis < latestLocalMigrationMillis)
+
+	if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
+		console.log('[db] Applying migrations')
+	}
+
+	const bootstrapDb = createDatabase(client)
+	await migrate(bootstrapDb, {
+		migrationsFolder: getMigrationsFolder(),
+		migrationsSchema: MIGRATIONS_SCHEMA,
+		migrationsTable: MIGRATIONS_TABLE,
+	})
+
+	if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
+		console.log('[db] Database bootstrapped and ready')
+	} else {
+		console.log('[db] Database ready')
+	}
+}
+
+const databaseReadyPromise = skipDatabaseInitialization ? Promise.resolve() : bootstrapDatabase()
 
 export async function ensureDatabaseReady() {
 	await databaseReadyPromise
@@ -110,4 +291,4 @@ export async function ensureDatabaseReady() {
 
 await databaseReadyPromise
 
-export const db = drizzle(client, { schema })
+export const db: Database = client ? createDatabase(client) : createUnavailableDatabase()

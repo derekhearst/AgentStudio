@@ -103,7 +103,7 @@
 
 				<button
 					type="button"
-					class="btn btn-primary w-full"
+					class="btn btn-primary mt-2 w-full"
 					disabled={!selectedUserId || loading || users.length === 0}
 					onclick={beginPasskeyFlow}
 				>

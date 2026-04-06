@@ -626,11 +626,11 @@
 				<span class="loading loading-spinner loading-sm opacity-50"></span>
 			</div>
 		{:else}
-			<div class="flex items-center gap-2 px-1 py-1.5 lg:px-0">
+			<div class="flex items-center gap-2 px-1 py-0 lg:px-0">
 				<button onclick={() => goto('/')} class="btn btn-ghost btn-sm btn-circle lg:hidden" aria-label="Back to chats">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
 				</button>
-				<h1 class="min-w-0 flex-1 truncate text-base font-semibold lg:text-lg">{conversationData?.conversation.title ?? 'Chat'}</h1>
+				<h1 class="min-w-0 flex-1 truncate text-base font-semibold leading-tight lg:text-lg">{conversationData?.conversation.title ?? 'Chat'}</h1>
 				<ContextWindow
 					used={contextMetrics.used}
 					total={contextMetrics.total}

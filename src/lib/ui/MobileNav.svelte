@@ -48,8 +48,8 @@
 	] as const;
 </script>
 
-<nav class="fixed inset-x-0 bottom-0 z-40 border-t border-base-300 bg-base-100/95 backdrop-blur-md xl:hidden safe-bottom">
-	<div class="mx-auto flex max-w-lg items-center justify-around px-1 py-1">
+<nav class="fixed inset-x-0 bottom-0 z-40 mx-auto flex max-w-lg justify-center px-3 xl:hidden safe-bottom">
+	<div class="flex w-full items-center justify-around rounded-2xl border border-base-300/50 bg-base-100/80 px-1 py-1 shadow-lg shadow-black/20 backdrop-blur-xl">
 		{#each navItems as item}
 			<a
 				href={item.href}
@@ -151,12 +151,12 @@
 
 <style>
 	.safe-bottom {
-		padding-bottom: env(safe-area-inset-bottom, 0px);
+		padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 	}
 
 	.mobile-more-popover {
 		position: fixed;
-		inset: auto 0.5rem 4.5rem;
+		inset: auto 0.5rem 5.5rem;
 		margin: 0;
 		border: 1px solid var(--color-base-300);
 		border-radius: 1rem;

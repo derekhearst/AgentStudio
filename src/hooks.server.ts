@@ -19,7 +19,7 @@ async function cleanupLegacyCapabilitySkills() {
 	}
 }
 
-const PUBLIC_PATH_PREFIXES = ['/login', '/demo']
+const PUBLIC_PATH_PREFIXES = ['/login', '/demo', '/icon-preview']
 const ADMIN_PATH_PREFIXES = ['/users']
 
 function isPublicPath(pathname: string) {
@@ -57,4 +57,3 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	return resolve(event)
 }
-

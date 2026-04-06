@@ -134,6 +134,7 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - On startup, the server ensures the PostgreSQL database named in `DATABASE_URL` exists before handling requests
 - Required extensions are installed automatically: `pgcrypto` for UUID defaults and `vector` for memory embeddings
 - Bundled Drizzle SQL migrations are applied automatically on startup so container deploys do not require a separate manual migration step
+- If the database has AGENTSTUDIO schema objects but no recorded Drizzle migrations, startup resets the app schemas and reapplies migrations from scratch
 
 ---
 

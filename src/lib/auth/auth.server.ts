@@ -30,19 +30,25 @@ function shouldUseSecureCookie() {
 }
 
 export function normalizeUsername(input: string) {
-	return input.trim().toLowerCase()
+	return input.trim()
 }
 
 export function validateUsername(input: string) {
 	const normalized = normalizeUsername(input)
-	if (!/^[a-z0-9_-]{3,32}$/.test(normalized)) {
-		throw new Error('Username must be lowercase and contain only letters, numbers, underscore, or hyphen')
+	if (!/^[a-zA-Z0-9_-]{3,32}$/.test(normalized)) {
+		throw new Error('Username must contain only letters, numbers, underscore, or hyphen')
 	}
 	return normalized
 }
 
 async function ensureBootstrapClaimExists(baseUrl?: string) {
-	const adminUsername = 'admin'
+	const adminUsername = env.USER_NAME
+	const claimKey = env.CLAIM_KEY
+	if (!adminUsername || !claimKey) {
+		console.warn('[auth] USER_NAME and CLAIM_KEY env vars are required for bootstrap. Skipping.')
+		return
+	}
+
 	const [admin] = await db.select().from(users).where(eq(users.username, adminUsername)).limit(1)
 
 	const adminUser =
@@ -51,7 +57,7 @@ async function ensureBootstrapClaimExists(baseUrl?: string) {
 			await db
 				.insert(users)
 				.values({
-					name: 'Admin',
+					name: adminUsername,
 					username: adminUsername,
 					role: 'admin',
 					isActive: true,
@@ -70,7 +76,6 @@ async function ensureBootstrapClaimExists(baseUrl?: string) {
 
 	if (activeClaim) return
 
-	const claimKey = randomBytes(24).toString('base64url')
 	const tokenHash = hashToken(claimKey)
 	const expiresAt = new Date(Date.now() + BOOTSTRAP_CLAIM_TTL_MS)
 
@@ -79,7 +84,6 @@ async function ensureBootstrapClaimExists(baseUrl?: string) {
 	const hintUrl = baseUrl ? `${baseUrl}/login?claim=${encodeURIComponent(claimKey)}` : '(login URL unavailable)'
 	console.log('[auth] Initial admin bootstrap created.')
 	console.log(`[auth] Visit: ${hintUrl}`)
-	console.log(`[auth] Claim key: ${claimKey}`)
 }
 
 export async function ensureAuthBootstrap(baseUrl?: string) {
@@ -99,11 +103,7 @@ async function findActiveBootstrapClaim(claimKey: string) {
 		.select()
 		.from(bootstrapClaims)
 		.where(
-			and(
-				eq(bootstrapClaims.tokenHash, tokenHash),
-				isNull(bootstrapClaims.usedAt),
-				gt(bootstrapClaims.expiresAt, now),
-			),
+			and(eq(bootstrapClaims.tokenHash, tokenHash), isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)),
 		)
 		.limit(1)
 
