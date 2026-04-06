@@ -42,15 +42,6 @@
 		onNavigate((navigation) => {
 			if (!supportsViewTransitions) return;
 
-			const fromPath = navigation.from?.url.pathname ?? '';
-			const toPath = navigation.to?.url.pathname ?? '';
-			const chatDetailRoute = /^\/chat\/[^/]+$/;
-			const morphComposer =
-				(fromPath === '/' && chatDetailRoute.test(toPath)) ||
-				(chatDetailRoute.test(fromPath) && toPath === '/');
-
-			if (!morphComposer) return;
-
 			return new Promise<void>((resolve) => {
 				(
 					document as Document & {

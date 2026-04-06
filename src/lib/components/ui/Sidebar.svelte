@@ -112,6 +112,16 @@
 				</svg>
 				Skills
 			</a>
+			<a href="/tools"
+				class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/tools')} class:font-medium={isActive('/tools')} class:text-primary={isActive('/tools')}
+				onclick={onNavigate}>
+				<!-- wrench -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8z"/>
+				</svg>
+				Tools
+			</a>
 		</div>
 
 		<!-- Insights group -->

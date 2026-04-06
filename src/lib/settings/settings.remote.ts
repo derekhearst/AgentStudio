@@ -4,15 +4,7 @@ import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/setting
 import { getToolDefinitions } from '$lib/llm/tools'
 import { listSkillSummaries } from '$lib/skills/store'
 import { assembleContext } from '$lib/memory/context'
-import {
-	capabilityGroups,
-	type CapabilityGroup,
-	detectCapabilities,
-	getActiveTools,
-	buildCapabilityPrompt,
-	estimateTokens,
-	estimateToolDefinitionTokens,
-} from '$lib/llm/capabilities'
+import { capabilityGroups, estimateTokens, estimateToolDefinitionTokens } from '$lib/llm/capabilities'
 
 const settingsUpdateSchema = z.object({
 	defaultModel: z.string().trim().min(1).max(120).optional(),
@@ -49,15 +41,19 @@ const settingsUpdateSchema = z.object({
 			reservedResponsePct: z.number().min(10).max(40).optional(),
 			autoCompactThresholdPct: z.number().min(40).max(95).optional(),
 			compactionModel: z.string().trim().min(1).max(120).optional(),
-			capabilityOverrides: z.record(z.string(), z.enum(['auto', 'always', 'off'])).optional(),
 		})
 		.optional(),
 	toolConfig: z
 		.object({
 			approvalMode: z.enum(['auto', 'confirm']).optional(),
+			disabledTools: z.array(z.string()).optional(),
 		})
 		.optional(),
 	systemPrompt: z.string().max(12000).optional(),
+})
+
+const disabledToolsSchema = z.object({
+	disabledTools: z.array(z.string()),
 })
 
 export const getSettings = query(async () => {
@@ -68,24 +64,16 @@ export const updateAppSettings = command(settingsUpdateSchema, async (input) => 
 	return updateSettings(input)
 })
 
+export const updateDisabledToolsCommand = command(disabledToolsSchema, async ({ disabledTools }) => {
+	return updateSettings({ toolConfig: { disabledTools } })
+})
+
 export const resetAppSettings = command(async () => {
 	return resetSettings()
 })
 
 export const getFullPromptPreview = query(async () => {
 	const settings = await getOrCreateSettings()
-
-	const contextConfig = settings.contextConfig as {
-		capabilityOverrides?: Record<string, 'auto' | 'always' | 'off'>
-	}
-	const overrides = contextConfig?.capabilityOverrides ?? {}
-
-	// Simulate a "simple query" and a "complex query" to show both scenarios
-	const simpleMessage = 'Hello, how are you?'
-	const complexMessage = 'Write a Python script that generates a chart and save it as an artifact'
-
-	const simpleCapabilities = detectCapabilities(simpleMessage, [], overrides)
-	const complexCapabilities = detectCapabilities(complexMessage, [], overrides)
 
 	// Skill summaries
 	const skillSummaries = await listSkillSummaries()
@@ -103,13 +91,16 @@ export const getFullPromptPreview = query(async () => {
 	const memoryContext = await assembleContext('sample conversation')
 	const memoryPrompt = memoryContext.memories.length > 0 ? memoryContext.systemPrompt : undefined
 
-	function buildScenario(label: string, capabilities: CapabilityGroup[]) {
-		const systemPrompt = buildCapabilityPrompt(capabilities, {
-			customSystemPrompt: settings.systemPrompt || undefined,
-			skillSummaries: capabilities.includes('skills') ? skillList : undefined,
-		})
-		const toolNames = getActiveTools(capabilities)
-		const tools = getToolDefinitions(toolNames)
+	function buildScenario(label: string) {
+		const sections: string[] = []
+		if (settings.systemPrompt?.trim()) sections.push(settings.systemPrompt)
+		if (skillList) sections.push(`Available skills (use read_skill to load full content when relevant):\n${skillList}`)
+		const systemPrompt = sections.join('\n\n')
+
+		const disabledTools = new Set(
+			(settings.toolConfig as { disabledTools?: string[] } | undefined)?.disabledTools ?? [],
+		)
+		const tools = getToolDefinitions().filter((tool) => !disabledTools.has(tool.function.name))
 		const toolsJson = JSON.stringify(tools, null, 2)
 
 		const rawParts: Array<{ label: string; content: string }> = []
@@ -120,12 +111,14 @@ export const getFullPromptPreview = query(async () => {
 		rawParts.push({ label: `Tools (${tools.length})`, content: toolsJson })
 
 		const totalChars = systemPrompt.length + (memoryPrompt?.length ?? 0) + toolsJson.length
-		const estimatedTokens = estimateTokens(systemPrompt) + estimateToolDefinitionTokens(tools)
-			+ (memoryPrompt ? estimateTokens(memoryPrompt) : 0)
+		const estimatedTokens =
+			estimateTokens(systemPrompt) +
+			estimateToolDefinitionTokens(tools) +
+			(memoryPrompt ? estimateTokens(memoryPrompt) : 0)
 
 		return {
 			label,
-			capabilities: [...capabilities],
+			capabilities: [] as string[],
 			toolCount: tools.length,
 			estimatedTokens,
 			totalChars,
@@ -135,10 +128,11 @@ export const getFullPromptPreview = query(async () => {
 
 	return {
 		model: settings.defaultModel,
+		availableCapabilityGroups: Object.entries(capabilityGroups).map(([key, group]) => ({ key, label: group.label })),
 		toolApprovalMode: (settings.toolConfig as { approvalMode?: string } | undefined)?.approvalMode ?? 'auto',
 		scenarios: {
-			simple: buildScenario('Simple Query', simpleCapabilities),
-			complex: buildScenario('Complex Query', complexCapabilities),
+			simple: buildScenario('Simple Query'),
+			complex: buildScenario('Complex Query'),
 		},
 	}
 })

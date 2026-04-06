@@ -62,9 +62,7 @@ function classifyReviewType(execution: {
 	summary: string
 	toolResults: Array<{ call: { name: string }; result: unknown }>
 }): 'heavy' | 'quick' | 'informational' {
-	const hasCodeTools = execution.toolResults.some((r) =>
-		['code_execute', 'file_write', 'file_read'].includes(r.call.name),
-	)
+	const hasCodeTools = execution.toolResults.some((r) => ['shell', 'file_write', 'file_read'].includes(r.call.name))
 	if (hasCodeTools) return 'heavy'
 	if (execution.summary.length < 500 && execution.toolResults.length <= 1) return 'quick'
 	return 'informational'

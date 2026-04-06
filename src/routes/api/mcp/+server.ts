@@ -40,9 +40,16 @@ function listTools() {
 
 const toolDescriptions: Record<ToolName, string> = {
 	web_search: 'Search the web using SearXNG',
-	code_execute: 'Execute code in a sandboxed environment',
-	file_read: 'Read a file from the sandbox filesystem',
+	shell: 'Run a shell command in a sandboxed environment',
+	file_read: 'Read a file from the sandbox filesystem, optionally by line range',
 	file_write: 'Write a file to the sandbox filesystem',
+	file_patch: 'Apply a unified diff patch to files in the sandbox workspace',
+	file_replace: 'Replace an exact string in a file with deterministic unique-match behavior by default',
+	list_directory: 'List files and directories with optional depth and hidden-file controls',
+	delete_file: 'Delete a file or directory (recursive=true required for directories)',
+	move_file: 'Move or rename a file/directory',
+	search_files: 'Search file contents with ripgrep-style matching and options',
+	file_info: 'Return metadata for a file or directory',
 	browser_screenshot: 'Take a screenshot of a web page',
 	memory_search: 'Search through stored memories using semantic similarity',
 	create_task: 'Create a new task for an available agent',
@@ -65,16 +72,71 @@ const toolDescriptions: Record<ToolName, string> = {
 function schemaToJsonSchema(name: ToolName) {
 	const schemas: Record<string, object> = {
 		web_search: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-		code_execute: {
+		shell: {
 			type: 'object',
-			properties: { code: { type: 'string' }, language: { type: 'string', default: 'typescript' } },
-			required: ['code'],
+			properties: { command: { type: 'string' } },
+			required: ['command'],
 		},
-		file_read: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+		file_read: {
+			type: 'object',
+			properties: { path: { type: 'string' }, startLine: { type: 'number' }, endLine: { type: 'number' } },
+			required: ['path'],
+		},
 		file_write: {
 			type: 'object',
 			properties: { path: { type: 'string' }, content: { type: 'string' } },
 			required: ['path', 'content'],
+		},
+		file_patch: { type: 'object', properties: { patch: { type: 'string' } }, required: ['patch'] },
+		file_replace: {
+			type: 'object',
+			properties: {
+				path: { type: 'string' },
+				oldStr: { type: 'string' },
+				newStr: { type: 'string' },
+				requireUnique: { type: 'boolean', default: true },
+				replaceAll: { type: 'boolean', default: false },
+			},
+			required: ['path', 'oldStr', 'newStr'],
+		},
+		list_directory: {
+			type: 'object',
+			properties: {
+				path: { type: 'string' },
+				depth: { type: 'number', default: 1 },
+				includeHidden: { type: 'boolean', default: false },
+			},
+		},
+		delete_file: {
+			type: 'object',
+			properties: { path: { type: 'string' }, recursive: { type: 'boolean', default: false } },
+			required: ['path'],
+		},
+		move_file: {
+			type: 'object',
+			properties: {
+				fromPath: { type: 'string' },
+				toPath: { type: 'string' },
+				overwrite: { type: 'boolean', default: false },
+			},
+			required: ['fromPath', 'toPath'],
+		},
+		search_files: {
+			type: 'object',
+			properties: {
+				query: { type: 'string' },
+				path: { type: 'string' },
+				maxResults: { type: 'number', default: 50 },
+				isRegex: { type: 'boolean', default: false },
+				includeIgnored: { type: 'boolean', default: false },
+				caseSensitive: { type: 'boolean', default: false },
+			},
+			required: ['query'],
+		},
+		file_info: {
+			type: 'object',
+			properties: { path: { type: 'string' } },
+			required: ['path'],
 		},
 		browser_screenshot: { type: 'object', properties: { url: { type: 'string' } } },
 		memory_search: {
@@ -157,22 +219,42 @@ function schemaToJsonSchema(name: ToolName) {
 		},
 		create_skill: {
 			type: 'object',
-			properties: { name: { type: 'string' }, description: { type: 'string' }, content: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } },
+			properties: {
+				name: { type: 'string' },
+				description: { type: 'string' },
+				content: { type: 'string' },
+				tags: { type: 'array', items: { type: 'string' } },
+			},
 			required: ['name', 'description', 'content'],
 		},
 		update_skill: {
 			type: 'object',
-			properties: { name: { type: 'string' }, description: { type: 'string' }, content: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } },
+			properties: {
+				name: { type: 'string' },
+				description: { type: 'string' },
+				content: { type: 'string' },
+				tags: { type: 'array', items: { type: 'string' } },
+			},
 			required: ['name'],
 		},
 		add_skill_file: {
 			type: 'object',
-			properties: { skillName: { type: 'string' }, fileName: { type: 'string' }, description: { type: 'string' }, content: { type: 'string' } },
+			properties: {
+				skillName: { type: 'string' },
+				fileName: { type: 'string' },
+				description: { type: 'string' },
+				content: { type: 'string' },
+			},
 			required: ['skillName', 'fileName', 'content'],
 		},
 		update_skill_file: {
 			type: 'object',
-			properties: { skillName: { type: 'string' }, fileName: { type: 'string' }, content: { type: 'string' }, description: { type: 'string' } },
+			properties: {
+				skillName: { type: 'string' },
+				fileName: { type: 'string' },
+				content: { type: 'string' },
+				description: { type: 'string' },
+			},
 			required: ['skillName', 'fileName'],
 		},
 		delete_skill: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },

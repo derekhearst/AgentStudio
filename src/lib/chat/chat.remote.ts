@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
+import { getOrCreateSettings } from '$lib/settings/settings'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -64,11 +65,12 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 })
 
 export const createConversation = command(createConversationSchema, async (input) => {
+	const settings = await getOrCreateSettings()
 	const [created] = await db
 		.insert(conversations)
 		.values({
 			title: input.title,
-			model: input.model ?? 'anthropic/claude-sonnet-4',
+			model: input.model ?? settings.defaultModel,
 		})
 		.returning()
 

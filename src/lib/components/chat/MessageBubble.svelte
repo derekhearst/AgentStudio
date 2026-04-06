@@ -74,6 +74,18 @@
 </script>
 
 <article class={`chat-message w-full ${isUser ? 'chat chat-end' : ''}`}>
+	{#if !isUser && message.toolCalls && message.toolCalls.length > 0}
+		<div class="mb-2 w-full space-y-2 pl-2">
+			{#each message.toolCalls as call, idx (`${message.id}-${idx}`)}
+				<ToolCallCard
+					name={String(call.name ?? 'tool')}
+					argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
+					result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
+				/>
+			{/each}
+		</div>
+	{/if}
+
 	{#if isUser}
 		<div class="max-w-[90%] rounded-2xl border-2 border-primary bg-base-100/60 px-4 py-3">
 			{#if editing}
@@ -87,7 +99,7 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="assistant-message">
+		<div class="assistant-message pl-4">
 			{#if editing}
 				<textarea class="textarea textarea-bordered w-full" bind:value={draft}></textarea>
 				<div class="mt-2 flex gap-2">
@@ -147,18 +159,6 @@
 					</div>
 				</div>
 			{/if}
-		</div>
-	{/if}
-
-	{#if message.toolCalls && message.toolCalls.length > 0}
-		<div class="mt-2 w-full space-y-2">
-			{#each message.toolCalls as call, idx (`${message.id}-${idx}`)}
-				<ToolCallCard
-					name={String(call.name ?? 'tool')}
-					argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
-					result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
-				/>
-			{/each}
 		</div>
 	{/if}
 

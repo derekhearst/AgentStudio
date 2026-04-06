@@ -1,6 +1,19 @@
 import { z } from 'zod'
 import { webSearch } from '$lib/tools/search'
-import { browserNavigate, browserScreenshot, execCode, execShell, readFile, writeFile } from '$lib/tools/sandbox'
+import {
+	browserNavigate,
+	browserScreenshot,
+	execShell,
+	readFile,
+	writeFile,
+	patchFile,
+	replaceInFile,
+	listDirectory,
+	deleteFile,
+	moveFile,
+	searchFiles,
+	fileInfo,
+} from '$lib/tools/sandbox'
 import { searchMemories } from '$lib/memory/store'
 import { runSubagent } from '$lib/agents/subagent'
 import { generateImage } from '$lib/tools/imagegen'
@@ -22,9 +35,41 @@ import {
 
 export const toolSchemas = {
 	web_search: z.object({ query: z.string().min(1) }),
-	code_execute: z.object({ code: z.string().min(1), language: z.string().default('typescript') }),
-	file_read: z.object({ path: z.string().min(1) }),
+	shell: z.object({ command: z.string().min(1) }),
+	file_read: z.object({
+		path: z.string().min(1),
+		startLine: z.number().int().min(1).optional(),
+		endLine: z.number().int().min(1).optional(),
+	}),
 	file_write: z.object({ path: z.string().min(1), content: z.string() }),
+	file_patch: z.object({ patch: z.string().min(1) }),
+	file_replace: z.object({
+		path: z.string().min(1),
+		oldStr: z.string().min(1),
+		newStr: z.string(),
+		requireUnique: z.boolean().default(true),
+		replaceAll: z.boolean().default(false),
+	}),
+	list_directory: z.object({
+		path: z.string().min(1).optional(),
+		depth: z.number().int().min(0).max(6).default(1),
+		includeHidden: z.boolean().default(false),
+	}),
+	delete_file: z.object({ path: z.string().min(1), recursive: z.boolean().default(false) }),
+	move_file: z.object({
+		fromPath: z.string().min(1),
+		toPath: z.string().min(1),
+		overwrite: z.boolean().default(false),
+	}),
+	search_files: z.object({
+		query: z.string().min(1),
+		path: z.string().min(1).optional(),
+		maxResults: z.number().int().min(1).max(200).default(50),
+		isRegex: z.boolean().default(false),
+		includeIgnored: z.boolean().default(false),
+		caseSensitive: z.boolean().default(false),
+	}),
+	file_info: z.object({ path: z.string().min(1) }),
 	browser_screenshot: z.object({ url: z.string().url().optional() }),
 	memory_search: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).default(5) }),
 	create_task: z.object({ title: z.string().min(1), description: z.string().min(1) }),
@@ -101,9 +146,17 @@ export const allToolNames = Object.keys(toolSchemas) as ToolName[]
 
 const toolDescriptions: Record<ToolName, string> = {
 	web_search: 'Search the web for information.',
-	code_execute: 'Execute code in a sandboxed environment.',
-	file_read: 'Read a file from the sandbox filesystem.',
+	shell: 'Run a shell command in the sandboxed environment.',
+	file_read: 'Read a file from the sandbox filesystem, optionally by line range.',
 	file_write: 'Write content to a file in the sandbox filesystem.',
+	file_patch: 'Apply a unified diff patch to files in the sandbox workspace.',
+	file_replace:
+		'Replace an exact string in a file. By default requires exactly one match, making edits deterministic and retry-safe.',
+	list_directory: 'List files and directories with depth and hidden-file controls.',
+	delete_file: 'Delete a file or directory (recursive deletes require explicit recursive=true).',
+	move_file: 'Move or rename a file/directory within the sandbox workspace.',
+	search_files: 'Search file contents in the workspace (ripgrep-style) with optional regex and ignore controls.',
+	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
 	memory_search: 'Search persistent memory for relevant information.',
 	create_task: 'Create a new agent task.',
@@ -178,13 +231,13 @@ export async function executeTool(call: ToolCall) {
 			}
 		}
 
-		if (call.name === 'code_execute') {
-			const input = toolSchemas.code_execute.parse(call.arguments)
+		if (call.name === 'shell') {
+			const input = toolSchemas.shell.parse(call.arguments)
 			return {
 				success: true,
 				tool: call.name,
 				input,
-				result: await execCode(input.code, input.language),
+				result: await execShell(input.command),
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -195,7 +248,7 @@ export async function executeTool(call: ToolCall) {
 				success: true,
 				tool: call.name,
 				input,
-				result: await readFile(input.path),
+				result: await readFile(input.path, input.startLine, input.endLine),
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -207,6 +260,92 @@ export async function executeTool(call: ToolCall) {
 				tool: call.name,
 				input,
 				result: await writeFile(input.path, input.content),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'file_patch') {
+			const input = toolSchemas.file_patch.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await patchFile(input.patch),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'file_replace') {
+			const input = toolSchemas.file_replace.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await replaceInFile(input.path, input.oldStr, input.newStr, {
+					requireUnique: input.requireUnique,
+					replaceAll: input.replaceAll,
+				}),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'list_directory') {
+			const input = toolSchemas.list_directory.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await listDirectory(input.path, input.depth, input.includeHidden),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'delete_file') {
+			const input = toolSchemas.delete_file.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await deleteFile(input.path, input.recursive),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'move_file') {
+			const input = toolSchemas.move_file.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await moveFile(input.fromPath, input.toPath, input.overwrite),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'search_files') {
+			const input = toolSchemas.search_files.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await searchFiles(input.query, {
+					path: input.path,
+					maxResults: input.maxResults,
+					isRegex: input.isRegex,
+					includeIgnored: input.includeIgnored,
+					caseSensitive: input.caseSensitive,
+				}),
+				executionMs: Date.now() - startedAt,
+			}
+		}
+
+		if (call.name === 'file_info') {
+			const input = toolSchemas.file_info.parse(call.arguments)
+			return {
+				success: true,
+				tool: call.name,
+				input,
+				result: await fileInfo(input.path),
 				executionMs: Date.now() - startedAt,
 			}
 		}

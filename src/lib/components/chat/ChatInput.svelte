@@ -2,6 +2,14 @@
 	import { onMount } from 'svelte';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 
+	type ChatAttachment = {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number;
+		url: string;
+	};
+
 	let {
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
@@ -12,7 +20,7 @@
 	} = $props<{
 		busy?: boolean;
 		model?: string;
-		onSubmit?: ((content: string) => Promise<void> | void) | undefined;
+		onSubmit?: ((content: string, attachments: ChatAttachment[]) => Promise<void> | void) | undefined;
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
@@ -27,6 +35,10 @@
 	let mediaRecorder: MediaRecorder | null = null;
 	let audioChunks: Blob[] = [];
 	let baseText = '';
+	let fileInputEl = $state<HTMLInputElement | undefined>(undefined);
+	let attachments = $state<ChatAttachment[]>([]);
+	let uploadBusy = $state(false);
+	let uploadError = $state<string | null>(null);
 
 	onMount(() => {
 		const hasNative = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -161,16 +173,76 @@
 		if (!content.trim() || busy) return;
 		stopRecording();
 		const msg = content;
+		const selectedAttachments = [...attachments];
+		await onSubmit?.(msg, selectedAttachments);
 		value = '';
 		baseText = '';
-		await onSubmit?.(msg);
+		attachments = [];
+		uploadError = null;
+	}
+
+	function formatBytes(size: number) {
+		if (size < 1024) return `${size} B`;
+		if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	async function uploadSingleFile(file: File): Promise<ChatAttachment> {
+		const form = new FormData();
+		form.append('file', file);
+		const res = await fetch('/api/upload', { method: 'POST', body: form });
+		if (!res.ok) {
+			const payload = await res.json().catch(() => ({}));
+			throw new Error(payload?.error ?? `Failed to upload ${file.name}`);
+		}
+		return (await res.json()) as ChatAttachment;
+	}
+
+	async function handleFilesSelected(event: Event) {
+		const input = event.currentTarget as HTMLInputElement | null;
+		const files = input?.files;
+		if (!files || files.length === 0) return;
+
+		uploadBusy = true;
+		uploadError = null;
+		try {
+			const uploaded: ChatAttachment[] = [];
+			for (const file of Array.from(files)) {
+				uploaded.push(await uploadSingleFile(file));
+			}
+			const known = new Set(attachments.map((a) => a.id));
+			attachments = [...attachments, ...uploaded.filter((a) => !known.has(a.id))];
+		} catch (error) {
+			uploadError = error instanceof Error ? error.message : 'Upload failed';
+		} finally {
+			uploadBusy = false;
+			if (input) input.value = '';
+		}
+	}
+
+	function openFilePicker() {
+		if (busy || uploadBusy) return;
+		fileInputEl?.click();
+	}
+
+	function removeAttachment(id: string) {
+		attachments = attachments.filter((attachment) => attachment.id !== id);
 	}
 </script>
 
 <div class="space-y-2">
+	<input
+		bind:this={fileInputEl}
+		type="file"
+		class="hidden"
+		multiple
+		accept="image/*,.pdf,.txt,.csv,.json,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		onchange={handleFilesSelected}
+	/>
+
 	<ChatComposer
 		bind:value
-		{busy}
+		busy={busy || uploadBusy}
 		{model}
 		{recording}
 		{transcribing}
@@ -179,9 +251,31 @@
 		onSubmit={(content) => handleSubmit(content)}
 		onModelChange={(id) => onModelChange?.(id)}
 		onCancelGeneration={() => onCancelGeneration?.()}
-		onAddFiles={() => {
-			// File picker hook will be wired in a later pass.
-		}}
+		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}
 	/>
+
+	{#if uploadError}
+		<p class="px-1 text-xs text-error">{uploadError}</p>
+	{/if}
+
+	{#if attachments.length > 0}
+		<div class="flex flex-wrap gap-2 px-1">
+			{#each attachments as attachment (attachment.id)}
+				<div class="flex items-center gap-2 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-xs">
+					<span class="max-w-44 truncate" title={attachment.filename}>{attachment.filename}</span>
+					<span class="text-base-content/60">{formatBytes(attachment.size)}</span>
+					<button
+						type="button"
+						class="btn btn-ghost btn-xs btn-circle"
+						title="Remove file"
+						aria-label="Remove file"
+						onclick={() => removeAttachment(attachment.id)}
+					>
+						×
+					</button>
+				</div>
+			{/each}
+		</div>
+	{/if}
 </div>

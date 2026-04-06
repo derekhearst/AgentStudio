@@ -19,6 +19,14 @@
 	import { renderMarkdown } from '$lib/chat/markdown';
 	import ArtifactPanel from '$lib/components/artifacts/ArtifactPanel.svelte';
 
+	type ChatAttachment = {
+		id: string;
+		filename: string;
+		mimeType: string;
+		size: number;
+		url: string;
+	};
+
 	type StreamingToolCall = {
 		id: string;
 		name: string;
@@ -37,7 +45,7 @@
 	let draftAssistant = $state('');
 	let pendingMessageId = $state<string | null>(null);
 	let pendingUserMessages = $state<Array<{ id: string; content: string; createdAt: Date }>>([]);
-	let pendingAssistantDrafts = $state<Array<{ id: string; content: string; createdAt: Date }>>([]);
+	let pendingAssistantDrafts = $state<Array<{ id: string; content: string; createdAt: Date; toolCalls?: Array<Record<string, unknown>> }>>([]);
 	let waitingForFirstToken = $state(false);
 	let streamAbortController = $state<AbortController | null>(null);
 	let stoppedByUser = $state(false);
@@ -49,6 +57,10 @@
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let consumedInitialPrompt = $state(false);
 	let modelSwitchNotice = $state<string | null>(null);
+	let defaultModelApplied = $state(false);
+	let streamedAssistantTarget = $state('');
+	let draftInterpolationFrame = $state<number | null>(null);
+	let draftInterpolationLastTs = $state<number | null>(null);
 
 	// Artifact panel state
 	type PanelMode = 'collapsed' | 'panel' | 'fullscreen';
@@ -91,11 +103,57 @@
 		}
 	}
 
+	function stopDraftInterpolation() {
+		if (draftInterpolationFrame !== null) {
+			cancelAnimationFrame(draftInterpolationFrame);
+			draftInterpolationFrame = null;
+		}
+		draftInterpolationLastTs = null;
+	}
+
+	function interpolateDraft(now: number) {
+		draftInterpolationFrame = null;
+		if (draftInterpolationLastTs === null) {
+			draftInterpolationLastTs = now;
+		}
+
+		const elapsedMs = now - draftInterpolationLastTs;
+		draftInterpolationLastTs = now;
+		const remaining = streamedAssistantTarget.length - draftAssistant.length;
+		if (remaining <= 0) {
+			stopDraftInterpolation();
+			return;
+		}
+
+		const charsPerSecond = Math.min(280, Math.max(80, remaining * 4));
+		const step = Math.max(1, Math.floor((charsPerSecond * Math.max(16, elapsedMs)) / 1000));
+		draftAssistant += streamedAssistantTarget.slice(draftAssistant.length, draftAssistant.length + step);
+
+		if (draftAssistant.length < streamedAssistantTarget.length) {
+			draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
+		} else {
+			stopDraftInterpolation();
+		}
+	}
+
+	function queueDraftInterpolation() {
+		if (draftAssistant.length >= streamedAssistantTarget.length) return;
+		if (draftInterpolationFrame !== null) return;
+		draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
+	}
+
 	$effect(() => {
 		// Auto-scroll when messages change or during streaming
 		void messages.length;
 		void draftAssistant;
+		void streamingToolCalls.map((tc) => `${tc.id}:${tc.status}:${tc.expanded}:${tc.result?.length ?? 0}`).join('|');
 		scrollToBottom();
+	});
+
+	$effect(() => {
+		return () => {
+			stopDraftInterpolation();
+		};
 	});
 
 	$effect(() => {
@@ -148,7 +206,7 @@
 				totalMs: null,
 				tokensPerSec: null,
 				createdAt: message.createdAt,
-				toolCalls: []
+				toolCalls: message.toolCalls ?? []
 			}));
 
 		const combined = [...remoteMessages, ...optimisticUsers, ...pendingAssistants];
@@ -228,6 +286,14 @@
 	$effect(() => {
 		if (conversationData?.conversation.model) {
 			model = conversationData.conversation.model;
+		}
+	});
+
+	$effect(() => {
+		if (defaultModelApplied || conversationData?.conversation.model) return;
+		if (appSettings?.defaultModel) {
+			model = appSettings.defaultModel;
+			defaultModelApplied = true;
 		}
 	});
 
@@ -321,7 +387,7 @@
 		);
 	}
 
-	async function streamMessage(content: string, regenerate = false) {
+	async function streamMessage(content: string, regenerate = false, attachments: ChatAttachment[] = []) {
 		if (!conversationId || streaming) return;
 
 		const abortController = new AbortController();
@@ -337,6 +403,8 @@
 		streaming = true;
 		streamError = null;
 		draftAssistant = '';
+		streamedAssistantTarget = '';
+		stopDraftInterpolation();
 		pendingMessageId = null;
 		waitingForFirstToken = true;
 		streamAbortController = abortController;
@@ -346,7 +414,7 @@
 			const response = await fetch(`/chat/${conversationId}/stream`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ conversationId, content, model, regenerate }),
+				body: JSON.stringify({ conversationId, content, model, regenerate, attachments }),
 				signal: abortController.signal
 			});
 
@@ -378,7 +446,8 @@
 						waitingForFirstToken = false;
 						// Collapse any expanded tool calls when text resumes
 						streamingToolCalls = streamingToolCalls.map((tc) => ({ ...tc, expanded: false }));
-						draftAssistant += payload.content ?? '';
+						streamedAssistantTarget += payload.content ?? '';
+						queueDraftInterpolation();
 					}
 
 					if (eventName === 'tool_pending') {
@@ -430,7 +499,7 @@
 										...tc,
 										status: 'completed' as const,
 										executionMs: payload.executionMs ?? null,
-										result: payload.success ? 'Success' : 'Failed',
+										result: payload.result ?? (payload.success ? 'Success' : 'Failed'),
 									}
 								: tc
 						);
@@ -456,12 +525,21 @@
 						if (payload.error) {
 							streamError = payload.error;
 						} else if (payload.messageId) {
+							draftAssistant = streamedAssistantTarget;
+							stopDraftInterpolation();
 							// Keep draft visible until refreshAll() completes
 							pendingMessageId = payload.messageId;
-							if (draftAssistant.trim()) {
+							if (streamedAssistantTarget.trim()) {
 								pendingAssistantDrafts = [
 									...pendingAssistantDrafts.filter((draft) => draft.id !== payload.messageId),
-									{ id: payload.messageId, content: draftAssistant, createdAt: new Date() }
+									{
+										id: payload.messageId,
+										content: streamedAssistantTarget,
+										createdAt: new Date(),
+										toolCalls: streamingToolCalls
+											.filter((tc) => tc.status === 'completed')
+											.map((tc) => ({ name: tc.name, arguments: JSON.parse(tc.arguments || '{}'), result: tc.result ?? '' }))
+									}
 								];
 							}
 						}
@@ -490,6 +568,8 @@
 			streamAbortController = null;
 			stoppedByUser = false;
 			streamingToolCalls = [];
+			streamedAssistantTarget = '';
+			stopDraftInterpolation();
 		}
 	}
 
@@ -592,11 +672,6 @@
 						</div>
 					</article>
 				{:else if streaming}
-					{#if draftAssistant}
-						<article class="chat chat-start">
-							<div class="assistant-message"><div class="markdown-body">{@html renderMarkdown(draftAssistant)}</div></div>
-						</article>
-					{/if}
 					{#if streamingToolCalls.length > 0}
 						<div class="w-full space-y-1.5 pl-1">
 							{#each streamingToolCalls as tc (tc.id)}
@@ -614,6 +689,11 @@
 							{/each}
 						</div>
 					{/if}
+					{#if draftAssistant}
+						<article class="chat chat-start">
+							<div class="assistant-message pl-4"><div class="markdown-body">{@html renderMarkdown(draftAssistant)}</div></div>
+						</article>
+					{/if}
 				{/if}
 			</div>
 
@@ -628,7 +708,7 @@
 				onCancelGeneration={stopStreaming}
 				model={model}
 				onModelChange={(next) => maybeCompactBeforeModelSwitch(next)}
-				onSubmit={(content) => streamMessage(content, false)}
+				onSubmit={(content, attachments) => streamMessage(content, false, attachments)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
 			/>
 		</div>

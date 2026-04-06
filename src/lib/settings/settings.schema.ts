@@ -35,16 +35,16 @@ export const appSettings = pgTable('app_settings', {
 			reservedResponsePct: number
 			autoCompactThresholdPct: number
 			compactionModel: string
-			capabilityOverrides: Record<string, 'auto' | 'always' | 'off'>
 		}>()
 		.notNull()
-		.default({ reservedResponsePct: 30, autoCompactThresholdPct: 72, compactionModel: 'openai/gpt-4o-mini', capabilityOverrides: {} }),
+		.default({ reservedResponsePct: 30, autoCompactThresholdPct: 72, compactionModel: 'openai/gpt-4o-mini' }),
 	toolConfig: jsonb('tool_config')
 		.$type<{
 			approvalMode: 'auto' | 'confirm'
+			disabledTools: string[]
 		}>()
 		.notNull()
-		.default({ approvalMode: 'auto' }),
+		.default({ approvalMode: 'auto', disabledTools: [] }),
 	systemPrompt: text('system_prompt').notNull().default(''),
 	theme: text('theme').notNull().default('drokbot-night'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

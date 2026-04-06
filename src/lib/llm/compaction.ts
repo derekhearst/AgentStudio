@@ -178,7 +178,7 @@ export function trimToolResult(toolName: string, resultStr: string): string {
 	const limits: Record<string, number> = {
 		web_search: 6000, // ~1500 tokens
 		file_read: 32000, // ~8000 tokens
-		code_execute: 16000, // ~4000 tokens
+		shell: 16000, // ~4000 tokens
 		browser_screenshot: Infinity, // base64 handled by provider
 		memory_search: 8000,
 		run_subagent: 16000,

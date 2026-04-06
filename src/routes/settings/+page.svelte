@@ -13,7 +13,6 @@
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
-	import { capabilityGroups, type CapabilityGroup } from '$lib/llm/capabilities';
 	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
 	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
 
@@ -44,7 +43,7 @@
 	const sections = [
 		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
 		{ id: 'prompt', keywords: 'system prompt custom instructions' },
-		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model capability group tools sandbox artifacts skills agents media' },
+		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
 		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
@@ -504,39 +503,9 @@
 					</div>
 				</div>
 				<div class="border-t border-base-content/[.06]"></div>
-
-				<!-- Capability Groups -->
 				<div class="py-3.5">
-					<p class="text-sm font-medium">Capability Groups</p>
-					<p class="mt-0.5 mb-3 text-xs text-base-content/40">Control when each tool group loads into context</p>
-					<div class="space-y-2">
-						{#each Object.entries(capabilityGroups) as [key, group]}
-							{@const override = settings.contextConfig.capabilityOverrides?.[key] ?? (group.alwaysOn ? 'always' : 'auto')}
-							<div class="flex items-center justify-between gap-3 rounded-lg bg-base-300/30 px-3 py-2">
-								<div class="min-w-0">
-									<p class="text-xs font-medium text-base-content/80">{group.label}</p>
-									<p class="truncate text-[10px] text-base-content/35">{group.description} ({group.tools.length} tools)</p>
-								</div>
-								<select
-									class="select select-xs select-bordered w-24 shrink-0 text-[10px]"
-									value={override}
-									onchange={(e) => {
-										if (!settings) return;
-										const val = (e.target as HTMLSelectElement).value as 'auto' | 'always' | 'off';
-										if (!settings.contextConfig.capabilityOverrides) {
-											settings.contextConfig.capabilityOverrides = {};
-										}
-										settings.contextConfig.capabilityOverrides[key] = val;
-										settings.contextConfig = { ...settings.contextConfig };
-									}}
-								>
-									<option value="auto">Auto</option>
-									<option value="always">Always On</option>
-									<option value="off">Off</option>
-								</select>
-							</div>
-						{/each}
-					</div>
+					<p class="text-sm font-medium">Tool Availability</p>
+					<p class="mt-0.5 text-xs text-base-content/40">Manage built-in tool toggles from the Tools page.</p>
 				</div>
 			</div>
 		</section>

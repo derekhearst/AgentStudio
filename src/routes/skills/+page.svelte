@@ -39,16 +39,21 @@
 
 	function filterLocally() {
 		const q = search.trim().toLowerCase();
-		if (!q) {
-			skills = allSkills;
-		} else {
-			skills = allSkills.filter(
+
+		let filtered = allSkills;
+		filtered = filtered.filter((s) => !s.name.startsWith('capability:'));
+
+		// Filter by search text
+		if (q) {
+			filtered = filtered.filter(
 				(s) =>
 					s.name.toLowerCase().includes(q) ||
 					s.description.toLowerCase().includes(q) ||
 					s.tags.some((t) => t.toLowerCase().includes(q))
 			);
 		}
+
+		skills = filtered;
 	}
 
 	function handleSearchInput() {
@@ -105,7 +110,7 @@
 			<div>
 				<h1 class="text-xl font-bold sm:text-3xl">Skills</h1>
 				<p class="text-xs text-base-content/70 sm:text-sm">
-					{skills.length} {skills.length === 1 ? 'skill' : 'skills'} &middot; Reusable instruction bundles for the LLM
+					{skills.length} {skills.length === 1 ? 'skill' : 'skills'} - Reusable instruction bundles for the LLM
 				</p>
 			</div>
 		{/snippet}
@@ -123,12 +128,14 @@
 	</ContentPanel>
 
 	<!-- Search -->
-	<input
-		class="input input-bordered input-sm w-full shrink-0"
-		bind:value={search}
-		oninput={handleSearchInput}
-		placeholder="Search skills..."
-	/>
+	<div class="flex shrink-0 items-center gap-2">
+		<input
+			class="input input-bordered input-md flex-1"
+			bind:value={search}
+			oninput={handleSearchInput}
+			placeholder="Search skills..."
+		/>
+	</div>
 
 	<!-- Skill list (scrollable) -->
 	<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">

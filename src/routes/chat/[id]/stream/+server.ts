@@ -14,13 +14,6 @@ import { logLlmUsage } from '$lib/llm/usage'
 import { getOrCreateSettings } from '$lib/settings/settings'
 import { requestApproval } from '$lib/llm/tool-approval'
 import { listSkillSummaries } from '$lib/skills/store'
-import {
-	detectCapabilities,
-	getActiveTools,
-	buildCapabilityPrompt,
-	getGroupForTool,
-	type CapabilityGroup,
-} from '$lib/llm/capabilities'
 import { shouldCompact, compactMessages, trimHistoricalToolResults, trimToolResult } from '$lib/llm/compaction'
 
 const encoder = new TextEncoder()
@@ -121,30 +114,12 @@ export const POST: RequestHandler = async ({ request }) => {
 			return { role: row.role, content: row.content }
 		})
 
-	// --- Context Engineering: Capability Detection ---
-	// Gather tool names used in previous messages for sticky activation
-	const previousToolNames: string[] = []
-	for (const row of historyRows) {
-		// toolCalls is stored as JSON array on assistant messages
-		const rawRow = row as Record<string, unknown>
-		const toolCalls = rawRow.toolCalls as Array<{ name?: string }> | undefined
-		if (toolCalls) {
-			for (const tc of toolCalls) {
-				if (tc.name) previousToolNames.push(tc.name)
-			}
-		}
-	}
-
 	const userContent = body.content?.trim() ?? ''
 
 	// --- Context Engineering: Unified System Prompt ---
 	const currentSettings = await getOrCreateSettings()
-	const contextConfig = currentSettings.contextConfig as {
-		capabilityOverrides?: Record<string, 'auto' | 'always' | 'off'>
-	} | undefined
-	const capabilityOverrides = contextConfig?.capabilityOverrides ?? {}
-
-	const activeCapabilities = detectCapabilities(userContent, previousToolNames, capabilityOverrides)
+	const toolConfig = currentSettings.toolConfig as { approvalMode?: string; disabledTools?: string[] } | undefined
+	const disabledTools = new Set(toolConfig?.disabledTools ?? [])
 
 	// --- Context Engineering: Conditional Memory ---
 	const fetchMemory = shouldFetchMemory(userContent)
@@ -160,24 +135,27 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 	}
 
-	// Build skill summaries only if skills capability is active
+	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
 	let skillSummariesText: string | undefined
-	if (activeCapabilities.includes('skills')) {
-		const skillSummaries = await listSkillSummaries()
-		if (skillSummaries.length > 0) {
-			skillSummariesText = skillSummaries
-				.map((s) => {
-					const fileNames = s.files.map((f) => f.name).join(', ')
-					return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
-				})
-				.join('\n')
-		}
+	const skillSummaries = await listSkillSummaries()
+	if (skillSummaries.length > 0) {
+		skillSummariesText = skillSummaries
+			.map((s) => {
+				const fileNames = s.files.map((f) => f.name).join(', ')
+				return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
+			})
+			.join('\n')
 	}
 
-	const capabilityPrompt = buildCapabilityPrompt(activeCapabilities, {
-		customSystemPrompt: currentSettings.systemPrompt || undefined,
-		skillSummaries: skillSummariesText,
-	})
+	const systemSections: string[] = []
+	if (currentSettings.systemPrompt?.trim()) {
+		systemSections.push(currentSettings.systemPrompt)
+	}
+	if (skillSummariesText) {
+		systemSections.push(`Available skills (use read_skill to load full content when relevant):\n${skillSummariesText}`)
+	}
+
+	const capabilityPrompt = systemSections.join('\n\n')
 
 	if (capabilityPrompt) {
 		llmMessages.unshift({
@@ -207,13 +185,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	let promptTokens = 0
 	let completionTokens = 0
 
-	// --- Context Engineering: Selective Tool Loading ---
-	const activeToolNames = getActiveTools(activeCapabilities)
-	let tools = getToolDefinitions(activeToolNames)
-	let escalatedOnce = false
+	// --- Context Engineering: Tool Loading ---
+	let tools = getToolDefinitions().filter((tool) => !disabledTools.has(tool.function.name))
 	const MAX_TOOL_ROUNDS = 3
 
-	const toolApprovalMode = (currentSettings.toolConfig as { approvalMode?: string } | undefined)?.approvalMode ?? 'auto'
+	const toolApprovalMode = toolConfig?.approvalMode ?? 'auto'
 
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
@@ -242,7 +218,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						const delta = chunk.choices?.[0]?.delta as
 							| {
 									content?: string
-									tool_calls?: Array<{
+									toolCalls?: Array<{
 										index?: number
 										id?: string
 										function?: { name?: string; arguments?: string }
@@ -259,7 +235,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						}
 
 						// Accumulate streamed tool calls
-						const deltaToolCalls = delta?.tool_calls
+						const deltaToolCalls = delta?.toolCalls
 						if (deltaToolCalls) {
 							for (const tc of deltaToolCalls) {
 								const idx = tc.index ?? 0
@@ -283,39 +259,6 @@ export const POST: RequestHandler = async ({ request }) => {
 					if (validToolCalls.length === 0) {
 						// No tool calls — we're done
 						break
-					}
-
-					// --- Capability Escalation ---
-					// If the LLM tries to call a tool not in the active set, expand capabilities and retry
-					if (!escalatedOnce) {
-						const unknownTools = validToolCalls.filter((tc) => !activeToolNames.includes(tc.name as ToolName))
-						if (unknownTools.length > 0) {
-							const newGroups = new Set<CapabilityGroup>()
-							for (const tc of unknownTools) {
-								const group = getGroupForTool(tc.name)
-								if (group) newGroups.add(group)
-							}
-							if (newGroups.size > 0) {
-								for (const g of newGroups) {
-									if (!activeCapabilities.includes(g)) activeCapabilities.push(g)
-								}
-								const expandedToolNames = getActiveTools(activeCapabilities)
-								tools = getToolDefinitions(expandedToolNames)
-								activeToolNames.push(...expandedToolNames.filter((t) => !activeToolNames.includes(t)))
-								escalatedOnce = true
-								controller.enqueue(
-									sse('capability_escalation', {
-										expanded: [...newGroups],
-									}),
-								)
-								// Re-stream this round with expanded tools
-								currentMessages.push({
-									role: 'assistant',
-									content: assistantContent || '',
-								})
-								continue
-							}
-						}
 					}
 
 					// Execute each tool call
@@ -356,6 +299,25 @@ export const POST: RequestHandler = async ({ request }) => {
 								toolResults.push({ call_id: tc.id, name: tc.name, result: 'Tool execution was denied by user.' })
 								continue
 							}
+						}
+
+						if (disabledTools.has(tc.name)) {
+							const deniedMessage = `Tool '${tc.name}' is disabled in settings.`
+							controller.enqueue(
+								sse('tool_denied', {
+									id: tc.id,
+									name: tc.name,
+									reason: deniedMessage,
+								}),
+							)
+							allToolCalls.push({
+								name: tc.name,
+								arguments: parsedArgs,
+								result: { denied: true, reason: deniedMessage },
+								executionMs: 0,
+							})
+							toolResults.push({ call_id: tc.id, name: tc.name, result: deniedMessage })
+							continue
 						}
 
 						controller.enqueue(
@@ -399,6 +361,7 @@ export const POST: RequestHandler = async ({ request }) => {
 								name: tc.name,
 								success: toolResult.success,
 								executionMs: toolResult.executionMs,
+								result: resultStr,
 							}),
 						)
 
@@ -414,12 +377,18 @@ export const POST: RequestHandler = async ({ request }) => {
 					currentMessages.push({
 						role: 'assistant',
 						content: assistantContent || '',
+						toolCalls: validToolCalls.map((tc) => ({
+							id: tc.id,
+							type: 'function' as const,
+							function: { name: tc.name, arguments: tc.arguments },
+						})),
 					})
 
 					for (const tr of toolResults) {
 						currentMessages.push({
 							role: 'tool',
 							content: tr.result,
+							toolCallId: tr.call_id,
 						})
 					}
 				}

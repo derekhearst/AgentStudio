@@ -6,11 +6,13 @@
 	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { createConversation, getConversations } from '$lib/chat';
+	import { getSettings } from '$lib/settings';
 	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
 	let model = $state('anthropic/claude-sonnet-4');
+	let modelInitialized = $state(false);
 	let expanded = $state(false);
 	let search = $state('');
 	let groupMode = $state<'date' | 'category'>('date');
@@ -21,6 +23,19 @@
 	$effect(() => {
 		void loadRecent();
 	});
+
+	$effect(() => {
+		if (modelInitialized) return;
+		void loadDefaultModel();
+	});
+
+	async function loadDefaultModel() {
+		const settings = await getSettings();
+		if (settings?.defaultModel) {
+			model = settings.defaultModel;
+		}
+		modelInitialized = true;
+	}
 
 	async function loadRecent() {
 		recentChats = await getConversations();

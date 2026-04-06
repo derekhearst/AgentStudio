@@ -15,6 +15,7 @@
 		{ href: '/review', label: 'Review' },
 		{ href: '/artifacts', label: 'Artifacts' },
 		{ href: '/skills', label: 'Skills' },
+		{ href: '/tools', label: 'Tools' },
 		{ href: '/cost', label: 'Cost' },
 		{ href: '/settings', label: 'Settings' }
 	];
@@ -104,6 +105,7 @@
 			{ href: '/review', label: 'Review', icon: 'eye' },
 			{ href: '/artifacts', label: 'Artifacts', icon: 'layers' },
 			{ href: '/skills', label: 'Skills', icon: 'cap' },
+			{ href: '/tools', label: 'Tools', icon: 'wrench' },
 			{ href: '/cost', label: 'Cost', icon: 'dollar' },
 			{ href: '/settings', label: 'Settings', icon: 'cog' }
 		] as item}
@@ -132,6 +134,8 @@
 					{:else if item.icon === 'cap'}
 						<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
 						<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
+					{:else if item.icon === 'wrench'}
+						<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8z"/>
 					{:else if item.icon === 'dollar'}
 						<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
 					{:else if item.icon === 'cog'}

@@ -10,12 +10,20 @@ type MessageContent = string | Array<TextContent | ImageContent>
 export type LlmMessage = {
 	role: ChatRole
 	content: MessageContent
+	toolCallId?: string
+	toolCalls?: Array<{
+		id: string
+		type: 'function'
+		function: { name: string; arguments: string }
+	}>
 }
 
 function toChatMessages(messages: LlmMessage[]) {
 	return messages.map((message) => ({
 		role: message.role,
 		content: message.content,
+		...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+		...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
 	})) as Array<{ role: ChatRole; content: MessageContent }>
 }
 

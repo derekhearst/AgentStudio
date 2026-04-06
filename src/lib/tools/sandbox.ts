@@ -2,8 +2,15 @@ import { env } from '$env/dynamic/private'
 import {
 	shellExec,
 	fileRead,
+	fileReadRange,
 	fileWrite,
-	execCode as sandboxExecCode,
+	filePatch,
+	fileStrReplace,
+	fileList,
+	fileDelete,
+	fileMove,
+	fileSearch,
+	fileInfo as sandboxFileInfo,
 	browserNavigate as sandboxBrowserNavigate,
 	browserScreenshot as sandboxBrowserScreenshot,
 	browserClose,
@@ -33,7 +40,7 @@ export async function execShell(command: string) {
 	}
 }
 
-export async function readFile(path: string) {
+export async function readFile(path: string, startLine?: number, endLine?: number) {
 	if (env.E2E_MOCK_EXTERNALS === '1') {
 		return {
 			path,
@@ -41,7 +48,10 @@ export async function readFile(path: string) {
 		}
 	}
 
-	const content = await fileRead(path)
+	const content =
+		startLine !== undefined || endLine !== undefined
+			? await fileReadRange(path, { startLine, endLine })
+			: await fileRead(path)
 	return { path, content }
 }
 
@@ -62,27 +72,92 @@ export async function writeFile(path: string, content: string) {
 	}
 }
 
-export async function execCode(code: string, language: string) {
+export async function patchFile(patch: string) {
 	if (env.E2E_MOCK_EXTERNALS === '1') {
 		return {
 			success: true,
-			result: {
-				language,
-				stdout: `MOCK_CODE_OUTPUT: ${code.slice(0, 60)}`,
-			},
+			message: 'MOCK_PATCH_APPLIED',
 		}
 	}
 
-	const result = await sandboxExecCode(code, language)
-	return {
-		success: result.exitCode === 0,
-		result: {
-			language,
-			stdout: result.stdout,
-			stderr: result.stderr,
-			exitCode: result.exitCode,
-		},
+	return filePatch(patch)
+}
+
+export async function replaceInFile(
+	path: string,
+	oldStr: string,
+	newStr: string,
+	options?: { requireUnique?: boolean; replaceAll?: boolean },
+) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			path,
+			replacedCount: 1,
+			matchCount: 1,
+			message: 'MOCK_STR_REPLACE',
+		}
 	}
+
+	return fileStrReplace(path, oldStr, newStr, options)
+}
+
+export async function listDirectory(path?: string, depth = 1, includeHidden = false) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return [{ path: 'mock.txt', name: 'mock.txt', isDirectory: false, size: 10, modified: new Date().toISOString() }]
+	}
+
+	return fileList(path, { depth, includeHidden })
+}
+
+export async function deleteFile(path: string, recursive = false) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return { success: true, path, recursive, message: 'MOCK_DELETE' }
+	}
+
+	await fileDelete(path, recursive)
+	return { success: true, path, recursive }
+}
+
+export async function moveFile(fromPath: string, toPath: string, overwrite = false) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return { success: true, fromPath, toPath, overwrite, message: 'MOCK_MOVE' }
+	}
+
+	const result = await fileMove(fromPath, toPath, overwrite)
+	return { success: true, ...result }
+}
+
+export async function searchFiles(
+	query: string,
+	options?: {
+		path?: string
+		maxResults?: number
+		isRegex?: boolean
+		includeIgnored?: boolean
+		caseSensitive?: boolean
+	},
+) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return [{ path: 'mock.txt', line: 1, preview: `MOCK_SEARCH_RESULT for ${query}` }]
+	}
+
+	return fileSearch(query, options)
+}
+
+export async function fileInfo(path: string) {
+	if (env.E2E_MOCK_EXTERNALS === '1') {
+		return {
+			path,
+			isDirectory: false,
+			isFile: true,
+			size: 123,
+			modified: new Date().toISOString(),
+			created: new Date().toISOString(),
+			permissions: '644',
+		}
+	}
+
+	return sandboxFileInfo(path)
 }
 
 export async function browserNavigate(url: string) {

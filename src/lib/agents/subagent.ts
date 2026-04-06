@@ -13,7 +13,7 @@ const MAX_TOOL_ROUNDS = 2
 export async function runSubagent(task: string, context?: string) {
 	const systemPrompt = [
 		'You are a focused subagent. Complete the given task and return a clear, concise result.',
-		'You have access to tools: web_search, code_execute, file_read, file_write, browser_screenshot, memory_search, image_generate.',
+		'You have access to tools: web_search, shell, file_read, file_write, browser_screenshot, memory_search, image_generate.',
 		'Use tools only when necessary. When done, provide your final answer as plain text.',
 		'Return strict JSON: { "toolCalls": [...], "result": "your final answer" }',
 		'Each toolCall: { "name": "tool_name", "arguments": { ... } }',

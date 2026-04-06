@@ -69,7 +69,9 @@
 				<span>Model: <span class="font-mono text-base-content/70">{preview.model}</span></span>
 				<span>Tools: <span class="font-mono text-base-content/70">{scenario.toolCount}</span></span>
 				<span>~<span class="font-mono text-base-content/70">{formatTokens(scenario.estimatedTokens)}</span> tokens</span>
-				<span>Groups: <span class="font-mono text-base-content/70">{scenario.capabilities.join(', ')}</span></span>
+				{#if scenario.capabilities.length > 0}
+					<span>Groups: <span class="font-mono text-base-content/70">{scenario.capabilities.join(', ')}</span></span>
+				{/if}
 			</div>
 
 			<!-- Raw message parts -->

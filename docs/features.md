@@ -15,6 +15,7 @@ DrokBot is a SvelteKit PWA that provides a personal, self-hosted AI agent you ca
 ### 1. Chat
 
 - Real-time streaming responses
+- Smooth character interpolation for streamed assistant text
 - Per-message metrics (model, tokens, cost, latency)
 - Message editing and regeneration
 - Model picker per conversation
@@ -23,6 +24,7 @@ DrokBot is a SvelteKit PWA that provides a personal, self-hosted AI agent you ca
 - Auto-title generation
 - Memory context auto-injection before each response
 - Tool call visibility with collapsible cards
+- Auto-scroll keeps following live output during both text streaming and tool call rendering
 
 ### 2. Autonomous Agents
 
@@ -70,7 +72,7 @@ DrokBot is a SvelteKit PWA that provides a personal, self-hosted AI agent you ca
 ### 7. Code Sandbox
 
 - Shell execution with timeout and buffer limits
-- File read, write, delete, list, and stat operations
+- File operations: read (full or line-range), write, unified-diff patch apply, deterministic string replace, delete, list, move/rename, content search, and metadata lookup
 - Path-sandboxed to workspace directory (no directory traversal)
 - Browser automation via Playwright (screenshots, navigation)
 - Built into the Docker container (no external sandbox dependency)
