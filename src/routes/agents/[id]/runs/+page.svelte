@@ -5,7 +5,7 @@
 	import { onMount } from 'svelte';
 	import { listAgentRuns } from '$lib/agents';
 	import { getAgent } from '$lib/agents';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const agentId = $derived(page.params.id ?? '');
 
@@ -82,3 +82,4 @@
 		</div>
 	{/if}
 </section>
+

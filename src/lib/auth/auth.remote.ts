@@ -1,5 +1,5 @@
 import { command, getRequestEvent, query } from '$app/server'
-import { clearSessionCookie, isAuthenticated } from '$lib/auth/auth'
+import { clearSessionCookie, isAuthenticated } from '$lib/auth/auth.server'
 
 export const getSession = query(async () => {
 	const event = getRequestEvent()
@@ -13,3 +13,4 @@ export const logout = command(async () => {
 	clearSessionCookie(event.cookies)
 	return { success: true }
 })
+

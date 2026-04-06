@@ -11,9 +11,9 @@
 		updateMemoryCommand
 	} from '$lib/memory';
 	import { getSettings } from '$lib/settings/settings.remote';
-	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
-	import { dreamPanel } from '$lib/memory/panel.svelte';
+	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import { dreamPanel } from '$lib/state.svelte';
 
 	type MemoryRow = Awaited<ReturnType<typeof listMemoriesQuery>>[number];
 
@@ -268,3 +268,6 @@ Do not include facts about yourself or our conversation mechanics.`;
 		<button type="submit">close</button>
 	</form>
 </dialog>
+
+
+

@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { createTask, delegateTask, getAgent, getAgentChoices, runTaskNow, updateAgentStatus } from '$lib/agents';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const agentId = $derived(page.params.id ?? '');
 	let data = $state<Awaited<ReturnType<typeof getAgent>> | null>(null);
@@ -178,3 +178,4 @@
 		</section>
 	</section>
 {/if}
+

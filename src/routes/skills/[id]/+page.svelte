@@ -13,7 +13,7 @@
 		deleteSkillFileCommand,
 		toggleSkillEnabledCommand
 	} from '$lib/skills';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const skillId = $derived(page.params.id ?? '');
 
@@ -364,3 +364,4 @@
 		<form method="dialog" class="modal-backdrop"><button>close</button></form>
 	</dialog>
 {/if}
+

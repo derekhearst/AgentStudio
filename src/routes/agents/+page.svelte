@@ -10,7 +10,7 @@
 		schedulerSnapshot,
 		updateAgentStatus
 	} from '$lib/agents';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number];
 	type Snapshot = Awaited<ReturnType<typeof schedulerSnapshot>>;
@@ -142,3 +142,4 @@
 		{/if}
 	</div>
 </section>
+

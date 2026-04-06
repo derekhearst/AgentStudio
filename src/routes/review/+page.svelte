@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { listTasks, setTaskStatus, requestChanges } from '$lib/tasks';
 	import { approveChanges } from '$lib/tasks';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type TaskRow = Awaited<ReturnType<typeof listTasks>>[number];
 
@@ -204,3 +204,4 @@
 		</div>
 	{/if}
 </section>
+

@@ -9,7 +9,7 @@ import {
 	listSkills,
 	updateSkill,
 	updateSkillFile,
-} from '$lib/skills/store'
+} from '$lib/skills/skills.server'
 
 /* ── Queries ────────────────────────────────────────────────── */
 
@@ -104,3 +104,4 @@ export const deleteSkillFileCommand = command(deleteSkillFileSchema, async ({ fi
 	await deleteSkillFile(fileId)
 	return { ok: true }
 })
+

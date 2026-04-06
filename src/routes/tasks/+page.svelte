@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { getAgentChoices, runSchedulerTickCommand } from '$lib/agents';
 	import { listTasks, setTaskPriority, setTaskStatus } from '$lib/tasks';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type TaskRow = Awaited<ReturnType<typeof listTasks>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
@@ -102,3 +102,4 @@
 		{/each}
 	</div>
 </section>
+

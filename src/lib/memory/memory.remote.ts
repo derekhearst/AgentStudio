@@ -12,8 +12,9 @@ import {
 	searchMemories,
 	unpinMemoryRecord,
 	updateMemoryRecord,
-} from '$lib/memory/store'
-import { buildImportPrompt, extractFromImportText } from '$lib/memory/import'
+} from '$lib/memory/memory.server'
+import { listDreamCycles, runDreamCycle } from '$lib/memory/memory'
+import { buildImportPrompt, extractFromImportText } from '$lib/memory/memory'
 
 const createMemorySchema = z.object({
 	content: z.string().trim().min(1),
@@ -111,4 +112,32 @@ export const buildImportPromptQuery = query(buildImportPromptSchema, async ({ in
 
 export const importMemoriesCommand = command(importMemoriesSchema, async ({ text, model }) => {
 	return extractFromImportText(text, model)
+})
+
+const runDreamCycleSchema = z.object({
+	decayLambda: z.number().positive().max(1).optional(),
+	pruneThreshold: z.number().min(0).max(1).optional(),
+	topCount: z.number().int().min(1).max(200).optional(),
+	conversationLimit: z.number().int().min(1).max(50).optional(),
+	lookbackHours: z
+		.number()
+		.int()
+		.min(1)
+		.max(24 * 30)
+		.optional(),
+})
+
+const listDreamCyclesSchema = z.object({
+	limit: z.number().int().min(1).max(100).optional(),
+})
+
+export const runDreamCycleCommand = command(
+	runDreamCycleSchema,
+	async ({ decayLambda, pruneThreshold, topCount, conversationLimit, lookbackHours }) => {
+		return runDreamCycle({ decayLambda, pruneThreshold, topCount, conversationLimit, lookbackHours })
+	},
+)
+
+export const listDreamCyclesQuery = query(listDreamCyclesSchema, async ({ limit }) => {
+	return listDreamCycles(limit ?? 20)
 })

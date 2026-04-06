@@ -5,15 +5,15 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import Sidebar from '$lib/components/ui/Sidebar.svelte';
-	import RecentChats from '$lib/components/ui/RecentChats.svelte';
-	import DreamCycles from '$lib/components/ui/DreamCycles.svelte';
-	import SidePanel from '$lib/components/ui/SidePanel.svelte';
-	import MobileNav from '$lib/components/ui/MobileNav.svelte';
-	import PromptPreviewPanel from '$lib/components/ui/PromptPreviewPanel.svelte';
-	import { dreamPanel } from '$lib/memory/panel.svelte';
-	import SkillStats from '$lib/components/ui/SkillStats.svelte';
-	import { skillsPanel } from '$lib/skills/panel.svelte';
+	import Sidebar from '$lib/ui/Sidebar.svelte';
+	import RecentChats from '$lib/chat/RecentChats.svelte';
+	import DreamCycles from '$lib/memory/DreamCycles.svelte';
+	import SidePanel from '$lib/ui/SidePanel.svelte';
+	import MobileNav from '$lib/ui/MobileNav.svelte';
+	import PromptPreviewPanel from '$lib/settings/PromptPreviewPanel.svelte';
+	import { dreamPanel } from '$lib/state.svelte';
+	import SkillStats from '$lib/skills/SkillStats.svelte';
+	import { skillsPanel } from '$lib/state.svelte';
 
 	let { children } = $props();
 	let mobileSidebarOpen = $state(false);
@@ -176,3 +176,5 @@
 
 	<MobileNav activePath={page.url.pathname} onNavigate={closeSidebar} />
 {/if}
+
+

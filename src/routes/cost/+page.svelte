@@ -2,9 +2,9 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getCostSummary, getBudgetStatus } from '$lib/dashboard';
+	import { getCostSummary, getBudgetStatus } from '$lib/cost';
 	import { getSettings } from '$lib/settings';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type CostData = Awaited<ReturnType<typeof getCostSummary>>;
 	type BudgetData = Awaited<ReturnType<typeof getBudgetStatus>>;
@@ -263,3 +263,4 @@
 		</ContentPanel>
 	{/if}
 </section>
+

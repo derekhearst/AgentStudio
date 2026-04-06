@@ -3,8 +3,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getSettings, updateDisabledToolsCommand } from '$lib/settings';
-	import { BUILTIN_TOOLS, type BuiltinTool } from '$lib/llm/tool-registry';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import { BUILTIN_TOOLS, type BuiltinTool } from '$lib/tools/tools';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	let search = $state('');
 	let busy = $state(false);
@@ -123,3 +123,4 @@
 		{/if}
 	</div>
 </div>
+

@@ -13,8 +13,8 @@
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
-	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -696,3 +696,5 @@
 	</div><!-- end max-w-2xl -->
 	</div><!-- end scroll -->
 </section>
+
+

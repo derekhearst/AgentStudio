@@ -12,7 +12,7 @@
 		unpinMemoryCommand,
 		updateMemoryCommand
 	} from '$lib/memory';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const memoryId = $derived(page.params.id ?? '');
 
@@ -187,3 +187,4 @@
 		</div>
 	{/if}
 </section>
+

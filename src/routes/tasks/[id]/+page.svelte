@@ -6,7 +6,7 @@
 	import { getAgentChoices, runTaskNow } from '$lib/agents';
 	import { getTask, reassignTask, setTaskStatus, requestChanges, getTaskComments, getTaskMessages, addTaskMessage } from '$lib/tasks';
 	import { approveChanges, getChangedFiles, getTaskDiff, rejectChanges, requestRevision } from '$lib/tasks';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const taskId = $derived(page.params.id ?? '');
 
@@ -270,3 +270,4 @@
 		</ContentPanel>
 	</section>
 {/if}
+

@@ -9,15 +9,15 @@
 		getConversation,
 		getMessageStats
 	} from '$lib/chat';
-	import { getAvailableModels } from '$lib/llm';
+	import { getAvailableModels } from '$lib/models';
 	import { getSettings } from '$lib/settings';
 	import { getArtifact, getArtifactsByConversation, pinArtifact as pinArtifactCommand } from '$lib/artifacts';
-	import ChatInput from '$lib/components/chat/ChatInput.svelte';
-	import ContextWindow from '$lib/components/chat/ContextWindow.svelte';
-	import MessageBubble from '$lib/components/chat/MessageBubble.svelte';
-	import LiveToolCallCard from '$lib/components/chat/LiveToolCallCard.svelte';
-	import { renderMarkdown } from '$lib/chat/markdown';
-	import ArtifactPanel from '$lib/components/artifacts/ArtifactPanel.svelte';
+	import ChatInput from '$lib/chat/ChatInput.svelte';
+	import ContextWindow from '$lib/chat/ContextWindow.svelte';
+	import MessageBubble from '$lib/chat/MessageBubble.svelte';
+	import LiveToolCallCard from '$lib/chat/LiveToolCallCard.svelte';
+	import { renderMarkdown } from '$lib/chat/chat';
+	import ArtifactPanel from '$lib/artifacts/ArtifactPanel.svelte';
 
 	type ChatAttachment = {
 		id: string;
@@ -725,4 +725,6 @@
 		</div>
 	{/if}
 </div>
+
+
 

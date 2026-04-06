@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listActivity } from '$lib/activity';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
 	type EventType = ActivityRow['type'];
@@ -117,3 +117,4 @@
 		</div>
 	{/if}
 </section>
+

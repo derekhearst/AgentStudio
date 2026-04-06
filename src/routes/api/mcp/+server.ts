@@ -1,7 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { env } from '$env/dynamic/private'
-import { executeTool, toolSchemas, type ToolName } from '$lib/llm/tools'
-import { searchMemories } from '$lib/memory/store'
+import { executeTool, toolSchemas, type ToolName } from '$lib/tools/tools.server'
+import { searchMemories } from '$lib/memory/memory.server'
 import { db } from '$lib/db.server'
 import { agents, agentTasks } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/chat/chat.schema'
@@ -388,3 +388,5 @@ export const POST: RequestHandler = async ({ request }) => {
 		return json(rpcError(body.id, -32603, error instanceof Error ? error.message : 'Internal server error'))
 	}
 }
+
+

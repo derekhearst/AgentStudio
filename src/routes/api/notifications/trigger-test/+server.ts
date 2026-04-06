@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { createNotificationRecord, sendPushToAll } from '$lib/notifications/push'
+import { createNotificationRecord, sendPushToAll } from '$lib/notifications/notifications.server'
 
 export const POST: RequestHandler = async ({ request }) => {
 	const body = (await request.json()) as { title?: string; body?: string; url?: string; tag?: string }
@@ -18,3 +18,4 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	return json({ ok: true, row, push })
 }
+

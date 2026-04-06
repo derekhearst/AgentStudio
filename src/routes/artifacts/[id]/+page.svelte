@@ -13,7 +13,7 @@
 		updateArtifactCategory,
 		rollbackArtifact,
 	} from '$lib/artifacts'
-	import ArtifactViewer from '$lib/components/artifacts/ArtifactViewer.svelte'
+	import ArtifactViewer from '$lib/artifacts/ArtifactViewer.svelte'
 
 	type ArtifactData = Awaited<ReturnType<typeof getArtifact>>
 	type VersionRow = Awaited<ReturnType<typeof getArtifactVersions>>[number]
@@ -279,3 +279,4 @@
 		</div>
 	</section>
 {/if}
+

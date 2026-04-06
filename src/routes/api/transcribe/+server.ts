@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private'
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
-import { getOrCreateSettings } from '$lib/settings/settings'
+import { getOrCreateSettings } from '$lib/settings/settings.server'
 
 export const POST: RequestHandler = async ({ request }) => {
 	if (!env.OPENROUTER_API_KEY) {
@@ -67,3 +67,4 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	return json({ transcript })
 }
+

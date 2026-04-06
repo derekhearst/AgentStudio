@@ -7,7 +7,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import { createConversation, getConversations } from '$lib/chat';
 	import { getSettings } from '$lib/settings';
-	import ChatComposer from '$lib/components/chat/ChatComposer.svelte';
+	import ChatComposer from '$lib/chat/ChatComposer.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
@@ -300,3 +300,4 @@
 	</div>
 {/if}
 </div>
+

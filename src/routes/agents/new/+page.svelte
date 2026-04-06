@@ -3,8 +3,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { createAgent } from '$lib/agents';
-	import ModelSelector from '$lib/components/ui/ModelSelector.svelte';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	let name = $state('');
 	let role = $state('Research and implementation specialist');
@@ -73,3 +73,5 @@
 		<button class="btn btn-primary" type="submit" disabled={busy}>Create Agent</button>
 	</form>
 </section>
+
+

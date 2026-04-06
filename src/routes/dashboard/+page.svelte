@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { getDashboardSummary } from '$lib/dashboard';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type DashboardSummary = Awaited<ReturnType<typeof getDashboardSummary>>;
 
@@ -163,3 +163,4 @@
 		</div>
 	</ContentPanel>
 </section>
+

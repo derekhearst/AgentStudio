@@ -1,6 +1,6 @@
 import { redirect, type Handle } from '@sveltejs/kit'
 import { and, arrayContains, sql } from 'drizzle-orm'
-import { isAuthenticated } from '$lib/auth/auth'
+import { isAuthenticated } from '$lib/auth/auth.server'
 import { db } from '$lib/db.server'
 import { skills } from '$lib/skills/skills.schema'
 
@@ -45,3 +45,4 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	return resolve(event)
 }
+

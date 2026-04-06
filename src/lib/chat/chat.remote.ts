@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
-import { getOrCreateSettings } from '$lib/settings/settings'
+import { getOrCreateSettings } from '$lib/settings/settings.server'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -144,3 +144,4 @@ export const updateConversationMeta = command(updateConversationMetaSchema, asyn
 	await db.update(conversations).set(updates).where(eq(conversations.id, input.id))
 	return { success: true as const }
 })
+

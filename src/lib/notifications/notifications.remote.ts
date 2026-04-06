@@ -9,7 +9,7 @@ import {
 	removePushSubscription,
 	sendPushToAll,
 	upsertPushSubscription,
-} from '$lib/notifications/push'
+} from '$lib/notifications/notifications.server'
 
 const pushSubscriptionSchema = z.object({
 	endpoint: z.string().url(),
@@ -65,3 +65,4 @@ export const sendTestNotification = command(sendNotificationSchema, async (paylo
 	const push = await sendPushToAll(payload)
 	return { row, push }
 })
+

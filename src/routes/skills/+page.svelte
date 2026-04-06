@@ -8,8 +8,8 @@
 		deleteSkillCommand,
 		toggleSkillEnabledCommand
 	} from '$lib/skills';
-	import ContentPanel from '$lib/components/ui/ContentPanel.svelte';
-	import { skillsPanel } from '$lib/skills/panel.svelte';
+	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import { skillsPanel } from '$lib/state.svelte';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
 
@@ -230,3 +230,4 @@
 		<form method="dialog" class="modal-backdrop"><button>close</button></form>
 	</dialog>
 {/if}
+
