@@ -698,17 +698,23 @@
 </script>
 
 <div class="flex min-h-0 w-full flex-1 gap-0" class:artifact-split={artifactPanelMode === 'panel'}>
-	<section class="relative flex min-h-0 flex-1 flex-col gap-1 px-1 pt-0 pb-1 sm:px-0 lg:pb-0" class:max-w-full={artifactPanelMode !== 'panel'}>
+	<section class="relative flex min-h-0 flex-1 flex-col gap-1 px-0 pt-0 pb-0 desktop:px-1 desktop:pb-1" class:max-w-full={artifactPanelMode !== 'panel'}>
 		{#if !conversationData}
 			<div class="flex flex-1 items-center justify-center">
 				<span class="loading loading-spinner loading-sm opacity-50"></span>
 			</div>
 		{:else}
-			<div class="chat-detail-header flex items-center gap-2 px-2 py-1.5 lg:absolute lg:top-2 lg:left-2 lg:right-2 lg:z-20 lg:px-3 lg:py-2">
-				<button onclick={() => goto('/')} class="btn btn-ghost btn-sm btn-circle lg:hidden" aria-label="Back to chats">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
-				</button>
-				<h1 class="min-w-0 flex-1 truncate text-base font-semibold leading-tight lg:text-lg">{conversationData?.conversation.title ?? 'Chat'}</h1>
+
+			<!-- Header: mobile/tablet only. Desktop uses the RecentChats sidebar panel. -->
+			<div class="flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 py-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4">
+				<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="Back to chats">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+					</svg>
+				</a>
+				<h1 class="min-w-0 flex-1 truncate text-sm leading-tight font-semibold">
+					{conversationData.conversation.title}
+				</h1>
 				<ContextWindow
 					used={contextMetrics.used}
 					total={contextMetrics.total}
@@ -725,7 +731,7 @@
 				</div>
 			{/if}
 
-			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-0.5 py-1 lg:pt-12">
+			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
 				{#each displayedMessages as message (message.id)}
 					<MessageBubble {message} artifacts={conversationArtifacts} onEdit={handleEdit} onRegenerate={handleRegenerate} onOpenArtifact={openArtifact} />
 				{/each}
@@ -780,7 +786,7 @@
 			{/if}
 		{/if}
 
-		<div class="chat-composer-transition">
+		<div class="chat-composer-transition px-2 pb-2 tablet:px-4 tablet:pb-4 desktop:px-0 desktop:pb-0">
 			<AskUserModal
 				open={askUserModalOpen && !!pendingAskUser}
 				questions={pendingAskUser?.questions ?? []}
@@ -812,14 +818,6 @@
 	{/if}
 </div>
 
-<style>
-	.chat-detail-header {
-		border: 1px solid color-mix(in oklab, var(--color-base-300) 72%, transparent);
-		border-radius: 0.9rem;
-		background: color-mix(in oklab, var(--color-base-100) 84%, transparent);
-		box-shadow: 0 1px 0 color-mix(in oklab, var(--color-base-300) 35%, transparent);
-	}
-</style>
 
 
 

@@ -5,6 +5,7 @@
 		header,
 		actions,
 		children,
+		footer,
 		compact = false,
 		flush = false,
 		bare = false,
@@ -13,6 +14,7 @@
 		header?: Snippet;
 		actions?: Snippet;
 		children?: Snippet;
+		footer?: Snippet;
 		compact?: boolean;
 		flush?: boolean;
 		bare?: boolean;
@@ -38,6 +40,11 @@
 	{#if children}
 		<div class={hasBar && !flush ? 'mt-3' : ''} class:flex-1={bare} class:overflow-y-auto={bare}>
 			{@render children()}
+		</div>
+	{/if}
+	{#if footer}
+		<div class="shrink-0">
+			{@render footer()}
 		</div>
 	{/if}
 </section>
