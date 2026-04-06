@@ -2,7 +2,7 @@ import { and, desc, eq, gte } from 'drizzle-orm'
 import { chat } from '$lib/openrouter.server'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
-import { generateTitleAndCategory } from '$lib/chat/chat'
+import { generateTitleAndCategory } from '$lib/chat/chat.server'
 import { logLlmUsage } from '$lib/cost/usage'
 import { dreamCycles, memories } from '$lib/memory/memory.schema'
 import {

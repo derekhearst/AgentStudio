@@ -1,7 +1,4 @@
-import type { ToolName } from './tools.server'
-
-export { allToolNames, getToolDefinitions, toolSchemas } from './tools.server'
-export type { ToolName } from './tools.server'
+type ToolName = string
 
 /**
  * Capability groups that organize tools into logical bundles.

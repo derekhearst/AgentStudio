@@ -7,14 +7,14 @@ import { routeModel } from '$lib/models/router'
 import { extractAndPersist } from '$lib/memory/memory'
 import { assembleContext, shouldFetchMemory } from '$lib/memory/memory'
 import { bumpAccessCount } from '$lib/memory/memory.server'
-import { generateTitle } from '$lib/chat/chat'
+import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/cost/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requestApproval } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
-import { shouldCompact, compactMessages, trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
+import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 
 const encoder = new TextEncoder()
 
@@ -24,6 +24,11 @@ type StreamPayload = {
 	model?: string
 	regenerate?: boolean
 	attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
+}
+
+type LoopMessage = LlmMessage & {
+	toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+	toolCallId?: string
 }
 
 function sse(name: string, payload: unknown) {
@@ -199,7 +204,7 @@ export const POST: RequestHandler = async ({ request }) => {
 					controller.enqueue(sse('compaction', { tokensBefore: compactionCheck.tokenEstimate }))
 				}
 
-				let currentMessages = [...trimmedMessages]
+				let currentMessages: LoopMessage[] = [...trimmedMessages]
 				const allToolCalls: Array<Record<string, unknown>> = []
 
 				for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {

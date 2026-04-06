@@ -16,7 +16,6 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { promisify } from 'node:util'
 import { searchMemories } from '$lib/memory/memory.server'
-import { runSubagent } from '$lib/agents/agents.server'
 import { db } from '$lib/db.server'
 import { artifacts, artifactVersions } from '$lib/artifacts/artifacts.schema'
 import { eq, max } from 'drizzle-orm'
@@ -1374,6 +1373,7 @@ export async function executeTool(call: ToolCall) {
 		}
 
 		const input = toolSchemas.run_subagent.parse(call.arguments)
+		const { runSubagent } = await import('$lib/agents/agents.server')
 		const result = await runSubagent(input.task, input.context)
 		return {
 			success: true,
