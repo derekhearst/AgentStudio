@@ -5,6 +5,12 @@ declare global {
 		// interface Error {}
 		interface Locals {
 			authenticated: boolean
+			user: {
+				id: string
+				name: string
+				username: string
+				role: 'admin' | 'user'
+			} | null
 		}
 		// interface PageData {}
 		// interface PageState {}

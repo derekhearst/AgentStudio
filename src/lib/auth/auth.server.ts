@@ -1,74 +1,215 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { env } from '$env/dynamic/private'
+import { getRequestEvent } from '$app/server'
 import type { Cookies } from '@sveltejs/kit'
+import { and, eq, gt, isNull } from 'drizzle-orm'
+import { db } from '$lib/db.server'
+import { authSessions, bootstrapClaims, users, userRoleEnum } from '$lib/auth/auth.schema'
 
 const SESSION_COOKIE = 'AGENTSTUDIO_session'
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+const BOOTSTRAP_CLAIM_TTL_MS = 1000 * 60 * 30
 
-function requireSecret() {
-	if (!env.AUTH_PASSWORD) {
-		throw new Error('AUTH_PASSWORD is not set')
+type UserRole = (typeof userRoleEnum.enumValues)[number]
+
+export type AuthenticatedUser = {
+	id: string
+	name: string
+	username: string
+	role: UserRole
+}
+
+let bootstrapPromise: Promise<void> | null = null
+
+function hashToken(token: string) {
+	return createHash('sha256').update(token).digest('base64url')
+}
+
+function shouldUseSecureCookie() {
+	return env.NODE_ENV === 'production'
+}
+
+export function normalizeUsername(input: string) {
+	return input.trim().toLowerCase()
+}
+
+export function validateUsername(input: string) {
+	const normalized = normalizeUsername(input)
+	if (!/^[a-z0-9_-]{3,32}$/.test(normalized)) {
+		throw new Error('Username must be lowercase and contain only letters, numbers, underscore, or hyphen')
 	}
-	return env.AUTH_PASSWORD
+	return normalized
 }
 
-function safeCompare(a: string, b: string) {
-	const left = Buffer.from(a)
-	const right = Buffer.from(b)
-	if (left.length !== right.length) {
-		return false
+async function ensureBootstrapClaimExists(baseUrl?: string) {
+	const adminUsername = 'admin'
+	const [admin] = await db.select().from(users).where(eq(users.username, adminUsername)).limit(1)
+
+	const adminUser =
+		admin ??
+		(
+			await db
+				.insert(users)
+				.values({
+					name: 'Admin',
+					username: adminUsername,
+					role: 'admin',
+					isActive: true,
+				})
+				.returning()
+		)[0]
+
+	if (adminUser.claimedAt) return
+
+	const now = new Date()
+	const [activeClaim] = await db
+		.select({ id: bootstrapClaims.id })
+		.from(bootstrapClaims)
+		.where(and(isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)))
+		.limit(1)
+
+	if (activeClaim) return
+
+	const claimKey = randomBytes(24).toString('base64url')
+	const tokenHash = hashToken(claimKey)
+	const expiresAt = new Date(Date.now() + BOOTSTRAP_CLAIM_TTL_MS)
+
+	await db.insert(bootstrapClaims).values({ tokenHash, expiresAt })
+
+	const hintUrl = baseUrl ? `${baseUrl}/login?claim=${encodeURIComponent(claimKey)}` : '(login URL unavailable)'
+	console.log('[auth] Initial admin bootstrap created.')
+	console.log(`[auth] Visit: ${hintUrl}`)
+	console.log(`[auth] Claim key: ${claimKey}`)
+}
+
+export async function ensureAuthBootstrap(baseUrl?: string) {
+	if (!bootstrapPromise) {
+		bootstrapPromise = ensureBootstrapClaimExists(baseUrl).finally(() => {
+			bootstrapPromise = null
+		})
 	}
-	return timingSafeEqual(left, right)
+	await bootstrapPromise
 }
 
-function sign(nonce: string, secret: string) {
-	return createHmac('sha256', secret).update(nonce).digest('base64url')
+async function findActiveBootstrapClaim(claimKey: string) {
+	const tokenHash = hashToken(claimKey)
+	const now = new Date()
+
+	const [claim] = await db
+		.select()
+		.from(bootstrapClaims)
+		.where(
+			and(
+				eq(bootstrapClaims.tokenHash, tokenHash),
+				isNull(bootstrapClaims.usedAt),
+				gt(bootstrapClaims.expiresAt, now),
+			),
+		)
+		.limit(1)
+
+	return claim ?? null
 }
 
-export function isValidPassword(password: string) {
-	const secret = requireSecret()
-	return safeCompare(password, secret)
+export async function validateBootstrapClaim(claimKey: string) {
+	const claim = await findActiveBootstrapClaim(claimKey)
+	return claim !== null
 }
 
-export function createSessionToken() {
-	const secret = requireSecret()
-	const nonce = randomBytes(32).toString('base64url')
-	const signature = sign(nonce, secret)
-	return `${nonce}.${signature}`
+export async function consumeBootstrapClaim(claimKey: string) {
+	const claim = await findActiveBootstrapClaim(claimKey)
+	if (!claim) return false
+
+	const now = new Date()
+	await db.update(bootstrapClaims).set({ usedAt: now }).where(eq(bootstrapClaims.id, claim.id))
+	return true
 }
 
-export function validateSessionToken(token: string | undefined) {
-	if (!token) {
-		return false
-	}
+export async function createSessionForUser(cookies: Cookies, userId: string) {
+	const token = randomBytes(32).toString('base64url')
+	const tokenHash = hashToken(token)
+	const expiresAt = new Date(Date.now() + MAX_AGE_SECONDS * 1000)
 
-	const [nonce, signature] = token.split('.')
-	if (!nonce || !signature) {
-		return false
-	}
+	await db.insert(authSessions).values({ userId, tokenHash, expiresAt })
 
-	const expected = sign(nonce, requireSecret())
-	return safeCompare(signature, expected)
-}
-
-export function setSessionCookie(cookies: Cookies) {
-	const token = createSessionToken()
 	cookies.set(SESSION_COOKIE, token, {
 		path: '/',
 		httpOnly: true,
-		secure: true,
+		secure: shouldUseSecureCookie(),
 		sameSite: 'lax',
 		maxAge: MAX_AGE_SECONDS,
 	})
 }
 
-export function clearSessionCookie(cookies: Cookies) {
+export async function clearSessionCookie(cookies: Cookies) {
+	const token = cookies.get(SESSION_COOKIE)
+	if (token) {
+		const tokenHash = hashToken(token)
+		await db.delete(authSessions).where(eq(authSessions.tokenHash, tokenHash))
+	}
+
 	cookies.delete(SESSION_COOKIE, {
 		path: '/',
 	})
 }
 
-export function isAuthenticated(cookies: Cookies) {
+export async function getSessionUser(cookies: Cookies): Promise<AuthenticatedUser | null> {
 	const token = cookies.get(SESSION_COOKIE)
-	return validateSessionToken(token)
+	if (!token) return null
+
+	const tokenHash = hashToken(token)
+	const now = new Date()
+
+	const [row] = await db
+		.select({
+			id: users.id,
+			name: users.name,
+			username: users.username,
+			role: users.role,
+			sessionId: authSessions.id,
+		})
+		.from(authSessions)
+		.innerJoin(users, eq(users.id, authSessions.userId))
+		.where(
+			and(
+				eq(authSessions.tokenHash, tokenHash),
+				gt(authSessions.expiresAt, now),
+				eq(users.isActive, true),
+				isNull(users.deletedAt),
+			),
+		)
+		.limit(1)
+
+	if (!row) return null
+
+	return {
+		id: row.id,
+		name: row.name,
+		username: row.username,
+		role: row.role,
+	}
+}
+
+export async function isAuthenticated(cookies: Cookies) {
+	const user = await getSessionUser(cookies)
+	return user !== null
+}
+
+export async function touchUserLastLogin(userId: string) {
+	await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, userId))
+}
+
+export function requireAuthenticatedRequestUser() {
+	const event = getRequestEvent()
+	if (!event.locals.user) {
+		throw new Error('Not authenticated')
+	}
+	return event.locals.user
+}
+
+export function requireAdminRequestUser() {
+	const user = requireAuthenticatedRequestUser()
+	if (user.role !== 'admin') {
+		throw new Error('Admin access required')
+	}
+	return user
 }

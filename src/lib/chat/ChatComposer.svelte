@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ModelSelector from '$lib/settings/ModelSelector.svelte'
+	import ModelSelector from '$lib/models/ModelSelector.svelte'
 
 	let {
 		value = $bindable(''),

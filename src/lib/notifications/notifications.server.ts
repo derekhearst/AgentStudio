@@ -80,12 +80,21 @@ export async function upsertPushSubscription(input: SubscriptionInput) {
 }
 
 export async function removePushSubscription(endpoint: string) {
+
+
 	await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint))
 	return { ok: true }
 }
 
-export async function listPushSubscriptions() {
-	return db.select().from(pushSubscriptions).orderBy(desc(pushSubscriptions.updatedAt)).limit(100)
+export async function removePushSubscriptionForUser(endpoint: string, userId: string) {
+	await db.delete(pushSubscriptions).where(and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.userId, userId)))
+	return { ok: true }
+}
+
+export async function listPushSubscriptions(userId?: string) {
+	const query = db.select().from(pushSubscriptions).orderBy(desc(pushSubscriptions.updatedAt)).limit(100)
+	if (!userId) return query
+	return query.where(eq(pushSubscriptions.userId, userId))
 }
 
 export async function createNotificationRecord(payload: PushPayload, userId?: string | null) {
@@ -101,22 +110,28 @@ export async function createNotificationRecord(payload: PushPayload, userId?: st
 	return created
 }
 
-export async function listNotifications(limit = 100) {
-	return db
+export async function listNotifications(limit = 100, userId?: string) {
+	const query = db
 		.select()
 		.from(notifications)
 		.orderBy(desc(notifications.createdAt))
 		.limit(Math.max(1, Math.min(limit, 500)))
+	if (!userId) return query
+	return query.where(eq(notifications.userId, userId))
 }
 
-export async function markNotificationRead(notificationId: string, read = true) {
-	const [updated] = await db.update(notifications).set({ read }).where(eq(notifications.id, notificationId)).returning()
+export async function markNotificationRead(notificationId: string, read = true, userId?: string) {
+	const [updated] = await db
+		.update(notifications)
+		.set({ read })
+		.where(userId ? and(eq(notifications.id, notificationId), eq(notifications.userId, userId)) : eq(notifications.id, notificationId))
+		.returning()
 	return updated
 }
 
-export async function sendPushToAll(payload: PushPayload) {
+export async function sendPushToAll(payload: PushPayload, userId?: string) {
 	ensurePushConfigured()
-	const subscriptions = await listPushSubscriptions()
+	const subscriptions = await listPushSubscriptions(userId)
 	let delivered = 0
 	let failed = 0
 

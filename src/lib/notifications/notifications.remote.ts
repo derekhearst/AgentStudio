@@ -6,10 +6,11 @@ import {
 	listNotifications,
 	listPushSubscriptions,
 	markNotificationRead,
-	removePushSubscription,
+	removePushSubscriptionForUser,
 	sendPushToAll,
 	upsertPushSubscription,
 } from '$lib/notifications/notifications.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 const pushSubscriptionSchema = z.object({
 	endpoint: z.string().url(),
@@ -41,28 +42,34 @@ export const getPushPublicKey = query(async () => {
 })
 
 export const listSubscriptions = query(async () => {
-	return listPushSubscriptions()
+	const user = requireAuthenticatedRequestUser()
+	return listPushSubscriptions(user.id)
 })
 
 export const subscribePush = command(pushSubscriptionSchema, async (input) => {
-	return upsertPushSubscription(input)
+	const user = requireAuthenticatedRequestUser()
+	return upsertPushSubscription({ ...input, userId: user.id })
 })
 
 export const unsubscribePush = command(endpointSchema, async ({ endpoint }) => {
-	return removePushSubscription(endpoint)
+	const user = requireAuthenticatedRequestUser()
+	return removePushSubscriptionForUser(endpoint, user.id)
 })
 
 export const listNotificationFeed = query(async () => {
-	return listNotifications(100)
+	const user = requireAuthenticatedRequestUser()
+	return listNotifications(100, user.id)
 })
 
 export const markNotification = command(notificationIdSchema, async ({ notificationId, read }) => {
-	return markNotificationRead(notificationId, read ?? true)
+	const user = requireAuthenticatedRequestUser()
+	return markNotificationRead(notificationId, read ?? true, user.id)
 })
 
 export const sendTestNotification = command(sendNotificationSchema, async (payload) => {
-	const row = await createNotificationRecord(payload)
-	const push = await sendPushToAll(payload)
+	const user = requireAuthenticatedRequestUser()
+	const row = await createNotificationRecord(payload, user.id)
+	const push = await sendPushToAll(payload, user.id)
 	return { row, push }
 })
 

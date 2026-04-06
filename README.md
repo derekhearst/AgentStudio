@@ -1,6 +1,6 @@
 # AGENTSTUDIO
 
-Self-hosted autonomous AI agent platform with persistent memory, tool use, and mobile-ready chat.
+Self-hosted autonomous AI agent platform with persistent memory, user-scoped tool sandboxes, and passkey authentication.
 
 ## Feature Overview
 
@@ -19,6 +19,10 @@ The memory system stores, retrieves, and consolidates facts over time using Post
 ### Dashboard and Settings
 
 The dashboard is available at a dedicated route and shows live system totals, task status distribution, and recent activity across conversations and tasks. Settings persist default model, theme, notification preferences, and dream-cycle behavior in the database.
+
+### Database Bootstrap
+
+On server startup, AGENTSTUDIO now ensures the configured PostgreSQL database exists, installs the required extensions, and applies bundled Drizzle migrations before serving requests. The Postgres role in `DATABASE_URL` must be allowed to create the target database and install `pgcrypto` and `vector`.
 
 ## Tech Stack
 
@@ -48,11 +52,15 @@ cp .env.example .env
 
 - `DATABASE_URL`
 - `OPENROUTER_API_KEY`
-- `AUTH_PASSWORD`
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
-- `SANDBOX_WORKSPACE` (defaults to `/workspace` in Docker, use `.sandbox` for local dev)
+- `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
+
+Database note:
+
+- `DATABASE_URL` should point at the final application database name even if that database does not exist yet.
+- The configured Postgres role must be able to create that database on first start and run `CREATE EXTENSION IF NOT EXISTS pgcrypto` and `CREATE EXTENSION IF NOT EXISTS vector`.
 
 4. Run the app:
 
@@ -90,10 +98,19 @@ Notes:
 - Server-only internals are colocated in domain folders under `src/lib/**` and are only imported by remote functions or `+server` routes.
 - Route and component imports should prefer domain barrels (for example, `$lib/chat`, `$lib/agents`) over deep `*.remote` paths.
 
+## Auth and Users
+
+- Authentication uses WebAuthn passkeys (no OAuth or password login).
+- On first startup, the server seeds an unclaimed `admin` account and logs a one-time bootstrap claim URL/key.
+- Admins create new accounts from `/users`.
+- Accounts are claimed by the first successful passkey registration for that username.
+- User removal is soft-delete; access is blocked while historical data remains owned by that user.
+
 ## Route Map
 
 - `/` Redirects to chat
 - `/login` Authentication
+- `/users` Admin user management
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
 - `/dashboard` System dashboard

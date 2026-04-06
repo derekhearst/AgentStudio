@@ -3,7 +3,6 @@ import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
 import { streamChat, type LlmMessage } from '$lib/openrouter.server'
-import { routeModel } from '$lib/models/router'
 import { extractAndPersist } from '$lib/memory/memory'
 import { assembleContext, shouldFetchMemory } from '$lib/memory/memory'
 import { bumpAccessCount } from '$lib/memory/memory.server'
@@ -35,24 +34,34 @@ function sse(name: string, payload: unknown) {
 	return encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
 }
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) {
+		return json({ error: 'Unauthorized' }, { status: 401 })
+	}
+	const user = locals.user
+
 	const body = (await request.json()) as StreamPayload
 	if (!body.conversationId) {
 		return json({ error: 'conversationId is required' }, { status: 400 })
 	}
 
-	const [conversation] = await db.select().from(conversations).where(eq(conversations.id, body.conversationId)).limit(1)
+	const [conversation] = await db
+		.select()
+		.from(conversations)
+		.where(and(eq(conversations.id, body.conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
 
 	if (!conversation) {
 		return json({ error: 'Conversation not found' }, { status: 404 })
 	}
 
-	const model = body.model ?? conversation.model
-	const routing = await routeModel({
-		content: body.content ?? '',
-		explicitModel: body.model ?? undefined,
-	})
-	const routedModel = body.model ? model : routing.model
+	const currentSettings = await getOrCreateSettings(user.id)
+	const selectedModel = body.model?.trim()
+	const routedModel = selectedModel && selectedModel.length > 0 ? selectedModel : currentSettings.defaultModel
+	const modelSelection = {
+		source: selectedModel ? ('user' as const) : ('settingsDefault' as const),
+		reason: selectedModel ? 'User-selected model' : 'Default model from settings',
+	}
 	let parentMessageId: string | null = null
 
 	if (!body.regenerate) {
@@ -66,7 +75,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				conversationId: body.conversationId,
 				role: 'user',
 				content: body.content.trim(),
-				model,
+				model: routedModel,
 				metadata: {},
 				toolCalls: [],
 				attachments: body.attachments ?? [],
@@ -122,7 +131,6 @@ export const POST: RequestHandler = async ({ request }) => {
 	const userContent = body.content?.trim() ?? ''
 
 	// --- Context Engineering: Unified System Prompt ---
-	const currentSettings = await getOrCreateSettings()
 	const toolConfig = currentSettings.toolConfig as { approvalMode?: string; disabledTools?: string[] } | undefined
 	const disabledTools = new Set(toolConfig?.disabledTools ?? [])
 
@@ -170,10 +178,10 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	// --- Context Engineering: Conversation Compaction ---
-	const compactionCheck = await shouldCompact(llmMessages, routedModel)
+	const compactionCheck = await shouldCompact(llmMessages, routedModel, user.id)
 	let didCompact = false
 	if (compactionCheck.needed) {
-		const result = await compactMessages(llmMessages)
+		const result = await compactMessages(llmMessages, user.id)
 		if (result.summary) {
 			llmMessages.length = 0
 			llmMessages.push(...result.compacted)
@@ -340,7 +348,7 @@ export const POST: RequestHandler = async ({ request }) => {
 							messageId: null,
 						}
 
-						const toolResult = await executeTool(toolCall)
+						const toolResult = await executeTool(toolCall, user.id)
 
 						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 						const resultStr = trimToolResult(tc.name, rawResultStr)
@@ -425,7 +433,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						tokensPerSec,
 						cost: messageCost,
 						metadata: {
-							routing: { tier: routing.tier, reason: routing.reason, budgetDowngraded: routing.budgetDowngraded },
+							modelSelection,
 						},
 						toolCalls: allToolCalls,
 					})
@@ -486,7 +494,7 @@ export const POST: RequestHandler = async ({ request }) => {
 						totalMs,
 						tokensPerSec,
 						cost: parseFloat(messageCost),
-						routing: { tier: routing.tier, reason: routing.reason, budgetDowngraded: routing.budgetDowngraded },
+						modelSelection,
 					}),
 				)
 				controller.enqueue(sse('done', { messageId: assistantMessage.id }))
@@ -510,11 +518,3 @@ export const POST: RequestHandler = async ({ request }) => {
 		},
 	})
 }
-
-
-
-
-
-
-
-

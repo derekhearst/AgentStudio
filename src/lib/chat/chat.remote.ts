@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -29,7 +30,13 @@ const deleteMessagesAfterSchema = z.object({
 })
 
 export const getConversations = query(async () => {
-	const rows = await db.select().from(conversations).orderBy(desc(conversations.updatedAt)).limit(50)
+	const user = requireAuthenticatedRequestUser()
+	const rows = await db
+		.select()
+		.from(conversations)
+		.where(eq(conversations.userId, user.id))
+		.orderBy(desc(conversations.updatedAt))
+		.limit(50)
 
 	const conversationIds = rows.map((row) => row.id)
 	const lastMessages = conversationIds.length
@@ -46,7 +53,12 @@ export const getConversations = query(async () => {
 })
 
 export const getConversation = query(conversationIdSchema, async (conversationId) => {
-	const [conversation] = await db.select().from(conversations).where(eq(conversations.id, conversationId)).limit(1)
+	const user = requireAuthenticatedRequestUser()
+	const [conversation] = await db
+		.select()
+		.from(conversations)
+		.where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
 
 	if (!conversation) {
 		return null
@@ -65,11 +77,13 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 })
 
 export const createConversation = command(createConversationSchema, async (input) => {
-	const settings = await getOrCreateSettings()
+	const user = requireAuthenticatedRequestUser()
+	const settings = await getOrCreateSettings(user.id)
 	const [created] = await db
 		.insert(conversations)
 		.values({
 			title: input.title,
+			userId: user.id,
 			model: input.model ?? settings.defaultModel,
 		})
 		.returning()
@@ -78,13 +92,24 @@ export const createConversation = command(createConversationSchema, async (input
 })
 
 export const deleteConversation = command(conversationIdSchema, async (conversationId) => {
-	await db.delete(conversations).where(eq(conversations.id, conversationId))
+	const user = requireAuthenticatedRequestUser()
+	await db.delete(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
 	return { success: true }
 })
 
 export const editMessage = command(editMessageSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
 	const [target] = await db.select().from(messages).where(eq(messages.id, input.messageId)).limit(1)
 	if (!target || target.role !== 'user') {
+		return { success: false, error: 'Message not found or not editable' as const }
+	}
+
+	const [conversation] = await db
+		.select({ id: conversations.id })
+		.from(conversations)
+		.where(and(eq(conversations.id, target.conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
+	if (!conversation) {
 		return { success: false, error: 'Message not found or not editable' as const }
 	}
 
@@ -98,6 +123,17 @@ export const editMessage = command(editMessageSchema, async (input) => {
 })
 
 export const deleteMessagesAfter = command(deleteMessagesAfterSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const [conversation] = await db
+		.select({ id: conversations.id })
+		.from(conversations)
+		.where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
+
+	if (!conversation) {
+		return { success: false, error: 'Message not found' as const }
+	}
+
 	const [pivot] = await db
 		.select()
 		.from(messages)
@@ -116,6 +152,17 @@ export const deleteMessagesAfter = command(deleteMessagesAfterSchema, async (inp
 })
 
 export const getMessageStats = query(conversationIdSchema, async (conversationId) => {
+	const user = requireAuthenticatedRequestUser()
+	const [conversation] = await db
+		.select({ id: conversations.id })
+		.from(conversations)
+		.where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
+
+	if (!conversation) {
+		return []
+	}
+
 	const rows = await db
 		.select({
 			id: messages.id,
@@ -137,11 +184,15 @@ export const getMessageStats = query(conversationIdSchema, async (conversationId
 })
 
 export const updateConversationMeta = command(updateConversationMetaSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
 	const updates: Record<string, unknown> = {}
 	if (input.title !== undefined) updates.title = input.title
 	if (input.category !== undefined) updates.category = input.category
 	if (Object.keys(updates).length === 0) return { success: true as const }
-	await db.update(conversations).set(updates).where(eq(conversations.id, input.id))
+	await db
+		.update(conversations)
+		.set(updates)
+		.where(and(eq(conversations.id, input.id), eq(conversations.userId, user.id)))
 	return { success: true as const }
 })
 

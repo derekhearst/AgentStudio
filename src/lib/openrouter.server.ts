@@ -49,12 +49,6 @@ function getClient() {
 	return singleton
 }
 
-export function getModelForTier(tier: 'fast' | 'powerful' | 'cheap') {
-	if (tier === 'fast') return 'anthropic/claude-sonnet-4'
-	if (tier === 'powerful') return 'anthropic/claude-opus-4'
-	return 'openai/gpt-4o-mini'
-}
-
 export async function chat(messages: LlmMessage[], model = DEFAULT_MODEL) {
 	if (MOCK_EXTERNALS) {
 		const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? ''

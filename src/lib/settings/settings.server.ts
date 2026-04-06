@@ -33,13 +33,19 @@ export const DEFAULT_SETTINGS = {
 	theme: 'AGENTSTUDIO-night',
 } as const
 
-export async function getOrCreateSettings() {
-	const [existing] = await db.select().from(appSettings).orderBy(asc(appSettings.createdAt)).limit(1)
+export async function getOrCreateSettings(userId: string) {
+	const [existing] = await db
+		.select()
+		.from(appSettings)
+		.where(eq(appSettings.userId, userId))
+		.orderBy(asc(appSettings.createdAt))
+		.limit(1)
 	if (existing) return existing
 
 	const [created] = await db
 		.insert(appSettings)
 		.values({
+			userId,
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			transcriptionModel: DEFAULT_SETTINGS.transcriptionModel,
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
@@ -55,6 +61,7 @@ export async function getOrCreateSettings() {
 }
 
 export async function updateSettings(input: {
+	userId: string
 	defaultModel?: string
 	transcriptionModel?: string
 	theme?: string
@@ -84,7 +91,7 @@ export async function updateSettings(input: {
 	}
 	systemPrompt?: string
 }) {
-	const current = await getOrCreateSettings()
+	const current = await getOrCreateSettings(input.userId)
 	const [updated] = await db
 		.update(appSettings)
 		.set({
@@ -121,10 +128,15 @@ export async function updateSettings(input: {
 	return updated
 }
 
-export async function resetSettings() {
-	const [existing] = await db.select().from(appSettings).orderBy(asc(appSettings.createdAt)).limit(1)
+export async function resetSettings(userId: string) {
+	const [existing] = await db
+		.select()
+		.from(appSettings)
+		.where(eq(appSettings.userId, userId))
+		.orderBy(asc(appSettings.createdAt))
+		.limit(1)
 	if (!existing) {
-		return getOrCreateSettings()
+		return getOrCreateSettings(userId)
 	}
 
 	const [updated] = await db

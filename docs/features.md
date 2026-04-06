@@ -76,11 +76,12 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Path-sandboxed to workspace directory (no directory traversal)
 - Browser automation via Playwright (screenshots, navigation)
 - Built into the Docker container (no external sandbox dependency)
+- Per-user workspace isolation (filesystem and shell tools run inside a user-scoped root)
 
-### 8. Smart Model Routing
+### 8. Model Selection
 
-- Auto-routes queries to cheap, fast, or powerful models based on estimated complexity
-- Budget-aware downgrade near spending limits
+- Uses the exact model selected by the user for each prompt
+- Falls back to the default model from settings when no model is explicitly selected
 - Configurable via settings
 
 ### 9. Cost Tracking
@@ -120,11 +121,19 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Push subscription management
 - PWA install prompt
 
-### 14. Authentication
+### 14. Authentication and User Management
 
-- Single-user password-based login
-- HMAC-SHA256 signed session tokens in httpOnly cookies
-- Server hook guards all routes except `/login`
+- Multi-user account system with lowercase usernames
+- WebAuthn passkey login and account claiming
+- First startup seeds an unclaimed `admin` account with a one-time bootstrap claim key
+- Admin-only user management page for add/remove (soft-delete) accounts
+- Server hook enforces authentication and admin-only routes (`/users`)
+
+### 15. Database Bootstrap
+
+- On startup, the server ensures the PostgreSQL database named in `DATABASE_URL` exists before handling requests
+- Required extensions are installed automatically: `pgcrypto` for UUID defaults and `vector` for memory embeddings
+- Bundled Drizzle SQL migrations are applied automatically on startup so container deploys do not require a separate manual migration step
 
 ---
 
@@ -148,6 +157,7 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 | --------------------------- | ------------------------------- |
 | `/`                         | Home / chat launcher            |
 | `/login`                    | Authentication                  |
+| `/users`                    | Admin user management           |
 | `/chat`                     | Conversation list               |
 | `/chat/[id]`                | Conversation detail + streaming |
 | `/agents`                   | Agent management + scheduler    |

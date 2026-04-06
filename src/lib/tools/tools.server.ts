@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { env } from '$env/dynamic/private'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFile } from 'node:child_process'
 import {
 	access,
@@ -63,8 +64,22 @@ const execFileAsync = promisify(execFile)
 let browser: Browser | null = null
 let page: Page | null = null
 
+const toolUserContext = new AsyncLocalStorage<{ userId: string }>()
+
+function sanitizeUserId(userId: string) {
+	if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
+		throw new Error('Invalid user context for sandbox workspace')
+	}
+	return userId
+}
+
 function getWorkspace() {
-	return env.SANDBOX_WORKSPACE || '/workspace'
+	const ctx = toolUserContext.getStore()
+	if (!ctx?.userId) {
+		throw new Error('Missing user context for tool execution')
+	}
+	const baseRoot = env.SANDBOX_WORKSPACE || '/workspace/users'
+	return resolve(baseRoot, sanitizeUserId(ctx.userId))
 }
 
 function safePath(userPath: string): string {
@@ -83,7 +98,12 @@ interface ShellOpts {
 	env?: Record<string, string>
 }
 
+async function ensureWorkspaceDir() {
+	await mkdir(getWorkspace(), { recursive: true })
+}
+
 async function shellExec(command: string, opts: ShellOpts = {}) {
+	await ensureWorkspaceDir()
 	const workspace = getWorkspace()
 	const cwd = opts.cwd ? safePath(opts.cwd) : workspace
 	const timeout = opts.timeout ?? 120_000
@@ -114,6 +134,7 @@ async function shellExec(command: string, opts: ShellOpts = {}) {
 }
 
 async function fileRead(path: string) {
+	await ensureWorkspaceDir()
 	const fullPath = safePath(path)
 	return fsRead(fullPath, 'utf-8')
 }
@@ -124,6 +145,7 @@ interface FileReadOpts {
 }
 
 async function fileReadRange(path: string, opts: FileReadOpts = {}) {
+	await ensureWorkspaceDir()
 	const fullPath = safePath(path)
 	const content = await fsRead(fullPath, 'utf-8')
 
@@ -142,12 +164,14 @@ async function fileReadRange(path: string, opts: FileReadOpts = {}) {
 }
 
 async function fileWrite(path: string, content: string) {
+	await ensureWorkspaceDir()
 	const fullPath = safePath(path)
 	await mkdir(resolve(fullPath, '..'), { recursive: true })
 	await fsWrite(fullPath, content, 'utf-8')
 }
 
 async function fileDelete(path: string, recursive = false) {
+	await ensureWorkspaceDir()
 	const fullPath = safePath(path)
 	const info = await stat(fullPath)
 	if (info.isDirectory() && !recursive) {
@@ -157,6 +181,7 @@ async function fileDelete(path: string, recursive = false) {
 }
 
 async function fileMove(fromPath: string, toPath: string, overwrite = false) {
+	await ensureWorkspaceDir()
 	const source = safePath(fromPath)
 	const target = safePath(toPath)
 	await mkdir(dirname(target), { recursive: true })
@@ -185,6 +210,7 @@ interface FileListOpts {
 }
 
 async function fileList(path?: string, opts: FileListOpts = {}) {
+	await ensureWorkspaceDir()
 	const root = path ? safePath(path) : getWorkspace()
 	const depth = opts.depth ?? 1
 	const includeHidden = opts.includeHidden ?? false
@@ -228,6 +254,7 @@ async function fileList(path?: string, opts: FileListOpts = {}) {
 }
 
 async function sandboxFileInfo(path: string) {
+	await ensureWorkspaceDir()
 	const fullPath = safePath(path)
 	const s = await stat(fullPath)
 	return {
@@ -250,6 +277,7 @@ interface FileSearchOpts {
 }
 
 async function fileSearch(query: string, opts: FileSearchOpts = {}) {
+	await ensureWorkspaceDir()
 	const searchPath = opts.path ? safePath(opts.path) : getWorkspace()
 	const maxResults = opts.maxResults ?? 50
 	const flags = [
@@ -889,9 +917,10 @@ export type ToolCallWithContext = ToolCall & {
 	messageId?: string | null
 }
 
-export async function executeTool(call: ToolCall) {
-	const startedAt = Date.now()
-	try {
+export async function executeTool(call: ToolCall, userId: string) {
+	return toolUserContext.run({ userId }, async () => {
+		const startedAt = Date.now()
+		try {
 		if (call.name === 'web_search') {
 			const input = toolSchemas.web_search.parse(call.arguments)
 			return {
@@ -1382,14 +1411,15 @@ export async function executeTool(call: ToolCall) {
 			result,
 			executionMs: Date.now() - startedAt,
 		}
-	} catch (error) {
-		return {
-			success: false,
-			tool: call.name,
-			error: error instanceof Error ? error.message : 'Tool execution failed',
-			executionMs: Date.now() - startedAt,
+		} catch (error) {
+			return {
+				success: false,
+				tool: call.name,
+				error: error instanceof Error ? error.message : 'Tool execution failed',
+				executionMs: Date.now() - startedAt,
+			}
 		}
-	}
+	})
 }
 
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000

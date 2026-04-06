@@ -3,12 +3,16 @@ import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) {
+		throw error(401, 'Unauthorized')
+	}
+
 	if (!env.OPENROUTER_API_KEY) {
 		throw error(500, 'OPENROUTER_API_KEY is not set')
 	}
 
-	const settings = await getOrCreateSettings()
+	const settings = await getOrCreateSettings(locals.user.id)
 	const transcriptionModel = settings.transcriptionModel ?? 'google/gemini-2.5-flash'
 
 	const formData = await request.formData()

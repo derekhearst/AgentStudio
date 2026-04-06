@@ -13,7 +13,7 @@
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
-	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ModelSelector from '$lib/models/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];

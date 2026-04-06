@@ -323,7 +323,11 @@ function rpcError(id: string | number, code: number, message: string) {
 	return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) {
+		return json({ error: 'Unauthorized' }, { status: 401 })
+	}
+
 	if (!verifyApiKey(request)) {
 		return json({ error: 'Unauthorized' }, { status: 401 })
 	}
@@ -353,7 +357,7 @@ export const POST: RequestHandler = async ({ request }) => {
 				if (!Object.keys(toolSchemas).includes(name)) {
 					return json(rpcError(body.id, -32602, `Unknown tool: ${name}`))
 				}
-				const result = await executeTool({ name: name as ToolName, arguments: args })
+				const result = await executeTool({ name: name as ToolName, arguments: args }, locals.user.id)
 				if (result.success) {
 					return json(
 						rpcResponse(body.id, {

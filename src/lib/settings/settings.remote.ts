@@ -1,6 +1,7 @@
 import { command, query } from '$app/server'
 import { z } from 'zod'
 import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/settings/settings.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { assembleContext } from '$lib/memory/memory'
@@ -57,23 +58,28 @@ const disabledToolsSchema = z.object({
 })
 
 export const getSettings = query(async () => {
-	return getOrCreateSettings()
+	const user = requireAuthenticatedRequestUser()
+	return getOrCreateSettings(user.id)
 })
 
 export const updateAppSettings = command(settingsUpdateSchema, async (input) => {
-	return updateSettings(input)
+	const user = requireAuthenticatedRequestUser()
+	return updateSettings({ ...input, userId: user.id })
 })
 
 export const updateDisabledToolsCommand = command(disabledToolsSchema, async ({ disabledTools }) => {
-	return updateSettings({ toolConfig: { disabledTools } })
+	const user = requireAuthenticatedRequestUser()
+	return updateSettings({ userId: user.id, toolConfig: { disabledTools } })
 })
 
 export const resetAppSettings = command(async () => {
-	return resetSettings()
+	const user = requireAuthenticatedRequestUser()
+	return resetSettings(user.id)
 })
 
 export const getFullPromptPreview = query(async () => {
-	const settings = await getOrCreateSettings()
+	const user = requireAuthenticatedRequestUser()
+	const settings = await getOrCreateSettings(user.id)
 
 	// Skill summaries
 	const skillSummaries = await listSkillSummaries()

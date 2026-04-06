@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { createAgent } from '$lib/agents';
-	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ModelSelector from '$lib/models/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	let name = $state('');

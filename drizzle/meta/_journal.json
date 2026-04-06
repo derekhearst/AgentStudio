@@ -8,6 +8,13 @@
       "when": 1775379373218,
       "tag": "0000_striped_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1775441776468,
+      "tag": "0001_nappy_wraith",
+      "breakpoints": true
     }
   ]
 }

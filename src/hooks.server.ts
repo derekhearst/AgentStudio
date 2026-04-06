@@ -1,7 +1,7 @@
 import { redirect, type Handle } from '@sveltejs/kit'
 import { and, arrayContains, sql } from 'drizzle-orm'
-import { isAuthenticated } from '$lib/auth/auth.server'
-import { db } from '$lib/db.server'
+import { ensureAuthBootstrap, getSessionUser } from '$lib/auth/auth.server'
+import { db, ensureDatabaseReady } from '$lib/db.server'
 import { skills } from '$lib/skills/skills.schema'
 
 // Cleanup old capability-group skill seed records once on startup.
@@ -20,6 +20,7 @@ async function cleanupLegacyCapabilitySkills() {
 }
 
 const PUBLIC_PATH_PREFIXES = ['/login', '/demo']
+const ADMIN_PATH_PREFIXES = ['/users']
 
 function isPublicPath(pathname: string) {
 	if (pathname.startsWith('/_app') || pathname.startsWith('/favicon')) {
@@ -30,16 +31,27 @@ function isPublicPath(pathname: string) {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
+	await ensureDatabaseReady()
 	await cleanupLegacyCapabilitySkills()
+	await ensureAuthBootstrap(event.url.origin)
 
-	const authenticated = isAuthenticated(event.cookies)
-	event.locals.authenticated = authenticated
+	const user = await getSessionUser(event.cookies)
+	event.locals.user = user
+	event.locals.authenticated = user !== null
 
-	if (!authenticated && !isPublicPath(event.url.pathname)) {
+	if (!event.locals.authenticated && !isPublicPath(event.url.pathname)) {
 		throw redirect(303, '/login')
 	}
 
-	if (authenticated && event.url.pathname === '/login') {
+	if (event.locals.authenticated && event.url.pathname === '/login') {
+		throw redirect(303, '/')
+	}
+
+	if (
+		event.locals.authenticated &&
+		event.locals.user?.role !== 'admin' &&
+		ADMIN_PATH_PREFIXES.some((prefix) => event.url.pathname === prefix || event.url.pathname.startsWith(`${prefix}/`))
+	) {
 		throw redirect(303, '/')
 	}
 

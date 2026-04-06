@@ -134,7 +134,7 @@ async function runToolLoopForTask(agent: typeof agents.$inferSelect, task: typeo
 			name: toolCall.name as ToolName,
 			arguments: toolCall.arguments,
 		}
-		const result = await executeTool(normalizedCall)
+		const result = await executeTool(normalizedCall, 'system')
 		toolResults.push({ call: normalizedCall, result })
 	}
 
@@ -596,7 +596,7 @@ export async function runSubagent(task: string, context?: string) {
 				name: toolCall.name as ToolName,
 				arguments: toolCall.arguments,
 			}
-			const result = await executeTool(normalizedCall)
+			const result = await executeTool(normalizedCall, 'system')
 			toolResults.push({ call: normalizedCall, result })
 		}
 

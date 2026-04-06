@@ -47,6 +47,7 @@ RUN git config --global user.name "AGENTSTUDIO" \
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/package.json ./
+COPY --from=build /app/drizzle ./drizzle
 
 RUN mkdir -p /workspace && chown bun:bun /workspace
 VOLUME /workspace

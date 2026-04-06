@@ -95,8 +95,8 @@ export async function generateTitleAndCategory(messages: Message[]): Promise<{ t
 	}
 }
 
-async function getCompactionModel(): Promise<string> {
-	const settings = await getOrCreateSettings()
+async function getCompactionModel(userId: string): Promise<string> {
+	const settings = await getOrCreateSettings(userId)
 	const contextConfig = settings.contextConfig as { compactionModel?: string } | undefined
 	return contextConfig?.compactionModel || DEFAULT_COMPACTION_MODEL
 }
@@ -123,8 +123,9 @@ export function estimateMessageTokens(messages: LlmMessage[]): number {
 export async function shouldCompact(
 	messages: LlmMessage[],
 	model: string,
+userId: string,
 ): Promise<{ needed: boolean; tokenEstimate: number; threshold: number }> {
-	const settings = await getOrCreateSettings()
+	const settings = await getOrCreateSettings(userId)
 	const contextConfig = settings.contextConfig as {
 		reservedResponsePct?: number
 		autoCompactThresholdPct?: number
@@ -146,7 +147,7 @@ export async function shouldCompact(
 	}
 }
 
-export async function compactMessages(messages: LlmMessage[]): Promise<{
+export async function compactMessages(messages: LlmMessage[], userId: string): Promise<{
 	compacted: LlmMessage[]
 	summary: string
 	originalTokens: number
@@ -172,7 +173,7 @@ export async function compactMessages(messages: LlmMessage[]): Promise<{
 		})
 		.join('\n\n')
 
-	const compactionModel = await getCompactionModel()
+	const compactionModel = await getCompactionModel(userId)
 
 	const summaryResponse = await chat(
 		[

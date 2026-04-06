@@ -11,7 +11,7 @@
 		updateMemoryCommand
 	} from '$lib/memory';
 	import { getSettings } from '$lib/settings/settings.remote';
-	import ModelSelector from '$lib/settings/ModelSelector.svelte';
+	import ModelSelector from '$lib/models/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import { dreamPanel } from '$lib/state.svelte';
 
