@@ -11,7 +11,6 @@ import python from 'highlight.js/lib/languages/python'
 import sql from 'highlight.js/lib/languages/sql'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
- 
 
 export type LlmMessage = {
 	role: 'system' | 'user' | 'assistant' | 'tool'
@@ -66,11 +65,12 @@ export function renderMarkdown(content: string) {
 
 /* ── Tool Call Presentation ────────────────────────────────── */
 
-export type ToolCardStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'denied'
+export type ToolCardStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
 
 type ToolCopy = {
 	inProgress: string
 	completed: string
+	failed?: string
 	denied: string
 }
 
@@ -118,6 +118,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
 	shell: {
 		inProgress: 'Running shell command',
 		completed: 'Ran shell command',
+		failed: 'Shell command failed',
 		denied: 'Shell command was denied',
 	},
 	browser_navigate: {
@@ -177,6 +178,10 @@ export function getFriendlyToolLabel(name: string, args: unknown, status: ToolCa
 
 	if (status === 'denied') {
 		return copy?.denied ?? `${fallbackToolLabel(name)} was denied`
+	}
+
+	if (status === 'failed') {
+		return copy?.failed ?? `${fallbackToolLabel(name)} failed`
 	}
 
 	const base =

@@ -22,6 +22,7 @@ type StreamPayload = {
 	conversationId: string
 	content?: string
 	model?: string
+	reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 	regenerate?: boolean
 	attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
 }
@@ -29,6 +30,38 @@ type StreamPayload = {
 type LoopMessage = LlmMessage & {
 	toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
 	toolCallId?: string
+}
+
+type ReasoningDetail = {
+	type?: string | null
+	text?: string | null
+	summary?: string | null
+	data?: string | null
+	[key: string]: unknown
+}
+
+function extractReasoningFragment(details: ReasoningDetail[] | undefined) {
+	if (!details?.length) return ''
+
+	return details
+		.map((detail) => {
+			switch (detail.type) {
+				case 'reasoning.text':
+					return typeof detail.text === 'string' ? detail.text : ''
+				case 'reasoning.summary':
+					return typeof detail.summary === 'string' ? detail.summary : ''
+				case 'reasoning.encrypted':
+					return '[Reasoning hidden by provider]'
+				default:
+					return typeof detail.text === 'string'
+						? detail.text
+						: typeof detail.summary === 'string'
+							? detail.summary
+							: ''
+			}
+		})
+		.filter(Boolean)
+		.join('\n\n')
 }
 
 function sse(name: string, payload: unknown) {
@@ -59,6 +92,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const currentSettings = await getOrCreateSettings(user.id)
 	const selectedModel = body.model?.trim()
 	const routedModel = selectedModel && selectedModel.length > 0 ? selectedModel : currentSettings.defaultModel
+	const reasoningEffort = body.reasoningEffort ?? 'none'
+	const reasoningConfig =
+		reasoningEffort === 'none' ? undefined : { enabled: true, exclude: false, effort: reasoningEffort }
 	const modelSelection = {
 		source: selectedModel ? ('user' as const) : ('settingsDefault' as const),
 		reason: selectedModel ? 'User-selected model' : 'Default model from settings',
@@ -171,6 +207,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
 			"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
 			'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
+			'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
 		].join('\n'),
 	)
 	if (skillSummariesText) {
@@ -209,7 +246,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	// --- Context Engineering: Tool Loading ---
 	let tools = getToolDefinitions().filter((tool) => !disabledTools.has(tool.function.name))
-	const MAX_TOOL_ROUNDS = 3
+	// No hard limit — loop exits when the model stops calling tools
+	const MAX_TOOL_ROUNDS = 50
 
 	const toolApprovalMode = toolConfig?.approvalMode ?? 'auto'
 
@@ -223,9 +261,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				let currentMessages: LoopMessage[] = [...trimmedMessages]
 				const allToolCalls: Array<Record<string, unknown>> = []
+				// Ordered blocks for interleaved rendering in the UI
+				type StreamBlock =
+					| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
+					| { kind: 'text'; content: string }
+					| { kind: 'tool'; name: string; arguments: unknown; result: unknown; success: boolean; executionMs: number }
+				const streamBlocks: StreamBlock[] = []
+				let allTextContent = ''
+
+				let reasoningTokens: number | null = null
 
 				for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-					const stream = await streamChat(currentMessages, routedModel, tools)
+					const stream = await streamChat(currentMessages, routedModel, tools, reasoningConfig)
 
 					// Accumulated tool calls for this round (streamed piecewise)
 					const pendingToolCalls: Array<{
@@ -235,11 +282,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					}> = []
 
 					assistantContent = ''
+					let assistantReasoning = ''
+					const assistantReasoningDetails: ReasoningDetail[] = []
 
 					for await (const chunk of stream) {
 						const delta = chunk.choices?.[0]?.delta as
 							| {
 									content?: string
+									reasoning?: string | null
+									reasoningDetails?: ReasoningDetail[]
 									toolCalls?: Array<{
 										index?: number
 										id?: string
@@ -247,6 +298,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									}>
 							  }
 							| undefined
+						const reasoningDelta = delta?.reasoning
+						const reasoningDetailDelta = delta?.reasoningDetails
+						if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
+							assistantReasoning += reasoningDelta
+							controller.enqueue(sse('reasoning', { content: reasoningDelta }))
+						} else if (reasoningDetailDelta?.length) {
+							assistantReasoningDetails.push(...reasoningDetailDelta)
+							const fragment = extractReasoningFragment(reasoningDetailDelta)
+							if (fragment) {
+								assistantReasoning += fragment
+								controller.enqueue(sse('reasoning', { content: fragment }))
+							}
+						}
 						const content = delta?.content
 						if (content) {
 							if (firstTokenAt === null) {
@@ -273,11 +337,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						if (chunk.usage) {
 							promptTokens += chunk.usage.promptTokens ?? 0
 							completionTokens += chunk.usage.completionTokens ?? 0
+							if ('completionTokensDetails' in chunk.usage) {
+								reasoningTokens = chunk.usage.completionTokensDetails?.reasoningTokens ?? reasoningTokens
+							}
 						}
 					}
 
 					// Check for finish_reason tool_calls or pending tool calls
 					const validToolCalls = pendingToolCalls.filter((tc) => tc.name)
+
+					// Capture assistant text for this round into ordered blocks
+					if (assistantReasoning.trim()) {
+						streamBlocks.push({ kind: 'thinking', content: assistantReasoning.trim() })
+					}
+					if (assistantContent) {
+						streamBlocks.push({ kind: 'text', content: assistantContent })
+						allTextContent += (allTextContent ? '\n' : '') + assistantContent
+					}
+
 					if (validToolCalls.length === 0) {
 						// No tool calls — we're done
 						break
@@ -339,6 +416,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								executionMs: 0,
 							})
 							toolResults.push({ call_id: tc.id, name: tc.name, result: deniedMessage })
+							streamBlocks.push({
+								kind: 'tool',
+								name: tc.name,
+								arguments: parsedArgs,
+								result: { denied: true },
+								success: false,
+								executionMs: 0,
+							})
+							streamBlocks.push({
+								kind: 'tool',
+								name: tc.name,
+								arguments: parsedArgs,
+								result: { denied: true, reason: deniedMessage },
+								success: false,
+								executionMs: 0,
+							})
 							continue
 						}
 
@@ -393,6 +486,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 							controller.enqueue(
 								sse('tool_result', {
+									id: tc.id,
 									name: tc.name,
 									success: answers !== null,
 									executionMs: 0,
@@ -405,6 +499,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								name: tc.name,
 								arguments: parsedArgs,
 								result: questionResult,
+								executionMs: 0,
+							})
+							streamBlocks.push({
+								kind: 'tool',
+								name: tc.name,
+								arguments: parsedArgs,
+								result: questionResult,
+								success: answers !== null,
 								executionMs: 0,
 							})
 							continue
@@ -448,6 +550,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 						controller.enqueue(
 							sse('tool_result', {
+								id: tc.id,
 								name: tc.name,
 								success: toolResult.success,
 								executionMs: toolResult.executionMs,
@@ -461,12 +564,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							result: toolResult.success ? toolResult.result : { error: toolResult.error },
 							executionMs: toolResult.executionMs,
 						})
+						streamBlocks.push({
+							kind: 'tool',
+							name: tc.name,
+							arguments: parsedArgs,
+							result: toolResult.success ? toolResult.result : { error: toolResult.error },
+							success: toolResult.success,
+							executionMs: toolResult.executionMs,
+						})
 					}
 
 					// Append assistant message with tool_calls + tool results to conversation for next round
 					currentMessages.push({
 						role: 'assistant',
 						content: assistantContent || '',
+						reasoning: assistantReasoning || undefined,
+						reasoningDetails: assistantReasoningDetails.length ? assistantReasoningDetails : undefined,
 						toolCalls: validToolCalls.map((tc) => ({
 							id: tc.id,
 							type: 'function' as const,
@@ -486,6 +599,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				const totalMs = Date.now() - startedAt
 				const ttftMs = firstTokenAt ? firstTokenAt - startedAt : null
 				const tokensPerSec = totalMs > 0 ? Math.round((completionTokens / (totalMs / 1000)) * 100) / 100 : null
+				for (let i = streamBlocks.length - 1; i >= 0; i--) {
+					const block = streamBlocks[i]
+					if (block.kind === 'thinking') {
+						block.reasoningTokens = reasoningTokens
+						break
+					}
+				}
 
 				const messageCost = await logLlmUsage({
 					source: 'chat',
@@ -500,7 +620,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.values({
 						conversationId: body.conversationId,
 						role: 'assistant',
-						content: assistantContent || '(no output)',
+						content: allTextContent || assistantContent || '(no output)',
 						model: routedModel,
 						parentMessageId,
 						tokensIn: promptTokens,
@@ -511,6 +631,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						cost: messageCost,
 						metadata: {
 							modelSelection,
+							reasoningEffort,
+							reasoningTokens,
+							blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
 						},
 						toolCalls: allToolCalls,
 					})
@@ -545,7 +668,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (isFirstExchange && body.content) {
 					void generateTitle([
 						{ role: 'user', content: body.content.trim() },
-						{ role: 'assistant', content: assistantContent || '' },
+						{ role: 'assistant', content: allTextContent || assistantContent || '' },
 					])
 						.then((title) => db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId)))
 						.catch(() => {
@@ -557,7 +680,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (!body.regenerate && body.content?.trim()) {
 					extractionMessages.push({ role: 'user', content: body.content.trim() })
 				}
-				extractionMessages.push({ role: 'assistant', content: assistantContent || '(no output)' })
+				extractionMessages.push({ role: 'assistant', content: allTextContent || assistantContent || '(no output)' })
 				void extractAndPersist(extractionMessages).catch(() => {
 					// Ignore extraction failures to avoid impacting chat streaming.
 				})
@@ -567,6 +690,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						model: routedModel,
 						tokensIn: promptTokens,
 						tokensOut: completionTokens,
+						reasoningTokens,
 						ttftMs,
 						totalMs,
 						tokensPerSec,

@@ -108,12 +108,36 @@ async function shellExec(command: string, opts: ShellOpts = {}) {
 	const cwd = opts.cwd ? safePath(opts.cwd) : workspace
 	const timeout = opts.timeout ?? 120_000
 
+	// Restrict the shell environment to the sandbox workspace so temp files,
+	// home-dir expansion, and npm/bun caches all stay inside the workspace.
+	const tmpDir = join(workspace, '.tmp')
+	await mkdir(tmpDir, { recursive: true })
+	const sandboxEnv: Record<string, string> = {
+		// Inherit PATH / system vars only
+		PATH: process.env.PATH ?? '',
+		SYSTEMROOT: process.env.SYSTEMROOT ?? '',
+		SYSTEMDRIVE: process.env.SYSTEMDRIVE ?? '',
+		// Redirect all home / temp references into the workspace
+		HOME: workspace,
+		USERPROFILE: workspace,
+		TMPDIR: tmpDir,
+		TMP: tmpDir,
+		TEMP: tmpDir,
+		// Surface the boundary so sub-processes can respect it
+		SANDBOX_ROOT: workspace,
+		// Prevent npm/bun from writing caches outside workspace
+		NPM_CONFIG_CACHE: join(workspace, '.npm-cache'),
+		BUN_INSTALL_CACHE_DIR: join(workspace, '.bun-cache'),
+		NODE_PATH: '',
+		...(opts.env ?? {}),
+	}
+
 	try {
-		const { stdout, stderr } = await execFileAsync('bash', ['-c', command], {
+		const { stdout, stderr } = await execFileAsync('bun', ['exec', command], {
 			cwd,
 			timeout,
 			maxBuffer: 10 * 1024 * 1024,
-			env: { ...process.env, ...opts.env },
+			env: sandboxEnv,
 		})
 		return { exitCode: 0, stdout, stderr }
 	} catch (error: unknown) {
@@ -890,7 +914,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	artifact_storage_update:
 		"Update a key in an artifact's persistent storage. Used for reactive/living artifacts like trackers and dashboards.",
 	ask_user:
-		'Ask the user one or more clarifying questions with prefilled options. Use when you need explicit user input before proceeding.',
+		'Ask the user one or more focused clarifying questions with prefilled answer options. Each question should have ~3 prefilled options — prefer splitting a broad inquiry into multiple focused questions rather than providing many options in a single question. Use when you need explicit user input before proceeding.',
 	list_skills:
 		'List all available skills with their names, descriptions, and nested file names. Use this to discover what skills are available.',
 	read_skill:
@@ -957,11 +981,13 @@ export async function executeTool(call: ToolCall, userId: string) {
 
 			if (call.name === 'shell') {
 				const input = toolSchemas.shell.parse(call.arguments)
+				const shellResult = await execShell(input.command)
 				return {
-					success: true,
+					success: shellResult.success,
 					tool: call.name,
 					input,
-					result: await execShell(input.command),
+					result: shellResult,
+					error: shellResult.success ? undefined : shellResult.output,
 					executionMs: Date.now() - startedAt,
 				}
 			}

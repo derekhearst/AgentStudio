@@ -1,14 +1,16 @@
 <svelte:head><title>{conversationData?.conversation.title ?? 'Chat'} | AGENTSTUDIO</title></svelte:head>
 
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { tick } from 'svelte';
 	import {
 		editMessage,
 		getConversation,
-		getMessageStats
+		getMessageStats,
 	} from '$lib/chat';
+	import { savePartialAssistant } from '$lib/chat/chat.remote';
 	import { getAvailableModels } from '$lib/models';
 	import { getSettings } from '$lib/settings';
 	import { getArtifact, getArtifactsByConversation, pinArtifact as pinArtifactCommand } from '$lib/artifacts';
@@ -16,6 +18,7 @@
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import LiveToolCallCard from '$lib/chat/LiveToolCallCard.svelte';
+	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import ArtifactPanel from '$lib/artifacts/ArtifactPanel.svelte';
@@ -27,6 +30,10 @@
 		size: number;
 		url: string;
 	};
+
+	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+	const REASONING_STORAGE_KEY = 'drokbot:reasoning-effort';
+	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 	type AskUserOption = {
 		label: string;
@@ -41,29 +48,50 @@
 		allowFreeformInput?: boolean;
 	};
 
-	type StreamingToolCall = {
+	type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied';
+
+	type TextBlock = {
+		kind: 'text';
+		id: string;
+		content: string;
+	};
+
+	type ToolBlock = {
+		kind: 'tool';
 		id: string;
 		name: string;
 		arguments: string;
-		status: 'pending' | 'approved' | 'executing' | 'completed' | 'denied';
+		status: ToolStatus;
 		result?: string;
 		executionMs?: number | null;
 		expanded: boolean;
 		token?: string | null;
 	};
 
+	type ThinkingBlock = {
+		kind: 'thinking';
+		id: string;
+		content: string;
+		reasoningTokens?: number | null;
+		expanded: boolean;
+	};
+
+	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock;
+
 	const conversationId = $derived(page.params.id ?? '');
 	let model = $state('anthropic/claude-sonnet-4');
+	let reasoningEffort = $state<ReasoningEffort>('none');
+	let reasoningHydratedFor = $state<string | null>(null);
 	let streaming = $state(false);
 	let streamError = $state<string | null>(null);
-	let draftAssistant = $state('');
+	let streamingBlocks = $state<StreamingBlock[]>([]);
+	let currentTextTarget = $state('');
 	let pendingMessageId = $state<string | null>(null);
 	let pendingUserMessages = $state<Array<{ id: string; content: string; createdAt: Date }>>([]);
 	let pendingAssistantDrafts = $state<Array<{ id: string; content: string; createdAt: Date; toolCalls?: Array<Record<string, unknown>> }>>([]);
 	let waitingForFirstToken = $state(false);
 	let streamAbortController = $state<AbortController | null>(null);
 	let stoppedByUser = $state(false);
-	let streamingToolCalls = $state<StreamingToolCall[]>([]);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 	let availableModels = $derived(await getAvailableModels());
@@ -72,9 +100,11 @@
 	let consumedInitialPrompt = $state(false);
 	let modelSwitchNotice = $state<string | null>(null);
 	let defaultModelApplied = $state(false);
-	let streamedAssistantTarget = $state('');
 	let draftInterpolationFrame = $state<number | null>(null);
 	let draftInterpolationLastTs = $state<number | null>(null);
+	let thinkingInterpolationFrame = $state<number | null>(null);
+	let thinkingInterpolationLastTs = $state<number | null>(null);
+	let currentThinkingTarget = $state('');
 	let pendingAskUser = $state<{ token: string; questions: AskUserQuestion[] } | null>(null);
 	let askUserModalOpen = $state(false);
 
@@ -127,6 +157,77 @@
 		draftInterpolationLastTs = null;
 	}
 
+	function stopThinkingInterpolation() {
+		if (thinkingInterpolationFrame !== null) {
+			cancelAnimationFrame(thinkingInterpolationFrame);
+			thinkingInterpolationFrame = null;
+		}
+		thinkingInterpolationLastTs = null;
+	}
+
+	function interpolateThinking(now: number) {
+		thinkingInterpolationFrame = null;
+		if (thinkingInterpolationLastTs === null) {
+			thinkingInterpolationLastTs = now;
+		}
+
+		const elapsedMs = now - thinkingInterpolationLastTs;
+		thinkingInterpolationLastTs = now;
+
+		let lastThinkingIdx = -1;
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			if (streamingBlocks[i].kind === 'thinking') {
+				lastThinkingIdx = i;
+				break;
+			}
+		}
+		if (lastThinkingIdx === -1) {
+			stopThinkingInterpolation();
+			return;
+		}
+
+		const block = streamingBlocks[lastThinkingIdx];
+		if (block.kind !== 'thinking') {
+			stopThinkingInterpolation();
+			return;
+		}
+
+		const remaining = currentThinkingTarget.length - block.content.length;
+		if (remaining <= 0) {
+			stopThinkingInterpolation();
+			return;
+		}
+
+		const charsPerSecond = Math.min(220, Math.max(70, remaining * 3));
+		const step = Math.max(1, Math.floor((charsPerSecond * Math.max(16, elapsedMs)) / 1000));
+		const newContent = currentThinkingTarget.slice(0, block.content.length + step);
+
+		streamingBlocks = streamingBlocks.map((b, i) =>
+			i === lastThinkingIdx && b.kind === 'thinking' ? { ...b, content: newContent } : b
+		);
+
+		if (newContent.length < currentThinkingTarget.length) {
+			thinkingInterpolationFrame = requestAnimationFrame(interpolateThinking);
+		} else {
+			stopThinkingInterpolation();
+		}
+	}
+
+	function queueThinkingInterpolation() {
+		let lastThinkingBlock: ThinkingBlock | undefined;
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			const b = streamingBlocks[i];
+			if (b.kind === 'thinking') {
+				lastThinkingBlock = b;
+				break;
+			}
+		}
+		if (!lastThinkingBlock) return;
+		if (lastThinkingBlock.content.length >= currentThinkingTarget.length) return;
+		if (thinkingInterpolationFrame !== null) return;
+		thinkingInterpolationFrame = requestAnimationFrame(interpolateThinking);
+	}
+
 	function interpolateDraft(now: number) {
 		draftInterpolationFrame = null;
 		if (draftInterpolationLastTs === null) {
@@ -135,17 +236,29 @@
 
 		const elapsedMs = now - draftInterpolationLastTs;
 		draftInterpolationLastTs = now;
-		const remaining = streamedAssistantTarget.length - draftAssistant.length;
-		if (remaining <= 0) {
-			stopDraftInterpolation();
-			return;
+
+		// Find the last text block
+		let lastTextIdx = -1;
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			if (streamingBlocks[i].kind === 'text') { lastTextIdx = i; break; }
 		}
+		if (lastTextIdx === -1) { stopDraftInterpolation(); return; }
+
+		const block = streamingBlocks[lastTextIdx];
+		if (block.kind !== 'text') { stopDraftInterpolation(); return; }
+
+		const remaining = currentTextTarget.length - block.content.length;
+		if (remaining <= 0) { stopDraftInterpolation(); return; }
 
 		const charsPerSecond = Math.min(280, Math.max(80, remaining * 4));
 		const step = Math.max(1, Math.floor((charsPerSecond * Math.max(16, elapsedMs)) / 1000));
-		draftAssistant += streamedAssistantTarget.slice(draftAssistant.length, draftAssistant.length + step);
+		const newContent = currentTextTarget.slice(0, block.content.length + step);
 
-		if (draftAssistant.length < streamedAssistantTarget.length) {
+		streamingBlocks = streamingBlocks.map((b, i) =>
+			i === lastTextIdx && b.kind === 'text' ? { ...b, content: newContent } : b
+		);
+
+		if (newContent.length < currentTextTarget.length) {
 			draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
 		} else {
 			stopDraftInterpolation();
@@ -153,22 +266,201 @@
 	}
 
 	function queueDraftInterpolation() {
-		if (draftAssistant.length >= streamedAssistantTarget.length) return;
+		let lastTextBlock: TextBlock | undefined;
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			const b = streamingBlocks[i];
+			if (b.kind === 'text') { lastTextBlock = b; break; }
+		}
+		if (!lastTextBlock) return;
+		if (lastTextBlock.content.length >= currentTextTarget.length) return;
 		if (draftInterpolationFrame !== null) return;
 		draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
+	}
+
+	function appendThinkingContent(content: string) {
+		if (!content) return;
+		const lastIdx = streamingBlocks.length - 1;
+		const lastBlock = streamingBlocks[lastIdx];
+		if (lastBlock?.kind === 'thinking') {
+			currentThinkingTarget += content;
+			// Re-expand if user or a prior event collapsed it
+			if (!lastBlock.expanded) {
+				streamingBlocks = streamingBlocks.map((b, i) =>
+					i === lastIdx && b.kind === 'thinking' ? { ...b, expanded: true } : b
+				);
+			}
+			queueThinkingInterpolation();
+			return;
+		}
+
+		streamingBlocks = [
+			...streamingBlocks,
+			{
+				kind: 'thinking' as const,
+				id: `thinking-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+				content: '',
+				reasoningTokens: null,
+				expanded: true,
+			}
+		];
+		currentThinkingTarget = content;
+		queueThinkingInterpolation();
+	}
+
+	function updateLatestReasoningTokens(reasoningTokens: number | null | undefined) {
+		if (typeof reasoningTokens !== 'number' || reasoningTokens <= 0) return;
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			const block = streamingBlocks[i];
+			if (block.kind !== 'thinking') continue;
+			streamingBlocks = streamingBlocks.map((entry, idx) =>
+				idx === i && entry.kind === 'thinking' ? { ...entry, reasoningTokens } : entry
+			);
+			break;
+		}
+	}
+
+	/** Commit currentTextTarget into the last text block and stop animation. */
+	function finalizeCurrentTextBlock() {
+		stopDraftInterpolation();
+		if (!currentTextTarget) return;
+		const lastIdx = streamingBlocks.length - 1;
+		if (lastIdx >= 0 && streamingBlocks[lastIdx].kind === 'text') {
+			streamingBlocks = streamingBlocks.map((b, i) =>
+				i === lastIdx && b.kind === 'text' ? { ...b, content: currentTextTarget } : b
+			);
+		}
+		currentTextTarget = '';
+	}
+
+	function finalizeCurrentThinkingBlock() {
+		stopThinkingInterpolation();
+		if (!currentThinkingTarget) return;
+		const lastIdx = streamingBlocks.length - 1;
+		if (lastIdx >= 0 && streamingBlocks[lastIdx].kind === 'thinking') {
+			streamingBlocks = streamingBlocks.map((b, i) =>
+				i === lastIdx && b.kind === 'thinking' ? { ...b, content: currentThinkingTarget } : b
+			);
+		}
+		currentThinkingTarget = '';
+	}
+
+	function parseJsonFallback(raw: string) {
+		try {
+			return JSON.parse(raw || '{}');
+		} catch {
+			return {};
+		}
+	}
+
+	function getPartialTextFromBlocks() {
+		return streamingBlocks
+			.filter((b) => b.kind === 'text')
+			.map((b) => (b.kind === 'text' ? b.content : ''))
+			.join('');
+	}
+
+	function getThinkingTextFromBlocks() {
+		return streamingBlocks
+			.filter((b) => b.kind === 'thinking')
+			.map((b) => (b.kind === 'thinking' ? b.content : ''))
+			.join('\n\n');
+	}
+
+	function getLatestReasoningTokensFromBlocks() {
+		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
+			const block = streamingBlocks[i];
+			if (block.kind === 'thinking' && typeof block.reasoningTokens === 'number') {
+				return block.reasoningTokens;
+			}
+		}
+		return null;
+	}
+
+	function getSerializableBlocksForMetadata() {
+		return streamingBlocks
+			.map((block) => {
+				if (block.kind === 'text') {
+					if (!block.content.trim()) return null;
+					return { kind: 'text' as const, content: block.content };
+				}
+				if (block.kind === 'thinking') {
+					if (!block.content.trim()) return null;
+					return {
+						kind: 'thinking' as const,
+						content: block.content,
+						reasoningTokens: block.reasoningTokens ?? null,
+					};
+				}
+				return {
+					kind: 'tool' as const,
+					name: block.name,
+					arguments: parseJsonFallback(block.arguments),
+					result: block.result ?? '',
+					success: block.status === 'completed',
+					executionMs: block.executionMs ?? 0,
+				};
+			})
+			.filter(Boolean);
+	}
+
+	function getCompletedToolCallsFromBlocks() {
+		return streamingBlocks
+			.filter((b) => b.kind === 'tool' && (b.status === 'completed' || b.status === 'failed' || b.status === 'denied'))
+			.map((b) =>
+				b.kind === 'tool'
+					? {
+						name: b.name,
+						arguments: parseJsonFallback(b.arguments),
+						result: b.result ?? '',
+						status: b.status,
+					}
+					: null
+			)
+			.filter(Boolean) as Array<Record<string, unknown>>;
+	}
+
+	async function persistCanceledPartialIfAny() {
+		if (!stoppedByUser || pendingMessageId) return;
+		finalizeCurrentThinkingBlock();
+		finalizeCurrentTextBlock();
+
+		const textContent = getPartialTextFromBlocks().trim();
+		const thinkingContent = getThinkingTextFromBlocks().trim();
+		const contentToPersist = textContent || thinkingContent;
+		if (!contentToPersist) return;
+
+		await savePartialAssistant({
+			conversationId,
+			content: contentToPersist,
+			model,
+			toolCalls: getCompletedToolCallsFromBlocks(),
+			metadata: {
+				partial: true,
+				stoppedByUser: true,
+				reasoningEffort,
+				reasoningTokens: getLatestReasoningTokensFromBlocks(),
+				blocks: getSerializableBlocksForMetadata(),
+			},
+		});
 	}
 
 	$effect(() => {
 		// Auto-scroll when messages change or during streaming
 		void messages.length;
-		void draftAssistant;
-		void streamingToolCalls.map((tc) => `${tc.id}:${tc.status}:${tc.expanded}:${tc.result?.length ?? 0}`).join('|');
+		void streamingBlocks.map((b) =>
+			b.kind === 'tool'
+				? `${b.id}:${b.status}:${b.expanded}:${b.result?.length ?? 0}`
+				: b.kind === 'thinking'
+					? `${b.id}:${b.content.length}:${b.reasoningTokens ?? 0}`
+					: `${b.id}:${b.content.length}`
+		).join('|');
 		scrollToBottom();
 	});
 
 	$effect(() => {
 		return () => {
 			stopDraftInterpolation();
+			stopThinkingInterpolation();
 		};
 	});
 
@@ -306,6 +598,32 @@
 	});
 
 	$effect(() => {
+		if (!browser) return;
+		if (conversationId === reasoningHydratedFor) return;
+
+		const scopedKey = conversationId ? `${REASONING_STORAGE_KEY}:${conversationId}` : null;
+		const scoped = scopedKey ? window.localStorage.getItem(scopedKey) : null;
+		const global = window.localStorage.getItem(REASONING_STORAGE_KEY);
+		const stored = scoped ?? global;
+
+		if (stored && VALID_REASONING_EFFORTS.includes(stored as ReasoningEffort)) {
+			reasoningEffort = stored as ReasoningEffort;
+		}
+
+		reasoningHydratedFor = conversationId;
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		if (reasoningHydratedFor !== conversationId) return;
+
+		window.localStorage.setItem(REASONING_STORAGE_KEY, reasoningEffort);
+		if (conversationId) {
+			window.localStorage.setItem(`${REASONING_STORAGE_KEY}:${conversationId}`, reasoningEffort);
+		}
+	});
+
+	$effect(() => {
 		if (defaultModelApplied || conversationData?.conversation.model) return;
 		if (appSettings?.defaultModel) {
 			model = appSettings.defaultModel;
@@ -335,7 +653,8 @@
 		void displayedMessages.length;
 		if (!pendingMessageId) return;
 		if (messages.some((message) => message.id === pendingMessageId)) {
-			draftAssistant = '';
+			streamingBlocks = [];
+			currentTextTarget = '';
 			pendingMessageId = null;
 		}
 	});
@@ -377,6 +696,8 @@
 
 	function stopStreaming() {
 		if (!streaming || !streamAbortController) return;
+		finalizeCurrentThinkingBlock();
+		finalizeCurrentTextBlock();
 		stoppedByUser = true;
 		streamAbortController.abort();
 	}
@@ -387,8 +708,8 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ token, approved: true }),
 		});
-		streamingToolCalls = streamingToolCalls.map((tc) =>
-			tc.token === token ? { ...tc, status: 'approved' as const } : tc
+		streamingBlocks = streamingBlocks.map((b) =>
+			b.kind === 'tool' && b.token === token ? { ...b, status: 'approved' as const } : b
 		);
 	}
 
@@ -398,8 +719,8 @@
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ token, approved: false }),
 		});
-		streamingToolCalls = streamingToolCalls.map((tc) =>
-			tc.token === token ? { ...tc, status: 'denied' as const } : tc
+		streamingBlocks = streamingBlocks.map((b) =>
+			b.kind === 'tool' && b.token === token ? { ...b, status: 'denied' as const } : b
 		);
 	}
 
@@ -466,19 +787,20 @@
 
 		streaming = true;
 		streamError = null;
-		draftAssistant = '';
-		streamedAssistantTarget = '';
+		streamingBlocks = [];
+		currentTextTarget = '';
+		currentThinkingTarget = '';
 		stopDraftInterpolation();
+		stopThinkingInterpolation();
 		pendingMessageId = null;
 		waitingForFirstToken = true;
 		streamAbortController = abortController;
 		stoppedByUser = false;
-		streamingToolCalls = [];
 		try {
 			const response = await fetch(`/chat/${conversationId}/stream`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ conversationId, content, model, regenerate, attachments }),
+				body: JSON.stringify({ conversationId, content, model, reasoningEffort, regenerate, attachments }),
 				signal: abortController.signal
 			});
 
@@ -508,18 +830,35 @@
 
 					if (eventName === 'delta') {
 						waitingForFirstToken = false;
-						// Collapse any expanded tool calls when text resumes
-						streamingToolCalls = streamingToolCalls.map((tc) => ({ ...tc, expanded: false }));
-						streamedAssistantTarget += payload.content ?? '';
+						finalizeCurrentThinkingBlock();
+						const lastBlock = streamingBlocks.at(-1);
+						if (!lastBlock || lastBlock.kind !== 'text') {
+							// Collapse any expanded tool blocks when text starts again
+							streamingBlocks = [
+								...streamingBlocks.map((b) => b.kind === 'tool' ? { ...b, expanded: false } : b),
+								{ kind: 'text' as const, id: `txt-${Date.now()}-${Math.random().toString(36).slice(2)}`, content: '' },
+							];
+						}
+						currentTextTarget += payload.content ?? '';
 						queueDraftInterpolation();
+					}
+
+					if (eventName === 'reasoning') {
+						waitingForFirstToken = false;
+						appendThinkingContent(payload.content ?? '');
 					}
 
 					if (eventName === 'tool_pending') {
 						waitingForFirstToken = false;
-						// Collapse previous, add new pending tool
-						streamingToolCalls = [
-							...streamingToolCalls.map((tc) => ({ ...tc, expanded: false })),
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
+						streamingBlocks = [
+							...streamingBlocks.map((b) =>
+								b.kind === 'tool' ? { ...b, expanded: false } :
+								b.kind === 'thinking' ? { ...b, expanded: false } : b
+							),
 							{
+								kind: 'tool' as const,
 								id: payload.id,
 								name: payload.name,
 								arguments: payload.arguments ?? '',
@@ -532,6 +871,10 @@
 
 					if (eventName === 'ask_user') {
 						waitingForFirstToken = false;
+						// Collapse any open thinking blocks while waiting for user input
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'thinking' ? { ...b, expanded: false } : b
+						);
 						pendingAskUser = {
 							token: payload.token,
 							questions: payload.questions ?? []
@@ -541,19 +884,26 @@
 
 					if (eventName === 'tool_call') {
 						waitingForFirstToken = false;
-						const existing = streamingToolCalls.find((tc) => tc.id === payload.id);
+						const existing = streamingBlocks.find((b) => b.kind === 'tool' && b.id === payload.id);
 						if (existing) {
-							// Update from pending → executing
-							streamingToolCalls = streamingToolCalls.map((tc) =>
-								tc.id === payload.id
-									? { ...tc, status: 'executing' as const, expanded: true }
-									: { ...tc, expanded: false }
+							// Update pending → executing; also collapse any thinking blocks
+							streamingBlocks = streamingBlocks.map((b) =>
+								b.kind === 'tool' && b.id === payload.id
+									? { ...b, status: 'executing' as const, expanded: true }
+									: b.kind === 'tool' ? { ...b, expanded: false }
+									: b.kind === 'thinking' ? { ...b, expanded: false } : b
 							);
 						} else {
 							// Auto-approve mode — tool_call arrives directly
-							streamingToolCalls = [
-								...streamingToolCalls.map((tc) => ({ ...tc, expanded: false })),
+							finalizeCurrentThinkingBlock();
+							finalizeCurrentTextBlock();
+							streamingBlocks = [
+								...streamingBlocks.map((b) =>
+									b.kind === 'tool' ? { ...b, expanded: false } :
+									b.kind === 'thinking' ? { ...b, expanded: false } : b
+								),
 								{
+									kind: 'tool' as const,
 									id: payload.id,
 									name: payload.name,
 									arguments: payload.arguments ?? '',
@@ -570,24 +920,23 @@
 							pendingAskUser = null;
 							askUserModalOpen = false;
 						}
-
-						streamingToolCalls = streamingToolCalls.map((tc) =>
-							tc.name === payload.name && (tc.status === 'executing' || tc.status === 'approved')
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'tool' && b.id === payload.id && (b.status === 'executing' || b.status === 'approved')
 								? {
-										...tc,
-										status: 'completed' as const,
+										...b,
+										status: payload.success ? ('completed' as const) : ('failed' as const),
 										executionMs: payload.executionMs ?? null,
-										result: payload.result ?? (payload.success ? 'Success' : 'Failed'),
+										result: payload.result ?? (payload.success ? 'Success' : 'Tool execution failed'),
 									}
-								: tc
+								: b
 						);
 					}
 
 					if (eventName === 'tool_denied') {
-						streamingToolCalls = streamingToolCalls.map((tc) =>
-							tc.id === payload.id
-								? { ...tc, status: 'denied' as const, expanded: true }
-								: tc
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'tool' && b.id === payload.id
+								? { ...b, status: 'denied' as const, expanded: true }
+								: b
 						);
 					}
 
@@ -598,25 +947,28 @@
 						}
 					}
 
+					if (eventName === 'metrics') {
+						updateLatestReasoningTokens(payload.reasoningTokens ?? null);
+					}
+
 					if (eventName === 'done') {
 						waitingForFirstToken = false;
 						if (payload.error) {
 							streamError = payload.error;
 						} else if (payload.messageId) {
-							draftAssistant = streamedAssistantTarget;
-							stopDraftInterpolation();
-							// Keep draft visible until refreshAll() completes
+							finalizeCurrentThinkingBlock();
+							finalizeCurrentTextBlock();
+							// Keep content visible until refreshAll() confirms DB message
 							pendingMessageId = payload.messageId;
-							if (streamedAssistantTarget.trim()) {
+							const fullText = getPartialTextFromBlocks();
+							if (fullText.trim()) {
 								pendingAssistantDrafts = [
 									...pendingAssistantDrafts.filter((draft) => draft.id !== payload.messageId),
 									{
 										id: payload.messageId,
-										content: streamedAssistantTarget,
+										content: fullText,
 										createdAt: new Date(),
-										toolCalls: streamingToolCalls
-											.filter((tc) => tc.status === 'completed')
-											.map((tc) => ({ name: tc.name, arguments: JSON.parse(tc.arguments || '{}'), result: tc.result ?? '' }))
+										toolCalls: getCompletedToolCallsFromBlocks(),
 									}
 								];
 							}
@@ -635,25 +987,51 @@
 				streamError = error instanceof Error ? error.message : 'Streaming error';
 			}
 		} finally {
+			await persistCanceledPartialIfAny().catch(() => {});
+
 			// Always reload messages so user & assistant messages show even after an error
 			await refreshAll().catch(() => {});
 			if (pendingMessageId && messages.some((message) => message.id === pendingMessageId)) {
-				draftAssistant = '';
+				streamingBlocks = [];
+				currentTextTarget = '';
 				pendingMessageId = null;
 			}
 			streaming = false;
 			waitingForFirstToken = false;
 			streamAbortController = null;
 			stoppedByUser = false;
-			streamingToolCalls = [];
-			streamedAssistantTarget = '';
+			streamingBlocks = [];
+			currentTextTarget = '';
+			currentThinkingTarget = '';
 			stopDraftInterpolation();
+			stopThinkingInterpolation();
 		}
 	}
 
 	async function handleEdit(messageId: string, content: string) {
-		await editMessage({ messageId, content });
-		await refreshAll();
+		try {
+			const result = await editMessage({ messageId, content });
+			if (!result || result.success !== true) {
+				streamError = result?.error ?? 'Unable to edit message';
+				return;
+			}
+
+			// Editing creates a new branch point. Clear optimistic remnants so
+			// old assistant drafts cannot be re-shown after the server truncates history.
+			pendingAssistantDrafts = [];
+			pendingUserMessages = [];
+			pendingMessageId = null;
+			streamingBlocks = [];
+			currentTextTarget = '';
+			currentThinkingTarget = '';
+			stopDraftInterpolation();
+			stopThinkingInterpolation();
+
+			await refreshAll();
+			await streamMessage('regenerate', true);
+		} catch (error) {
+			streamError = error instanceof Error ? error.message : 'Unable to edit message';
+		}
 	}
 
 	async function handleRegenerate() {
@@ -736,48 +1114,43 @@
 					<MessageBubble {message} artifacts={conversationArtifacts} onEdit={handleEdit} onRegenerate={handleRegenerate} onOpenArtifact={openArtifact} />
 				{/each}
 
-				{#if waitingForFirstToken && streaming && !draftAssistant && streamingToolCalls.length === 0}
+				{#if waitingForFirstToken && streaming && streamingBlocks.length === 0}
 					<article class="chat chat-start">
-						<div>
-							<svg class="h-8 w-16" viewBox="0 0 80 32" aria-label="Assistant is generating a response">
-								<circle cx="16" cy="16" r="5" fill="currentColor" class="opacity-60">
-									<animate attributeName="r" values="5;7;5" dur="1.2s" repeatCount="indefinite" begin="0s" />
-									<animate attributeName="opacity" values="0.4;1;0.4" dur="1.2s" repeatCount="indefinite" begin="0s" />
-								</circle>
-								<circle cx="40" cy="16" r="5" fill="currentColor" class="opacity-60">
-									<animate attributeName="r" values="5;7;5" dur="1.2s" repeatCount="indefinite" begin="0.2s" />
-									<animate attributeName="opacity" values="0.4;1;0.4" dur="1.2s" repeatCount="indefinite" begin="0.2s" />
-								</circle>
-								<circle cx="64" cy="16" r="5" fill="currentColor" class="opacity-60">
-									<animate attributeName="r" values="5;7;5" dur="1.2s" repeatCount="indefinite" begin="0.4s" />
-									<animate attributeName="opacity" values="0.4;1;0.4" dur="1.2s" repeatCount="indefinite" begin="0.4s" />
-								</circle>
-							</svg>
+						<div class="flex items-center gap-3 px-4 py-3 text-sm text-base-content/70">
+							<span class="loading loading-spinner loading-md text-primary"></span>
+							<span class="sr-only">Assistant is generating a response</span>
 						</div>
 					</article>
 				{:else if streaming}
-					{#if streamingToolCalls.length > 0}
-						<div class="w-full space-y-1.5 pl-1">
-							{#each streamingToolCalls as tc (tc.id)}
-								<LiveToolCallCard
-									name={tc.name}
-									argumentsText={tc.arguments}
-									result={tc.result ?? ''}
-									status={tc.status}
-									executionMs={tc.executionMs ?? null}
-									expanded={tc.expanded}
-									token={tc.token ?? null}
-									onApprove={approveToolCall}
-									onDeny={denyToolCall}
+					{#each streamingBlocks as block (block.id)}
+						{#if block.kind === 'tool'}
+							<LiveToolCallCard
+								name={block.name}
+								argumentsText={block.arguments}
+								result={block.result ?? ''}
+								status={block.status === 'failed' ? 'completed' : block.status}
+								failed={block.status === 'failed'}
+								executionMs={block.executionMs ?? null}
+								expanded={block.expanded}
+								token={block.token ?? null}
+								onApprove={approveToolCall}
+								onDeny={denyToolCall}
+							/>
+						{:else if block.kind === 'thinking'}
+							<div class="w-full">
+								<ThinkingBlockCard
+									content={block.content}
+									reasoningTokens={block.reasoningTokens ?? null}
+									live={true}
+									expanded={block.expanded}
 								/>
-							{/each}
-						</div>
-					{/if}
-					{#if draftAssistant}
-						<article class="chat chat-start">
-							<div class="assistant-message pl-4"><div class="markdown-body">{@html renderMarkdown(draftAssistant)}</div></div>
-						</article>
-					{/if}
+							</div>
+						{:else if block.kind === 'text' && block.content}
+							<article class="chat chat-start">
+								<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3"><div class="markdown-body">{@html renderMarkdown(block.content)}</div></div>
+							</article>
+						{/if}
+					{/each}
 				{/if}
 			</div>
 
@@ -799,7 +1172,11 @@
 				busy={streaming && !pendingAskUser}
 				onCancelGeneration={stopStreaming}
 				model={model}
+				reasoningEffort={reasoningEffort}
 				onModelChange={(next) => maybeCompactBeforeModelSwitch(next)}
+				onReasoningEffortChange={(next) => {
+					reasoningEffort = next;
+				}}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
 			/>

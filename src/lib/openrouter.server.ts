@@ -6,11 +6,21 @@ type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 type TextContent = { type: 'text'; text: string }
 type ImageContent = { type: 'image_url'; image_url: { url: string } }
 type MessageContent = string | Array<TextContent | ImageContent>
+type ReasoningDetail = Record<string, unknown>
+
+type ReasoningConfig = {
+	enabled?: boolean
+	exclude?: boolean
+	effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+	maxTokens?: number
+}
 
 export type LlmMessage = {
 	role: ChatRole
 	content: MessageContent
 	toolCallId?: string
+	reasoning?: string | null
+	reasoningDetails?: ReasoningDetail[]
 	toolCalls?: Array<{
 		id: string
 		type: 'function'
@@ -23,6 +33,8 @@ function toChatMessages(messages: LlmMessage[]) {
 		role: message.role,
 		content: message.content,
 		...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+		...(message.reasoning ? { reasoning: message.reasoning } : {}),
+		...(message.reasoningDetails?.length ? { reasoningDetails: message.reasoningDetails } : {}),
 		...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
 	})) as Array<{ role: ChatRole; content: MessageContent }>
 }
@@ -83,6 +95,7 @@ export async function streamChat(
 	messages: LlmMessage[],
 	model = DEFAULT_MODEL,
 	tools?: Array<{ type: string; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+	reasoning?: ReasoningConfig,
 ) {
 	if (MOCK_EXTERNALS) {
 		const lastUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content ?? 'mock prompt'
@@ -110,6 +123,7 @@ export async function streamChat(
 			messages: chatMessages as never,
 			stream: true,
 			...(tools && tools.length > 0 ? { tools: tools as never } : {}),
+			...(reasoning ? { reasoning } : {}),
 		},
 	})
 }

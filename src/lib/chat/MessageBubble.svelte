@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ToolCallCard from './ToolCallCard.svelte';
+	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import ArtifactPreviewCard from '$lib/artifacts/ArtifactPreviewCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
@@ -25,7 +26,20 @@
 		tokensPerSec: number | null;
 		createdAt: Date | string;
 		toolCalls?: Array<Record<string, unknown>>;
+		metadata?: Record<string, unknown> | null;
 	};
+
+	type SavedBlock =
+		| { kind: 'text'; content: string }
+		| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
+		| {
+				kind: 'tool';
+				name: string;
+				arguments: unknown;
+				result: unknown;
+				success: boolean;
+				executionMs: number;
+		  };
 
 	let {
 		message,
@@ -41,18 +55,18 @@
 		onOpenArtifact?: ((artifactId: string) => void) | undefined;
 	}>();
 
-	const messageArtifacts = $derived(
-		artifacts.filter((a: ArtifactPreview) => a.messageId === message.id)
-	);
+	const messageArtifacts = $derived(artifacts.filter((a: ArtifactPreview) => a.messageId === message.id));
 
 	let editing = $state(false);
+	let editingBusy = $state(false);
+	let copied = $state(false);
+	let copiedResetTimer: ReturnType<typeof setTimeout> | null = null;
 	let draft = $state('');
+	let editorRoot = $state<HTMLDivElement | null>(null);
 
 	const isUser = $derived(message.role === 'user');
 	const isAssistant = $derived(message.role === 'assistant');
-	const renderedAssistantMarkdown = $derived(
-		isAssistant && !editing ? renderMarkdown(message.content ?? '') : ''
-	);
+	const renderedAssistantMarkdown = $derived(isAssistant ? renderMarkdown(message.content ?? '') : '');
 	const estimatedTokensOut = $derived(
 		message.tokensOut > 0 ? message.tokensOut : Math.max(1, Math.ceil((message.content?.length ?? 0) / 4))
 	);
@@ -60,55 +74,169 @@
 		message.tokensIn > 0 ? message.tokensIn : Math.max(1, Math.ceil((message.content?.length ?? 0) / 4))
 	);
 	const formattedCost = $derived(Number.parseFloat(message.cost || '0').toFixed(4));
+	const messageReasoningTokens = $derived.by(() => {
+		const value = (message.metadata as Record<string, unknown> | null | undefined)?.reasoningTokens;
+		return typeof value === 'number' && value > 0 ? value : null;
+	});
 
-	async function submitEdit() {
-		if (!draft.trim()) return;
-		await onEdit?.(message.id, draft.trim());
-		editing = false;
-	}
+	const savedBlocks = $derived<SavedBlock[] | null>(
+		Array.isArray((message.metadata as Record<string, unknown> | null | undefined)?.blocks)
+			? ((message.metadata as Record<string, unknown>).blocks as SavedBlock[])
+			: null
+	);
+	const lastThinkingBlockIndex = $derived(
+		savedBlocks
+			? savedBlocks.reduce((latest, block, index) => (block.kind === 'thinking' ? index : latest), -1)
+			: -1
+	);
+
+	$effect(() => {
+		if (!editing) return;
+
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target;
+			if (editorRoot && target instanceof Node && !editorRoot.contains(target)) {
+				cancelEditing();
+			}
+		};
+
+		const onEscape = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				cancelEditing();
+			}
+		};
+
+		window.addEventListener('pointerdown', onPointerDown, true);
+		window.addEventListener('keydown', onEscape);
+		return () => {
+			window.removeEventListener('pointerdown', onPointerDown, true);
+			window.removeEventListener('keydown', onEscape);
+		};
+	});
 
 	function startEditing() {
 		draft = message.content;
 		editing = true;
+		editingBusy = false;
+	}
+
+	function cancelEditing() {
+		editing = false;
+		editingBusy = false;
+		draft = message.content;
+	}
+
+	async function submitEdit() {
+		const trimmed = draft.trim();
+		if (!trimmed || editingBusy) return;
+		editingBusy = true;
+		try {
+			await onEdit?.(message.id, trimmed);
+			editing = false;
+		} finally {
+			editingBusy = false;
+		}
+	}
+
+	function handleEditorKeydown(event: KeyboardEvent) {
+		if (event.key === 'Enter' && !event.shiftKey) {
+			event.preventDefault();
+			void submitEdit();
+		}
+	}
+
+	async function copyAssistantResponse() {
+		if (!isAssistant || !message.content?.trim()) return;
+		try {
+			if (navigator?.clipboard?.writeText) {
+				await navigator.clipboard.writeText(message.content);
+			} else {
+				const textarea = document.createElement('textarea');
+				textarea.value = message.content;
+				textarea.setAttribute('readonly', '');
+				textarea.style.position = 'absolute';
+				textarea.style.left = '-9999px';
+				document.body.appendChild(textarea);
+				textarea.select();
+				document.execCommand('copy');
+				document.body.removeChild(textarea);
+			}
+			copied = true;
+			if (copiedResetTimer) clearTimeout(copiedResetTimer);
+			copiedResetTimer = setTimeout(() => {
+				copied = false;
+				copiedResetTimer = null;
+			}, 1200);
+		} catch {
+			copied = false;
+		}
 	}
 </script>
 
 <article class={`chat-message w-full ${isUser ? 'chat chat-end' : ''}`}>
-	{#if !isUser && message.toolCalls && message.toolCalls.length > 0}
-		<div class="mb-2 w-full space-y-2 pl-2">
-			{#each message.toolCalls as call, idx (`${message.id}-${idx}`)}
-				<ToolCallCard
-					name={String(call.name ?? 'tool')}
-					argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
-					result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
-				/>
-			{/each}
-		</div>
-	{/if}
-
 	{#if isUser}
-		<div class="max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
+		<div class={`max-w-[90%] ${editing ? '' : 'rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3'}`}>
 			{#if editing}
-				<textarea class="textarea textarea-bordered w-full" bind:value={draft}></textarea>
-				<div class="mt-2 flex gap-2">
-					<button class="btn btn-xs btn-primary" type="button" onclick={submitEdit}>Save</button>
-					<button class="btn btn-xs" type="button" onclick={() => (editing = false)}>Cancel</button>
+				<div bind:this={editorRoot} class="rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm sm:p-3">
+					<textarea
+						class="w-full resize-none border-none bg-transparent px-1.5 py-1 text-base leading-6 outline-none"
+						rows="3"
+						bind:value={draft}
+						onkeydown={handleEditorKeydown}
+						disabled={editingBusy}
+					></textarea>
+					<div class="mt-2 flex items-center justify-end gap-2 px-1">
+						<button class="btn btn-ghost btn-sm" type="button" onclick={cancelEditing} disabled={editingBusy}>
+							Cancel
+						</button>
+						<button class="btn btn-primary btn-sm" type="button" onclick={submitEdit} disabled={!draft.trim() || editingBusy}>
+							{editingBusy ? 'Updating…' : 'Save & regenerate'}
+						</button>
+					</div>
 				</div>
 			{:else}
 				<p class="whitespace-pre-wrap">{message.content}</p>
 			{/if}
 		</div>
-	{:else}
-		<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
-			{#if editing}
-				<textarea class="textarea textarea-bordered w-full" bind:value={draft}></textarea>
-				<div class="mt-2 flex gap-2">
-					<button class="btn btn-xs btn-primary" type="button" onclick={submitEdit}>Save</button>
-					<button class="btn btn-xs" type="button" onclick={() => (editing = false)}>Cancel</button>
+	{:else if savedBlocks}
+		{#each savedBlocks as block, idx (`${message.id}-block-${idx}`)}
+			{#if block.kind === 'tool'}
+				<div class="mb-1.5 w-full">
+					<ToolCallCard
+						name={String(block.name)}
+						argumentsText={JSON.stringify(block.arguments ?? {}, null, 2)}
+						result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
+						status={block.success === false ? 'failed' : 'completed'}
+					/>
 				</div>
-			{:else}
-				<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
+			{:else if block.kind === 'thinking' && block.content?.trim()}
+				<div class="mb-1.5 w-full">
+					<ThinkingBlockCard
+						content={block.content}
+						reasoningTokens={idx === lastThinkingBlockIndex ? messageReasoningTokens : block.reasoningTokens ?? null}
+					/>
+				</div>
+			{:else if block.kind === 'text' && block.content?.trim()}
+				<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+					<div class="markdown-body">{@html renderMarkdown(block.content)}</div>
+				</div>
 			{/if}
+		{/each}
+	{:else}
+		{#if message.toolCalls && message.toolCalls.length > 0}
+			<div class="mb-2 w-full space-y-2">
+				{#each message.toolCalls as call, idx (`${message.id}-${idx}`)}
+					<ToolCallCard
+						name={String(call.name ?? 'tool')}
+						argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
+						result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
+					/>
+				{/each}
+			</div>
+		{/if}
+		<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+			<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
 		</div>
 	{/if}
 
@@ -123,6 +251,24 @@
 				</button>
 			{/if}
 			{#if isAssistant}
+				<button
+					class="btn btn-ghost btn-xs rounded-md px-2"
+					type="button"
+					onclick={copyAssistantResponse}
+					title="Copy response"
+					aria-label="Copy response"
+				>
+					{#if copied}
+						<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<polyline points="20 6 9 17 4 12"></polyline>
+						</svg>
+					{:else}
+						<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+							<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+						</svg>
+					{/if}
+				</button>
 				<button class="btn btn-ghost btn-xs rounded-md px-2" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
 					<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<polyline points="23 4 23 10 17 10"></polyline>
@@ -147,6 +293,10 @@
 							<span class="text-right">{estimatedTokensIn}</span>
 							<span class="opacity-70">Tokens Out</span>
 							<span class="text-right">{estimatedTokensOut}</span>
+							{#if messageReasoningTokens !== null}
+								<span class="opacity-70">Thinking</span>
+								<span class="text-right">{messageReasoningTokens.toLocaleString()}</span>
+							{/if}
 							<span class="opacity-70">Cost</span>
 							<span class="text-right">${formattedCost}</span>
 							<span class="opacity-70">TTFT</span>
@@ -291,5 +441,3 @@
 		color: oklch(40% 0.16 250);
 	}
 </style>
-
-

@@ -1,16 +1,29 @@
 <script lang="ts">
 	import ModelSelector from '$lib/models/ModelSelector.svelte'
 
+	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+	const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+		{ value: 'none', label: 'Reasoning off' },
+		{ value: 'minimal', label: 'Reasoning min' },
+		{ value: 'low', label: 'Reasoning low' },
+		{ value: 'medium', label: 'Reasoning med' },
+		{ value: 'high', label: 'Reasoning high' },
+		{ value: 'xhigh', label: 'Reasoning max' },
+	]
+
 	let {
 		value = $bindable(''),
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
+		reasoningEffort = 'none',
 		placeholder = 'Message AGENTSTUDIO...',
 		recording = false,
 		transcribing = false,
 		speechSupported = false,
 		onSubmit,
 		onModelChange,
+		onReasoningEffortChange,
 		onCancelGeneration,
 		onAddFiles,
 		onMicClick,
@@ -19,17 +32,24 @@
 		value?: string
 		busy?: boolean
 		model?: string
+		reasoningEffort?: ReasoningEffort
 		placeholder?: string
 		recording?: boolean
 		transcribing?: boolean
 		speechSupported?: boolean
 		onSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
+		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined
 		onCancelGeneration?: (() => Promise<void> | void) | undefined
 		onAddFiles?: (() => Promise<void> | void) | undefined
 		onMicClick?: (() => Promise<void> | void) | undefined
 		class?: string
 	} = $props()
+
+	let reasoningMenuOpen = $state(false)
+	const selectedReasoningLabel = $derived(
+		REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'Reasoning off'
+	)
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault()
@@ -78,6 +98,40 @@
 					showChevron={false}
 					onchange={(id: string) => onModelChange?.(id)}
 				/>
+			</div>
+			<div class="dropdown dropdown-top dropdown-end">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-base-content/85 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+					title="Reasoning effort"
+					aria-label="Reasoning effort"
+					aria-expanded={reasoningMenuOpen}
+					disabled={busy}
+					onclick={() => {
+						reasoningMenuOpen = !reasoningMenuOpen
+					}}
+				>
+					<span class="truncate">{selectedReasoningLabel}</span>
+					<span class="opacity-70">▾</span>
+				</button>
+				{#if reasoningMenuOpen}
+					<ul class="menu dropdown-content z-30 mb-2 w-40 rounded-box border border-base-300 bg-base-100 p-1 shadow-xl">
+						{#each REASONING_OPTIONS as option (option.value)}
+							<li>
+								<button
+									type="button"
+									class:active={option.value === reasoningEffort}
+									onclick={() => {
+										reasoningMenuOpen = false
+										onReasoningEffortChange?.(option.value)
+									}}
+								>
+									{option.label}
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			</div>
 			{#if speechSupported}
 				<div class="relative flex items-center justify-center">

@@ -11,6 +11,7 @@
 		argumentsText = '',
 		result = '',
 		status = 'executing',
+		failed = false,
 		executionMs = null,
 		expanded = true,
 		token = null,
@@ -21,6 +22,7 @@
 		argumentsText?: string;
 		result?: string;
 		status?: 'pending' | 'approved' | 'executing' | 'completed' | 'denied';
+		failed?: boolean;
 		executionMs?: number | null;
 		expanded?: boolean;
 		token?: string | null;
@@ -31,15 +33,18 @@
 	const isPending = $derived(status === 'pending');
 	const isExecuting = $derived(status === 'executing' || status === 'approved');
 	const isCompleted = $derived(status === 'completed');
+	const isFailed = $derived(failed);
 	const isDenied = $derived(status === 'denied');
 	const parsedArgs = $derived(parseJsonValue(argumentsText));
 	const parsedResult = $derived(parseJsonValue(result));
-	const friendlyLabel = $derived(getFriendlyToolLabel(name, parsedArgs, status));
+	const friendlyLabel = $derived(getFriendlyToolLabel(name, parsedArgs, isFailed ? 'failed' : status));
 	const webPreview = $derived(getWebSearchPreview(name, parsedResult));
 
 	const colorClass = $derived(
 		isDenied
 			? 'border-error/50 bg-error/5'
+			: isFailed
+				? 'border-error/60 bg-error/10'
 			: isPending
 				? 'border-warning/50 bg-warning/5'
 				: isExecuting
@@ -54,7 +59,7 @@
 	);
 
 	const statusIcon = $derived(
-		isDenied ? 'blocked' : isPending ? 'pending' : isExecuting ? 'executing' : 'done'
+		isDenied ? 'blocked' : isFailed ? 'failed' : isPending ? 'pending' : isExecuting ? 'executing' : 'done'
 	);
 
 	const isScreenshot = $derived(name === 'browser_screenshot');
@@ -88,6 +93,12 @@
 					<circle cx="12" cy="12" r="10" />
 					<line x1="15" y1="9" x2="9" y2="15" />
 					<line x1="9" y1="9" x2="15" y2="15" />
+				</svg>
+			{:else if statusIcon === 'failed'}
+				<svg class="h-4 w-4 shrink-0 text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<circle cx="12" cy="12" r="10" />
+					<line x1="12" y1="7" x2="12" y2="13" />
+					<circle cx="12" cy="17" r="1" fill="currentColor" stroke="none" />
 				</svg>
 			{:else}
 				<svg class="h-4 w-4 shrink-0 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -128,6 +139,8 @@
 				</span>
 			{:else if isDenied}
 				<span class="text-xs text-error/70">denied</span>
+			{:else if isFailed}
+				<span class="text-xs text-error/70">failed</span>
 			{/if}
 			<svg class="tool-chevron h-4 w-4 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 				<polyline points="6 9 12 15 18 9" />
@@ -174,6 +187,8 @@
 
 		{#if isDenied}
 			<p class="text-xs text-error/70 italic">Tool execution was denied.</p>
+		{:else if isFailed}
+			<p class="text-xs text-error/70 italic">Tool execution failed.</p>
 		{/if}
 	</div>
 </details>

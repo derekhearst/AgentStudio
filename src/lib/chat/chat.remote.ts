@@ -1,5 +1,5 @@
 import { command, query } from '$app/server'
-import { and, asc, desc, eq, gt } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, ne, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
@@ -27,6 +27,14 @@ const editMessageSchema = z.object({
 const deleteMessagesAfterSchema = z.object({
 	conversationId: z.string().uuid(),
 	messageId: z.string().uuid(),
+})
+
+const savePartialAssistantSchema = z.object({
+	conversationId: z.string().uuid(),
+	content: z.string().trim().min(1),
+	model: z.string().trim().min(1).max(120).optional(),
+	toolCalls: z.array(z.record(z.string(), z.unknown())).optional(),
+	metadata: z.record(z.string(), z.unknown()).optional(),
 })
 
 export const getConversations = query(async () => {
@@ -117,7 +125,15 @@ export const editMessage = command(editMessageSchema, async (input) => {
 
 	await db
 		.delete(messages)
-		.where(and(eq(messages.conversationId, target.conversationId), gt(messages.createdAt, target.createdAt)))
+		.where(
+			and(
+				eq(messages.conversationId, target.conversationId),
+				or(
+					gt(messages.createdAt, target.createdAt),
+					and(eq(messages.createdAt, target.createdAt), ne(messages.id, target.id)),
+				),
+			),
+		)
 
 	return { success: true as const, conversationId: target.conversationId }
 })
@@ -149,6 +165,38 @@ export const deleteMessagesAfter = command(deleteMessagesAfterSchema, async (inp
 		.where(and(eq(messages.conversationId, input.conversationId), gt(messages.createdAt, pivot.createdAt)))
 
 	return { success: true as const }
+})
+
+export const savePartialAssistant = command(savePartialAssistantSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const [conversation] = await db
+		.select({ id: conversations.id })
+		.from(conversations)
+		.where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, user.id)))
+		.limit(1)
+
+	if (!conversation) {
+		return { success: false as const, error: 'Conversation not found' as const }
+	}
+
+	const [created] = await db
+		.insert(messages)
+		.values({
+			conversationId: input.conversationId,
+			role: 'assistant',
+			content: input.content,
+			model: input.model ?? null,
+			metadata: {
+				partial: true,
+				...input.metadata,
+			},
+			toolCalls: input.toolCalls ?? [],
+		})
+		.returning({ id: messages.id })
+
+	await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, input.conversationId))
+
+	return { success: true as const, messageId: created.id }
 })
 
 export const getMessageStats = query(conversationIdSchema, async (conversationId) => {
@@ -195,4 +243,3 @@ export const updateConversationMeta = command(updateConversationMetaSchema, asyn
 		.where(and(eq(conversations.id, input.id), eq(conversations.userId, user.id)))
 	return { success: true as const }
 })
-

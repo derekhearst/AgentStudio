@@ -10,18 +10,35 @@
 		name,
 		argumentsText = '',
 		result = '',
+		status,
 		executionMs = null
-	} = $props<{ name: string; argumentsText?: string; result?: string; executionMs?: number | null }>();
+	} = $props<{
+		name: string;
+		argumentsText?: string;
+		result?: string;
+		status?: 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied';
+		executionMs?: number | null;
+	}>();
 
 	const parsedArgs = $derived(parseJsonValue(argumentsText));
 	const parsedResult = $derived(parseJsonValue(result));
-	const friendlyLabel = $derived(getFriendlyToolLabel(name, parsedArgs, 'completed'));
+	const resultText = $derived(result?.trim() ?? '');
+	const isStatusFailed = $derived(status === 'failed');
+	const isStatusDenied = $derived(status === 'denied');
+	const isFailed = $derived(
+		isStatusFailed ||
+		Boolean(parsedResult && typeof parsedResult === 'object' && 'error' in (parsedResult as Record<string, unknown>)) ||
+		/^error:/i.test(resultText)
+	);
+	const friendlyLabel = $derived(getFriendlyToolLabel(name, parsedArgs, isStatusDenied ? 'denied' : isFailed ? 'failed' : 'completed'));
 	const webPreview = $derived(getWebSearchPreview(name, parsedResult));
 
 	const isScreenshot = $derived(name === 'browser_screenshot');
 
 	const colorClass = $derived(
-		name === 'web_search'
+		isFailed
+			? 'border-error/60 bg-error/10'
+			: name === 'web_search'
 			? 'border-info/50 bg-info/10'
 			: name.includes('code')
 				? 'border-success/50 bg-success/10'
@@ -44,10 +61,18 @@
 <details class={`rounded-xl border ${colorClass} transition-all duration-300`}>
 	<summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium select-none">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
-			<svg class="h-4 w-4 shrink-0 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<circle cx="12" cy="12" r="10" />
-				<polyline points="16 10 11 15.5 8 12.5" />
-			</svg>
+			{#if isStatusDenied || isFailed}
+				<svg class="h-4 w-4 shrink-0 text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<circle cx="12" cy="12" r="10" />
+					<line x1="15" y1="9" x2="9" y2="15" />
+					<line x1="9" y1="9" x2="15" y2="15" />
+				</svg>
+			{:else}
+				<svg class="h-4 w-4 shrink-0 text-success" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+					<circle cx="12" cy="12" r="10" />
+					<polyline points="16 10 11 15.5 8 12.5" />
+				</svg>
+			{/if}
 			<div class="min-w-0">
 				<div class="truncate">{friendlyLabel}</div>
 				{#if webPreview}

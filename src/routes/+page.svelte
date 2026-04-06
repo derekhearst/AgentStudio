@@ -1,6 +1,7 @@
 <svelte:head><title>Chat | AGENTSTUDIO</title></svelte:head>
 
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { tick } from 'svelte';
 	import { fade, fly, scale } from 'svelte/transition';
@@ -12,6 +13,11 @@
 	let busy = $state(false);
 	let prompt = $state('');
 	let model = $state('anthropic/claude-sonnet-4');
+	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+	const REASONING_STORAGE_KEY = 'drokbot:reasoning-effort';
+	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+	let reasoningEffort = $state<ReasoningEffort>('none');
+	let reasoningHydrated = $state(false);
 	let modelInitialized = $state(false);
 	let expanded = $state(false);
 	let search = $state('');
@@ -27,6 +33,20 @@
 	$effect(() => {
 		if (modelInitialized) return;
 		void loadDefaultModel();
+	});
+
+	$effect(() => {
+		if (!browser || reasoningHydrated) return;
+		const stored = window.localStorage.getItem(REASONING_STORAGE_KEY);
+		if (stored && VALID_REASONING_EFFORTS.includes(stored as ReasoningEffort)) {
+			reasoningEffort = stored as ReasoningEffort;
+		}
+		reasoningHydrated = true;
+	});
+
+	$effect(() => {
+		if (!browser || !reasoningHydrated) return;
+		window.localStorage.setItem(REASONING_STORAGE_KEY, reasoningEffort);
 	});
 
 	async function loadDefaultModel() {
@@ -178,10 +198,14 @@
 				bind:value={prompt}
 				{busy}
 				{model}
+				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
 				onSubmit={(content) => handleNewChat(content)}
 				onModelChange={(id) => {
 					model = id;
+				}}
+				onReasoningEffortChange={(next) => {
+					reasoningEffort = next;
 				}}
 				onAddFiles={() => {
 					// File picker hook will be wired in a later pass.

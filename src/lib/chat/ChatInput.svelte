@@ -10,18 +10,24 @@
 		url: string;
 	};
 
+	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 	let {
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
+		reasoningEffort = 'none',
 		onSubmit,
 		onModelChange,
+		onReasoningEffortChange,
 		onCancelGeneration,
 		estimatedRemaining = 128000
 	} = $props<{
 		busy?: boolean;
 		model?: string;
+		reasoningEffort?: ReasoningEffort;
 		onSubmit?: ((content: string, attachments: ChatAttachment[]) => Promise<void> | void) | undefined;
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
+		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined;
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
 	}>();
@@ -244,12 +250,14 @@
 		bind:value
 		busy={busy || uploadBusy}
 		{model}
+		{reasoningEffort}
 		{recording}
 		{transcribing}
 		{speechSupported}
 		placeholder="Message AGENTSTUDIO..."
 		onSubmit={(content) => handleSubmit(content)}
 		onModelChange={(id) => onModelChange?.(id)}
+		onReasoningEffortChange={(effort) => onReasoningEffortChange?.(effort)}
 		onCancelGeneration={() => onCancelGeneration?.()}
 		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}

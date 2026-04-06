@@ -16,9 +16,12 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 
 - Real-time streaming responses
 - Smooth character interpolation for streamed assistant text
+- Visible thinking blocks with streamed reasoning details and thinking-token counts when the model provides them
+- Spinner-first waiting state before first stream tokens arrive
 - Per-message metrics (model, tokens, cost, latency)
-- Message editing and regeneration
+- Message editing with inline composer-style UI, outside-click cancel, and save-to-regenerate flow
 - Model picker per conversation
+- Composer-level reasoning effort picker (`off`, `minimal`, `low`, `medium`, `high`, `max`) for supported models
 - File attachments (images, PDFs, CSV, JSON, Excel)
 - Artifact side panel (collapsed, panel, fullscreen modes)
 - Auto-title generation
@@ -28,6 +31,7 @@ AGENTSTUDIO is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Multi-question ask_user flow with previous/next navigation and per-question focus
 - Freeform bypass: typing in the composer resolves pending ask_user prompts directly
 - Auto-scroll keeps following live output during both text streaming and tool call rendering
+- User-canceled streams persist partial output so streamed content is not lost mid-response
 
 ### 2. Autonomous Agents
 
