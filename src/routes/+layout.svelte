@@ -142,7 +142,7 @@
 				<MobileNav activePath={page.url.pathname} slideOff={true} />
 			{/if}
 
-			<div class="mx-auto grid min-h-0 w-full max-w-400 flex-1 grid-rows-[1fr] gap-0 p-0 tablet:gap-3 tablet:p-3 desktop:p-3 {showAside ? 'desktop:grid-cols-[minmax(0,1fr)_320px]' : ''}">
+			<div class="grid min-h-0 w-full flex-1 grid-rows-[1fr] gap-0 p-0 tablet:gap-3 tablet:p-3 desktop:p-3 {showAside ? 'desktop:grid-cols-[minmax(0,1fr)_320px]' : ''}">
 				<main class="relative flex min-h-0 flex-col overflow-y-auto {isChatDetailRoute ? 'p-0 tablet:rounded-3xl tablet:border tablet:border-base-300 tablet:bg-base-100/85 tablet:shadow-sm' : 'p-2 tablet:rounded-3xl tablet:border tablet:border-base-300 tablet:bg-base-100/85 tablet:px-4 tablet:pt-3 tablet:pb-4 tablet:shadow-sm'} desktop:px-6 desktop:pt-3 desktop:pb-6 {isChatOrHome && !isChatDetailRoute ? 'mobile-chat-main' : ''}">
 					{@render children()}
 				</main>
