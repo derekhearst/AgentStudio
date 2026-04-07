@@ -30,3 +30,7 @@ test-results
 # Generated Tauri icons (single source is static/icon.svg)
 src-tauri/icons/*
 !src-tauri/icons/.gitkeep
+
+# Tauri Rust build artifacts
+src-tauri/target/
+src-tauri/Cargo.lock
