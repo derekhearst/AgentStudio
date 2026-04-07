@@ -134,17 +134,12 @@ async function ensureDatabaseExists(databaseUrl: string) {
 
 		if (!existingDatabase[0]?.exists) {
 			console.log(`[db] Creating database ${databaseName}`)
-			try {
-				await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
-			} catch (err: unknown) {
-				const isCollationMismatch =
-					err instanceof Error && err.message.toLowerCase().includes('collation version mismatch')
-				if (!isCollationMismatch) throw err
-
-				console.warn('[db] Collation version mismatch on template1; refreshing and retrying')
-				await adminClient.unsafe('ALTER DATABASE template1 REFRESH COLLATION VERSION')
-				await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
-			}
+			// Proactively refresh template1 collation to avoid version mismatch errors
+			// when the OS libc version differs from when PostgreSQL was initialized.
+			await adminClient.unsafe('ALTER DATABASE template1 REFRESH COLLATION VERSION').catch(() => {
+				// Not fatal — may lack superuser privileges or already be up to date
+			})
+			await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
 			return true
 		}
 
@@ -281,31 +276,35 @@ async function bootstrapDatabase() {
 		return
 	}
 
-	const createdDatabase = await ensureDatabaseExists(databaseUrl)
-	const resetLegacySchema = await reconcileLegacySchemaState()
-	await ensureRequiredExtensions()
+	try {
+		const createdDatabase = await ensureDatabaseExists(databaseUrl)
+		const resetLegacySchema = await reconcileLegacySchemaState()
+		await ensureRequiredExtensions()
 
-	const latestLocalMigrationMillis = getLatestLocalMigrationMillis()
-	const lastAppliedMigrationMillis = await getLastAppliedMigrationMillis()
-	const hasPendingMigrations =
-		latestLocalMigrationMillis !== null &&
-		(lastAppliedMigrationMillis === null || lastAppliedMigrationMillis < latestLocalMigrationMillis)
+		const latestLocalMigrationMillis = getLatestLocalMigrationMillis()
+		const lastAppliedMigrationMillis = await getLastAppliedMigrationMillis()
+		const hasPendingMigrations =
+			latestLocalMigrationMillis !== null &&
+			(lastAppliedMigrationMillis === null || lastAppliedMigrationMillis < latestLocalMigrationMillis)
 
-	if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
-		console.log('[db] Applying migrations')
-	}
+		if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
+			console.log('[db] Applying migrations')
+		}
 
-	const bootstrapDb = createDatabase(client)
-	await migrate(bootstrapDb, {
-		migrationsFolder: getMigrationsFolder(),
-		migrationsSchema: MIGRATIONS_SCHEMA,
-		migrationsTable: MIGRATIONS_TABLE,
-	})
+		const bootstrapDb = createDatabase(client)
+		await migrate(bootstrapDb, {
+			migrationsFolder: getMigrationsFolder(),
+			migrationsSchema: MIGRATIONS_SCHEMA,
+			migrationsTable: MIGRATIONS_TABLE,
+		})
 
-	if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
-		console.log('[db] Database bootstrapped and ready')
-	} else {
-		console.log('[db] Database ready')
+		if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
+			console.log('[db] Database bootstrapped and ready')
+		} else {
+			console.log('[db] Database ready')
+		}
+	} catch (err) {
+		console.error('[db] Bootstrap failed — database may be unavailable:', err)
 	}
 }
 
