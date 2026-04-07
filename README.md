@@ -101,8 +101,8 @@ bun run test:e2e
 
 - GitHub Releases now trigger a workflow that builds native artifacts and attaches them to the release.
 - Outputs:
-	- Windows installer `.exe`
-	- Android `.apk`
+  - Windows installer `.exe`
+  - Android `.apk`
 - Workflow file: `.github/workflows/release-native-builds.yml`
 - Trigger: publish a GitHub Release (tag-based release flow)
 - Icon source-of-truth: `static/icon.svg`.
