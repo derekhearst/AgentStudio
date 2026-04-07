@@ -134,7 +134,17 @@ async function ensureDatabaseExists(databaseUrl: string) {
 
 		if (!existingDatabase[0]?.exists) {
 			console.log(`[db] Creating database ${databaseName}`)
-			await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
+			try {
+				await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
+			} catch (err: unknown) {
+				const isCollationMismatch =
+					err instanceof Error && err.message.toLowerCase().includes('collation version mismatch')
+				if (!isCollationMismatch) throw err
+
+				console.warn('[db] Collation version mismatch on template1; refreshing and retrying')
+				await adminClient.unsafe('ALTER DATABASE template1 REFRESH COLLATION VERSION')
+				await adminClient.unsafe(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
+			}
 			return true
 		}
 
