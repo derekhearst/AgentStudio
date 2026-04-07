@@ -26,3 +26,7 @@ test-results
 
 # Sandbox workspace (local dev)
 .sandbox
+
+# Generated Tauri icons (single source is static/icon.svg)
+src-tauri/icons/*
+!src-tauri/icons/.gitkeep

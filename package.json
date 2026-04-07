@@ -4,6 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
+		"tauri:icons": "bunx tauri icon static/icon.svg -o src-tauri/icons",
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
