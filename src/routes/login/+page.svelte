@@ -28,7 +28,7 @@
 	let tauriContext = $state(false);
 
 	const selectedUser = $derived(users.find((user) => user.id === selectedUserId) ?? null);
-	const showBrowserFallback = $derived(tauriContext && !passkeySupported);
+	const showBrowserFallback = $derived(!passkeySupported);
 
 	async function detectPasskeySupport(): Promise<boolean> {
 		if (typeof window === 'undefined') return false;

@@ -109,6 +109,17 @@ bun run test:e2e
 - Icon source-of-truth: `static/icon.svg`.
 - Generated platform icon files under `src-tauri/icons` are recreated automatically by `bun run tauri:icons` in CI and before Tauri dev/build.
 
+### Local Android Commands (Windows)
+
+- `bun run android:build:local` builds a debug APK using the known-good local SDK/NDK + MSVC setup and `TAURI_REMOTE_URL=https://agentstudio.derekhearst.com`.
+- `bun run android:install:local` installs the latest built APK to a connected device and launches the app.
+- `bun run android:run:local` builds, installs, and launches in one command.
+
+Optional script args:
+
+- Build with a different URL: `powershell -ExecutionPolicy Bypass -File scripts/android-build-local.ps1 -RemoteUrl "https://your-host"`
+- Install a specific APK file: `powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1 -ApkPath "path\\to\\app.apk"`
+
 For opt-in live provider checks (real OpenRouter calls, no E2E mocks):
 
 ```sh

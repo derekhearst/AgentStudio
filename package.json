@@ -5,6 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"tauri:icons": "bunx tauri icon static/icon.svg -o src-tauri/icons",
+		"android:build:local": "powershell -ExecutionPolicy Bypass -File scripts/android-build-local.ps1",
+		"android:install:local": "powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1",
+		"android:run:local": "bun run android:build:local && bun run android:install:local",
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
