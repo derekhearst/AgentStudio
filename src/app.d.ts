@@ -60,6 +60,7 @@ declare global {
 	}
 
 	interface Window {
+		__TAURI_INTERNALS__?: unknown
 		__TAURI__?: {
 			core: {
 				invoke<T = unknown>(cmd: string, args?: unknown): Promise<T>

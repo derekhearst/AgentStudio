@@ -25,7 +25,6 @@
 	let browserFallbackError = $state('');
 	let statusMessage = $state('');
 	let passkeySupported = $state(true);
-	let tauriContext = $state(false);
 
 	const selectedUser = $derived(users.find((user) => user.id === selectedUserId) ?? null);
 	const showBrowserFallback = $derived(!passkeySupported);
@@ -102,7 +101,7 @@
 
 		try {
 			const targetUrl = page.url.href;
-			if (tauriContext) {
+			if (isTauri()) {
 				await invoke('open_external_url', { url: targetUrl });
 				statusMessage = 'Opened your default browser for sign-in.';
 				return;
@@ -119,7 +118,6 @@
 	}
 
 	onMount(() => {
-		tauriContext = isTauri();
 		void detectPasskeySupport().then((supported) => {
 			passkeySupported = supported;
 		});
