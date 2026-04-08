@@ -27,6 +27,8 @@ jobs:
         run: bun run tauri:icons
 
       - name: Build Windows bundle
+        env:
+          TAURI_REMOTE_URL: ${{ secrets.TAURI_REMOTE_URL }}
         run: bunx tauri build --bundles nsis
 
       - name: Collect EXE artifacts
@@ -93,6 +95,8 @@ jobs:
         run: bunx tauri android init --ci
 
       - name: Build Android APK
+        env:
+          TAURI_REMOTE_URL: ${{ secrets.TAURI_REMOTE_URL }}
         run: bunx tauri android build --apk --target aarch64
 
       - name: Debug signing secret presence (safe)

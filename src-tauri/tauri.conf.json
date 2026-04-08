@@ -9,15 +9,7 @@
 		"frontendDist": "../build"
 	},
 	"app": {
-		"windows": [
-			{
-				"fullscreen": false,
-				"height": 900,
-				"resizable": true,
-				"title": "AgentStudio",
-				"width": 1200
-			}
-		],
+		"windows": [],
 		"security": {
 			"csp": null
 		}

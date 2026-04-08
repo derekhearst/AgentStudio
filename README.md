@@ -100,6 +100,7 @@ bun run test:e2e
 ## Native Release Builds
 
 - GitHub Releases now trigger a workflow that builds native artifacts and attaches them to the release.
+- If repository secret `TAURI_REMOTE_URL` is set, native builds open that hosted URL in the Tauri webview instead of bundled frontend assets. This is the intended mode for thin-shell desktop/mobile releases backed by the Docker-hosted Node app.
 - Outputs:
   - Windows installer `.exe`
   - Android `.apk`

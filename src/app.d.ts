@@ -60,6 +60,11 @@ declare global {
 	}
 
 	interface Window {
+		__TAURI__?: {
+			core: {
+				invoke<T = unknown>(cmd: string, args?: unknown): Promise<T>
+			}
+		}
 		SpeechRecognition?: SpeechRecognitionConstructor
 		webkitSpeechRecognition?: SpeechRecognitionConstructor
 	}

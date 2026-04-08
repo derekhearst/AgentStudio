@@ -12,5 +12,9 @@ export async function invoke<T = unknown>(cmd: string, args?: unknown): Promise<
 	if (!isTauri()) {
 		throw new Error('Not running in Tauri context')
 	}
-	return window.__TAURI__.core.invoke(cmd, args)
+	const tauri = window.__TAURI__
+	if (!tauri) {
+		throw new Error('Tauri bridge is unavailable')
+	}
+	return tauri.core.invoke(cmd, args)
 }
