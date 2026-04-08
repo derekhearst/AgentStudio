@@ -8,6 +8,8 @@ Self-hosted autonomous AI agent platform with persistent memory, user-scoped too
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Creation workflows are chat-led: New Project, New Agent, New Task, and New Skill actions now launch a fresh conversation with a seeded creation prompt. The assistant runs a cooperative planning flow (asks follow-up questions first), presents an execution plan card, and only executes tool calls after explicit plan approval.
+
 ### Agents and Tasks
 
 You can create specialized agents, assign tasks, and review results in a branch-based code review flow. Task lifecycle is managed in a Kanban-style board with clear status transitions.
@@ -23,6 +25,8 @@ The memory system stores, retrieves, and consolidates facts over time using Post
 ### Dashboard and Settings
 
 The dashboard is available at a dedicated route and shows live system totals, task status distribution, and recent activity across conversations and tasks. Settings persist default model, theme, notification preferences, and dream-cycle behavior in the database.
+
+Tool execution has three approval modes: `auto`, `confirm`, and `plan` (plan-first). In plan-first mode, tool calls are grouped into a plan and require Approve, Cancel, or Continue Planning before execution.
 
 ### Database Bootstrap
 
@@ -97,6 +101,12 @@ bun run check
 bun run test:e2e
 ```
 
+Playwright E2E policy:
+
+- `bun run test:e2e` runs with real external integrations (OpenRouter, SearXNG, sandbox tools).
+- Required env vars for E2E: `DATABASE_URL`, `AUTH_PASSWORD`, `OPENROUTER_API_KEY`, `SEARXNG_URL`, `SANDBOX_WORKSPACE`.
+- The suite fails fast during global setup if any required dependency is missing or unreachable.
+
 ## Native Release Builds
 
 - GitHub Releases now trigger a workflow that builds native artifacts and attaches them to the release.
@@ -120,7 +130,7 @@ Optional script args:
 - Build with a different URL: `powershell -ExecutionPolicy Bypass -File scripts/android-build-local.ps1 -RemoteUrl "https://your-host"`
 - Install a specific APK file: `powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1 -ApkPath "path\\to\\app.apk"`
 
-For opt-in live provider checks (real OpenRouter calls, no E2E mocks):
+For an explicit live-focused subset:
 
 ```sh
 bun run test:e2e:live
@@ -128,9 +138,9 @@ bun run test:e2e:live
 
 Notes:
 
-- `bun run test:e2e` runs deterministic mocked external integrations for stable CI/local execution.
-- `bun run test:e2e:live` runs only `@live` tests with `PLAYWRIGHT_LIVE=1`, which disables external mocks.
-- Live tests require a valid `OPENROUTER_API_KEY` with account access; provider auth errors (for example `User not found`) indicate credential/account issues rather than app test harness issues.
+- `bun run test:e2e` is the primary CI path and uses real integrations.
+- `bun run test:e2e:live` remains available for targeted provider-focused runs.
+- Provider auth errors (for example `User not found`) indicate credential/account issues rather than app test harness issues.
 
 ## Docs
 

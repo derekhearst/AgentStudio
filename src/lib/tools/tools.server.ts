@@ -58,7 +58,6 @@ const MODEL_MAP: Record<ImageModel, string> = {
 	'dall-e': 'openai/dall-e-3',
 }
 
-const MOCK_EXTERNALS = env.E2E_MOCK_EXTERNALS === '1'
 const execFileAsync = promisify(execFile)
 
 let browser: Browser | null = null
@@ -449,18 +448,6 @@ function buildAuthHeader() {
 }
 
 export async function webSearch(query: string, limit = 8): Promise<SearchResult[]> {
-	if (MOCK_EXTERNALS) {
-		return [
-			{
-				title: `Mock result for ${query}`,
-				url: 'https://example.com/mock-result',
-				snippet: 'Deterministic mock search result for E2E execution.',
-				engine: 'mock',
-				score: 1,
-			},
-		].slice(0, limit)
-	}
-
 	if (!env.SEARXNG_URL) {
 		throw new Error('SEARXNG_URL is not configured')
 	}
@@ -500,16 +487,6 @@ export async function generateImage(
 	model: ImageModel = 'flux',
 	size: ImageSize = '1024x1024',
 ): Promise<ImageResult> {
-	if (MOCK_EXTERNALS) {
-		return {
-			url: 'https://placehold.co/1024x1024/333/fff?text=MOCK+IMAGE',
-			model: MODEL_MAP[model],
-			size,
-			prompt,
-			cost: 0,
-		}
-	}
-
 	if (!env.OPENROUTER_API_KEY) {
 		throw new Error('OPENROUTER_API_KEY is not set')
 	}
@@ -553,17 +530,6 @@ export async function generateImage(
 }
 
 export async function execShell(command: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			success: true,
-			command,
-			status: 'completed',
-			exitCode: 0,
-			output: `MOCK_SHELL_OUTPUT: ${command}`,
-			raw: { mocked: true },
-		}
-	}
-
 	const result = await shellExec(command)
 	return {
 		success: result.exitCode === 0,
@@ -576,13 +542,6 @@ export async function execShell(command: string) {
 }
 
 export async function readFile(path: string, startLine?: number, endLine?: number) {
-	if (MOCK_EXTERNALS) {
-		return {
-			path,
-			content: `MOCK_FILE_CONTENT for ${path}`,
-		}
-	}
-
 	const content =
 		startLine !== undefined || endLine !== undefined
 			? await fileReadRange(path, { startLine, endLine })
@@ -591,14 +550,6 @@ export async function readFile(path: string, startLine?: number, endLine?: numbe
 }
 
 export async function writeFile(path: string, content: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			success: true,
-			path,
-			message: `MOCK_FILE_WRITE (${content.length} chars)`,
-		}
-	}
-
 	await fileWrite(path, content)
 	return {
 		success: true,
@@ -608,13 +559,6 @@ export async function writeFile(path: string, content: string) {
 }
 
 export async function patchFile(patch: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			success: true,
-			message: 'MOCK_PATCH_APPLIED',
-		}
-	}
-
 	return filePatch(patch)
 }
 
@@ -624,40 +568,19 @@ export async function replaceInFile(
 	newStr: string,
 	options?: { requireUnique?: boolean; replaceAll?: boolean },
 ) {
-	if (MOCK_EXTERNALS) {
-		return {
-			path,
-			replacedCount: 1,
-			matchCount: 1,
-			message: 'MOCK_STR_REPLACE',
-		}
-	}
-
 	return fileStrReplace(path, oldStr, newStr, options)
 }
 
 export async function listDirectory(path?: string, depth = 1, includeHidden = false) {
-	if (MOCK_EXTERNALS) {
-		return [{ path: 'mock.txt', name: 'mock.txt', isDirectory: false, size: 10, modified: new Date().toISOString() }]
-	}
-
 	return fileList(path, { depth, includeHidden })
 }
 
 export async function deleteFile(path: string, recursive = false) {
-	if (MOCK_EXTERNALS) {
-		return { success: true, path, recursive, message: 'MOCK_DELETE' }
-	}
-
 	await fileDelete(path, recursive)
 	return { success: true, path, recursive }
 }
 
 export async function moveFile(fromPath: string, toPath: string, overwrite = false) {
-	if (MOCK_EXTERNALS) {
-		return { success: true, fromPath, toPath, overwrite, message: 'MOCK_MOVE' }
-	}
-
 	const result = await fileMove(fromPath, toPath, overwrite)
 	return { success: true, ...result }
 }
@@ -672,37 +595,14 @@ export async function searchFiles(
 		caseSensitive?: boolean
 	},
 ) {
-	if (MOCK_EXTERNALS) {
-		return [{ path: 'mock.txt', line: 1, preview: `MOCK_SEARCH_RESULT for ${query}` }]
-	}
-
 	return fileSearch(query, options)
 }
 
 export async function fileInfo(path: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			path,
-			isDirectory: false,
-			isFile: true,
-			size: 123,
-			modified: new Date().toISOString(),
-			created: new Date().toISOString(),
-			permissions: '644',
-		}
-	}
-
 	return sandboxFileInfo(path)
 }
 
 export async function browserNavigate(url: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			success: true,
-			url,
-		}
-	}
-
 	const result = await sandboxBrowserNavigate(url)
 	return {
 		success: true,
@@ -712,13 +612,6 @@ export async function browserNavigate(url: string) {
 }
 
 export async function browserScreenshot(url?: string) {
-	if (MOCK_EXTERNALS) {
-		return {
-			mimeType: 'image/png',
-			imageBase64: '',
-		}
-	}
-
 	if (url) {
 		await sandboxBrowserNavigate(url)
 	}
@@ -730,14 +623,6 @@ export async function browserScreenshot(url?: string) {
 }
 
 export async function getSandboxStatus() {
-	if (MOCK_EXTERNALS) {
-		return {
-			success: true,
-			message: 'Sandbox reachable (mock)',
-			stats: { mocked: true },
-		}
-	}
-
 	const workspace = env.SANDBOX_WORKSPACE || '/workspace'
 	try {
 		const s = await stat(workspace)
@@ -964,9 +849,30 @@ export type ToolCallWithContext = ToolCall & {
 	messageId?: string | null
 }
 
+function normalizeToolName(name: string): ToolName | null {
+	const trimmed = name.trim()
+	if (trimmed in toolSchemas) return trimmed as ToolName
+	const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_')
+	if (normalized in toolSchemas) return normalized as ToolName
+	return null
+}
+
 export async function executeTool(call: ToolCall, userId: string) {
 	return toolUserContext.run({ userId }, async () => {
 		const startedAt = Date.now()
+		const normalizedName = normalizeToolName(call.name)
+		if (!normalizedName) {
+			return {
+				success: false,
+				tool: call.name,
+				error: `Unknown tool: ${call.name}`,
+				executionMs: Date.now() - startedAt,
+			}
+		}
+		if (normalizedName !== call.name) {
+			call = { ...call, name: normalizedName }
+		}
+
 		try {
 			if (call.name === 'web_search') {
 				const input = toolSchemas.web_search.parse(call.arguments)
@@ -1461,14 +1367,23 @@ export async function executeTool(call: ToolCall, userId: string) {
 				}
 			}
 
-			const input = toolSchemas.run_subagent.parse(call.arguments)
-			const { runSubagent } = await import('$lib/agents/agents.server')
-			const result = await runSubagent(input.task, input.context)
+			if (call.name === 'run_subagent') {
+				const input = toolSchemas.run_subagent.parse(call.arguments)
+				const { runSubagent } = await import('$lib/agents/agents.server')
+				const result = await runSubagent(input.task, input.context)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
 			return {
-				success: true,
+				success: false,
 				tool: call.name,
-				input,
-				result,
+				error: `Tool is not implemented: ${call.name}`,
 				executionMs: Date.now() - startedAt,
 			}
 		} catch (error) {
@@ -1489,6 +1404,13 @@ type PendingApproval = {
 	timer: ReturnType<typeof setTimeout>
 }
 
+export type PlanDecision = 'approve' | 'deny' | 'continue'
+
+type PendingPlanDecision = {
+	resolve: (decision: PlanDecision | null) => void
+	timer: ReturnType<typeof setTimeout>
+}
+
 export type AskUserQuestion = z.infer<typeof toolSchemas.ask_user>['questions'][number]
 export type AskUserAnswers = Record<string, string>
 
@@ -1499,6 +1421,7 @@ type PendingQuestion = {
 
 const pendingApprovals = new Map<string, PendingApproval>()
 const pendingQuestions = new Map<string, PendingQuestion>()
+const pendingPlanDecisions = new Map<string, PendingPlanDecision>()
 
 export function requestApproval(token: string): Promise<boolean> {
 	return new Promise((resolve) => {
@@ -1541,5 +1464,27 @@ export function resolveUserQuestions(token: string, answers: AskUserAnswers): bo
 	clearTimeout(entry.timer)
 	pendingQuestions.delete(token)
 	entry.resolve(answers)
+	return true
+}
+
+export function requestPlanDecision(token: string): Promise<PlanDecision | null> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => {
+			if (pendingPlanDecisions.has(token)) {
+				pendingPlanDecisions.delete(token)
+				resolve(null)
+			}
+		}, APPROVAL_TIMEOUT_MS)
+
+		pendingPlanDecisions.set(token, { resolve, timer })
+	})
+}
+
+export function resolvePlanDecision(token: string, decision: PlanDecision): boolean {
+	const entry = pendingPlanDecisions.get(token)
+	if (!entry) return false
+	clearTimeout(entry.timer)
+	pendingPlanDecisions.delete(token)
+	entry.resolve(decision)
 	return true
 }

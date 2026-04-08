@@ -4,12 +4,12 @@
 	import { onMount } from 'svelte'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import {
-		createProjectCommand,
 		listProjectGoalsQuery,
 		listProjectStrategiesQuery,
 		listProjectsQuery,
 		setProjectStatusCommand,
 	} from '$lib/projects'
+	import { startGuidedCreationChat } from '$lib/chat/creation-flow'
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number]
 	type GoalRow = Awaited<ReturnType<typeof listProjectGoalsQuery>>[number]
@@ -20,10 +20,7 @@
 	let selectedGoals = $state<GoalRow[]>([])
 	let selectedStrategies = $state<StrategyRow[]>([])
 	let loading = $state(true)
-	let creating = $state(false)
 	let archiving = $state(false)
-	let newName = $state('')
-	let newDescription = $state('')
 
 	onMount(() => {
 		void refresh()
@@ -53,22 +50,6 @@
 
 		selectedGoals = goals
 		selectedStrategies = strategies
-	}
-
-	async function createProject() {
-		if (creating || !newName.trim()) return
-		creating = true
-		try {
-			await createProjectCommand({
-				name: newName.trim(),
-				description: newDescription.trim() || undefined,
-			})
-			newName = ''
-			newDescription = ''
-			await refresh()
-		} finally {
-			creating = false
-		}
 	}
 
 	async function archiveSelectedProject() {
@@ -102,34 +83,17 @@
 		{/snippet}
 
 		<div class="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
-			<form
-				class="rounded-2xl border border-base-300 bg-base-200/40 p-3"
-				onsubmit={(event) => {
-					event.preventDefault()
-					void createProject()
-				}}
-			>
+			<section class="rounded-2xl border border-base-300 bg-base-200/40 p-3">
 				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Create project</p>
-				<div class="mt-2 grid gap-2">
-					<input
-						type="text"
-						class="input input-bordered input-sm"
-						placeholder="e.g. AgentStudio"
-						bind:value={newName}
-						required
-					/>
-					<textarea
-						class="textarea textarea-bordered textarea-sm min-h-20"
-						placeholder="Optional project context"
-						bind:value={newDescription}
-					></textarea>
-					<div class="flex justify-end">
-						<button class="btn btn-primary btn-sm" type="submit" disabled={creating || !newName.trim()}>
-							{creating ? 'Creating...' : 'Create Project'}
-						</button>
-					</div>
+				<p class="mt-2 text-sm text-base-content/70">
+					Start a cooperative planning session in chat. The assistant will ask questions and prepare an approval plan before execution.
+				</p>
+				<div class="mt-3 flex justify-end">
+					<button class="btn btn-primary btn-sm" type="button" onclick={() => startGuidedCreationChat({ kind: 'project' })}>
+						Create Project in Chat
+					</button>
 				</div>
-			</form>
+			</section>
 
 			<div class="rounded-2xl border border-base-300 bg-base-200/40 p-3">
 				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/60">V1 scope now</p>
@@ -153,7 +117,7 @@
 					<span class="badge badge-ghost badge-sm">{projects.length}</span>
 				</div>
 				{#if projects.length === 0}
-					<p class="text-sm text-base-content/60">No projects yet. Create your first one above.</p>
+					<p class="text-sm text-base-content/60">No projects yet. Start a guided creation chat above.</p>
 				{:else}
 					<div class="space-y-2">
 						{#each projects as project (project.id)}

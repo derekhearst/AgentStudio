@@ -13,6 +13,7 @@ import { logLlmUsage } from '$lib/cost/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requestApproval } from '$lib/tools/tools.server'
 import { requestUserQuestions, toolSchemas } from '$lib/tools/tools.server'
+import { requestPlanDecision } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 
@@ -345,6 +346,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 					// Check for finish_reason tool_calls or pending tool calls
 					const validToolCalls = pendingToolCalls.filter((tc) => tc.name)
+					const plannedToolCalls = validToolCalls.map((tc) => {
+						let parsedArgs: unknown = {}
+						try {
+							parsedArgs = JSON.parse(tc.arguments)
+						} catch {
+							parsedArgs = {}
+						}
+						return {
+							id: tc.id,
+							name: tc.name,
+							arguments: tc.arguments,
+							parsedArgs,
+						}
+					})
 
 					// Capture assistant text for this round into ordered blocks
 					if (assistantReasoning.trim()) {
@@ -360,15 +375,98 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						break
 					}
 
+					if (toolApprovalMode === 'plan') {
+						const planToken = crypto.randomUUID()
+						controller.enqueue(
+							sse('plan_pending', {
+								token: planToken,
+								round,
+								tools: plannedToolCalls.map((tc) => ({
+									id: tc.id,
+									name: tc.name,
+									arguments: tc.arguments,
+									preview: tc.parsedArgs,
+								})),
+							}),
+						)
+
+						const decision = await requestPlanDecision(planToken)
+						const normalizedDecision = decision ?? 'deny'
+						controller.enqueue(
+							sse('plan_decision', {
+								token: planToken,
+								decision: normalizedDecision,
+							}),
+						)
+
+						if (normalizedDecision === 'continue') {
+							currentMessages.push({
+								role: 'assistant',
+								content: assistantContent || '',
+								reasoning: assistantReasoning || undefined,
+								reasoningDetails: assistantReasoningDetails.length ? assistantReasoningDetails : undefined,
+							})
+							currentMessages.push({
+								role: 'user',
+								content:
+									'Continue planning only. Do not execute tools yet. Ask clarifying questions if needed and then provide an updated execution plan.',
+							})
+							continue
+						}
+
+						if (normalizedDecision === 'deny') {
+							const deniedResult = 'Planned execution was canceled by the user.'
+							const deniedToolResults: Array<{ call_id: string; name: string; result: string }> = plannedToolCalls.map(
+								(tc) => ({
+									call_id: tc.id,
+									name: tc.name,
+									result: deniedResult,
+								}),
+							)
+
+							for (const tc of plannedToolCalls) {
+								allToolCalls.push({
+									name: tc.name,
+									arguments: tc.parsedArgs,
+									result: { denied: true, reason: deniedResult },
+									executionMs: 0,
+								})
+								streamBlocks.push({
+									kind: 'tool',
+									name: tc.name,
+									arguments: tc.parsedArgs,
+									result: { denied: true, reason: deniedResult },
+									success: false,
+									executionMs: 0,
+								})
+							}
+
+							currentMessages.push({
+								role: 'assistant',
+								content: assistantContent || '',
+								reasoning: assistantReasoning || undefined,
+								reasoningDetails: assistantReasoningDetails.length ? assistantReasoningDetails : undefined,
+								toolCalls: validToolCalls.map((tc) => ({
+									id: tc.id,
+									type: 'function' as const,
+									function: { name: tc.name, arguments: tc.arguments },
+								})),
+							})
+							for (const tr of deniedToolResults) {
+								currentMessages.push({
+									role: 'tool',
+									content: tr.result,
+									toolCallId: tr.call_id,
+								})
+							}
+							continue
+						}
+					}
+
 					// Execute each tool call
 					const toolResults: Array<{ call_id: string; name: string; result: string }> = []
-					for (const tc of validToolCalls) {
-						let parsedArgs: unknown = {}
-						try {
-							parsedArgs = JSON.parse(tc.arguments)
-						} catch {
-							// Bad JSON — skip
-						}
+					for (const tc of plannedToolCalls) {
+						const parsedArgs = tc.parsedArgs
 
 						// If approval mode is 'confirm', pause and wait for user decision
 						if (toolApprovalMode === 'confirm') {

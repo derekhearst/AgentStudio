@@ -42,6 +42,7 @@
 	let newFileDesc = $state('');
 	let newFileContent = $state('');
 	let addFileDialogEl = $state<HTMLDialogElement | undefined>(undefined);
+	const isSystemSkill = $derived(Boolean(skill?.isSystem));
 
 	onMount(() => {
 		void refresh();
@@ -62,7 +63,7 @@
 
 	/* ── Inline editing ──────────────────── */
 	function startEdit(field: 'name' | 'description' | 'content' | 'tags') {
-		if (!skill) return;
+		if (!skill || skill.isSystem) return;
 		editingField = field;
 		editValue = field === 'tags' ? skill.tags.join(', ') : skill[field];
 	}
@@ -90,19 +91,20 @@
 
 	/* ── Skill actions ───────────────────── */
 	async function handleToggleEnabled() {
-		if (!skill) return;
+		if (!skill || skill.isSystem) return;
 		await toggleSkillEnabledCommand({ id: skill.id, enabled: !skill.enabled });
 		await refresh();
 	}
 
 	async function handleDelete() {
-		if (!skill || !confirm('Delete this skill and all its files?')) return;
+		if (!skill || skill.isSystem || !confirm('Delete this skill and all its files?')) return;
 		await deleteSkillCommand({ id: skill.id });
 		goto('/skills');
 	}
 
 	/* ── File actions ────────────────────── */
 	function openAddFileModal() {
+		if (skill?.isSystem) return;
 		newFileName = '';
 		newFileDesc = '';
 		newFileContent = '';
@@ -111,7 +113,7 @@
 	}
 
 	async function handleAddFile() {
-		if (!skill || busy || !newFileName.trim() || !newFileContent.trim()) return;
+		if (!skill || skill.isSystem || busy || !newFileName.trim() || !newFileContent.trim()) return;
 		busy = true;
 		try {
 			await addSkillFileCommand({
@@ -129,6 +131,7 @@
 	}
 
 	function startEditFile(file: SkillFile) {
+		if (skill?.isSystem) return;
 		editingFileId = file.id;
 		editFileName = file.name;
 		editFileDesc = file.description;
@@ -157,6 +160,7 @@
 	}
 
 	async function handleDeleteFile(fileId: string) {
+		if (skill?.isSystem) return;
 		if (!confirm('Delete this file?')) return;
 		await deleteSkillFileCommand({ fileId });
 		await refresh();
@@ -180,6 +184,11 @@
 		<div class="alert alert-error">{error}</div>
 	{:else if skill}
 		{@const s = skill}
+		{#if isSystemSkill}
+			<div class="alert alert-info">
+				This is a built-in DrokBot guide skill. It is read-only and always available.
+			</div>
+		{/if}
 		<!-- Skill header -->
 		<ContentPanel>
 			{#snippet header()}
@@ -194,6 +203,9 @@
 						{:else}
 							<h1 class="text-2xl font-bold">
 								<button class="hover:text-primary" onclick={() => startEdit('name')} title="Edit name">{s.name}</button>
+								{#if isSystemSkill}
+									<span class="badge badge-primary badge-sm align-middle">built-in</span>
+								{/if}
 							</h1>
 						{/if}
 
@@ -210,16 +222,20 @@
 						{/if}
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
-						<input
-							type="checkbox"
-							class="toggle toggle-sm toggle-primary"
-							checked={s.enabled}
-							onchange={handleToggleEnabled}
-							title={s.enabled ? 'Disable' : 'Enable'}
-						/>
-						<button class="btn btn-ghost btn-xs text-error" onclick={handleDelete} title="Delete skill">
-							<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-						</button>
+						{#if !isSystemSkill}
+							<input
+								type="checkbox"
+								class="toggle toggle-sm toggle-primary"
+								checked={s.enabled}
+								onchange={handleToggleEnabled}
+								title={s.enabled ? 'Disable' : 'Enable'}
+							/>
+							<button class="btn btn-ghost btn-xs text-error" onclick={handleDelete} title="Delete skill">
+								<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+							</button>
+						{:else}
+							<span class="badge badge-outline">read-only</span>
+						{/if}
 					</div>
 				</div>
 			{/snippet}
@@ -259,7 +275,7 @@
 			<div>
 				<div class="mb-1 flex items-center justify-between">
 					<span class="text-xs font-semibold uppercase tracking-wider opacity-40">Content</span>
-					{#if editingField !== 'content'}
+					{#if editingField !== 'content' && !isSystemSkill}
 						<button class="btn btn-ghost btn-xs" onclick={() => startEdit('content')}>Edit</button>
 					{/if}
 				</div>
@@ -280,7 +296,9 @@
 			{#snippet header()}
 				<div class="flex items-center justify-between">
 					<h2 class="text-lg font-semibold">Files ({s.files.length})</h2>
-					<button class="btn btn-primary btn-xs" onclick={openAddFileModal}>+ Add File</button>
+					{#if !isSystemSkill}
+						<button class="btn btn-primary btn-xs" onclick={openAddFileModal}>+ Add File</button>
+					{/if}
 				</div>
 			{/snippet}
 
@@ -315,12 +333,14 @@
 										</div>
 									</button>
 									<div class="flex shrink-0 gap-1">
-										<button class="btn btn-ghost btn-xs" onclick={() => startEditFile(file)} title="Edit">
-											<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-										</button>
-										<button class="btn btn-ghost btn-xs text-error" onclick={() => handleDeleteFile(file.id)} title="Delete">
-											<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-										</button>
+										{#if !isSystemSkill}
+											<button class="btn btn-ghost btn-xs" onclick={() => startEditFile(file)} title="Edit">
+												<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+											</button>
+											<button class="btn btn-ghost btn-xs text-error" onclick={() => handleDeleteFile(file.id)} title="Delete">
+												<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+											</button>
+										{/if}
 									</div>
 								</div>
 								{#if expandedFileId === file.id}

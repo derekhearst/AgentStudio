@@ -86,7 +86,7 @@ export async function updateSettings(input: {
 		compactionModel?: string
 	}
 	toolConfig?: {
-		approvalMode?: 'auto' | 'confirm'
+		approvalMode?: 'auto' | 'confirm' | 'plan'
 		disabledTools?: string[]
 	}
 	systemPrompt?: string

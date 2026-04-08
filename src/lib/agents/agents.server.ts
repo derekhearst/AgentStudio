@@ -85,11 +85,11 @@ async function runToolLoopForTask(agent: typeof agents.$inferSelect, task: typeo
 	const skillSummaries = await listSkillSummaries()
 	const skillContext =
 		skillSummaries.length > 0
-			? '\nAvailable skills (use read_skill tool to load full content when relevant):\n' +
+			? '\nAvailable skills (call read_skill tool with name parameter to load):\n' +
 				skillSummaries
 					.map((s) => {
 						const fileNames = s.files.map((f) => f.name).join(', ')
-						return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
+						return `- name: "${s.name}" | ${s.description}${fileNames ? ` | files: ${fileNames}` : ''}`
 					})
 					.join('\n')
 			: ''

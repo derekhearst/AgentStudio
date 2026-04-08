@@ -10,6 +10,7 @@
 		schedulerSnapshot,
 		updateAgentStatus
 	} from '$lib/agents';
+	import { startGuidedCreationChat } from '$lib/chat/creation-flow';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number];
@@ -71,7 +72,7 @@
 		{#snippet actions()}
 			<button class="btn btn-sm btn-outline sm:btn-md" type="button" onclick={runTick} disabled={busy}>Tick</button>
 			<button class="btn btn-sm btn-outline sm:btn-md" type="button" onclick={runDrain} disabled={busy}>Drain</button>
-			<a class="btn btn-sm btn-primary sm:btn-md" href="/agents/new">New Agent</a>
+			<button class="btn btn-sm btn-primary sm:btn-md" type="button" onclick={() => startGuidedCreationChat({ kind: 'agent' })}>New Agent</button>
 		{/snippet}
 	</ContentPanel>
 

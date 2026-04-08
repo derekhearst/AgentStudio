@@ -20,6 +20,7 @@
 	import LiveToolCallCard from '$lib/chat/LiveToolCallCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
+	import PlanApprovalCard from '$lib/chat/PlanApprovalCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import ArtifactPanel from '$lib/artifacts/ArtifactPanel.svelte';
 
@@ -76,7 +77,15 @@
 		expanded: boolean;
 	};
 
-	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock;
+	type PlanBlock = {
+		kind: 'plan';
+		id: string;
+		token: string;
+		status: 'pending' | 'approved' | 'denied' | 'continued';
+		tools: Array<{ id: string; name: string; argumentsText: string }>;
+	};
+
+	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | PlanBlock;
 
 	const conversationId = $derived(page.params.id ?? '');
 	let model = $state('anthropic/claude-sonnet-4');
@@ -391,6 +400,13 @@
 						reasoningTokens: block.reasoningTokens ?? null,
 					};
 				}
+				if (block.kind === 'plan') {
+					return {
+						kind: 'plan' as const,
+						status: block.status,
+						tools: block.tools,
+					};
+				}
 				return {
 					kind: 'tool' as const,
 					name: block.name,
@@ -452,7 +468,9 @@
 				? `${b.id}:${b.status}:${b.expanded}:${b.result?.length ?? 0}`
 				: b.kind === 'thinking'
 					? `${b.id}:${b.content.length}:${b.reasoningTokens ?? 0}`
-					: `${b.id}:${b.content.length}`
+					: b.kind === 'plan'
+						? `${b.id}:${b.status}:${b.tools.length}`
+						: `${b.id}:${b.content.length}`
 		).join('|');
 		scrollToBottom();
 	});
@@ -613,6 +631,8 @@
 		reasoningHydratedFor = conversationId;
 	});
 
+
+
 	$effect(() => {
 		if (!browser) return;
 		if (reasoningHydratedFor !== conversationId) return;
@@ -724,6 +744,28 @@
 		);
 	}
 
+	async function decidePlan(token: string, decision: 'approve' | 'deny' | 'continue') {
+		await fetch(`/chat/${conversationId}/plan-decide`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ token, decision }),
+		});
+
+		streamingBlocks = streamingBlocks.map((b) =>
+			b.kind === 'plan' && b.token === token
+				? {
+						...b,
+						status:
+							decision === 'approve'
+								? ('approved' as const)
+								: decision === 'continue'
+									? ('continued' as const)
+									: ('denied' as const),
+				  }
+				: b,
+		);
+	}
+
 	function buildAskUserAnswersFromFreeform(freeform: string): Record<string, string> {
 		if (!pendingAskUser) return {};
 		const trimmed = freeform.trim();
@@ -800,7 +842,14 @@
 			const response = await fetch(`/chat/${conversationId}/stream`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ conversationId, content, model, reasoningEffort, regenerate, attachments }),
+				body: JSON.stringify({
+					conversationId,
+					content,
+					model,
+					reasoningEffort,
+					regenerate,
+					attachments,
+				}),
 				signal: abortController.signal
 			});
 
@@ -846,6 +895,45 @@
 					if (eventName === 'reasoning') {
 						waitingForFirstToken = false;
 						appendThinkingContent(payload.content ?? '');
+					}
+
+					if (eventName === 'plan_pending') {
+						waitingForFirstToken = false;
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
+						streamingBlocks = [
+							...streamingBlocks,
+							{
+								kind: 'plan' as const,
+								id: `plan-${payload.token}`,
+								token: payload.token,
+								status: 'pending' as const,
+								tools: Array.isArray(payload.tools)
+									? payload.tools.map((tool: { id?: string; name?: string; arguments?: string }) => ({
+											id: tool.id ?? `tool-${Math.random().toString(36).slice(2)}`,
+											name: tool.name ?? 'unknown',
+											argumentsText: tool.arguments ?? '',
+									  }))
+									: [],
+							},
+						];
+					}
+
+					if (eventName === 'plan_decision') {
+						const decision = payload.decision as 'approve' | 'deny' | 'continue' | undefined;
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'plan' && b.token === payload.token
+								? {
+										...b,
+										status:
+											decision === 'approve'
+												? ('approved' as const)
+												: decision === 'continue'
+													? ('continued' as const)
+													: ('denied' as const),
+								  }
+								: b,
+						);
 					}
 
 					if (eventName === 'tool_pending') {
@@ -1145,6 +1233,15 @@
 									expanded={block.expanded}
 								/>
 							</div>
+						{:else if block.kind === 'plan'}
+							<PlanApprovalCard
+								token={block.token}
+								tools={block.tools}
+								status={block.status}
+								onApprove={(token) => decidePlan(token, 'approve')}
+								onDeny={(token) => decidePlan(token, 'deny')}
+								onContinue={(token) => decidePlan(token, 'continue')}
+							/>
 						{:else if block.kind === 'text' && block.content}
 							<article class="chat chat-start">
 								<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3"><div class="markdown-body">{@html renderMarkdown(block.content)}</div></div>
@@ -1160,6 +1257,7 @@
 		{/if}
 
 		<div class="chat-composer-transition px-2 pb-2 tablet:px-4 tablet:pb-4 desktop:px-0 desktop:pb-0">
+
 			<AskUserModal
 				open={askUserModalOpen && !!pendingAskUser}
 				questions={pendingAskUser?.questions ?? []}

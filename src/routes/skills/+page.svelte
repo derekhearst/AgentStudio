@@ -4,10 +4,10 @@
 	import { onMount } from 'svelte';
 	import {
 		listSkillsQuery,
-		createSkillCommand,
 		deleteSkillCommand,
 		toggleSkillEnabledCommand
 	} from '$lib/skills';
+	import { startGuidedCreationChat } from '$lib/chat/creation-flow';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import { skillsPanel } from '$lib/state.svelte';
 
@@ -17,14 +17,6 @@
 	let busy = $state(false);
 	let skills = $state<SkillRow[]>([]);
 	let allSkills = $state<SkillRow[]>([]);
-
-	/* ── Create modal ────────────────────── */
-	let showCreate = $state(false);
-	let newName = $state('');
-	let newDescription = $state('');
-	let newContent = $state('');
-	let newTags = $state('');
-	let createDialogEl = $state<HTMLDialogElement | undefined>(undefined);
 
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -61,37 +53,6 @@
 		filterTimer = setTimeout(filterLocally, 150);
 	}
 
-	function openCreateModal() {
-		newName = '';
-		newDescription = '';
-		newContent = '';
-		newTags = '';
-		showCreate = true;
-		setTimeout(() => createDialogEl?.showModal(), 0);
-	}
-
-	async function handleCreate() {
-		if (busy || !newName.trim() || !newDescription.trim() || !newContent.trim()) return;
-		busy = true;
-		try {
-			const tags = newTags
-				.split(',')
-				.map((t) => t.trim())
-				.filter(Boolean);
-			await createSkillCommand({
-				name: newName.trim(),
-				description: newDescription.trim(),
-				content: newContent.trim(),
-				tags: tags.length > 0 ? tags : undefined
-			});
-			showCreate = false;
-			createDialogEl?.close();
-			await loadSkills();
-		} finally {
-			busy = false;
-		}
-	}
-
 	async function handleToggleEnabled(skill: SkillRow) {
 		await toggleSkillEnabledCommand({ id: skill.id, enabled: !skill.enabled });
 		await loadSkills();
@@ -115,7 +76,7 @@
 			</div>
 		{/snippet}
 		{#snippet actions()}
-			<button class="btn btn-sm btn-primary sm:btn-md" onclick={openCreateModal}>+ New Skill</button>
+			<button class="btn btn-sm btn-primary sm:btn-md" onclick={() => startGuidedCreationChat({ kind: 'skill' })}>+ New Skill</button>
 			<button
 				class="btn btn-sm btn-outline gap-1.5 sm:btn-md lg:hidden"
 				type="button"
@@ -145,7 +106,7 @@
 				<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
 				<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
 			</svg>
-			<p class="text-sm">No skills yet. Create one to get started.</p>
+			<p class="text-sm">No skills yet. Start a guided creation chat to create one.</p>
 		</div>
 	{:else}
 		<div class="space-y-2">
@@ -155,6 +116,9 @@
 						<a href="/skills/{skill.id}" class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
 								<h3 class="font-semibold">{skill.name}</h3>
+								{#if skill.isSystem}
+									<span class="badge badge-primary badge-xs">built-in</span>
+								{/if}
 								{#if !skill.enabled}
 									<span class="badge badge-ghost badge-xs">disabled</span>
 								{/if}
@@ -162,7 +126,7 @@
 							<p class="mt-0.5 text-sm opacity-60">{skill.description}</p>
 							<div class="mt-2 flex flex-wrap items-center gap-2 text-xs opacity-50">
 								{#if skill.tags.length > 0}
-									{#each skill.tags as tag}
+									{#each skill.tags as tag (tag)}
 										<span class="badge badge-outline badge-xs">{tag}</span>
 									{/each}
 								{/if}
@@ -171,24 +135,28 @@
 								<span>{skill.accessCount} reads</span>
 							</div>
 						</a>
-						<div class="flex shrink-0 items-center gap-1">
-							<input
-								type="checkbox"
-								class="toggle toggle-sm toggle-primary"
-								checked={skill.enabled}
-								onchange={() => handleToggleEnabled(skill)}
-								title={skill.enabled ? 'Disable' : 'Enable'}
-							/>
-							<button
-								class="btn btn-ghost btn-xs text-error"
-								onclick={() => handleDelete(skill.id)}
-								title="Delete"
-							>
-								<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-									<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-								</svg>
-							</button>
-						</div>
+						{#if !skill.isSystem}
+							<div class="flex shrink-0 items-center gap-1">
+								<input
+									type="checkbox"
+									class="toggle toggle-sm toggle-primary"
+									checked={skill.enabled}
+									onchange={() => handleToggleEnabled(skill)}
+									title={skill.enabled ? 'Disable' : 'Enable'}
+								/>
+								<button
+									class="btn btn-ghost btn-xs text-error"
+									onclick={() => handleDelete(skill.id)}
+									title="Delete"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+										<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+									</svg>
+								</button>
+							</div>
+						{:else}
+							<div class="badge badge-outline badge-sm">read-only</div>
+						{/if}
 					</div>
 				</div>
 			{/each}
@@ -196,38 +164,4 @@
 	{/if}
 	</div>
 </div>
-
-<!-- Create skill dialog -->
-{#if showCreate}
-	<dialog bind:this={createDialogEl} class="modal" onclose={() => (showCreate = false)}>
-		<div class="modal-box max-w-2xl">
-			<h3 class="mb-4 text-lg font-bold">Create Skill</h3>
-			<form onsubmit={(e) => { e.preventDefault(); handleCreate(); }} class="space-y-3">
-				<div class="form-control">
-					<label class="label" for="skill-name"><span class="label-text">Name</span></label>
-					<input id="skill-name" type="text" class="input input-bordered input-sm" placeholder="e.g. sveltekit-dev" bind:value={newName} required />
-				</div>
-				<div class="form-control">
-					<label class="label" for="skill-desc"><span class="label-text">Description</span></label>
-					<input id="skill-desc" type="text" class="input input-bordered input-sm" placeholder="Short summary for LLM auto-detection" bind:value={newDescription} required />
-				</div>
-				<div class="form-control">
-					<label class="label" for="skill-tags"><span class="label-text">Tags (comma-separated)</span></label>
-					<input id="skill-tags" type="text" class="input input-bordered input-sm" placeholder="sveltekit, web, frontend" bind:value={newTags} />
-				</div>
-				<div class="form-control">
-					<label class="label" for="skill-content"><span class="label-text">Content (Markdown)</span></label>
-					<textarea id="skill-content" class="textarea textarea-bordered min-h-48 text-sm" placeholder="Main skill instructions/knowledge..." bind:value={newContent} required></textarea>
-				</div>
-				<div class="modal-action">
-					<button type="button" class="btn btn-ghost btn-sm" onclick={() => { showCreate = false; createDialogEl?.close(); }}>Cancel</button>
-					<button type="submit" class="btn btn-primary btn-sm" disabled={busy || !newName.trim() || !newDescription.trim() || !newContent.trim()}>
-						{busy ? 'Creating...' : 'Create'}
-					</button>
-				</div>
-			</form>
-		</div>
-		<form method="dialog" class="modal-backdrop"><button>close</button></form>
-	</dialog>
-{/if}
 

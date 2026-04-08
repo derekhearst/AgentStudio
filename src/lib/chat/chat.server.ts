@@ -9,15 +9,7 @@ const DEFAULT_COMPACTION_MODEL = 'openai/gpt-4o-mini'
 const KEEP_RECENT_MESSAGES = 6
 const MIN_MESSAGES_FOR_COMPACTION = 10
 
-function isMockExternalsEnabled(): boolean {
-	return process.env.E2E_MOCK_EXTERNALS === '1'
-}
-
 export async function generateTitle(messages: Message[]): Promise<string> {
-	if (isMockExternalsEnabled()) {
-		return 'Mock conversation'
-	}
-
 	const transcript = messages.map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 400)}`).join('\n')
 
 	const titleModel = 'openai/gpt-4o-mini'
@@ -51,10 +43,6 @@ export async function generateTitle(messages: Message[]): Promise<string> {
 }
 
 export async function generateTitleAndCategory(messages: Message[]): Promise<{ title: string; category: string }> {
-	if (isMockExternalsEnabled()) {
-		return { title: 'Mock conversation', category: 'general' }
-	}
-
 	const transcript = messages.map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 400)}`).join('\n')
 
 	const catModel = 'openai/gpt-4o-mini'
@@ -123,7 +111,7 @@ export function estimateMessageTokens(messages: LlmMessage[]): number {
 export async function shouldCompact(
 	messages: LlmMessage[],
 	model: string,
-userId: string,
+	userId: string,
 ): Promise<{ needed: boolean; tokenEstimate: number; threshold: number }> {
 	const settings = await getOrCreateSettings(userId)
 	const contextConfig = settings.contextConfig as {
@@ -147,7 +135,10 @@ userId: string,
 	}
 }
 
-export async function compactMessages(messages: LlmMessage[], userId: string): Promise<{
+export async function compactMessages(
+	messages: LlmMessage[],
+	userId: string,
+): Promise<{
 	compacted: LlmMessage[]
 	summary: string
 	originalTokens: number

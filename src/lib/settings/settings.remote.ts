@@ -46,7 +46,7 @@ const settingsUpdateSchema = z.object({
 		.optional(),
 	toolConfig: z
 		.object({
-			approvalMode: z.enum(['auto', 'confirm']).optional(),
+			approvalMode: z.enum(['auto', 'confirm', 'plan']).optional(),
 			disabledTools: z.array(z.string()).optional(),
 		})
 		.optional(),

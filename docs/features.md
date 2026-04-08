@@ -27,6 +27,7 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Auto-title generation
 - Memory context auto-injection before each response
 - Tool call visibility with collapsible cards
+- Plan-first execution card for grouped tool calls with Approve, Cancel, and Continue Planning actions
 - ask_user prompt surface docked above the composer (inline dropdown, not modal)
 - Multi-question ask_user flow with previous/next navigation and per-question focus
 - Freeform bypass: typing in the composer resolves pending ask_user prompts directly
@@ -42,6 +43,13 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Per-run metrics: token usage, cost, execution logs
 - Priority-based scheduler with concurrent queue
 - Agent run trace viewer (step-by-step logs per run)
+
+### 2.5 Guided Creation Workflows
+
+- New Project, New Agent, New Task, and New Skill actions open a new chat with a seeded creation prompt
+- Assistant runs a cooperative planning flow and asks clarifying questions before execution
+- Plan approval gate appears in-chat before tools run
+- Task creation from agent detail includes target-agent context in the seeded prompt
 
 ### 3. Task Board & Code Review
 
@@ -133,11 +141,19 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Theme (AgentStudio-night)
 - Notification preferences
 - Dream cycle configuration (decay lambda, prune threshold)
+- Tool approval mode configuration: auto, confirm, plan-first
 - Budget configuration (daily and monthly limits)
 - Push subscription management
 - PWA install prompt
 
-### 14. Authentication and User Management
+### 14. Skills
+
+- Skill library for reusable instruction bundles used by chat and agents
+- Nested skill files for focused, modular guidance
+- Read-only built-in onboarding skill (`drokbot-guide`) visible in `/skills`
+- Built-in guide includes quickstart workflow, feature map, and effectiveness playbook
+
+### 15. Authentication and User Management
 
 - Multi-user account system with lowercase usernames
 - WebAuthn passkey login and account claiming
@@ -146,7 +162,7 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Admin-only user management page for add/remove (soft-delete) accounts
 - Server hook enforces authentication and admin-only routes (`/users`)
 
-### 15. Database Bootstrap
+### 16. Database Bootstrap
 
 - On startup, the server ensures the PostgreSQL database named in `DATABASE_URL` exists before handling requests
 - Required extensions are installed automatically: `pgcrypto` for UUID defaults and `vector` for memory embeddings
@@ -185,6 +201,8 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 | `/tasks`                    | Task board (kanban)                |
 | `/tasks/[id]`               | Task detail                        |
 | `/review`                   | Mobile review queue                |
+| `/skills`                   | Skills library + built-in guide    |
+| `/skills/[id]`              | Skill detail + files               |
 | `/memory`                   | Memory explorer                    |
 | `/memory/[id]`              | Memory detail + relation graph     |
 | `/artifacts`                | Artifact gallery                   |

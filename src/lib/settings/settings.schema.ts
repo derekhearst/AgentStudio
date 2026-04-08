@@ -40,7 +40,7 @@ export const appSettings = pgTable('app_settings', {
 		.default({ reservedResponsePct: 30, autoCompactThresholdPct: 72, compactionModel: 'openai/gpt-4o-mini' }),
 	toolConfig: jsonb('tool_config')
 		.$type<{
-			approvalMode: 'auto' | 'confirm'
+			approvalMode: 'auto' | 'confirm' | 'plan'
 			disabledTools: string[]
 		}>()
 		.notNull()

@@ -343,7 +343,7 @@
 						value={settings.toolConfig?.approvalMode ?? 'auto'}
 						onchange={(e) => {
 							if (!settings) return;
-							const mode = (e.currentTarget as HTMLSelectElement).value as 'auto' | 'confirm';
+							const mode = (e.currentTarget as HTMLSelectElement).value as 'auto' | 'confirm' | 'plan';
 							settings = {
 								...settings,
 								toolConfig: { ...settings.toolConfig, approvalMode: mode },
@@ -352,6 +352,7 @@
 					>
 						<option value="auto">Auto-approve</option>
 						<option value="confirm">Ask every time</option>
+						<option value="plan">Plan first</option>
 					</select>
 				</div>
 				<div class="border-t border-base-content/[.06]"></div>

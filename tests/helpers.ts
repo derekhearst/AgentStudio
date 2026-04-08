@@ -1,11 +1,10 @@
-import { createHmac, randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Page } from '@playwright/test'
 import postgres from 'postgres'
 
 type ParsedEnv = {
-	AUTH_PASSWORD: string
 	DATABASE_URL: string
 }
 
@@ -35,13 +34,12 @@ function parseEnvFile() {
 
 	cachedEnvValues = values
 
-	const AUTH_PASSWORD = values.get('AUTH_PASSWORD')
 	const DATABASE_URL = values.get('DATABASE_URL')
-	if (!AUTH_PASSWORD || !DATABASE_URL) {
-		throw new Error('AUTH_PASSWORD and DATABASE_URL must exist in .env for Playwright tests')
+	if (!DATABASE_URL) {
+		throw new Error('DATABASE_URL must exist in .env for Playwright tests')
 	}
 
-	cachedEnv = { AUTH_PASSWORD, DATABASE_URL }
+	cachedEnv = { DATABASE_URL }
 	return cachedEnv
 }
 
@@ -54,15 +52,33 @@ export function uniquePrefix(scope: string) {
 	return `E2E:${scope}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
 }
 
-function createSessionToken(secret: string) {
-	const nonce = randomBytes(32).toString('base64url')
-	const signature = createHmac('sha256', secret).update(nonce).digest('base64url')
-	return `${nonce}.${signature}`
+function createSessionToken() {
+	return randomBytes(32).toString('base64url')
 }
 
 export async function authenticateContext(context: BrowserContext) {
-	const { AUTH_PASSWORD } = parseEnvFile()
-	const token = createSessionToken(AUTH_PASSWORD)
+	const token = createSessionToken()
+	const tokenHash = createHash('sha256').update(token).digest('base64url')
+	const sql = getSql()
+
+	const [user] = await sql<{ id: string }[]>`
+		select id
+		from users
+		where is_active = true and deleted_at is null
+		order by case when role = 'admin' then 0 else 1 end, created_at asc
+		limit 1
+	`
+
+	if (!user?.id) {
+		throw new Error('No active user found for E2E authentication')
+	}
+
+	const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+	await sql`
+		insert into auth_sessions (user_id, token_hash, expires_at)
+		values (${user.id}, ${tokenHash}, ${expiresAt})
+	`
+
 	await context.addCookies([
 		{
 			name: 'AgentStudio_session',
@@ -76,10 +92,8 @@ export async function authenticateContext(context: BrowserContext) {
 }
 
 export async function loginViaUi(page: Page) {
-	const { AUTH_PASSWORD } = parseEnvFile()
-	await page.goto('/login')
-	await page.getByLabel('Password').fill(AUTH_PASSWORD)
-	await page.getByRole('button', { name: /sign in/i }).click()
+	await authenticateContext(page.context())
+	await page.goto('/')
 }
 
 export function getSql() {
@@ -102,6 +116,30 @@ export async function cleanupPrefixedRecords(prefix: string) {
 	await sql`delete from notifications where title like ${`${prefix}%`} or body like ${`${prefix}%`}`
 	await sql`delete from push_subscriptions where device_label like ${`${prefix}%`}`
 	await sql`delete from agents where name like ${`${prefix}%`} or role like ${`${prefix}%`}`
+}
+
+export async function expectRealAssistantReply(conversationId: string, timeoutMs = 90000) {
+	const sql = getSql()
+	const startedAt = Date.now()
+
+	while (Date.now() - startedAt < timeoutMs) {
+		const rows = await sql<{ content: string }[]>`
+			select content
+			from messages
+			where conversation_id = ${conversationId} and role = 'assistant'
+			order by created_at desc
+			limit 1
+		`
+
+		const content = rows[0]?.content ?? ''
+		if (content.length > 8 && !content.includes('MOCK_STREAM:') && !content.includes('MOCK_RESPONSE:')) {
+			return content
+		}
+
+		await new Promise((resolve) => setTimeout(resolve, 500))
+	}
+
+	throw new Error(`Timed out waiting for real assistant response for conversation ${conversationId}`)
 }
 
 export async function seedAgent(

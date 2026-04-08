@@ -3,14 +3,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { createTask, delegateTask, getAgent, getAgentChoices, runTaskNow, updateAgentStatus } from '$lib/agents';
+	import { delegateTask, getAgent, getAgentChoices, runTaskNow, updateAgentStatus } from '$lib/agents';
+	import { startGuidedCreationChat } from '$lib/chat/creation-flow';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const agentId = $derived(page.params.id ?? '');
 	let data = $state<Awaited<ReturnType<typeof getAgent>> | null>(null);
 	let agentChoices = $state<Awaited<ReturnType<typeof getAgentChoices>>>([]);
-	let title = $state('');
-	let description = $state('');
 	let delegateAgentId = $state('');
 	let delegateTaskText = $state('');
 	let busy = $state(false);
@@ -34,24 +33,6 @@
 		if (!agentId) return;
 		await updateAgentStatus({ agentId, status });
 		await refresh();
-	}
-
-	async function createAgentTaskAction() {
-		if (!agentId || !title.trim() || !description.trim()) return;
-		busy = true;
-		try {
-			await createTask({
-				agentId,
-				title: title.trim(),
-				description: description.trim(),
-				priority: 2,
-			});
-			title = '';
-			description = '';
-			await refresh();
-		} finally {
-			busy = false;
-		}
 	}
 
 	async function runTask(taskId: string) {
@@ -104,10 +85,24 @@
 
 		<ContentPanel>
 			{#snippet header()}<h2 class="font-semibold">Create Task</h2>{/snippet}
-			<div class="grid gap-2">
-				<input class="input input-bordered" bind:value={title} placeholder="Task title" />
-				<textarea class="textarea textarea-bordered h-24" bind:value={description} placeholder="Task details"></textarea>
-				<button class="btn btn-primary" type="button" onclick={createAgentTaskAction} disabled={busy}>Queue Task</button>
+			<p class="text-sm text-base-content/70">
+				Start a guided planning chat to create a task for this agent. The assistant will ask questions and wait for plan approval before executing tools.
+			</p>
+			<div class="mt-3">
+				<button
+					class="btn btn-primary"
+					type="button"
+					onclick={() =>
+						startGuidedCreationChat({
+							kind: 'task',
+							context: {
+								agentId,
+								agentName: data?.agent.name,
+							},
+						})}
+				>
+					Create Task in Chat
+				</button>
 			</div>
 		</ContentPanel>
 
