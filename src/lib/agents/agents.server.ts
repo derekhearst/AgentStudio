@@ -317,13 +317,7 @@ export async function getAgentDetail(agentId: string) {
 		const [ttftRow] = await db
 			.select({ avgTtftMs: sql<number | null>`AVG(${messages.ttftMs})::int` })
 			.from(messages)
-			.where(
-				and(
-					inArray(messages.conversationId, convIds),
-					eq(messages.role, 'assistant'),
-					isNotNull(messages.ttftMs),
-				),
-			)
+			.where(and(inArray(messages.conversationId, convIds), eq(messages.role, 'assistant'), isNotNull(messages.ttftMs)))
 		avgTtftMs = ttftRow?.avgTtftMs ?? null
 	}
 
