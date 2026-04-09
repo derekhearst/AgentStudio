@@ -275,33 +275,39 @@ export async function buildImportPrompt(options?: { includeExisting?: boolean })
 	if (options?.includeExisting) {
 		const existing = await listMemories({ limit: 200 })
 		if (existing.length > 0) {
+			const hallCounts = new Map<string, number>()
 			const categoryCounts = new Map<string, number>()
 			for (const m of existing) {
+				hallCounts.set(m.hallType, (hallCounts.get(m.hallType) ?? 0) + 1)
 				categoryCounts.set(m.category, (categoryCounts.get(m.category) ?? 0) + 1)
 			}
-			const summary = [...categoryCounts.entries()].map(([cat, count]) => `${cat}: ${count}`).join(', ')
+			const hallSummary = [...hallCounts.entries()].map(([hall, count]) => `${hall}: ${count}`).join(', ')
+			const categorySummary = [...categoryCounts.entries()].map(([cat, count]) => `${cat}: ${count}`).join(', ')
 
 			existingContext = [
 				'',
-				'I already have these memory categories stored: ' + summary + '.',
+				'I already have these hall distributions stored: ' + hallSummary + '.',
+				'I also have these category tags stored: ' + categorySummary + '.',
 				'Skip facts I likely already know and focus on new or unique information.',
 			].join('\n')
 		}
 	}
 
 	return [
-		'I use a personal AI assistant that stores long-term memories about me.',
-		'Please help me transfer knowledge from our conversations here into my assistant.',
+		'I use a personal AI assistant that stores long-term memories in a Memory Palace.',
+		'Each memory becomes a drawer placed in a Wing > Room > Hall location.',
+		'Please help me transfer knowledge from our conversations here into that structure.',
 		'',
-		'List everything you know about me as concise, standalone facts - one fact per line.',
-		'Cover these categories:',
-		'- **preference** - likes, dislikes, communication style, tools I prefer',
-		"- **project** - things I'm working on, tech stack, goals",
-		"- **person** - people I've mentioned, relationships, roles",
-		"- **constraint** - limitations, deadlines, requirements I've stated",
-		'- **general** - anything else noteworthy',
+		'List everything you know about me as concise, standalone drawer candidates (one per line).',
+		'For each line, include: Wing, Room, Hall, optional Category tag, and the Fact sentence.',
+		'Valid Hall values: facts, events, discoveries, preferences, advice.',
+		'Use this format exactly:',
+		'Wing > Room > Hall | category | fact sentence',
+		'If category is unclear, use general.',
+		'If Wing or Room is unclear, infer the best fit from the fact content.',
 		'',
-		'Format each fact as a single clear sentence. Do not use bullet markers or numbering.',
+		'Keep each fact sentence short, specific, and durable over time.',
+		'Do not use bullet markers, numbering, JSON, or markdown tables.',
 		'Do not include uncertain or speculative information.',
 		'Do not include facts about yourself or our conversation mechanics.',
 		existingContext,
