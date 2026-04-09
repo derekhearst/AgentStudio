@@ -3,7 +3,8 @@
 <script lang="ts">
 	import { page } from '$app/state'
 	import { onMount, onDestroy } from 'svelte'
-	import { getAgent } from '$lib/agents'
+	import { getAgent, updateAgentCommand } from '$lib/agents'
+	import ModelSelector from '$lib/models/ModelSelector.svelte'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
@@ -14,6 +15,12 @@
 	let loading = $state(true)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 	let showAllConversations = $state(false)
+	let editingConfig = $state(false)
+	let configSaving = $state(false)
+	let configError = $state<string | null>(null)
+	let configSaved = $state(false)
+	let draftSystemPrompt = $state('')
+	let draftModel = $state('')
 
 	let eventSource: EventSource | null = null
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -138,7 +145,68 @@
 		loading = true
 		const result = await getAgent(agentId)
 		data = result ?? null
+		if (data) {
+			draftSystemPrompt = data.agent.systemPrompt
+			draftModel = data.agent.model
+		}
 		loading = false
+	}
+
+	function startEditConfig() {
+		if (!data) return
+		draftSystemPrompt = data.agent.systemPrompt
+		draftModel = data.agent.model
+		configError = null
+		configSaved = false
+		editingConfig = true
+	}
+
+	function cancelEditConfig() {
+		editingConfig = false
+		configError = null
+		configSaved = false
+		if (!data) return
+		draftSystemPrompt = data.agent.systemPrompt
+		draftModel = data.agent.model
+	}
+
+	async function saveConfig() {
+		if (!data) return
+		const systemPrompt = draftSystemPrompt.trim()
+		const model = draftModel.trim()
+		if (!systemPrompt) {
+			configError = 'System prompt cannot be empty.'
+			return
+		}
+		if (!model) {
+			configError = 'Model cannot be empty.'
+			return
+		}
+
+		configSaving = true
+		configError = null
+		configSaved = false
+		try {
+			const updated = await updateAgentCommand({
+				agentId: data.agent.id,
+				systemPrompt,
+				model,
+			})
+			if (!updated) {
+				configError = 'Failed to save agent configuration.'
+				return
+			}
+			data = {
+				...data,
+				agent: updated,
+			}
+			editingConfig = false
+			configSaved = true
+		} catch (error) {
+			configError = error instanceof Error ? error.message : 'Failed to save agent configuration.'
+		} finally {
+			configSaving = false
+		}
 	}
 
 	function connectMonitor() {
@@ -380,12 +448,61 @@
 			</ContentPanel>
 		</div>
 
-		<!-- ── System prompt ────────────────────────────────────────── -->
+		<!-- ── Agent configuration ──────────────────────────────────── -->
 		<ContentPanel>
 			{#snippet header()}
-				<h2 class="font-semibold">System prompt</h2>
+				<div class="flex min-w-0 flex-1 items-center justify-between gap-2">
+					<h2 class="font-semibold">Agent configuration</h2>
+					<div class="flex items-center gap-2">
+						{#if configSaved}
+							<span class="text-xs text-success">Saved</span>
+						{/if}
+						{#if editingConfig}
+							<button class="btn btn-xs btn-ghost" onclick={cancelEditConfig} disabled={configSaving}>Cancel</button>
+							<button class="btn btn-xs btn-primary" onclick={saveConfig} disabled={configSaving}>
+								{configSaving ? 'Saving…' : 'Save'}
+							</button>
+						{:else}
+							<button class="btn btn-xs btn-ghost" onclick={startEditConfig}>Edit</button>
+						{/if}
+					</div>
+				</div>
 			{/snippet}
-			<pre class="whitespace-pre-wrap text-xs leading-relaxed text-base-content/70">{data.agent.systemPrompt}</pre>
+
+			{#if configError}
+				<div class="alert alert-error mb-3 py-2 text-xs">{configError}</div>
+			{/if}
+
+			<div class="mb-4">
+				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Model</p>
+				{#if editingConfig}
+					<div class="mt-2 max-w-md">
+						<ModelSelector
+							value={draftModel}
+							showChevron={false}
+							showBrowseBadge={false}
+							onchange={(id: string) => {
+								draftModel = id
+							}}
+						/>
+					</div>
+				{:else}
+					<p class="mt-1 font-mono text-xs text-base-content/65">{data.agent.model}</p>
+				{/if}
+			</div>
+
+			<div class="mb-2 border-t border-base-300/70"></div>
+
+			<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/45">System prompt</p>
+			{#if editingConfig}
+				<textarea
+					class="textarea textarea-bordered min-h-52 w-full text-xs leading-relaxed"
+					bind:value={draftSystemPrompt}
+				></textarea>
+				<p class="mt-1 text-right text-[11px] text-base-content/45">{draftSystemPrompt.length} chars</p>
+			{:else}
+				<pre class="whitespace-pre-wrap text-xs leading-relaxed text-base-content/70">{data.agent.systemPrompt}</pre>
+			{/if}
 		</ContentPanel>
 
 		<!-- ── Session history ───────────────────────────────────────── -->

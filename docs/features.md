@@ -36,12 +36,21 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 ### 2. Autonomous Agents
 
 - Named agents with custom roles, system prompts, and model assignments
+- Agent detail page supports editing each agent's model assignment and system prompt
 - LLM-driven task execution with full tool access (search, code, files, browser)
 - Agent lifecycle management (active, paused, idle)
 - Parent-child delegation for multi-step work
 - Per-run metrics: token usage, cost, execution logs
 - Agent run trace viewer (step-by-step logs per run)
 - Read-only agent listing page (creation and lifecycle managed via chat orchestrator)
+
+### 3. Automations
+
+- Visual automation board inspired by the agent cards: status badges, schedule telemetry, and quick action controls
+- Two-column automation workspace with existing schedules on the left and a dedicated creation studio on the right
+- Creation studio includes cron presets, agent targeting, conversation mode selection, and immediate enable toggle
+- One-click duplicate from any existing automation to pre-fill a new automation draft
+- Lifecycle actions in-page: enable/disable, delete, and jump to the linked conversation thread
 
 ### 4. Memory System
 
@@ -169,7 +178,7 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 | `/agents`                   | Agent browser (read-only)       |
 | `/agents/[id]`              | Agent detail                    |
 | `/agents/[id]/runs/[runId]` | Agent run trace                 |
-| `/automations`              | Automation schedule overview    |
+| `/automations`              | Automation board + creation studio |
 | `/skills`                   | Skills browser (read-only)      |
 | `/skills/[id]`              | Skill detail + files            |
 | `/memory`                   | Memory explorer (read-only)     |

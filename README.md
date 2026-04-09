@@ -13,6 +13,7 @@ Creation workflows are chat-led: New Agent and New Skill actions launch a fresh 
 ### Agents
 
 Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page provides a read-only browser for viewing agent status and navigating to agent details.
+Agent detail pages allow editing the assigned model and system prompt.
 
 ### Memory Palace and Dreaming Agent
 
