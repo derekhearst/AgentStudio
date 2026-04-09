@@ -1,6 +1,5 @@
 import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { conversations, messages } from '../chat/chat.schema'
-import { agentTasks } from '../agents/agents.schema'
 
 export const artifactTypeEnum = pgEnum('artifact_type', [
 	'markdown',
@@ -30,7 +29,6 @@ export const artifacts = pgTable('artifacts', {
 	storage: jsonb('storage').$type<Record<string, unknown>>().notNull().default({}),
 	conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
 	messageId: uuid('message_id').references(() => messages.id, { onDelete: 'set null' }),
-	taskId: uuid('task_id').references(() => agentTasks.id, { onDelete: 'set null' }),
 	pinned: boolean('pinned').notNull().default(false),
 	accessCount: integer('access_count').notNull().default(0),
 	lastAccessed: timestamp('last_accessed', { withTimezone: true }),

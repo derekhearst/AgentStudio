@@ -1,5 +1,6 @@
 import { integer, jsonb, numeric, pgEnum, pgTable, real, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '../auth/auth.schema'
+import { agents } from '../agents/agents.schema'
 
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool'])
 
@@ -8,6 +9,7 @@ export const conversations = pgTable('conversations', {
 	title: text('title').notNull(),
 	category: text('category'),
 	userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+	agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 	model: text('model').notNull().default('anthropic/claude-sonnet-4'),
 	totalTokens: integer('total_tokens').notNull().default(0),
 	totalCost: numeric('total_cost', { precision: 18, scale: 12 }).notNull().default('0'),

@@ -8,23 +8,21 @@ Self-hosted autonomous AI agent platform with persistent memory, user-scoped too
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
-Creation workflows are chat-led: New Project, New Agent, New Task, and New Skill actions now launch a fresh conversation with a seeded creation prompt. The assistant runs a cooperative planning flow (asks follow-up questions first), presents an execution plan card, and only executes tool calls after explicit plan approval.
+Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant runs a cooperative planning flow (asks follow-up questions first, optionally with ask_user), presents an execution plan card, and only executes tool calls after explicit plan approval.
 
-### Agents and Tasks
+### Agents
 
-You can create specialized agents, assign tasks, and review results in a branch-based code review flow. Task lifecycle is managed in a Kanban-style board with clear status transitions.
+Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page provides a read-only browser for viewing agent status and navigating to agent details.
 
-### Projects Control Plane (Foundation)
+### Memory Palace and Dreaming Agent
 
-Projects are now the unified top-level workspace for orchestration. The initial foundation includes project lifecycle management, goal hierarchy scaffolding, and strategy governance APIs (submit, approve, reject) with project-scoped data hooks for agents, tasks, and runs.
+The memory system stores, retrieves, and consolidates facts over time using PostgreSQL + pgvector. Memory Palace organization is active (wings, rooms, halls, drawers, and closets), and chat context now uses the layered memory stack (L0 identity, L1 essential story, L2 recall, L3 semantic fallback).
 
-### Memory and Dream Cycles
+Dreaming Agent is a real visible agent that owns memory consolidation work. Its periodic consolidation runs are modeled as standard automations and produce normal chat sessions.
 
-The memory system stores, retrieves, and consolidates facts over time using PostgreSQL + pgvector. Periodic dream cycles merge duplicates, resolve contradictions, and prune stale knowledge.
+### Settings
 
-### Dashboard and Settings
-
-The dashboard is available at a dedicated route and shows live system totals, task status distribution, and recent activity across conversations and tasks. Settings persist default model, theme, notification preferences, and dream-cycle behavior in the database.
+Settings persist default model, theme, notification preferences, tool availability toggles by capability group, context window configuration, and budget limits.
 
 Tool execution has three approval modes: `auto`, `confirm`, and `plan` (plan-first). In plan-first mode, tool calls are grouped into a plan and require Approve, Cancel, or Continue Planning before execution.
 
@@ -169,10 +167,8 @@ Notes:
 - `/users` Admin user management
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
-- `/dashboard` System dashboard
 - `/cost` Cost dashboard
-- `/projects` Projects control plane (foundation)
 - `/agents` Agent management
-- `/tasks` Task board
+- `/automations` Scheduled automation workflows
 - `/memory` Memory explorer
 - `/settings` App configuration

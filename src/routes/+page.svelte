@@ -7,6 +7,7 @@
 	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { createConversation, getConversations } from '$lib/chat';
+	import { getAgentChoices } from '$lib/agents';
 	import { getSettings } from '$lib/settings';
 	import ChatComposer from '$lib/chat/ChatComposer.svelte';
 
@@ -22,9 +23,12 @@
 	let expanded = $state(false);
 	let search = $state('');
 	let groupMode = $state<'date' | 'category'>('date');
+	let agentFilter = $state<'all' | 'orchestrator' | string>('all');
 
 	type Conversation = Awaited<ReturnType<typeof getConversations>>[number];
+	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
 	let recentChats = $state<Conversation[]>([]);
+	let agentChoices = $state<AgentChoice[]>([]);
 
 	$effect(() => {
 		void loadRecent();
@@ -59,6 +63,7 @@
 
 	async function loadRecent() {
 		recentChats = await getConversations();
+		agentChoices = await getAgentChoices();
 	}
 
 	function getGreeting() {
@@ -75,8 +80,17 @@
 		const sorted = [...recentChats].sort(
 			(a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
 		);
-		if (!q) return sorted;
-		return sorted.filter(
+		let results = sorted;
+
+		// Agent filter
+		if (agentFilter === 'orchestrator') {
+			results = results.filter((c) => !c.agentId);
+		} else if (agentFilter !== 'all') {
+			results = results.filter((c) => c.agentId === agentFilter);
+		}
+
+		if (!q) return results;
+		return results.filter(
 			(c) =>
 				c.title.toLowerCase().includes(q) ||
 				(c.lastMessage && c.lastMessage.toLowerCase().includes(q))
@@ -316,13 +330,26 @@
 				</div>
 			</div>
 
-			<input
-				type="text"
-				class="input input-bordered input-sm w-full"
-				placeholder="Search chats…"
-				bind:value={search}
-				aria-label="Search chats"
-			/>
+			<div class="flex gap-2">
+				<input
+					type="text"
+					class="input input-bordered input-sm min-w-0 flex-1"
+					placeholder="Search chats…"
+					bind:value={search}
+					aria-label="Search chats"
+				/>
+				<select
+					class="select select-bordered select-sm w-auto max-w-[140px]"
+					bind:value={agentFilter}
+					aria-label="Filter by agent"
+				>
+					<option value="all">All</option>
+					<option value="orchestrator">Orchestrator</option>
+					{#each agentChoices as agent (agent.id)}
+						<option value={agent.id}>{agent.name}</option>
+					{/each}
+				</select>
+			</div>
 		</div>
 
 		<!-- Scrollable list -->

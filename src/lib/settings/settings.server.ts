@@ -29,7 +29,6 @@ export const DEFAULT_SETTINGS = {
 		approvalMode: 'auto' as const,
 		disabledTools: [] as string[],
 	},
-	systemPrompt: '',
 	theme: 'AgentStudio-night',
 } as const
 
@@ -52,7 +51,6 @@ export async function getOrCreateSettings(userId: string) {
 			dreamConfig: DEFAULT_SETTINGS.dreamConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
-			systemPrompt: DEFAULT_SETTINGS.systemPrompt,
 			theme: DEFAULT_SETTINGS.theme,
 			updatedAt: new Date(),
 		})
@@ -89,7 +87,6 @@ export async function updateSettings(input: {
 		approvalMode?: 'auto' | 'confirm' | 'plan'
 		disabledTools?: string[]
 	}
-	systemPrompt?: string
 }) {
 	const current = await getOrCreateSettings(input.userId)
 	const [updated] = await db
@@ -119,7 +116,6 @@ export async function updateSettings(input: {
 				...((current.toolConfig as typeof DEFAULT_SETTINGS.toolConfig | undefined) ?? DEFAULT_SETTINGS.toolConfig),
 				...(input.toolConfig ?? {}),
 			},
-			systemPrompt: input.systemPrompt ?? current.systemPrompt,
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, current.id))
@@ -149,7 +145,6 @@ export async function resetSettings(userId: string) {
 			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
-			systemPrompt: DEFAULT_SETTINGS.systemPrompt,
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, existing.id))

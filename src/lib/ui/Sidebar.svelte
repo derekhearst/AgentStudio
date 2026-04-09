@@ -46,28 +46,6 @@
 		<!-- Work group -->
 		<p class="nav-section-title mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest opacity-40">Work</p>
 		<div class="mb-4 space-y-0.5">
-			<a href="/dashboard"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/dashboard')} class:font-medium={isActive('/dashboard')} class:text-primary={isActive('/dashboard')}
-				onclick={onNavigate}>
-				<!-- squares-2x2 -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-					<rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-				</svg>
-				Dashboard
-			</a>
-			<a href="/projects"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/projects')} class:font-medium={isActive('/projects')} class:text-primary={isActive('/projects')}
-				onclick={onNavigate}>
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M12 2l9 5-9 5-9-5 9-5z"/>
-					<path d="M3 17l9 5 9-5"/>
-					<path d="M3 12l9 5 9-5"/>
-				</svg>
-				Projects
-			</a>
 			<a href="/agents"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
 				class:bg-base-200={isActive('/agents')} class:font-medium={isActive('/agents')} class:text-primary={isActive('/agents')}
@@ -78,16 +56,6 @@
 					<path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3"/>
 				</svg>
 				Agents
-			</a>
-			<a href="/tasks"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/tasks')} class:font-medium={isActive('/tasks')} class:text-primary={isActive('/tasks')}
-				onclick={onNavigate}>
-				<!-- check-circle -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>
-				</svg>
-				Tasks
 			</a>
 			<a href="/review"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
@@ -123,15 +91,15 @@
 				</svg>
 				Skills
 			</a>
-			<a href="/tools"
+			<a href="/automations"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/tools')} class:font-medium={isActive('/tools')} class:text-primary={isActive('/tools')}
+				class:bg-base-200={isActive('/automations')} class:font-medium={isActive('/automations')} class:text-primary={isActive('/automations')}
 				onclick={onNavigate}>
-				<!-- wrench -->
+				<!-- refresh/cycle -->
 				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8z"/>
+					<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
 				</svg>
-				Tools
+				Automations
 			</a>
 		</div>
 

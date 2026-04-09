@@ -13,6 +13,7 @@
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
+	import { capabilityGroups } from '$lib/tools/tools';
 	import ModelSelector from '$lib/models/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
@@ -33,7 +34,7 @@
 	let installAvailable = $derived(installPromptEvent !== null);
 	let testTitle = $state('Task needs review');
 	let testBody = $state('A delegated task is waiting for your approval.');
-	let testUrl = $state('/tasks');
+	let testUrl = $state('/chat');
 	let statusMessage = $state('');
 	let settings = $state<SettingsRow | null>(null);
 	let searchQuery = $state('');
@@ -42,8 +43,8 @@
 
 	const sections = [
 		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
-		{ id: 'prompt', keywords: 'system prompt custom instructions' },
 		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
+		{ id: 'tools', keywords: 'tools sandbox coding artifacts skills agents media image generation disabled enabled toggle' },
 		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
@@ -101,7 +102,6 @@
 				budgetConfig: settings.budgetConfig,
 				contextConfig: settings.contextConfig,
 				toolConfig: settings.toolConfig,
-				systemPrompt: settings.systemPrompt,
 			});
 			settings = updated;
 			applyTheme('AgentStudio-night');
@@ -239,6 +239,27 @@
 				...settings.dreamConfig,
 				autoRun
 			}
+		};
+	}
+
+	function isToolDisabled(toolName: string): boolean {
+		return settings?.toolConfig?.disabledTools?.includes(toolName) ?? false;
+	}
+
+	function isGroupDisabled(groupTools: readonly string[]): boolean {
+		return groupTools.every((t) => isToolDisabled(t));
+	}
+
+	function toggleGroup(groupTools: readonly string[], disabled: boolean) {
+		if (!settings) return;
+		const current = new Set(settings.toolConfig?.disabledTools ?? []);
+		for (const tool of groupTools) {
+			if (disabled) current.add(tool);
+			else current.delete(tool);
+		}
+		settings = {
+			...settings,
+			toolConfig: { ...settings.toolConfig, disabledTools: [...current] },
 		};
 	}
 </script>
@@ -412,36 +433,6 @@
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
-		     SYSTEM PROMPT
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('prompt')}
-		<section>
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-primary"></span>System Prompt
-			</p>
-			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4">
-				<div class="py-3.5">
-					<div class="flex items-center justify-between">
-						<div>
-							<p class="text-sm font-medium">Custom System Prompt</p>
-							<p class="mt-0.5 text-xs text-base-content/40">Prepended to every chat conversation. Leave empty to use defaults only.</p>
-						</div>
-					</div>
-					<textarea
-						class="textarea textarea-bordered mt-3 w-full font-mono text-xs leading-relaxed"
-						rows="6"
-						maxlength="12000"
-						placeholder="e.g. You are AgentStudio, a helpful AI assistant with access to tools..."
-						bind:value={settings.systemPrompt}
-					></textarea>
-					<p class="mt-1 text-right text-[10px] text-base-content/30">{settings.systemPrompt?.length ?? 0} / 12000</p>
-				</div>
-			</div>
-		</section>
-
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
 		     CONTEXT WINDOW
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('context')}
@@ -503,14 +494,43 @@
 						/>
 					</div>
 				</div>
-				<div class="border-t border-base-content/[.06]"></div>
-				<div class="py-3.5">
-					<p class="text-sm font-medium">Tool Availability</p>
-					<p class="mt-0.5 text-xs text-base-content/40">Manage built-in tool toggles from the Tools page.</p>
-				</div>
 			</div>
 		</section>
 
+		{/if}
+
+		<!-- ════════════════════════════════════════════════
+		     TOOL TOGGLES
+		     ════════════════════════════════════════════════ -->
+		{#if isVisible('tools')}
+		<section>
+			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
+				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Tool Availability
+			</p>
+			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4">
+				{#each Object.entries(capabilityGroups) as [key, group], i (key)}
+					{#if i > 0}
+						<div class="border-t border-base-content/[.06]"></div>
+					{/if}
+					<div class="flex items-center justify-between gap-4 py-3 sm:py-3.5">
+						<div>
+							<p class="text-sm font-medium">{group.label}</p>
+							<p class="mt-0.5 text-xs text-base-content/40">{group.description}</p>
+						</div>
+						{#if group.alwaysOn}
+							<span class="badge badge-outline badge-sm">always on</span>
+						{:else}
+							<input
+								type="checkbox"
+								class="toggle toggle-secondary toggle-sm"
+								checked={!isGroupDisabled(group.tools)}
+								onchange={(e) => toggleGroup(group.tools, !(e.currentTarget as HTMLInputElement).checked)}
+							/>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		</section>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════

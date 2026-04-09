@@ -45,7 +45,7 @@ Example:
 		content: `# Feature Map
 
 ## Chat
-Use for interactive implementation, debugging, design iteration, and code reviews.
+Use for interactive implementation, debugging, design iteration, and code reviews. The orchestrator chat is the primary interface.
 
 ## Skills
 Use /skills to store repeatable instructions, standards, and domain playbooks.
@@ -53,14 +53,17 @@ Use /skills to store repeatable instructions, standards, and domain playbooks.
 ## Memory
 Use /memory for durable facts, context, and relationships that should persist between sessions.
 
-## Tasks + Agents
-Use /tasks and /agents when work is multi-step, parallelizable, or review-heavy.
+## Agents
+Use /agents to manage sub-agents and their configurations.
 
 ## Artifacts
 Use /artifacts for durable outputs: docs, code snippets, diagrams, and generated assets.
 
-## Dashboard + Cost
-Use /dashboard and /dashboard/cost to track system health, usage, and budgets.
+## Automations
+Use /automations for scheduled and recurring agent workflows (dream cycles, etc.).
+
+## Cost
+Use /cost to track usage and budgets.
 
 ## Settings
 Configure defaults (model, budgets, notifications, behavior preferences) in /settings.`,

@@ -27,7 +27,6 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Auto-title generation
 - Memory context auto-injection before each response
 - Tool call visibility with collapsible cards
-- Plan-first execution card for grouped tool calls with Approve, Cancel, and Continue Planning actions
 - ask_user prompt surface docked above the composer (inline dropdown, not modal)
 - Multi-question ask_user flow with previous/next navigation and per-question focus
 - Freeform bypass: typing in the composer resolves pending ask_user prompts directly
@@ -41,32 +40,8 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Agent lifecycle management (active, paused, idle)
 - Parent-child delegation for multi-step work
 - Per-run metrics: token usage, cost, execution logs
-- Priority-based scheduler with concurrent queue
 - Agent run trace viewer (step-by-step logs per run)
-
-### 2.5 Guided Creation Workflows
-
-- New Project, New Agent, New Task, and New Skill actions open a new chat with a seeded creation prompt
-- Assistant runs a cooperative planning flow and asks clarifying questions before execution
-- Plan approval gate appears in-chat before tools run
-- Task creation from agent detail includes target-agent context in the seeded prompt
-
-### 3. Task Board & Code Review
-
-- Kanban board with six columns: pending, running, review, changes_requested, completed, failed
-- Drag-drop reorder with priority slider (0–5)
-- Git-based code review: auto-branch per task, in-app diff, approve/reject/request-changes
-- Task-level chat threads for iterative feedback between user and agent
-- Review type classification (heavy, quick, informational)
-- Mobile-first review queue with swipe navigation
-
-### 3.5 Projects (Foundation)
-
-- New `/projects` unified entrypoint for project-scoped operations
-- Project lifecycle support: active, archived, deleted
-- Goal hierarchy model for scoped mission/context propagation
-- Strategy governance workflow states: draft, submitted, approved, rejected, active, superseded
-- Project-scoped schema hooks added for agents, tasks, and runs
+- Read-only agent listing page (creation and lifecycle managed via chat orchestrator)
 
 ### 4. Memory System
 
@@ -74,7 +49,9 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Hybrid retrieval: semantic similarity + keyword matching
 - Typed memory relations (supports, contradicts, depends_on, part_of) with strength scores
 - Automatic extraction from conversations and agent runs
-- Dream cycles: decay, prune, deduplicate, categorize, resolve contradictions
+- Dreaming Agent consolidation via automations: decay, prune, deduplicate, categorize, resolve contradictions
+- Memory Palace foundation: wings, rooms, hall types, and closet/drawer metadata on memories
+- Layered runtime memory loading in chat (L0 identity, L1 essential story, L2 topic recall)
 - Memory explorer with search, category filters, importance sorting, relation graph
 - Pin memories to disable decay
 
@@ -83,8 +60,8 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - 14 artifact types: markdown, code, config, image, SVG, Mermaid, HTML, Svelte, data table, chart, audio, video
 - Automatic versioning on each update
 - Gallery view (list, grid, fullscreen) with search and filters
-- Linked to conversations, messages, or tasks
-- Pin and delete controls
+- Linked to conversations and messages
+- Delete control (pin, tag editing, category editing, and rollback removed — content managed via chat)
 
 ### 6. Web Search
 
@@ -114,16 +91,9 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Budget alerts with daily and monthly limits
 - Progress bars for spend vs budget
 
-### 10. Dashboard
+### 10. Activity Feed
 
-- Metric cards: conversations, messages, agents, tasks, memories, artifacts, notifications
-- Click-through to each section
-- Cost dashboard on a dedicated sub-page
-
-### 11. Activity Feed
-
-- Chronological event stream: task created, task status changed, agent action, memory created, dream cycle, chat started, review action
-- Includes project and governance events: project created/status changed, goal created, strategy submitted/approved/rejected
+- Chronological event stream: agent action, memory created, consolidation run, chat started
 - Type filter pills and refresh
 - Badge-coded entries with entity links
 
@@ -140,9 +110,11 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Default model selection
 - Theme (AgentStudio-night)
 - Notification preferences
-- Dream cycle configuration (decay lambda, prune threshold)
+- Automation and tool approval configuration (plus memory consolidation controls via Dreaming Agent tools)
 - Tool approval mode configuration: auto, confirm, plan-first
+- Tool availability toggles by capability group (sandbox, artifacts, skills, agents, media)
 - Budget configuration (daily and monthly limits)
+- Context window configuration (reserved response, auto-compact threshold, compaction model)
 - Push subscription management
 - PWA install prompt
 
@@ -150,8 +122,8 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 
 - Skill library for reusable instruction bundles used by chat and agents
 - Nested skill files for focused, modular guidance
-- Read-only built-in onboarding skill (`drokbot-guide`) visible in `/skills`
-- Built-in guide includes quickstart workflow, feature map, and effectiveness playbook
+- Read-only browse-only skills page (creation and management via chat orchestrator)
+- Built-in onboarding skill (`drokbot-guide`) visible in `/skills`
 
 ### 15. Authentication and User Management
 
@@ -187,29 +159,26 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 
 ## Route Map
 
-| Route                       | Purpose                            |
-| --------------------------- | ---------------------------------- |
-| `/`                         | Home / chat launcher               |
-| `/login`                    | Authentication                     |
-| `/users`                    | Admin user management              |
-| `/chat`                     | Conversation list                  |
-| `/chat/[id]`                | Conversation detail + streaming    |
-| `/projects`                 | Project control plane (foundation) |
-| `/agents`                   | Agent management + scheduler       |
-| `/agents/[id]`              | Agent detail                       |
-| `/agents/[id]/runs/[runId]` | Agent run trace                    |
-| `/tasks`                    | Task board (kanban)                |
-| `/tasks/[id]`               | Task detail                        |
-| `/review`                   | Mobile review queue                |
-| `/skills`                   | Skills library + built-in guide    |
-| `/skills/[id]`              | Skill detail + files               |
-| `/memory`                   | Memory explorer                    |
-| `/memory/[id]`              | Memory detail + relation graph     |
-| `/artifacts`                | Artifact gallery                   |
-| `/dashboard`                | System metrics                     |
-| `/dashboard/cost`           | Cost tracking + budgets            |
-| `/activity`                 | Activity event feed                |
-| `/settings`                 | Configuration + notifications      |
+| Route                       | Purpose                         |
+| --------------------------- | ------------------------------- |
+| `/`                         | Home / chat launcher            |
+| `/login`                    | Authentication                  |
+| `/users`                    | Admin user management           |
+| `/chat`                     | Conversation list               |
+| `/chat/[id]`                | Conversation detail + streaming |
+| `/agents`                   | Agent browser (read-only)       |
+| `/agents/[id]`              | Agent detail                    |
+| `/agents/[id]/runs/[runId]` | Agent run trace                 |
+| `/automations`              | Automation schedule overview    |
+| `/review`                   | Review queue                    |
+| `/skills`                   | Skills browser (read-only)      |
+| `/skills/[id]`              | Skill detail + files            |
+| `/memory`                   | Memory explorer (read-only)     |
+| `/memory/[id]`              | Memory detail + relation graph  |
+| `/artifacts`                | Artifact gallery (delete only)  |
+| `/cost`                     | Cost tracking + budgets         |
+| `/activity`                 | Activity event feed             |
+| `/settings`                 | Configuration + tool toggles    |
 
 ## Responsive Breakpoint Contract
 

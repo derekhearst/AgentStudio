@@ -52,7 +52,7 @@
 		if (!row.entityId || !row.entityType) return null;
 		switch (row.entityType) {
 			case 'task':
-				return `/tasks/${row.entityId}`;
+				return null;
 			case 'agent':
 				return `/agents/${row.entityId}`;
 			case 'memory':

@@ -20,6 +20,18 @@ import { searchMemories } from '$lib/memory/memory.server'
 import { db } from '$lib/db.server'
 import { artifacts, artifactVersions } from '$lib/artifacts/artifacts.schema'
 import { eq, max } from 'drizzle-orm'
+import { requireAdminRequestUser, normalizeUsername } from '$lib/auth/auth.server'
+import { users } from '$lib/auth/auth.schema'
+import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
+import {
+	createAutomationRecord,
+	deleteAutomationRecord,
+	listAutomationsForUser,
+	updateAutomationRecord,
+} from '$lib/automation/automation.server'
+import { createRoom, createWing, getClosetForRoom, placeMemory, traverseFromRoom } from '$lib/memory/palace.store'
+import { decayMemories, pruneMemories } from '$lib/memory/memory.server'
+import { listMemories } from '$lib/memory/memory.server'
 import {
 	listSkillSummaries,
 	getSkillByName,
@@ -681,8 +693,11 @@ export const toolSchemas = {
 	file_info: z.object({ path: z.string().min(1) }),
 	browser_screenshot: z.object({ url: z.string().url().optional() }),
 	memory_search: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).default(5) }),
-	create_task: z.object({ title: z.string().min(1), description: z.string().min(1) }),
-	run_subagent: z.object({ task: z.string().min(1), context: z.string().optional() }),
+	run_subagent: z.object({
+		task: z.string().min(1),
+		context: z.string().optional(),
+		agentId: z.string().uuid().optional(),
+	}),
 	image_generate: z.object({
 		prompt: z.string().min(1).max(2000),
 		model: z.enum(['flux', 'sdxl', 'dall-e']).default('flux'),
@@ -717,6 +732,87 @@ export const toolSchemas = {
 		artifactId: z.string().uuid(),
 		key: z.string().min(1).max(200),
 		value: z.unknown(),
+	}),
+	update_agent: z.object({
+		agentId: z.string().uuid(),
+		name: z.string().min(1).max(120).optional(),
+		role: z.string().min(1).max(240).optional(),
+		systemPrompt: z.string().min(1).optional(),
+		model: z.string().min(1).max(120).optional(),
+	}),
+	pause_agent: z.object({
+		agentId: z.string().uuid(),
+	}),
+	resume_agent: z.object({
+		agentId: z.string().uuid(),
+	}),
+	create_user: z.object({
+		username: z.string().min(3).max(32),
+		name: z.string().min(1).max(64).optional(),
+		role: z.enum(['admin', 'user']).default('user'),
+	}),
+	create_automation: z.object({
+		agentId: z.string().uuid().nullable().optional(),
+		description: z.string().min(1).max(200),
+		cronExpression: z.string().min(1).max(120),
+		prompt: z.string().min(1),
+		enabled: z.boolean().default(true),
+		conversationMode: z.enum(['new_each_run', 'reuse']).default('new_each_run'),
+	}),
+	list_automations: z.object({}),
+	update_automation: z.object({
+		automationId: z.string().uuid(),
+		agentId: z.string().uuid().nullable().optional(),
+		description: z.string().min(1).max(200).optional(),
+		cronExpression: z.string().min(1).max(120).optional(),
+		prompt: z.string().min(1).optional(),
+		enabled: z.boolean().optional(),
+		conversationMode: z.enum(['new_each_run', 'reuse']).optional(),
+	}),
+	delete_automation: z.object({
+		automationId: z.string().uuid(),
+	}),
+	palace_create_wing: z.object({
+		name: z.string().min(1).max(120),
+		description: z.string().max(500).optional(),
+	}),
+	palace_create_room: z.object({
+		wingId: z.string().uuid(),
+		name: z.string().min(1).max(120),
+		description: z.string().max(500).optional(),
+		closetForRoomId: z.string().uuid().optional(),
+	}),
+	palace_place_drawer: z.object({
+		content: z.string().min(1),
+		category: z.string().min(1).optional(),
+		importance: z.number().min(0).max(1).optional(),
+		wingId: z.string().uuid().optional(),
+		roomId: z.string().uuid().optional(),
+		hallType: z.enum(['facts', 'events', 'discoveries', 'preferences', 'advice']).optional(),
+	}),
+	palace_update_closet: z.object({
+		roomId: z.string().uuid(),
+		summary: z.string().min(1),
+	}),
+	palace_search: z.object({
+		query: z.string().min(1),
+		limit: z.number().int().min(1).max(20).default(8),
+	}),
+	palace_check_duplicate: z.object({
+		content: z.string().min(1),
+		limit: z.number().int().min(1).max(20).default(6),
+	}),
+	palace_decay: z.object({
+		lambda: z.number().min(0).max(1).default(0.03),
+	}),
+	palace_prune: z.object({
+		threshold: z.number().min(0).max(1).default(0.08),
+	}),
+	palace_detect_contradictions: z.object({
+		limit: z.number().int().min(1).max(30).default(20),
+	}),
+	palace_regenerate_l1: z.object({
+		limit: z.number().int().min(3).max(20).default(10),
 	}),
 	ask_user: z.object({
 		questions: z
@@ -789,15 +885,32 @@ const toolDescriptions: Record<ToolName, string> = {
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
 	memory_search: 'Search persistent memory for relevant information.',
-	create_task: 'Create a new agent task.',
 	run_subagent:
-		'Run a general-purpose subagent to handle a task. The subagent is stateless and returns a result without persistence.',
+		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
 	artifact_create:
 		'Create a persistent artifact (document, code, config, diagram, etc.). Use for code snippets over 15 lines, full documents, configs, diagrams, data tables, HTML pages, and Svelte components.',
 	artifact_update: 'Update the content of an existing artifact. Creates a new version automatically.',
 	artifact_storage_update:
 		"Update a key in an artifact's persistent storage. Used for reactive/living artifacts like trackers and dashboards.",
+	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
+	pause_agent: 'Pause an agent so it is not used for delegations.',
+	resume_agent: 'Resume a paused agent and mark it active again.',
+	create_user: 'Create a user account (admin-only tool).',
+	create_automation: 'Create a recurring automation that triggers an agent prompt on a cron schedule.',
+	list_automations: 'List automations for the current user.',
+	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',
+	delete_automation: 'Delete an automation by id.',
+	palace_create_wing: 'Create a Memory Palace wing for a domain.',
+	palace_create_room: 'Create a Memory Palace room within a wing.',
+	palace_place_drawer: 'Insert a raw memory drawer into a specific wing/room/hall.',
+	palace_update_closet: 'Update or create the closet summary for a room.',
+	palace_search: 'Search the Memory Palace memories using semantic + text retrieval.',
+	palace_check_duplicate: 'Check likely duplicate memories for a candidate drawer.',
+	palace_decay: 'Apply memory decay to non-pinned memories.',
+	palace_prune: 'Prune low-importance memories from the palace.',
+	palace_detect_contradictions: 'Detect likely contradictory memory pairs.',
+	palace_regenerate_l1: 'Regenerate a concise L1 always-on memory summary set.',
 	ask_user:
 		'Ask the user one or more focused clarifying questions with prefilled answer options. Each question should have ~3 prefilled options — prefer splitting a broad inquiry into multiple focused questions rather than providing many options in a single question. Use when you need explicit user input before proceeding.',
 	list_skills:
@@ -1029,19 +1142,6 @@ export async function executeTool(call: ToolCall, userId: string) {
 				}
 			}
 
-			if (call.name === 'create_task') {
-				const input = toolSchemas.create_task.parse(call.arguments)
-				const { createTaskForAvailableAgent } = await import('$lib/agents/agents.server')
-				const task = await createTaskForAvailableAgent(input.title, input.description)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: task,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
 			if (call.name === 'image_generate') {
 				const input = toolSchemas.image_generate.parse(call.arguments)
 				const result = await generateImage(input.prompt, input.model, input.size)
@@ -1147,6 +1247,344 @@ export async function executeTool(call: ToolCall, userId: string) {
 					tool: call.name,
 					input,
 					result: { artifactId: input.artifactId, updatedKey: input.key },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'update_agent') {
+				const input = toolSchemas.update_agent.parse(call.arguments)
+				const updated = await updateAgentRecord(input.agentId, {
+					name: input.name,
+					role: input.role,
+					systemPrompt: input.systemPrompt,
+					model: input.model,
+				})
+				if (!updated) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'Agent not found or no fields provided',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { id: updated.id, name: updated.name, status: updated.status },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'pause_agent') {
+				const input = toolSchemas.pause_agent.parse(call.arguments)
+				const updated = await setAgentStatus(input.agentId, 'paused')
+				if (!updated) {
+					return { success: false, tool: call.name, error: 'Agent not found', executionMs: Date.now() - startedAt }
+				}
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { id: updated.id, status: updated.status },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'resume_agent') {
+				const input = toolSchemas.resume_agent.parse(call.arguments)
+				const updated = await setAgentStatus(input.agentId, 'active')
+				if (!updated) {
+					return { success: false, tool: call.name, error: 'Agent not found', executionMs: Date.now() - startedAt }
+				}
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { id: updated.id, status: updated.status },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'create_user') {
+				const input = toolSchemas.create_user.parse(call.arguments)
+				requireAdminRequestUser()
+				const username = normalizeUsername(input.username)
+				const [created] = await db
+					.insert(users)
+					.values({
+						username,
+						name: input.name?.trim() || username,
+						role: input.role,
+						isActive: true,
+					})
+					.returning({ id: users.id, username: users.username, role: users.role })
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'create_automation') {
+				const input = toolSchemas.create_automation.parse(call.arguments)
+				const created = await createAutomationRecord({
+					userId,
+					agentId: input.agentId ?? null,
+					description: input.description,
+					cronExpression: input.cronExpression,
+					prompt: input.prompt,
+					enabled: input.enabled,
+					conversationMode: input.conversationMode,
+				})
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'list_automations') {
+				const input = toolSchemas.list_automations.parse(call.arguments)
+				const rows = await listAutomationsForUser(userId)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: rows,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'update_automation') {
+				const input = toolSchemas.update_automation.parse(call.arguments)
+				const updated = await updateAutomationRecord(userId, input.automationId, {
+					agentId: input.agentId,
+					description: input.description,
+					cronExpression: input.cronExpression,
+					prompt: input.prompt,
+					enabled: input.enabled,
+					conversationMode: input.conversationMode,
+				})
+				if (!updated) {
+					return { success: false, tool: call.name, error: 'Automation not found', executionMs: Date.now() - startedAt }
+				}
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: updated,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'delete_automation') {
+				const input = toolSchemas.delete_automation.parse(call.arguments)
+				await deleteAutomationRecord(userId, input.automationId)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { deleted: input.automationId },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_create_wing') {
+				const input = toolSchemas.palace_create_wing.parse(call.arguments)
+				const created = await createWing(userId, input.name, input.description)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_create_room') {
+				const input = toolSchemas.palace_create_room.parse(call.arguments)
+				const created = await createRoom(input.wingId, input.name, {
+					description: input.description,
+					closetForRoomId: input.closetForRoomId,
+				})
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_place_drawer') {
+				const input = toolSchemas.palace_place_drawer.parse(call.arguments)
+				const created = await placeMemory({
+					content: input.content,
+					category: input.category,
+					importance: input.importance,
+					wingId: input.wingId,
+					roomId: input.roomId,
+					hallType: input.hallType,
+					isCloset: false,
+				})
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_update_closet') {
+				const input = toolSchemas.palace_update_closet.parse(call.arguments)
+				const closet = await getClosetForRoom(input.roomId)
+				if (closet) {
+					const updated = await placeMemory({
+						content: input.summary,
+						category: 'closet',
+						importance: 0.8,
+						wingId: closet.wingId,
+						roomId: closet.id,
+						hallType: 'discoveries',
+						isCloset: true,
+						closetForRoomId: input.roomId,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: updated,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				const roomGraph = await traverseFromRoom(input.roomId, 1)
+				if (!roomGraph) {
+					return { success: false, tool: call.name, error: 'Room not found', executionMs: Date.now() - startedAt }
+				}
+				const newClosetRoom = await createRoom(roomGraph.room.wingId, `${roomGraph.room.name} Closet`, {
+					description: `Summary closet for ${roomGraph.room.name}`,
+					closetForRoomId: input.roomId,
+				})
+
+				const created = await placeMemory({
+					content: input.summary,
+					category: 'closet',
+					importance: 0.8,
+					wingId: newClosetRoom.wingId,
+					roomId: newClosetRoom.id,
+					hallType: 'discoveries',
+					isCloset: true,
+					closetForRoomId: input.roomId,
+				})
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: created,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_search') {
+				const input = toolSchemas.palace_search.parse(call.arguments)
+				const matches = await searchMemories(input.query, input.limit)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: matches,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_check_duplicate') {
+				const input = toolSchemas.palace_check_duplicate.parse(call.arguments)
+				const matches = await searchMemories(input.content, input.limit)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: matches,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_decay') {
+				const input = toolSchemas.palace_decay.parse(call.arguments)
+				await decayMemories(input.lambda)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { decayed: true },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_prune') {
+				const input = toolSchemas.palace_prune.parse(call.arguments)
+				const pruned = await pruneMemories(input.threshold)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: { pruned },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_detect_contradictions') {
+				const input = toolSchemas.palace_detect_contradictions.parse(call.arguments)
+				const rows = await listMemories({ limit: Math.max(40, input.limit * 2) })
+				const contradictions: Array<{ aId: string; bId: string; a: string; b: string }> = []
+
+				for (let i = 0; i < rows.length; i++) {
+					const a = rows[i]
+					for (let j = i + 1; j < rows.length; j++) {
+						const b = rows[j]
+						const aText = a.content.toLowerCase().trim()
+						const bText = b.content.toLowerCase().trim()
+						if (
+							(aText.startsWith('not ') && aText.replace(/^not\s+/, '') === bText) ||
+							(bText.startsWith('not ') && bText.replace(/^not\s+/, '') === aText)
+						) {
+							contradictions.push({ aId: a.id, bId: b.id, a: a.content, b: b.content })
+							if (contradictions.length >= input.limit) break
+						}
+					}
+					if (contradictions.length >= input.limit) break
+				}
+
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: contradictions,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'palace_regenerate_l1') {
+				const input = toolSchemas.palace_regenerate_l1.parse(call.arguments)
+				const rows = await listMemories({ limit: 120 })
+				const summaries = rows
+					.filter((row) => !row.isCloset)
+					.sort((a, b) => Number(b.importance) - Number(a.importance))
+					.slice(0, input.limit)
+					.map((row) => ({ id: row.id, hallType: row.hallType, content: row.content }))
+
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: summaries,
 					executionMs: Date.now() - startedAt,
 				}
 			}
@@ -1369,13 +1807,23 @@ export async function executeTool(call: ToolCall, userId: string) {
 
 			if (call.name === 'run_subagent') {
 				const input = toolSchemas.run_subagent.parse(call.arguments)
-				const { runSubagent } = await import('$lib/agents/agents.server')
-				const result = await runSubagent(input.task, input.context)
+				const { chat: llmChat } = await import('$lib/openrouter.server')
+				const subagentMessages = [
+					{
+						role: 'system' as const,
+						content: 'You are a focused subagent. Complete the given task and return a clear, concise result.',
+					},
+					{
+						role: 'user' as const,
+						content: input.context ? `Context: ${input.context}\n\nTask: ${input.task}` : `Task: ${input.task}`,
+					},
+				]
+				const response = await llmChat(subagentMessages, 'anthropic/claude-sonnet-4')
 				return {
 					success: true,
 					tool: call.name,
 					input,
-					result,
+					result: response.content,
 					executionMs: Date.now() - startedAt,
 				}
 			}

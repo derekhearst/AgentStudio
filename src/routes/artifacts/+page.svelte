@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte'
-	import { listArtifacts, deleteArtifact, pinArtifact } from '$lib/artifacts'
+	import { listArtifacts, deleteArtifact } from '$lib/artifacts'
 
 	type ArtifactRow = Awaited<ReturnType<typeof listArtifacts>>[number]
 
@@ -11,7 +11,6 @@
 	let search = $state('')
 	let typeFilter = $state<typeof typeOptions[number] | ''>('')
 	let categoryFilter = $state('')
-	let pinnedOnly = $state(false)
 	let viewMode = $state<'list' | 'grid' | 'gallery'>('grid')
 	let offset = $state(0)
 	const limit = 50
@@ -33,7 +32,6 @@
 				search: search.trim() || undefined,
 				type: (typeFilter || undefined) as typeof typeOptions[number] | undefined,
 				category: categoryFilter || undefined,
-				pinned: pinnedOnly || undefined,
 				limit,
 				offset,
 			})
@@ -53,18 +51,12 @@
 		await loadArtifacts()
 	}
 
-	async function handleTogglePin(id: string, currentPinned: boolean) {
-		await pinArtifact({ id, pinned: !currentPinned })
-		await loadArtifacts()
-	}
-
 	async function handleLoadMore() {
 		offset += limit
 		const more = await listArtifacts({
 			search: search.trim() || undefined,
 			type: (typeFilter || undefined) as typeof typeOptions[number] | undefined,
 			category: categoryFilter || undefined,
-			pinned: pinnedOnly || undefined,
 			limit,
 			offset,
 		})
@@ -138,10 +130,6 @@
 					<option value={cat}>{cat}</option>
 				{/each}
 			</select>
-			<label class="label cursor-pointer gap-2">
-				<input type="checkbox" class="checkbox checkbox-sm" bind:checked={pinnedOnly} onchange={handleSearch} />
-				<span class="label-text text-sm">Pinned</span>
-			</label>
 			<button class="btn btn-outline" type="button" onclick={handleSearch}>Search</button>
 		</div>
 	</div>
@@ -199,9 +187,6 @@
 						<div class="mt-3 flex items-center justify-between text-xs text-base-content/50">
 							<span>{formatDate(artifact.createdAt)}</span>
 							<div class="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-								<button class="btn btn-xs btn-ghost" type="button" onclick={() => handleTogglePin(artifact.id, artifact.pinned)}>
-									{artifact.pinned ? 'Unpin' : 'Pin'}
-								</button>
 								<a class="btn btn-xs btn-ghost" href="/artifacts/{artifact.id}">Open</a>
 								<button class="btn btn-xs btn-ghost text-error" type="button" onclick={() => handleDelete(artifact.id)}>
 									Delete
@@ -244,9 +229,6 @@
 								<td class="text-sm">{artifact.accessCount}</td>
 								<td>
 									<div class="flex gap-1">
-										<button class="btn btn-xs btn-ghost" type="button" onclick={() => handleTogglePin(artifact.id, artifact.pinned)}>
-											{artifact.pinned ? 'Unpin' : 'Pin'}
-										</button>
 										<button class="btn btn-xs btn-ghost text-error" type="button" onclick={() => handleDelete(artifact.id)}>
 											Delete
 										</button>

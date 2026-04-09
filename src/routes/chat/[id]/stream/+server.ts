@@ -4,8 +4,9 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
 import { streamChat, type LlmMessage } from '$lib/openrouter.server'
 import { extractAndPersist } from '$lib/memory/memory'
-import { assembleContext, shouldFetchMemory } from '$lib/memory/memory'
+import { shouldFetchMemory } from '$lib/memory/memory'
 import { bumpAccessCount } from '$lib/memory/memory.server'
+import { MemoryStack } from '$lib/memory/layers'
 import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
@@ -16,8 +17,23 @@ import { requestUserQuestions, toolSchemas } from '$lib/tools/tools.server'
 import { requestPlanDecision } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
+import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
+import { runInlineSubagent } from '$lib/agents/inline-subagent'
 
 const encoder = new TextEncoder()
+
+const DREAMING_ONLY_TOOLS = new Set([
+	'palace_create_wing',
+	'palace_create_room',
+	'palace_place_drawer',
+	'palace_update_closet',
+	'palace_search',
+	'palace_check_duplicate',
+	'palace_decay',
+	'palace_prune',
+	'palace_detect_contradictions',
+	'palace_regenerate_l1',
+])
 
 type StreamPayload = {
 	conversationId: string
@@ -175,14 +191,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// --- Context Engineering: Conditional Memory ---
 	const fetchMemory = shouldFetchMemory(userContent)
 	if (fetchMemory) {
-		const memoryLimit = isFirstExchange ? 8 : 6
-		const memoryContext = await assembleContext(body.content ?? conversation.title, { limit: memoryLimit })
-		if (memoryContext.memories.length > 0) {
+		const stack = new MemoryStack(user.id)
+		const memoryContext = await stack.wakeUp(body.content ?? conversation.title)
+		if (memoryContext.recalledMemoryIds.length > 0) {
 			llmMessages.unshift({
 				role: 'system',
 				content: memoryContext.systemPrompt,
 			})
-			await Promise.all(memoryContext.memories.map((memory) => bumpAccessCount(memory.id)))
+			await Promise.all(memoryContext.recalledMemoryIds.map((memoryId) => bumpAccessCount(memoryId)))
 		}
 	}
 
@@ -199,8 +215,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	const systemSections: string[] = []
+	let scopedAgentTools: string[] | null = null
+
+	// --- Context Engineering: Orchestrator / Agent Identity ---
+	const isOrchestrator = !conversation.agentId
+	if (isOrchestrator) {
+		const orchestratorPrompt = await buildOrchestratorPrompt()
+		systemSections.push(orchestratorPrompt)
+	} else {
+		// Agent conversation — load agent's own system prompt
+		const { agents: agentsTable } = await import('$lib/agents/agents.schema')
+		const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, conversation.agentId!)).limit(1)
+		if (agent) {
+			systemSections.push(agent.systemPrompt)
+			const config = agent.config as { allowedTools?: string[] } | null
+			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
+				scopedAgentTools = config.allowedTools
+			}
+		}
+	}
+
 	if (currentSettings.systemPrompt?.trim()) {
-		systemSections.push(currentSettings.systemPrompt)
+		// systemPrompt deprecated – memory layers will replace this
 	}
 	systemSections.push(
 		[
@@ -246,7 +282,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let completionTokens = 0
 
 	// --- Context Engineering: Tool Loading ---
-	let tools = getToolDefinitions().filter((tool) => !disabledTools.has(tool.function.name))
+	let tools = getToolDefinitions()
+		.filter((tool) => !disabledTools.has(tool.function.name))
+		.filter((tool) =>
+			scopedAgentTools ? scopedAgentTools.includes(tool.function.name) : !DREAMING_ONLY_TOOLS.has(tool.function.name),
+		)
 	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
 
@@ -617,6 +657,87 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								arguments: tc.arguments,
 							}),
 						)
+
+						// Intercept run_subagent with agentId for inline sub-agent streaming
+						if (tc.name === 'run_subagent' && isOrchestrator) {
+							const subagentArgs = parsedArgs as { task?: string; context?: string; agentId?: string }
+							if (subagentArgs.agentId && subagentArgs.task) {
+								try {
+									const subResult = await runInlineSubagent(
+										{
+											agentId: subagentArgs.agentId,
+											agentName: subagentArgs.agentId.slice(0, 8),
+											task: subagentArgs.context
+												? `${subagentArgs.context}\n\n${subagentArgs.task}`
+												: subagentArgs.task,
+										},
+										user.id,
+										body.conversationId,
+										controller,
+										disabledTools,
+									)
+									const resultStr = trimToolResult(
+										tc.name,
+										JSON.stringify({
+											success: true,
+											agentConversationId: subResult.conversationId,
+											result: subResult.result.slice(0, 4000),
+										}),
+									)
+									toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
+									controller.enqueue(
+										sse('tool_result', {
+											id: tc.id,
+											name: tc.name,
+											success: true,
+											executionMs: 0,
+											result: resultStr,
+										}),
+									)
+									allToolCalls.push({
+										name: tc.name,
+										arguments: parsedArgs,
+										result: { agentConversationId: subResult.conversationId, result: subResult.result.slice(0, 4000) },
+										executionMs: 0,
+									})
+									streamBlocks.push({
+										kind: 'tool',
+										name: tc.name,
+										arguments: parsedArgs,
+										result: { agentConversationId: subResult.conversationId, result: subResult.result.slice(0, 4000) },
+										success: true,
+										executionMs: 0,
+									})
+								} catch (error) {
+									const errorStr = error instanceof Error ? error.message : 'Sub-agent execution failed'
+									toolResults.push({ call_id: tc.id, name: tc.name, result: `Error: ${errorStr}` })
+									controller.enqueue(
+										sse('tool_result', {
+											id: tc.id,
+											name: tc.name,
+											success: false,
+											executionMs: 0,
+											result: errorStr,
+										}),
+									)
+									allToolCalls.push({
+										name: tc.name,
+										arguments: parsedArgs,
+										result: { error: errorStr },
+										executionMs: 0,
+									})
+									streamBlocks.push({
+										kind: 'tool',
+										name: tc.name,
+										arguments: parsedArgs,
+										result: { error: errorStr },
+										success: false,
+										executionMs: 0,
+									})
+								}
+								continue
+							}
+						}
 
 						const toolCall: ToolCallWithContext = {
 							name: tc.name as ToolName,

@@ -3,7 +3,6 @@ import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
-import { agentRuns } from '$lib/agents/agents.schema'
 import { llmUsage } from '$lib/cost/usage.schema'
 
 const costPeriodSchema = z.object({
@@ -93,15 +92,6 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 			.orderBy(sql`date_trunc('day', ${llmUsage.createdAt})`),
 	])
 
-	// Agent run costs (still from agentRuns for run-level detail)
-	const agentCosts = await db
-		.select({
-			total: sql<string>`coalesce(sum(${agentRuns.cost}::numeric), 0)::text`,
-			runCount: sql<number>`count(*)::int`,
-		})
-		.from(agentRuns)
-		.where(gte(agentRuns.startedAt, since))
-
 	return {
 		period: p,
 		since: since.toISOString(),
@@ -109,8 +99,6 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		totalTokensIn: totalSpend[0]?.totalTokensIn ?? 0,
 		totalTokensOut: totalSpend[0]?.totalTokensOut ?? 0,
 		callCount: totalSpend[0]?.callCount ?? 0,
-		agentSpend: agentCosts[0]?.total ?? '0',
-		agentRunCount: agentCosts[0]?.runCount ?? 0,
 		byModel,
 		bySource,
 		topConversations: byConversation,
@@ -139,4 +127,3 @@ export const getBudgetStatus = query(async () => {
 		monthlySpend: monthlySpend[0]?.total ?? '0',
 	}
 })
-

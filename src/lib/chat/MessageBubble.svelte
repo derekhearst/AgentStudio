@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
+	import SubagentBlockCard from './SubagentBlockCard.svelte';
 	import ArtifactPreviewCard from '$lib/artifacts/ArtifactPreviewCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
@@ -39,6 +40,15 @@
 				result: unknown;
 				success: boolean;
 				executionMs: number;
+		  }
+		| {
+				kind: 'subagent';
+				agentId: string;
+				agentName: string;
+				conversationId: string | null;
+				task: string;
+				content: string;
+				success: boolean;
 		  };
 
 	let {
@@ -215,6 +225,18 @@
 					<ThinkingBlockCard
 						content={block.content}
 						reasoningTokens={idx === lastThinkingBlockIndex ? messageReasoningTokens : block.reasoningTokens ?? null}
+					/>
+				</div>
+			{:else if block.kind === 'subagent'}
+				<div class="mb-1.5 w-full">
+					<SubagentBlockCard
+						agentName={block.agentName}
+						agentId={block.agentId}
+						conversationId={block.conversationId}
+						task={block.task}
+						content={block.content}
+						status={block.success ? 'completed' : 'failed'}
+						expanded={false}
 					/>
 				</div>
 			{:else if block.kind === 'text' && block.content?.trim()}

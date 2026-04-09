@@ -1,273 +1,304 @@
-<svelte:head><title>Memory | AgentStudio</title></svelte:head>
+<svelte:head><title>Memory Palace | AgentStudio</title></svelte:head>
 
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		deleteMemoryCommand,
+		buildImportPromptQuery,
+		getPalaceTaxonomyQuery,
 		importMemoriesCommand,
+		listDreamingSessionsQuery,
 		listMemoriesQuery,
-		pinMemoryCommand,
-		unpinMemoryCommand,
-		updateMemoryCommand
 	} from '$lib/memory';
-	import { getSettings } from '$lib/settings/settings.remote';
-	import ModelSelector from '$lib/models/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
-	import { dreamPanel } from '$lib/state.svelte';
 
 	type MemoryRow = Awaited<ReturnType<typeof listMemoriesQuery>>[number];
-
-	const IMPORT_PROMPT = `I use a personal AI assistant that stores long-term memories about me.
-Please help me transfer knowledge from our conversations here into my assistant.
-
-List everything you know about me as concise, standalone facts — one fact per line.
-Cover these categories:
-- **preference** — likes, dislikes, communication style, tools I prefer
-- **project** — things I'm working on, tech stack, goals
-- **person** — people I've mentioned, relationships, roles
-- **constraint** — limitations, deadlines, requirements I've stated
-- **general** — anything else noteworthy
-
-Format each fact as a single clear sentence. Do not use bullet markers or numbering.
-Do not include uncertain or speculative information.
-Do not include facts about yourself or our conversation mechanics.`;
+	type WingRow = Awaited<ReturnType<typeof getPalaceTaxonomyQuery>>[number];
+	type SessionRow = Awaited<ReturnType<typeof listDreamingSessionsQuery>>[number];
+	type HallFilter = 'all' | 'facts' | 'events' | 'discoveries' | 'preferences' | 'advice';
 
 	let search = $state('');
-	let busy = $state(false);
-	let memories = $state.raw<MemoryRow[]>([]);
-	let allMemories = $state.raw<MemoryRow[]>([]);
+	let hallFilter = $state<HallFilter>('all');
+	let selectedWingId = $state<string | null>(null);
+	let selectedRoomId = $state<string | null>(null);
 
-	/* ── Importer modal state ────────────────────────── */
-	let showImporter = $state(false);
+	let memories = $state<MemoryRow[]>([]);
+	let wings = $state<WingRow[]>([]);
+	let dreamingSessions = $state<SessionRow[]>([]);
+	let showImportModal = $state(false);
 	let importText = $state('');
-	let importResult = $state<{ imported: number; memories: Array<{ content: string; category: string; importance: number }> } | null>(null);
-	let promptCopied = $state(false);
 	let importModel = $state('');
-
-	let filterTimer: ReturnType<typeof setTimeout> | undefined;
-	let dialogEl = $state<HTMLDialogElement | undefined>(undefined);
+	let importPrompt = $state('');
+	let importBusy = $state(false);
+	let importError = $state<string | null>(null);
+	let importResult = $state<{ extractedCount?: number; duplicateCount?: number } | null>(null);
 
 	onMount(() => {
-		void loadMemories();
-		void loadDefaultModel();
+		void loadPalace();
 	});
 
-	async function loadDefaultModel() {
-		const settings = await getSettings();
-		if (settings.defaultModel) importModel = settings.defaultModel;
+	async function loadPalace() {
+		const [memoryRows, wingRows, sessions] = await Promise.all([
+			listMemoriesQuery({ limit: 400 }),
+			getPalaceTaxonomyQuery(),
+			listDreamingSessionsQuery(),
+		]);
+		memories = memoryRows;
+		wings = wingRows;
+		dreamingSessions = sessions;
+
+		if (!selectedWingId && wingRows.length > 0) {
+			selectedWingId = wingRows[0].id;
+		}
 	}
 
-	async function loadMemories() {
-		allMemories = await listMemoriesQuery({ limit: 200 });
-		filterLocally();
-	}
+	const selectedWing = $derived(wings.find((wing) => wing.id === selectedWingId) ?? null);
+	const selectedRoom = $derived(selectedWing?.rooms.find((room) => room.id === selectedRoomId) ?? null);
 
-	function filterLocally() {
+	const roomMemories = $derived.by(() => {
 		const q = search.trim().toLowerCase();
-		if (!q) {
-			memories = allMemories;
-		} else {
-			memories = allMemories.filter(
-				(m) => m.content.toLowerCase().includes(q) || m.category.toLowerCase().includes(q)
-			);
-		}
-	}
+		return memories
+			.filter((memory) => (selectedRoomId ? memory.roomId === selectedRoomId : selectedWingId ? memory.wingId === selectedWingId : true))
+			.filter((memory) => (hallFilter === 'all' ? true : memory.hallType === hallFilter))
+			.filter((memory) => {
+				if (!q) return true;
+				return memory.content.toLowerCase().includes(q) || memory.category.toLowerCase().includes(q);
+			})
+			.sort((a, b) => Number(b.importance) - Number(a.importance));
+	});
 
-	function handleSearchInput() {
-		clearTimeout(filterTimer);
-		filterTimer = setTimeout(filterLocally, 150);
-	}
-
-	async function handleDeleteMemory(id: string) {
-		await deleteMemoryCommand({ id });
-		await loadMemories();
-	}
-
-	async function handleTogglePin(memory: MemoryRow) {
-		if (memory.category === 'pinned' || memory.category.startsWith('pinned:')) {
-			await unpinMemoryCommand({ id: memory.id });
-		} else {
-			await pinMemoryCommand({ id: memory.id });
-		}
-		await loadMemories();
-	}
-
-	function isPinned(categoryName: string) {
-		return categoryName === 'pinned' || categoryName.startsWith('pinned:');
-	}
-
-	function openImportModal() {
-		showImporter = true;
-		dialogEl?.showModal();
-	}
-
-	function closeImportModal() {
-		dialogEl?.close();
-		showImporter = false;
-	}
-
-	/* ── Importer handlers ───────────────────────────── */
-	async function handleCopyPrompt() {
-		await navigator.clipboard.writeText(IMPORT_PROMPT);
-		promptCopied = true;
-	}
-
-	async function handleImport() {
-		if (!importText.trim() || busy) return;
-		busy = true;
-		importResult = null;
-		try {
-			importResult = await importMemoriesCommand({ text: importText.trim(), model: importModel });
-			if (importResult.imported > 0) {
-				importText = '';
-				await loadMemories();
+	const tunnelMap = $derived.by(() => {
+		const map = new Map<string, number>();
+		for (const wing of wings) {
+			for (const room of wing.rooms) {
+				const key = room.name.trim().toLowerCase();
+				map.set(key, (map.get(key) ?? 0) + 1);
 			}
-		} finally {
-			busy = false;
 		}
+		return map;
+	});
+
+	function selectWing(wingId: string) {
+		selectedWingId = wingId;
+		selectedRoomId = null;
+	}
+
+	async function generateImportPrompt() {
+		importError = null;
+		importPrompt = await buildImportPromptQuery({ includeExisting: false });
+	}
+
+	async function runImport() {
+		const text = importText.trim();
+		if (!text) {
+			importError = 'Paste memory text to import.';
+			return;
+		}
+
+		importBusy = true;
+		importError = null;
+		importResult = null;
+
+		try {
+			const result = await importMemoriesCommand({
+				text,
+				model: importModel.trim() || undefined,
+			});
+			importResult = result as { extractedCount?: number; duplicateCount?: number };
+			await loadPalace();
+		} catch (error) {
+			importError = error instanceof Error ? error.message : 'Failed to import memories.';
+		} finally {
+			importBusy = false;
+		}
+	}
+
+	function resetImportModal() {
+		importError = null;
+		importResult = null;
+		importPrompt = '';
 	}
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
+<div class="flex h-full min-h-0 flex-col gap-4">
 	<ContentPanel>
 		{#snippet header()}
-			<div>
-				<h1 class="text-xl font-bold sm:text-3xl">Memory Explorer</h1>
+			<div class="flex w-full items-start justify-between gap-3">
+				<div>
+				<h1 class="text-xl font-bold sm:text-3xl">Memory Palace</h1>
 				<p class="text-xs text-base-content/70 sm:text-sm">
-					{memories.length} {memories.length === 1 ? 'memory' : 'memories'}
+					{wings.length} wings • {memories.length} drawers • {dreamingSessions.length} Dreaming Agent sessions
 				</p>
+				</div>
+				<button
+					type="button"
+					class="btn btn-sm btn-outline"
+					onclick={() => {
+						showImportModal = true;
+						resetImportModal();
+					}}
+				>
+					Manual Import
+				</button>
 			</div>
-		{/snippet}
-		{#snippet actions()}
-			<button class="btn btn-sm btn-outline sm:btn-md" type="button" onclick={openImportModal}>Import</button>
-			<button
-				class="btn btn-sm btn-outline gap-1.5 sm:btn-md lg:hidden"
-				type="button"
-				onclick={() => (dreamPanel.open = true)}
-			>
-				Dream Cycles
-				<svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7" /></svg>
-			</button>
 		{/snippet}
 	</ContentPanel>
 
-	<!-- Search -->
-	<input
-		class="input input-bordered input-sm mb-4 w-full shrink-0"
-		bind:value={search}
-		oninput={handleSearchInput}
-		placeholder="Filter memories..."
-	/>
+	<div class="grid min-h-0 flex-1 gap-4 desktop:grid-cols-[280px_320px_minmax(0,1fr)]">
+		<section class="min-h-0 rounded-2xl border border-base-300 bg-base-100 p-3">
+			<h2 class="mb-2 text-sm font-semibold text-base-content/70">Wings</h2>
+			<div class="space-y-2 overflow-y-auto">
+				{#each wings as wing (wing.id)}
+					<button
+						type="button"
+						onclick={() => selectWing(wing.id)}
+						class={`w-full rounded-xl border px-3 py-2 text-left ${selectedWingId === wing.id ? 'border-primary bg-primary/10' : 'border-base-300 hover:bg-base-200/50'}`}
+					>
+						<p class="font-medium">{wing.name}</p>
+						<p class="text-xs text-base-content/60">{wing.rooms.length} rooms</p>
+					</button>
+				{/each}
+			</div>
 
-	<!-- Memory list (scrollable) -->
-	<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">
-		{#if memories.length === 0}
-			<p class="py-6 text-center text-sm text-base-content/40">No memories matched the current filters.</p>
-		{:else}
-			{#each memories as memory, i (memory.id)}
-				{#if i > 0}
-					<div class="border-t border-base-content/6"></div>
+			<h2 class="mb-2 mt-4 text-sm font-semibold text-base-content/70">Dreaming Sessions</h2>
+			<div class="space-y-2 overflow-y-auto">
+				{#if dreamingSessions.length === 0}
+					<p class="text-xs text-base-content/50">No Dreaming Agent sessions yet.</p>
+				{:else}
+					{#each dreamingSessions.slice(0, 6) as session (session.id)}
+						<a class="block rounded-lg border border-base-300 px-2 py-2 text-xs hover:bg-base-200/50" href={`/chat/${session.id}`}>
+							<p class="truncate font-medium">{session.title}</p>
+							<p class="text-base-content/60">{new Date(session.updatedAt).toLocaleString()}</p>
+						</a>
+					{/each}
 				{/if}
-				<div class="flex items-start gap-3 py-3 sm:py-3.5">
-					<div class="min-w-0 flex-1">
-						<p class="whitespace-pre-wrap text-sm leading-relaxed">{memory.content}</p>
-						<div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-base-content/40">
-							<span class="rounded-md bg-base-content/6 px-1.5 py-0.5">{memory.category}</span>
-							<span>imp {memory.importance.toFixed(2)}</span>
-							<span>&middot;</span>
-							<span>{memory.accessCount} access{memory.accessCount !== 1 ? 'es' : ''}</span>
-						</div>
-					</div>
-					<div class="flex shrink-0 items-center gap-1">
-						<a class="btn btn-ghost btn-xs" href={`/memory/${memory.id}`}>Detail</a>
-						<button class="btn btn-ghost btn-xs" type="button" onclick={() => handleTogglePin(memory)}>
-							{isPinned(memory.category) ? 'Unpin' : 'Pin'}
+			</div>
+		</section>
+
+		<section class="min-h-0 rounded-2xl border border-base-300 bg-base-100 p-3">
+			<h2 class="mb-2 text-sm font-semibold text-base-content/70">Rooms</h2>
+			{#if !selectedWing}
+				<p class="text-xs text-base-content/50">Select a wing.</p>
+			{:else if selectedWing.rooms.length === 0}
+				<p class="text-xs text-base-content/50">No rooms in this wing yet.</p>
+			{:else}
+				<div class="space-y-2 overflow-y-auto">
+					{#each selectedWing.rooms as room (room.id)}
+						<button
+							type="button"
+							onclick={() => (selectedRoomId = room.id)}
+							class={`w-full rounded-xl border px-3 py-2 text-left ${selectedRoomId === room.id ? 'border-primary bg-primary/10' : 'border-base-300 hover:bg-base-200/50'}`}
+						>
+							<div class="flex items-center justify-between gap-2">
+								<p class="font-medium">{room.name}</p>
+								{#if room.isCloset}
+									<span class="badge badge-sm">Closet</span>
+								{/if}
+							</div>
+							<p class="text-xs text-base-content/60 line-clamp-2">{room.description ?? 'No description'}</p>
+							{#if (tunnelMap.get(room.name.trim().toLowerCase()) ?? 0) > 1}
+								<p class="mt-1 text-[11px] text-primary">Tunnel linked across {(tunnelMap.get(room.name.trim().toLowerCase()) ?? 0) - 1} other wings</p>
+							{/if}
 						</button>
-						<button class="btn btn-ghost btn-xs text-error" type="button" onclick={() => handleDeleteMemory(memory.id)}>
-							Delete
-						</button>
-					</div>
+					{/each}
 				</div>
-			{/each}
-		{/if}
+			{/if}
+		</section>
+
+		<section class="min-h-0 rounded-2xl border border-base-300 bg-base-100 p-3">
+			<div class="mb-3 flex flex-wrap items-center gap-2">
+				<input class="input input-bordered input-sm flex-1" bind:value={search} placeholder="Search drawers..." />
+				<select class="select select-bordered select-sm" bind:value={hallFilter}>
+					<option value="all">All halls</option>
+					<option value="facts">Facts</option>
+					<option value="events">Events</option>
+					<option value="discoveries">Discoveries</option>
+					<option value="preferences">Preferences</option>
+					<option value="advice">Advice</option>
+				</select>
+			</div>
+
+			<h2 class="mb-2 text-sm font-semibold text-base-content/70">
+				{selectedRoom ? `${selectedRoom.name} Drawers` : selectedWing ? `${selectedWing.name} Drawers` : 'Drawers'}
+			</h2>
+
+			{#if roomMemories.length === 0}
+				<p class="text-xs text-base-content/50">No drawers matched this view.</p>
+			{:else}
+				<div class="space-y-2 overflow-y-auto">
+					{#each roomMemories as memory (memory.id)}
+						<a class="block rounded-lg border border-base-300 px-3 py-2 hover:bg-base-200/50" href={`/memory/${memory.id}`}>
+							<p class="line-clamp-2 text-sm">{memory.content}</p>
+							<p class="mt-1 text-xs text-base-content/60">
+								{memory.hallType} • {memory.category} • imp {Number(memory.importance).toFixed(2)}
+							</p>
+						</a>
+					{/each}
+				</div>
+			{/if}
+		</section>
 	</div>
 </div>
 
-<!-- ════════════════════════════════════════════════
-     IMPORT MODAL
-     ════════════════════════════════════════════════ -->
-<dialog bind:this={dialogEl} class="modal" onclose={() => (showImporter = false)}>
-	<div class="modal-box max-w-2xl space-y-4">
-		<div class="flex items-center justify-between">
-			<h3 class="text-lg font-bold">Import Memories</h3>
-			<button class="btn btn-ghost btn-sm btn-circle" type="button" onclick={closeImportModal} aria-label="Close">
-				<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12" /></svg>
-			</button>
-		</div>
-		<p class="text-sm text-base-content/50">Copy the prompt below into ChatGPT / Claude / etc., then paste their response back.</p>
-
-		<!-- Step 1 -->
-		<div class="rounded-xl bg-base-200/40 px-4 py-3.5">
-			<p class="mb-2.5 text-sm font-medium">Step 1 — Copy the extraction prompt</p>
-			<textarea
-				class="textarea textarea-bordered w-full font-mono text-xs"
-				rows="6"
-				readonly
-				value={IMPORT_PROMPT}
-			></textarea>
-			<button class="btn btn-outline btn-sm mt-2" type="button" onclick={handleCopyPrompt}>
-				{promptCopied ? 'Copied!' : 'Copy to Clipboard'}
-			</button>
-		</div>
-
-		<!-- Step 2 -->
-		<div class="rounded-xl bg-base-200/40 px-4 py-3.5">
-			<p class="mb-2.5 text-sm font-medium">Step 2 — Paste the LLM's response</p>
-			<div class="mb-2 flex flex-wrap items-center gap-3">
-				<span class="text-xs text-base-content/40">Extraction model:</span>
-				<ModelSelector value={importModel} onchange={(id) => (importModel = id)} size="sm" />
+{#if showImportModal}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-base-content/35 p-3">
+		<section class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-4 shadow-xl">
+			<div class="flex items-start justify-between gap-3">
+				<div>
+					<h2 class="text-lg font-semibold">Manual Memory Import</h2>
+					<p class="text-xs text-base-content/70">Paste notes, conversation logs, or summaries and extract memory drawers.</p>
+				</div>
+				<button
+					type="button"
+					class="btn btn-sm btn-ghost"
+					onclick={() => {
+						showImportModal = false;
+						resetImportModal();
+					}}
+				>
+					Close
+				</button>
 			</div>
-			<textarea
-				class="textarea textarea-bordered w-full text-sm"
-				rows="6"
-				bind:value={importText}
-				placeholder="Paste the response from the other LLM here..."
-			></textarea>
-			<button
-				class="btn btn-success btn-sm mt-2"
-				type="button"
-				onclick={handleImport}
-				disabled={busy || !importText.trim()}
-			>
-				{busy ? 'Importing...' : 'Import Memories'}
-			</button>
-		</div>
 
-		<!-- Result -->
-		{#if importResult}
-			<div class="rounded-xl border border-success/20 bg-success/5 px-4 py-3">
-				{#if importResult.imported === 0}
-					<p class="text-sm text-base-content/50">No new memories extracted (all duplicates or empty).</p>
-				{:else}
-					<p class="text-sm font-medium text-success">
-						Imported {importResult.imported} {importResult.imported === 1 ? 'memory' : 'memories'}
-					</p>
-					<ul class="mt-2 space-y-1">
-						{#each importResult.memories as m}
-							<li class="text-sm">
-								<span class="rounded-md bg-base-content/6 px-1.5 py-0.5 text-xs">{m.category}</span>
-								<span class="ml-1">{m.content}</span>
-							</li>
-						{/each}
-					</ul>
+			<div class="mt-3 space-y-3">
+				<div>
+					<label for="memory-import-model" class="mb-1 block text-xs font-semibold uppercase tracking-wide text-base-content/60">Model override (optional)</label>
+					<input id="memory-import-model" class="input input-bordered input-sm w-full" bind:value={importModel} placeholder="anthropic/claude-sonnet-4" />
+				</div>
+
+				<div>
+					<div class="mb-1 flex items-center justify-between gap-2">
+						<label for="memory-import-text" class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Import text</label>
+						<button type="button" class="btn btn-xs btn-outline" onclick={generateImportPrompt}>Generate import prompt</button>
+					</div>
+					<textarea id="memory-import-text" class="textarea textarea-bordered min-h-55 w-full" bind:value={importText} placeholder="Paste memory source text here..."></textarea>
+				</div>
+
+				{#if importPrompt}
+					<div class="rounded-xl border border-base-300 bg-base-200/40 p-3">
+						<p class="text-[11px] font-semibold uppercase tracking-wide text-base-content/60">Suggested prompt</p>
+						<pre class="mt-1 whitespace-pre-wrap text-xs leading-5 text-base-content/80">{importPrompt}</pre>
+					</div>
 				{/if}
-			</div>
-		{/if}
-	</div>
-	<form method="dialog" class="modal-backdrop">
-		<button type="submit">close</button>
-	</form>
-</dialog>
 
+				{#if importError}
+					<p class="rounded-lg border border-error/30 bg-error/10 px-3 py-2 text-xs text-error">{importError}</p>
+				{/if}
+
+				{#if importResult}
+					<p class="rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
+						Imported {importResult.extractedCount ?? 0} memories. Skipped duplicates: {importResult.duplicateCount ?? 0}.
+					</p>
+				{/if}
+
+				<div class="flex justify-end gap-2">
+					<button type="button" class="btn btn-sm btn-ghost" onclick={() => (importText = '')} disabled={importBusy}>Clear</button>
+					<button type="button" class="btn btn-sm btn-primary" onclick={runImport} disabled={importBusy || !importText.trim()}>
+						{importBusy ? 'Importing...' : 'Import Memories'}
+					</button>
+				</div>
+			</div>
+		</section>
+	</div>
+{/if}
 
 

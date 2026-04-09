@@ -1,4 +1,5 @@
-import { integer, pgEnum, pgTable, real, text, timestamp, uuid, vector } from 'drizzle-orm/pg-core'
+import { boolean, integer, pgEnum, pgTable, real, text, timestamp, uuid, vector } from 'drizzle-orm/pg-core'
+import { hallTypeEnum, memoryRooms, memoryWings } from '$lib/memory/palace.schema'
 
 export const memoryRelationTypeEnum = pgEnum('memory_relation_type', [
 	'supports',
@@ -12,6 +13,11 @@ export const memories = pgTable('memories', {
 	content: text('content').notNull(),
 	category: text('category').notNull().default('general'),
 	importance: real('importance').notNull().default(0.5),
+	wingId: uuid('wing_id').references(() => memoryWings.id, { onDelete: 'set null' }),
+	roomId: uuid('room_id').references(() => memoryRooms.id, { onDelete: 'set null' }),
+	hallType: hallTypeEnum('hall_type').notNull().default('discoveries'),
+	isCloset: boolean('is_closet').notNull().default(false),
+	closetForRoomId: uuid('closet_for_room_id').references(() => memoryRooms.id, { onDelete: 'set null' }),
 	embedding: vector('embedding', { dimensions: 1536 }),
 	accessCount: integer('access_count').notNull().default(0),
 	lastAccessed: timestamp('last_accessed', { withTimezone: true }),
@@ -30,14 +36,4 @@ export const memoryRelations = pgTable('memory_relations', {
 		.references(() => memories.id, { onDelete: 'cascade' }),
 	relationType: memoryRelationTypeEnum('relation_type').notNull(),
 	strength: real('strength').notNull().default(0.5),
-})
-
-export const dreamCycles = pgTable('dream_cycles', {
-	id: uuid('id').primaryKey().defaultRandom(),
-	startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
-	endedAt: timestamp('ended_at', { withTimezone: true }),
-	memoriesProcessed: integer('memories_processed').notNull().default(0),
-	memoriesCreated: integer('memories_created').notNull().default(0),
-	memoriesPruned: integer('memories_pruned').notNull().default(0),
-	summary: text('summary'),
 })

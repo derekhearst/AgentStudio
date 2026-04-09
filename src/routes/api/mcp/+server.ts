@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/private'
 import { executeTool, toolSchemas, type ToolName } from '$lib/tools/tools.server'
 import { searchMemories } from '$lib/memory/memory.server'
 import { db } from '$lib/db.server'
-import { agents, agentTasks } from '$lib/agents/agents.schema'
+import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/chat/chat.schema'
 import { memories } from '$lib/memory/memory.schema'
 import { desc, eq } from 'drizzle-orm'
@@ -52,7 +52,6 @@ const toolDescriptions: Record<ToolName, string> = {
 	file_info: 'Return metadata for a file or directory',
 	browser_screenshot: 'Take a screenshot of a web page',
 	memory_search: 'Search through stored memories using semantic similarity',
-	create_task: 'Create a new task for an available agent',
 	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
 	image_generate: 'Generate an image from a text prompt',
 	artifact_create: 'Create a persistent artifact (document, code, config, diagram, etc.)',
@@ -68,6 +67,24 @@ const toolDescriptions: Record<ToolName, string> = {
 	delete_skill: 'Delete a skill and all its nested files.',
 	delete_skill_file: 'Delete a specific nested file from a skill.',
 	ask_user: 'Request clarification or confirmation from the user before proceeding.',
+	update_agent: 'Update an existing agent fields such as name, role, model, or prompt.',
+	pause_agent: 'Pause an agent.',
+	resume_agent: 'Resume an agent.',
+	create_user: 'Create a user account (admin only).',
+	create_automation: 'Create a scheduled automation.',
+	list_automations: 'List scheduled automations.',
+	update_automation: 'Update an automation.',
+	delete_automation: 'Delete an automation.',
+	palace_create_wing: 'Create a Memory Palace wing.',
+	palace_create_room: 'Create a Memory Palace room.',
+	palace_place_drawer: 'Place a raw memory drawer into the palace.',
+	palace_update_closet: 'Update a closet summary for a room.',
+	palace_search: 'Search palace memories.',
+	palace_check_duplicate: 'Check likely duplicate memories.',
+	palace_decay: 'Apply memory decay.',
+	palace_prune: 'Prune low-importance memories.',
+	palace_detect_contradictions: 'Detect contradictory memories.',
+	palace_regenerate_l1: 'Regenerate L1 memory summary candidates.',
 }
 
 function schemaToJsonSchema(name: ToolName) {
@@ -144,11 +161,6 @@ function schemaToJsonSchema(name: ToolName) {
 			type: 'object',
 			properties: { query: { type: 'string' }, limit: { type: 'number', default: 5 } },
 			required: ['query'],
-		},
-		create_task: {
-			type: 'object',
-			properties: { title: { type: 'string' }, description: { type: 'string' } },
-			required: ['title', 'description'],
 		},
 		run_subagent: {
 			type: 'object',
@@ -264,6 +276,125 @@ function schemaToJsonSchema(name: ToolName) {
 			properties: { skillName: { type: 'string' }, fileName: { type: 'string' } },
 			required: ['skillName', 'fileName'],
 		},
+		update_agent: {
+			type: 'object',
+			properties: {
+				agentId: { type: 'string' },
+				name: { type: 'string' },
+				role: { type: 'string' },
+				systemPrompt: { type: 'string' },
+				model: { type: 'string' },
+			},
+			required: ['agentId'],
+		},
+		pause_agent: {
+			type: 'object',
+			properties: { agentId: { type: 'string' } },
+			required: ['agentId'],
+		},
+		resume_agent: {
+			type: 'object',
+			properties: { agentId: { type: 'string' } },
+			required: ['agentId'],
+		},
+		create_user: {
+			type: 'object',
+			properties: {
+				username: { type: 'string' },
+				name: { type: 'string' },
+				role: { type: 'string', enum: ['admin', 'user'] },
+			},
+			required: ['username'],
+		},
+		create_automation: {
+			type: 'object',
+			properties: {
+				agentId: { type: 'string' },
+				description: { type: 'string' },
+				cronExpression: { type: 'string' },
+				prompt: { type: 'string' },
+				enabled: { type: 'boolean' },
+				conversationMode: { type: 'string', enum: ['new_each_run', 'reuse'] },
+			},
+			required: ['description', 'cronExpression', 'prompt'],
+		},
+		list_automations: { type: 'object', properties: {} },
+		update_automation: {
+			type: 'object',
+			properties: {
+				automationId: { type: 'string' },
+				agentId: { type: 'string' },
+				description: { type: 'string' },
+				cronExpression: { type: 'string' },
+				prompt: { type: 'string' },
+				enabled: { type: 'boolean' },
+				conversationMode: { type: 'string', enum: ['new_each_run', 'reuse'] },
+			},
+			required: ['automationId'],
+		},
+		delete_automation: {
+			type: 'object',
+			properties: { automationId: { type: 'string' } },
+			required: ['automationId'],
+		},
+		palace_create_wing: {
+			type: 'object',
+			properties: { name: { type: 'string' }, description: { type: 'string' } },
+			required: ['name'],
+		},
+		palace_create_room: {
+			type: 'object',
+			properties: {
+				wingId: { type: 'string' },
+				name: { type: 'string' },
+				description: { type: 'string' },
+				closetForRoomId: { type: 'string' },
+			},
+			required: ['wingId', 'name'],
+		},
+		palace_place_drawer: {
+			type: 'object',
+			properties: {
+				content: { type: 'string' },
+				category: { type: 'string' },
+				importance: { type: 'number' },
+				wingId: { type: 'string' },
+				roomId: { type: 'string' },
+				hallType: { type: 'string' },
+			},
+			required: ['content'],
+		},
+		palace_update_closet: {
+			type: 'object',
+			properties: { roomId: { type: 'string' }, summary: { type: 'string' } },
+			required: ['roomId', 'summary'],
+		},
+		palace_search: {
+			type: 'object',
+			properties: { query: { type: 'string' }, limit: { type: 'number', default: 8 } },
+			required: ['query'],
+		},
+		palace_check_duplicate: {
+			type: 'object',
+			properties: { content: { type: 'string' }, limit: { type: 'number', default: 6 } },
+			required: ['content'],
+		},
+		palace_decay: {
+			type: 'object',
+			properties: { lambda: { type: 'number', default: 0.03 } },
+		},
+		palace_prune: {
+			type: 'object',
+			properties: { threshold: { type: 'number', default: 0.08 } },
+		},
+		palace_detect_contradictions: {
+			type: 'object',
+			properties: { limit: { type: 'number', default: 20 } },
+		},
+		palace_regenerate_l1: {
+			type: 'object',
+			properties: { limit: { type: 'number', default: 10 } },
+		},
 	}
 	return schemas[name] ?? { type: 'object' }
 }
@@ -278,7 +409,6 @@ function listResources() {
 			mimeType: 'application/json',
 		},
 		{ uri: 'AgentStudio://agents', name: 'Agents', description: 'Configured AI agents', mimeType: 'application/json' },
-		{ uri: 'AgentStudio://tasks', name: 'Tasks', description: 'Agent task queue', mimeType: 'application/json' },
 		{
 			uri: 'AgentStudio://conversations',
 			name: 'Conversations',
@@ -295,10 +425,6 @@ async function readResource(uri: string) {
 	}
 	if (uri === 'AgentStudio://agents') {
 		const rows = await db.select().from(agents).orderBy(desc(agents.createdAt))
-		return [{ uri, mimeType: 'application/json', text: JSON.stringify(rows) }]
-	}
-	if (uri === 'AgentStudio://tasks') {
-		const rows = await db.select().from(agentTasks).orderBy(desc(agentTasks.createdAt)).limit(100)
 		return [{ uri, mimeType: 'application/json', text: JSON.stringify(rows) }]
 	}
 	if (uri === 'AgentStudio://conversations') {
@@ -345,7 +471,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				return json(
 					rpcResponse(body.id, {
 						...SERVER_INFO,
-						instructions: 'AgentStudio MCP server — exposes tools, memories, agents, tasks, and conversations.',
+						instructions: 'AgentStudio MCP server — exposes tools, memories, agents, and conversations.',
 					}),
 				)
 

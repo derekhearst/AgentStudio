@@ -4,13 +4,11 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import {
-		deleteMemoryCommand,
 		getMemoryByIdQuery,
 		getMemoryRelationsQuery,
+		getRoomTunnelsQuery,
 		getRelatedMemoriesQuery,
-		pinMemoryCommand,
-		unpinMemoryCommand,
-		updateMemoryCommand
+		listDreamingSessionsQuery,
 	} from '$lib/memory';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
@@ -19,10 +17,14 @@
 	type MemoryRow = NonNullable<Awaited<ReturnType<typeof getMemoryByIdQuery>>>;
 	type RelatedRow = Awaited<ReturnType<typeof getRelatedMemoriesQuery>>[number];
 	type RelationRow = Awaited<ReturnType<typeof getMemoryRelationsQuery>>[number];
+	type TunnelRow = Awaited<ReturnType<typeof getRoomTunnelsQuery>>[number];
+	type DreamingSessionRow = Awaited<ReturnType<typeof listDreamingSessionsQuery>>[number];
 
 	let memory = $state<MemoryRow | null>(null);
 	let related = $state<RelatedRow[]>([]);
 	let relations = $state<RelationRow[]>([]);
+	let tunnels = $state<TunnelRow[]>([]);
+	let dreamingSessions = $state<DreamingSessionRow[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -35,43 +37,22 @@
 		loading = true;
 		error = null;
 		try {
-			const [memoryResult, relatedResult, relationResult] = await Promise.all([
+			const [memoryResult, relatedResult, relationResult, sessions] = await Promise.all([
 				getMemoryByIdQuery({ id: memoryId }),
 				getRelatedMemoriesQuery({ id: memoryId, depth: 2 }),
-				getMemoryRelationsQuery({ id: memoryId })
+				getMemoryRelationsQuery({ id: memoryId }),
+				listDreamingSessionsQuery(),
 			]);
 			memory = memoryResult;
 			related = relatedResult;
 			relations = relationResult;
+			dreamingSessions = sessions;
+			tunnels = memoryResult?.roomId ? await getRoomTunnelsQuery({ roomId: memoryResult.roomId }) : [];
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'Failed to load memory detail';
 		} finally {
 			loading = false;
 		}
-	}
-
-	async function handlePinToggle() {
-		if (!memory) return;
-		if (memory.category === 'pinned' || memory.category.startsWith('pinned:')) {
-			await unpinMemoryCommand({ id: memory.id });
-		} else {
-			await pinMemoryCommand({ id: memory.id });
-		}
-		await refresh();
-	}
-
-	async function handleEditContent() {
-		if (!memory) return;
-		const next = window.prompt('Edit memory content', memory.content);
-		if (!next || next.trim() === memory.content) return;
-		await updateMemoryCommand({ id: memory.id, content: next.trim() });
-		await refresh();
-	}
-
-	async function handleDelete() {
-		if (!memory) return;
-		await deleteMemoryCommand({ id: memory.id });
-		window.location.href = '/memory';
 	}
 </script>
 
@@ -91,60 +72,57 @@
 		<ContentPanel>
 			{#snippet header()}
 				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Memory Detail</h1>
+					<h1 class="text-xl font-bold sm:text-3xl">Drawer Detail</h1>
 					<p class="text-xs text-base-content/70 sm:text-sm">
 						<span class="badge badge-sm">{memory?.category}</span>
 						<span class="ml-1">importance {memory?.importance.toFixed(2)}</span>
 						<span class="ml-1">&middot; {memory?.accessCount} access{memory?.accessCount !== 1 ? 'es' : ''}</span>
 					</p>
+					<p class="mt-1 text-xs text-base-content/60">
+						Hall: {memory?.hallType} • Wing {memory?.wingId ? 'assigned' : 'unassigned'} • Room {memory?.roomId ? 'assigned' : 'unassigned'}
+					</p>
 				</div>
-			{/snippet}
-			{#snippet actions()}
-				<button class="btn btn-sm btn-outline" type="button" onclick={handlePinToggle}>
-					{memory?.category === 'pinned' || memory?.category.startsWith('pinned:') ? 'Unpin' : 'Pin'}
-				</button>
-				<button class="btn btn-sm btn-error btn-outline" type="button" onclick={handleDelete}>Delete</button>
 			{/snippet}
 		</ContentPanel>
 
-		<!-- Content editable area -->
+		<!-- Content -->
 		<div class="rounded-xl border border-base-300 bg-base-100 p-3 sm:rounded-2xl sm:p-4">
-			<div class="flex items-center justify-between gap-2 pb-2">
-				<h2 class="text-sm font-semibold text-base-content/60">Content</h2>
-				<button class="btn btn-ghost btn-xs" type="button" onclick={handleEditContent}>Edit</button>
-			</div>
+			<h2 class="pb-2 text-sm font-semibold text-base-content/60">Raw drawer content</h2>
 			<p class="whitespace-pre-wrap text-sm leading-relaxed">{memory?.content}</p>
 		</div>
 
-		<!-- Importance slider -->
-		<div class="rounded-xl border border-base-300 bg-base-100 p-3 sm:rounded-2xl sm:p-4">
-			<div class="flex items-center justify-between gap-2 pb-2">
-				<h2 class="text-sm font-semibold text-base-content/60">Importance</h2>
-				<span class="font-mono text-xs text-base-content/50">{memory?.importance.toFixed(2)}</span>
-			</div>
-			<input
-				type="range"
-				class="range range-sm range-primary"
-				min="0"
-				max="1"
-				step="0.05"
-				value={memory?.importance}
-				onchange={(e) => {
-					const val = Number(e.currentTarget.value);
-					if (memory && Number.isFinite(val)) {
-						void updateMemoryCommand({ id: memory.id, importance: val }).then(refresh);
-					}
-				}}
-			/>
-			<div class="mt-1 flex justify-between text-[10px] text-base-content/30">
-				<span>Trivial</span>
-				<span>Normal</span>
-				<span>Critical</span>
-			</div>
-		</div>
-
 		<!-- Relations & Related in a grid -->
-		<div class="grid gap-3 sm:gap-4 lg:grid-cols-2">
+		<div class="grid gap-3 sm:gap-4 lg:grid-cols-3">
+			<div class="rounded-xl border border-base-300 bg-base-100 p-3 sm:rounded-2xl sm:p-4">
+				<h2 class="pb-2 text-sm font-semibold text-base-content/60">Tunnels</h2>
+				{#if tunnels.length <= 1}
+					<p class="py-3 text-center text-xs text-base-content/40">No cross-wing tunnel for this room.</p>
+				{:else}
+					<div class="space-y-2">
+						{#each tunnels as tunnel (tunnel.roomId)}
+							<div class="rounded-lg bg-base-200/40 px-3 py-2 text-sm">
+								<p class="font-medium">{tunnel.wingName}</p>
+								<p class="text-xs text-base-content/60">{tunnel.roomName}</p>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				<h2 class="mb-2 mt-4 text-sm font-semibold text-base-content/60">Dreaming Agent Sessions</h2>
+				<div class="space-y-2">
+					{#if dreamingSessions.length === 0}
+						<p class="text-xs text-base-content/40">No sessions yet.</p>
+					{:else}
+						{#each dreamingSessions.slice(0, 5) as session (session.id)}
+							<a class="block rounded-lg bg-base-200/40 px-3 py-2 text-sm hover:bg-base-200" href={`/chat/${session.id}`}>
+								<p class="truncate">{session.title}</p>
+								<p class="text-[11px] text-base-content/50">{new Date(session.updatedAt).toLocaleString()}</p>
+							</a>
+						{/each}
+					{/if}
+				</div>
+			</div>
+
 			<div class="rounded-xl border border-base-300 bg-base-100 p-3 sm:rounded-2xl sm:p-4">
 				<h2 class="pb-2 text-sm font-semibold text-base-content/60">Relation Graph</h2>
 				{#if relations.length === 0}

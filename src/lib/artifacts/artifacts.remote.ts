@@ -20,7 +20,6 @@ const createArtifactSchema = z.object({
 	tags: z.array(z.string().trim().max(60)).max(20).default([]),
 	conversationId: z.string().uuid().nullish(),
 	messageId: z.string().uuid().nullish(),
-	taskId: z.string().uuid().nullish(),
 })
 
 const updateArtifactSchema = z.object({
@@ -38,7 +37,6 @@ const listArtifactsSchema = z.object({
 	category: z.string().trim().max(60).nullish(),
 	search: z.string().trim().max(200).nullish(),
 	conversationId: z.string().uuid().nullish(),
-	taskId: z.string().uuid().nullish(),
 	pinned: z.boolean().nullish(),
 	limit: z.number().int().min(1).max(100).default(50),
 	offset: z.number().int().min(0).default(0),
@@ -113,7 +111,6 @@ export const listArtifacts = query(listArtifactsSchema, async (filters) => {
 	if (filters.type) conditions.push(eq(artifacts.type, filters.type))
 	if (filters.category) conditions.push(eq(artifacts.category, filters.category))
 	if (filters.conversationId) conditions.push(eq(artifacts.conversationId, filters.conversationId))
-	if (filters.taskId) conditions.push(eq(artifacts.taskId, filters.taskId))
 	if (filters.pinned !== null && filters.pinned !== undefined) conditions.push(eq(artifacts.pinned, filters.pinned))
 	if (filters.search) {
 		conditions.push(or(ilike(artifacts.title, `%${filters.search}%`), ilike(artifacts.content, `%${filters.search}%`)))
@@ -165,7 +162,6 @@ export const createArtifact = command(createArtifactSchema, async (input) => {
 			tags: input.tags,
 			conversationId: input.conversationId ?? null,
 			messageId: input.messageId ?? null,
-			taskId: input.taskId ?? null,
 		})
 		.returning()
 

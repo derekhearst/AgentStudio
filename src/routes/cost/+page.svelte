@@ -128,16 +128,11 @@
 		{/if}
 
 		<!-- Summary Cards -->
-		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
 				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Total Spend</h3>
 				<p class="mt-1 text-2xl font-bold">{fmt(costData.totalSpend)}</p>
 				<p class="text-xs text-base-content/70">{costData.callCount} LLM calls</p>
-			</div>
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
-				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Agent Spend</h3>
-				<p class="mt-1 text-2xl font-bold">{fmt(costData.agentSpend)}</p>
-				<p class="text-xs text-base-content/70">{costData.agentRunCount} runs</p>
 			</div>
 			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
 				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Tokens In</h3>

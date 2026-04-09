@@ -21,6 +21,7 @@
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import PlanApprovalCard from '$lib/chat/PlanApprovalCard.svelte';
+	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import ArtifactPanel from '$lib/artifacts/ArtifactPanel.svelte';
 
@@ -85,7 +86,20 @@
 		tools: Array<{ id: string; name: string; argumentsText: string }>;
 	};
 
-	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | PlanBlock;
+	type SubagentBlock = {
+		kind: 'subagent';
+		id: string;
+		agentId: string;
+		agentName: string;
+		conversationId: string | null;
+		task: string;
+		content: string;
+		status: 'running' | 'completed' | 'failed';
+		toolCalls: Array<{ name: string; success?: boolean }>;
+		expanded: boolean;
+	};
+
+	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | PlanBlock | SubagentBlock;
 
 	const conversationId = $derived(page.params.id ?? '');
 	let model = $state('anthropic/claude-sonnet-4');
@@ -405,6 +419,17 @@
 						kind: 'plan' as const,
 						status: block.status,
 						tools: block.tools,
+					};
+				}
+				if (block.kind === 'subagent') {
+					return {
+						kind: 'subagent' as const,
+						agentId: block.agentId,
+						agentName: block.agentName,
+						conversationId: block.conversationId,
+						task: block.task,
+						content: block.content,
+						success: block.status === 'completed',
 					};
 				}
 				return {
@@ -1035,6 +1060,65 @@
 						}
 					}
 
+					if (eventName === 'subagent_start') {
+						waitingForFirstToken = false;
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
+						streamingBlocks = [
+							...streamingBlocks.map((b) =>
+								b.kind === 'thinking' ? { ...b, expanded: false } : b
+							),
+							{
+								kind: 'subagent' as const,
+								id: `subagent-${payload.agentId}-${payload.conversationId}`,
+								agentId: payload.agentId,
+								agentName: payload.agentName,
+								conversationId: payload.conversationId,
+								task: payload.task ?? '',
+								content: '',
+								status: 'running' as const,
+								toolCalls: [],
+								expanded: true,
+							},
+						];
+					}
+
+					if (eventName === 'subagent_delta') {
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
+								? { ...b, content: b.content + (payload.content ?? '') }
+								: b
+						);
+					}
+
+					if (eventName === 'subagent_tool_call') {
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
+								? { ...b, toolCalls: [...b.toolCalls, { name: payload.name }] }
+								: b
+						);
+					}
+
+					if (eventName === 'subagent_tool_result') {
+						streamingBlocks = streamingBlocks.map((b) => {
+							if (b.kind !== 'subagent' || b.agentId !== payload.agentId || b.conversationId !== payload.conversationId) return b;
+							const updatedTools = b.toolCalls.map((tc, i) =>
+								i === b.toolCalls.length - 1 && tc.name === payload.name
+									? { ...tc, success: payload.success }
+									: tc
+							);
+							return { ...b, toolCalls: updatedTools };
+						});
+					}
+
+					if (eventName === 'subagent_done') {
+						streamingBlocks = streamingBlocks.map((b) =>
+							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
+								? { ...b, status: 'completed' as const, expanded: false }
+								: b
+						);
+					}
+
 					if (eventName === 'metrics') {
 						updateLatestReasoningTokens(payload.reasoningTokens ?? null);
 					}
@@ -1241,6 +1325,17 @@
 								onApprove={(token) => decidePlan(token, 'approve')}
 								onDeny={(token) => decidePlan(token, 'deny')}
 								onContinue={(token) => decidePlan(token, 'continue')}
+							/>
+						{:else if block.kind === 'subagent'}
+							<SubagentBlockCard
+								agentName={block.agentName}
+								agentId={block.agentId}
+								conversationId={block.conversationId}
+								task={block.task}
+								content={block.content}
+								status={block.status}
+								toolCalls={block.toolCalls}
+								expanded={block.expanded}
 							/>
 						{:else if block.kind === 'text' && block.content}
 							<article class="chat chat-start">

@@ -9,7 +9,7 @@ export const capabilityGroups = {
 	core: {
 		label: 'Core',
 		description: 'Web search and memory lookup',
-		tools: ['web_search', 'memory_search', 'ask_user'] as ToolName[],
+		tools: ['web_search', 'memory_search', 'ask_user', 'list_automations'] as ToolName[],
 		alwaysOn: true,
 	},
 	sandbox: {
@@ -55,7 +55,17 @@ export const capabilityGroups = {
 	agents: {
 		label: 'Agents',
 		description: 'Create tasks and run sub-agents for delegation',
-		tools: ['create_task', 'run_subagent'] as ToolName[],
+		tools: [
+			'create_task',
+			'run_subagent',
+			'update_agent',
+			'pause_agent',
+			'resume_agent',
+			'create_user',
+			'create_automation',
+			'update_automation',
+			'delete_automation',
+		] as ToolName[],
 		alwaysOn: false,
 	},
 	media: {
@@ -135,6 +145,7 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 		description: 'Ask the user one or more clarifying questions with predefined answer options.',
 		group: 'core',
 	},
+	{ name: 'list_automations', description: 'List automations for the current user.', group: 'core' },
 	{ name: 'shell', description: 'Run a shell command in the sandboxed environment.', group: 'sandbox' },
 	{
 		name: 'file_read',
@@ -240,6 +251,13 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 			'Run a general-purpose subagent to handle a task. The subagent is stateless and returns a result without persistence.',
 		group: 'agents',
 	},
+	{ name: 'update_agent', description: 'Update an existing agent.', group: 'agents' },
+	{ name: 'pause_agent', description: 'Pause an existing agent.', group: 'agents' },
+	{ name: 'resume_agent', description: 'Resume an existing agent.', group: 'agents' },
+	{ name: 'create_user', description: 'Create a user account (admin only).', group: 'agents' },
+	{ name: 'create_automation', description: 'Create a recurring automation.', group: 'agents' },
+	{ name: 'update_automation', description: 'Update a recurring automation.', group: 'agents' },
+	{ name: 'delete_automation', description: 'Delete a recurring automation.', group: 'agents' },
 	{ name: 'image_generate', description: 'Generate an image from a text prompt.', group: 'media' },
 ]
 

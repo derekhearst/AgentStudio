@@ -8,10 +8,6 @@
 		getArtifact,
 		getArtifactVersions,
 		deleteArtifact,
-		pinArtifact,
-		updateArtifactTags,
-		updateArtifactCategory,
-		rollbackArtifact,
 	} from '$lib/artifacts'
 	import ArtifactViewer from '$lib/artifacts/ArtifactViewer.svelte'
 
@@ -22,10 +18,6 @@
 	let versions = $state<VersionRow[]>([])
 	let loading = $state(true)
 	let showVersions = $state(false)
-	let editingTags = $state(false)
-	let tagInput = $state('')
-	let editingCategory = $state(false)
-	let categoryInput = $state('')
 
 	const id = $derived($page.params.id!)
 
@@ -40,10 +32,6 @@
 			])
 			artifact = a
 			versions = v
-			if (a) {
-				tagInput = (a.tags ?? []).join(', ')
-				categoryInput = a.category ?? ''
-			}
 		} finally {
 			loading = false
 		}
@@ -53,31 +41,6 @@
 		if (!confirm('Delete this artifact permanently?')) return
 		await deleteArtifact(id)
 		await goto('/artifacts')
-	}
-
-	async function handleTogglePin() {
-		if (!artifact) return
-		await pinArtifact({ id, pinned: !artifact.pinned })
-		await load()
-	}
-
-	async function handleSaveTags() {
-		const tags = tagInput.split(',').map(t => t.trim()).filter(Boolean)
-		await updateArtifactTags({ id, tags })
-		editingTags = false
-		await load()
-	}
-
-	async function handleSaveCategory() {
-		await updateArtifactCategory({ id, category: categoryInput.trim() || null })
-		editingCategory = false
-		await load()
-	}
-
-	async function handleRollback(version: number) {
-		if (!confirm(`Restore version ${version}? This creates a new version with the old content.`)) return
-		await rollbackArtifact({ id, version })
-		await load()
 	}
 
 	async function handleDownload() {
@@ -146,9 +109,6 @@
 				<div class="flex flex-wrap gap-2">
 					<button class="btn btn-sm btn-outline" type="button" onclick={handleCopy}>Copy</button>
 					<button class="btn btn-sm btn-outline" type="button" onclick={handleDownload}>Download</button>
-					<button class="btn btn-sm btn-outline" type="button" onclick={handleTogglePin}>
-						{artifact.pinned ? 'Unpin' : 'Pin'}
-					</button>
 					<button class="btn btn-sm btn-outline" type="button" onclick={handleContinueWorking}>
 						Continue in Chat
 					</button>
@@ -207,36 +167,14 @@
 
 				<!-- Category -->
 				<div class="rounded-3xl border border-base-300 bg-base-100 p-4 space-y-2">
-					<div class="flex items-center justify-between">
-						<h2 class="text-lg font-semibold">Category</h2>
-						<button class="btn btn-xs btn-ghost" type="button" onclick={() => editingCategory = !editingCategory}>
-							{editingCategory ? 'Cancel' : 'Edit'}
-						</button>
-					</div>
-					{#if editingCategory}
-						<div class="flex gap-2">
-							<input class="input input-bordered input-sm flex-1" bind:value={categoryInput} placeholder="Category" />
-							<button class="btn btn-sm btn-success" type="button" onclick={handleSaveCategory}>Save</button>
-						</div>
-					{:else}
-						<p class="text-sm">{artifact.category ?? 'Uncategorized'}</p>
-					{/if}
+					<h2 class="text-lg font-semibold">Category</h2>
+					<p class="text-sm">{artifact.category ?? 'Uncategorized'}</p>
 				</div>
 
 				<!-- Tags -->
 				<div class="rounded-3xl border border-base-300 bg-base-100 p-4 space-y-2">
-					<div class="flex items-center justify-between">
-						<h2 class="text-lg font-semibold">Tags</h2>
-						<button class="btn btn-xs btn-ghost" type="button" onclick={() => editingTags = !editingTags}>
-							{editingTags ? 'Cancel' : 'Edit'}
-						</button>
-					</div>
-					{#if editingTags}
-						<div class="space-y-2">
-							<input class="input input-bordered input-sm w-full" bind:value={tagInput} placeholder="Comma-separated tags" />
-							<button class="btn btn-sm btn-success" type="button" onclick={handleSaveTags}>Save</button>
-						</div>
-					{:else if artifact.tags && artifact.tags.length > 0}
+					<h2 class="text-lg font-semibold">Tags</h2>
+					{#if artifact.tags && artifact.tags.length > 0}
 						<div class="flex flex-wrap gap-1">
 							{#each artifact.tags as tag (tag)}
 								<span class="badge badge-outline">{tag}</span>
@@ -263,11 +201,7 @@
 										<span class="font-medium">v{ver.version}</span>
 										<span class="text-xs text-base-content/50">{formatDate(ver.createdAt)}</span>
 									</div>
-									{#if ver.version < versions.length}
-										<button class="btn btn-xs btn-outline mt-1" type="button" onclick={() => handleRollback(ver.version)}>
-											Restore
-										</button>
-									{:else}
+									{#if ver.version === versions.length}
 										<span class="badge badge-success badge-xs mt-1">Current</span>
 									{/if}
 								</div>

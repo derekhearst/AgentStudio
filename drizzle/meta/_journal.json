@@ -22,6 +22,41 @@
       "when": 1775457038416,
       "tag": "0002_rich_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1775692644505,
+      "tag": "0003_giant_jubilee",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775695900679,
+      "tag": "0004_redundant_wolverine",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1775696269691,
+      "tag": "0005_robust_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775696581464,
+      "tag": "0006_remarkable_gauntlet",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1775697334597,
+      "tag": "0007_late_expediter",
+      "breakpoints": true
     }
   ]
 }

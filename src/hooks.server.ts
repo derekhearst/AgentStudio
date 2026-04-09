@@ -3,6 +3,7 @@ import { and, arrayContains, sql } from 'drizzle-orm'
 import { ensureAuthBootstrap, getSessionUser } from '$lib/auth/auth.server'
 import { db, ensureDatabaseReady } from '$lib/db.server'
 import { skills } from '$lib/skills/skills.schema'
+import { ensureDreamingAgentForUser } from '$lib/agents/agents.server'
 
 // Cleanup old capability-group skill seed records once on startup.
 let cleanedUpLegacyCapabilitySkills = false
@@ -45,6 +46,10 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	if (event.locals.authenticated && event.url.pathname === '/login') {
 		throw redirect(303, '/')
+	}
+
+	if (event.locals.user?.id) {
+		await ensureDreamingAgentForUser(event.locals.user.id)
 	}
 
 	if (

@@ -34,7 +34,7 @@ test('saves, persists, resets, and updates notification feed from settings', asy
 
 		await page.getByPlaceholder('Title').fill(`${prefix} Notification`)
 		await page.getByPlaceholder('Body').fill(`${prefix} Body`)
-		await page.getByPlaceholder('URL').fill('/tasks')
+		await page.getByPlaceholder('URL').fill('/chat')
 		await page
 			.locator('section')
 			.filter({ hasText: /send test notification/i })

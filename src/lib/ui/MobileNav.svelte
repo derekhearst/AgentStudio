@@ -11,13 +11,12 @@
 	}
 
 	const moreItems = [
-		{ href: '/projects', label: 'Projects' },
 		{ href: '/memory', label: 'Memory' },
 		{ href: '/activity', label: 'Activity' },
 		{ href: '/review', label: 'Review' },
 		{ href: '/artifacts', label: 'Artifacts' },
 		{ href: '/skills', label: 'Skills' },
-		{ href: '/tools', label: 'Tools' },
+		{ href: '/automations', label: 'Automations' },
 		{ href: '/cost', label: 'Cost' },
 		{ href: '/settings', label: 'Settings' }
 	];
@@ -30,27 +29,20 @@
 			icon: 'M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z'
 		},
 		{
-			href: '/dashboard',
-			label: 'Home',
-			// squares-2x2
-			paths: ['M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z']
-		},
-		{
-			href: '/projects',
-			label: 'Projects',
-			paths: ['M12 2l9 5-9 5-9-5 9-5', 'M3 17l9 5 9-5', 'M3 12l9 5 9-5']
-		},
-		{
-			href: '/tasks',
-			label: 'Tasks',
-			// check-circle
-			paths: ['M9 12l2 2 4-4', 'circle:12,12,9']
-		},
-		{
 			href: '/agents',
 			label: 'Agents',
 			// cpu
 			paths: ['M7 7h10v10H7z', 'M7 9H4 M7 12H4 M7 15H4 M17 9h3 M17 12h3 M17 15h3 M9 7V4 M12 7V4 M15 7V4 M9 17v3 M12 17v3 M15 17v3']
+		},
+		{
+			href: '/artifacts',
+			label: 'Artifacts',
+			paths: ['M12 2 2 7 12 12 22 7 12 2', 'M2 17 12 22 22 17', 'M2 12 12 17 22 12']
+		},
+		{
+			href: '/memory',
+			label: 'Memory',
+			paths: ['M12 5a9 3 0 0 1 0 0', 'M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5', 'M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6']
 		}
 	] as const;
 </script>
@@ -75,18 +67,17 @@
 				>
 					{#if item.href === '/'}
 						<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
-					{:else if item.href === '/dashboard'}
-						<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-						<rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-					{:else if item.href === '/projects'}
-						<path d="M12 2l9 5-9 5-9-5 9-5"/>
-						<path d="M3 17l9 5 9-5"/>
-						<path d="M3 12l9 5 9-5"/>
-					{:else if item.href === '/tasks'}
-						<path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>
 					{:else if item.href === '/agents'}
 						<rect x="7" y="7" width="10" height="10" rx="1"/>
 						<path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3"/>
+					{:else if item.href === '/artifacts'}
+						<polygon points="12 2 2 7 12 12 22 7 12 2"/>
+						<polyline points="2 17 12 22 22 17"/>
+						<polyline points="2 12 12 17 22 12"/>
+					{:else if item.href === '/memory'}
+						<ellipse cx="12" cy="5" rx="9" ry="3"/>
+						<path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+						<path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
 					{/if}
 				</svg>
 				<span class="truncate">{item.label}</span>
@@ -111,13 +102,12 @@
 <div id="mobile-more-menu" popover class="mobile-more-popover">
 	<div class="grid grid-cols-3 gap-1 p-3">
 		{#each [
-			{ href: '/projects', label: 'Projects', icon: 'layers3' },
 			{ href: '/memory', label: 'Memory', icon: 'db' },
 			{ href: '/activity', label: 'Activity', icon: 'activity' },
 			{ href: '/review', label: 'Review', icon: 'eye' },
 			{ href: '/artifacts', label: 'Artifacts', icon: 'layers' },
 			{ href: '/skills', label: 'Skills', icon: 'cap' },
-			{ href: '/tools', label: 'Tools', icon: 'wrench' },
+			{ href: '/automations', label: 'Automations', icon: 'cycle' },
 			{ href: '/cost', label: 'Cost', icon: 'dollar' },
 			{ href: '/settings', label: 'Settings', icon: 'cog' }
 		] as item (item.href)}
@@ -134,10 +124,6 @@
 						<ellipse cx="12" cy="5" rx="9" ry="3"/>
 						<path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
 						<path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
-					{:else if item.icon === 'layers3'}
-						<path d="M12 2l9 5-9 5-9-5 9-5"/>
-						<path d="M3 17l9 5 9-5"/>
-						<path d="M3 12l9 5 9-5"/>
 					{:else if item.icon === 'activity'}
 						<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
 					{:else if item.icon === 'eye'}
@@ -150,8 +136,8 @@
 					{:else if item.icon === 'cap'}
 						<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
 						<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
-					{:else if item.icon === 'wrench'}
-						<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.8-2.8z"/>
+					{:else if item.icon === 'cycle'}
+						<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
 					{:else if item.icon === 'dollar'}
 						<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
 					{:else if item.icon === 'cog'}

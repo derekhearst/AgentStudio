@@ -4,7 +4,7 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/chat/chat.schema'
 import { generateTitleAndCategory } from '$lib/chat/chat.server'
 import { logLlmUsage } from '$lib/cost/usage'
-import { dreamCycles, memories } from '$lib/memory/memory.schema'
+import { memories } from '$lib/memory/memory.schema'
 import {
 	bumpAccessCount,
 	createMemory,
@@ -267,54 +267,6 @@ export async function condenseMemories(config: Partial<DreamConfig> = {}) {
 		top,
 		config: merged,
 	}
-}
-
-export async function runDreamCycle(config: Partial<DreamConfig> = {}) {
-	const startedAt = new Date()
-	const [cycle] = await db
-		.insert(dreamCycles)
-		.values({
-			startedAt,
-			memoriesProcessed: 0,
-			memoriesCreated: 0,
-			memoriesPruned: 0,
-			summary: null,
-		})
-		.returning()
-
-	const result = await condenseMemories(config)
-	const categorizedCount = await categorizeConversations(result.recentConversationIds)
-	const endedAt = new Date()
-	const summary = `Processed ${result.recentConversationsProcessed} conversations, extracted ${result.extractedCount} memories, pruned ${result.prunedCount}, categorized ${categorizedCount} conversations.`
-
-	await db
-		.update(dreamCycles)
-		.set({
-			endedAt,
-			memoriesProcessed: result.top.length,
-			memoriesCreated: result.extractedCount,
-			memoriesPruned: result.prunedCount,
-			summary,
-		})
-		.where(eq(dreamCycles.id, cycle.id))
-
-	return {
-		ok: true,
-		cycleId: cycle.id,
-		startedAt,
-		endedAt,
-		durationMs: endedAt.getTime() - startedAt.getTime(),
-		summary,
-		...result,
-	}
-}
-
-export async function listDreamCycles(limit = 20) {
-	return db
-		.select()
-		.from(dreamCycles)
-		.orderBy(desc(dreamCycles.startedAt))
-		.limit(Math.max(1, Math.min(100, limit)))
 }
 
 export async function buildImportPrompt(options?: { includeExisting?: boolean }) {

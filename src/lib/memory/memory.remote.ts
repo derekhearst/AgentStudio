@@ -13,8 +13,14 @@ import {
 	unpinMemoryRecord,
 	updateMemoryRecord,
 } from '$lib/memory/memory.server'
-import { listDreamCycles, runDreamCycle } from '$lib/memory/memory'
 import { buildImportPrompt, extractFromImportText } from '$lib/memory/memory'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { getTaxonomy, findTunnels } from '$lib/memory/palace.store'
+import { db } from '$lib/db.server'
+import { agents } from '$lib/agents/agents.schema'
+import { conversations } from '$lib/chat/chat.schema'
+import { memoryRooms } from '$lib/memory/palace.schema'
+import { and, desc, eq } from 'drizzle-orm'
 
 const createMemorySchema = z.object({
 	content: z.string().trim().min(1),
@@ -95,6 +101,39 @@ export const touchMemoryCommand = command(memoryIdSchema, async ({ id }) => {
 	return { ok: true }
 })
 
+export const getPalaceTaxonomyQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return getTaxonomy(user.id)
+})
+
+const roomIdSchema = z.object({ roomId: z.string().uuid() })
+
+export const getRoomTunnelsQuery = query(roomIdSchema, async ({ roomId }) => {
+	const user = requireAuthenticatedRequestUser()
+	const [room] = await db.select().from(memoryRooms).where(eq(memoryRooms.id, roomId)).limit(1)
+	if (!room) return []
+	return findTunnels(user.id, room.name)
+})
+
+export const listDreamingSessionsQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	const [dreaming] = await db.select().from(agents).where(eq(agents.name, 'Dreaming Agent')).limit(1)
+	if (!dreaming) return []
+
+	return db
+		.select({
+			id: conversations.id,
+			title: conversations.title,
+			updatedAt: conversations.updatedAt,
+			createdAt: conversations.createdAt,
+			model: conversations.model,
+		})
+		.from(conversations)
+		.where(and(eq(conversations.userId, user.id), eq(conversations.agentId, dreaming.id)))
+		.orderBy(desc(conversations.updatedAt))
+		.limit(20)
+})
+
 /* ── Memory Importer ────────────────────────────────────────── */
 
 const buildImportPromptSchema = z.object({
@@ -112,32 +151,4 @@ export const buildImportPromptQuery = query(buildImportPromptSchema, async ({ in
 
 export const importMemoriesCommand = command(importMemoriesSchema, async ({ text, model }) => {
 	return extractFromImportText(text, model)
-})
-
-const runDreamCycleSchema = z.object({
-	decayLambda: z.number().positive().max(1).optional(),
-	pruneThreshold: z.number().min(0).max(1).optional(),
-	topCount: z.number().int().min(1).max(200).optional(),
-	conversationLimit: z.number().int().min(1).max(50).optional(),
-	lookbackHours: z
-		.number()
-		.int()
-		.min(1)
-		.max(24 * 30)
-		.optional(),
-})
-
-const listDreamCyclesSchema = z.object({
-	limit: z.number().int().min(1).max(100).optional(),
-})
-
-export const runDreamCycleCommand = command(
-	runDreamCycleSchema,
-	async ({ decayLambda, pruneThreshold, topCount, conversationLimit, lookbackHours }) => {
-		return runDreamCycle({ decayLambda, pruneThreshold, topCount, conversationLimit, lookbackHours })
-	},
-)
-
-export const listDreamCyclesQuery = query(listDreamCyclesSchema, async ({ limit }) => {
-	return listDreamCycles(limit ?? 20)
 })

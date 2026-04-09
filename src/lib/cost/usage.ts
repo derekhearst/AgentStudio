@@ -2,7 +2,14 @@ import { db } from '$lib/db.server'
 import { llmUsage } from '$lib/cost/usage.schema'
 import { listModels, type ModelInfo } from '$lib/models/models'
 
-export type LlmUsageSource = 'chat' | 'agent_planner' | 'agent_synthesis' | 'titlegen' | 'memory_extract' | 'image_gen'
+export type LlmUsageSource =
+	| 'chat'
+	| 'agent_planner'
+	| 'agent_synthesis'
+	| 'subagent'
+	| 'titlegen'
+	| 'memory_extract'
+	| 'image_gen'
 
 type LogInput = {
 	source: LlmUsageSource
@@ -75,5 +82,3 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 
 	return row.cost
 }
-
-
