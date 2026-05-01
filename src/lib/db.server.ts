@@ -14,6 +14,7 @@ import * as activitySchema from '$lib/activity/activity.schema'
 import * as llmUsageSchema from '$lib/cost/usage.schema'
 import * as skillsSchema from '$lib/skills/skills.schema'
 import * as automationSchema from '$lib/automation/automation.schema'
+import * as memorySchema from '$lib/memory/memory.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 const databaseUrl = env.DATABASE_URL
@@ -28,6 +29,7 @@ const schema = {
 	...activitySchema,
 	...llmUsageSchema,
 	...skillsSchema,
+	...memorySchema,
 	...automationSchema,
 }
 

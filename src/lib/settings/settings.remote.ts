@@ -48,6 +48,16 @@ const settingsUpdateSchema = z.object({
 			approvalRequiredTools: z.array(z.string()).optional(),
 		})
 		.optional(),
+	memoryConfig: z
+		.object({
+			enabled: z.boolean().optional(),
+			topK: z.number().int().min(1).max(20).optional(),
+			useRerank: z.boolean().optional(),
+			rerankModel: z.string().trim().min(1).max(120).optional(),
+			embeddingModel: z.string().trim().min(1).max(120).optional(),
+			autoMine: z.boolean().optional(),
+		})
+		.optional(),
 	systemPrompt: z.string().max(12000).optional(),
 })
 

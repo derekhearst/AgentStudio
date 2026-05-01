@@ -20,7 +20,15 @@
 		"db:push": "drizzle-kit push",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
-		"db:studio": "drizzle-kit studio"
+		"db:studio": "drizzle-kit studio",
+		"bench:longmemeval:download": "bun run scripts/bench/longmemeval/download-data.ts",
+		"bench:longmemeval:ingest": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts",
+		"bench:longmemeval:retrieve": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/retrieve.ts",
+		"bench:longmemeval:score-retrieval": "bun run scripts/bench/longmemeval/score-retrieval.ts",
+		"bench:longmemeval:qa": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/qa.ts",
+		"bench:longmemeval:score-qa": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/score-qa.ts",
+		"bench:longmemeval:smoke": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts",
+		"bench:longmemeval:reset": "bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/reset-memory-tables.ts"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.58.2",

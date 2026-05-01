@@ -28,6 +28,14 @@ export const DEFAULT_SETTINGS = {
 	toolConfig: {
 		approvalRequiredTools: [] as string[],
 	},
+	memoryConfig: {
+		enabled: true,
+		topK: 5,
+		useRerank: false,
+		rerankModel: 'anthropic/claude-haiku-4',
+		embeddingModel: 'openai/text-embedding-3-small',
+		autoMine: true,
+	},
 	theme: 'AgentStudio-night',
 } as const
 
@@ -50,6 +58,7 @@ export async function getOrCreateSettings(userId: string) {
 			dreamConfig: DEFAULT_SETTINGS.dreamConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
+			memoryConfig: DEFAULT_SETTINGS.memoryConfig,
 			theme: DEFAULT_SETTINGS.theme,
 			updatedAt: new Date(),
 		})
@@ -84,6 +93,14 @@ export async function updateSettings(input: {
 	}
 	toolConfig?: {
 		approvalRequiredTools?: string[]
+	}
+	memoryConfig?: {
+		enabled?: boolean
+		topK?: number
+		useRerank?: boolean
+		rerankModel?: string
+		embeddingModel?: string
+		autoMine?: boolean
 	}
 }) {
 	const current = await getOrCreateSettings(input.userId)
@@ -128,6 +145,11 @@ export async function updateSettings(input: {
 				approvalRequiredTools: migratedApprovalRequiredTools,
 				...(input.toolConfig ?? {}),
 			},
+			memoryConfig: {
+				...((current.memoryConfig as typeof DEFAULT_SETTINGS.memoryConfig | undefined) ??
+					DEFAULT_SETTINGS.memoryConfig),
+				...(input.memoryConfig ?? {}),
+			},
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, current.id))
@@ -157,6 +179,7 @@ export async function resetSettings(userId: string) {
 			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
+			memoryConfig: DEFAULT_SETTINGS.memoryConfig,
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, existing.id))

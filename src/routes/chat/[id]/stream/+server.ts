@@ -14,6 +14,7 @@ import { listSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
+import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
 
 const encoder = new TextEncoder()
 
@@ -236,6 +237,30 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 	if (skillSummariesText) {
 		systemSections.push(`Available skills (use read_skill to load full content when relevant):\n${skillSummariesText}`)
+	}
+
+	// --- Context Engineering: Memory Palace Recall ---
+	const memoryConfig = (currentSettings.memoryConfig ?? null) as
+		| {
+				enabled?: boolean
+				topK?: number
+				useRerank?: boolean
+				rerankModel?: string
+		  }
+		| null
+	const memoryEnabled = memoryConfig?.enabled !== false
+	if (memoryEnabled && body.content && body.content.trim().length > 0) {
+		try {
+			const recalled = await recallForUser(user.id, body.content.trim(), {
+				topK: memoryConfig?.topK ?? 5,
+				useRerank: memoryConfig?.useRerank ?? false,
+				rerankModel: memoryConfig?.rerankModel,
+			})
+			const memoryBlock = renderMemoryContext(recalled)
+			if (memoryBlock) systemSections.push(memoryBlock)
+		} catch (err) {
+			console.warn('[memory] recall failed', err)
+		}
 	}
 
 	const capabilityPrompt = systemSections.join('\n\n')
@@ -835,6 +860,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					heartbeat: true,
 					finished: true,
 				})
+
+				// --- Memory Palace: mine the latest exchange asynchronously ---
+				const autoMine = (currentSettings.memoryConfig as { autoMine?: boolean } | null)?.autoMine !== false
+				if (autoMine) {
+					void mineConversation({ conversationId: body.conversationId }).catch((err) => {
+						console.warn('[memory] mining failed', err)
+					})
+				}
 
 				emit('metrics', {
 					model: routedModel,

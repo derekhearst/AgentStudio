@@ -2,7 +2,17 @@ import { db } from '$lib/db.server'
 import { llmUsage } from '$lib/cost/usage.schema'
 import { listModels, type ModelInfo } from '$lib/models/models'
 
-export type LlmUsageSource = 'chat' | 'agent_planner' | 'agent_synthesis' | 'subagent' | 'titlegen' | 'image_gen'
+export type LlmUsageSource =
+	| 'chat'
+	| 'agent_planner'
+	| 'agent_synthesis'
+	| 'subagent'
+	| 'titlegen'
+	| 'image_gen'
+	| 'memory_embed'
+	| 'memory_extract'
+	| 'memory_rerank'
+	| 'memory_qa'
 
 type LogInput = {
 	source: LlmUsageSource

@@ -1,0 +1,15 @@
+{
+	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": "../..",
+		"paths": {
+			"$app/environment": ["./scripts/bench/shims/app-environment.ts"],
+			"$env/dynamic/private": ["./scripts/bench/shims/env-dynamic-private.ts"],
+			"$env/dynamic/public": ["./scripts/bench/shims/env-dynamic-private.ts"],
+			"$env/static/private": ["./scripts/bench/shims/env-dynamic-private.ts"],
+			"$env/static/public": ["./scripts/bench/shims/env-dynamic-private.ts"],
+			"$lib": ["./src/lib"],
+			"$lib/*": ["./src/lib/*"]
+		}
+	}
+}

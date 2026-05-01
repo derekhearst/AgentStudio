@@ -41,3 +41,11 @@ src-tauri/Cargo.lock
 
 # Tauri generated mobile/android project and schemas
 src-tauri/gen/
+
+# Reference clones for porting (read-only, never imported)
+vendor/
+
+# Benchmark data (downloaded, not committed)
+data/longmemeval/
+retrieval_logs/
+generation_logs/

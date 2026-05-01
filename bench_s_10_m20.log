@@ -1,0 +1,11 @@
+$ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts "--dataset=s" "--limit=10" "--maxSessions=20"
+[smoke] runId=lme_20260501092655_g5kx dataset=s limit=10 maxSessions=20
+
+=== ingest: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts --dataset=s --runId=lme_20260501092655_g5kx --limit=10 --maxSessions=20 ===
+[db] Database ready
+[ingest] dataset=s runId=lme_20260501092655_g5kx instances=10
+[ingest] (1/10) e47becba sessions=20 drawers=191 eta=935s
+[ingest] (2/10) 118b2229 sessions=20 drawers=233 eta=978s
+[ingest] (3/10) 51a45a95 sessions=20 drawers=220 eta=890s
+[ingest] (4/10) 58bf7951 sessions=20 drawers=221 eta=754s
+[ingest] (5/10) 1e043500 sessions=20 drawers=197 eta=617s

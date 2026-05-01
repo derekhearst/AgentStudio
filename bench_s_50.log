@@ -1,0 +1,53 @@
+$ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts "--dataset=s" "--limit=50"
+[smoke] runId=lme_20260501090623_ukw5 dataset=s limit=50
+
+=== ingest: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts --dataset=s --runId=lme_20260501090623_ukw5 --limit=50 ===
+[db] Database ready
+[ingest] dataset=s runId=lme_20260501090623_ukw5 instances=50
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (1/50) e47becba drawers=550 eta=18385s
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback

@@ -44,6 +44,24 @@ export const appSettings = pgTable('app_settings', {
 		}>()
 		.notNull()
 		.default({ approvalRequiredTools: [] }),
+	memoryConfig: jsonb('memory_config')
+		.$type<{
+			enabled: boolean
+			topK: number
+			useRerank: boolean
+			rerankModel: string
+			embeddingModel: string
+			autoMine: boolean
+		}>()
+		.notNull()
+		.default({
+			enabled: true,
+			topK: 5,
+			useRerank: false,
+			rerankModel: 'anthropic/claude-haiku-4',
+			embeddingModel: 'openai/text-embedding-3-small',
+			autoMine: true,
+		}),
 	systemPrompt: text('system_prompt').notNull().default(''), // deprecated – kept for migration compat
 	theme: text('theme').notNull().default('AgentStudio-night'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

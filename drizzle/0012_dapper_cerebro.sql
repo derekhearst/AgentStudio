@@ -1,0 +1,1 @@
+ALTER TABLE "app_settings" ADD COLUMN "memory_config" jsonb DEFAULT '{"enabled":true,"topK":5,"useRerank":false,"rerankModel":"anthropic/claude-haiku-4","embeddingModel":"openai/text-embedding-3-small","autoMine":true}'::jsonb NOT NULL;

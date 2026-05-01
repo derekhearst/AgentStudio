@@ -1,0 +1,37 @@
+$ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts "--dataset=s" "--limit=10" "--maxSessions=5"
+[smoke] runId=lme_20260501092103_83yz dataset=s limit=10 maxSessions=5
+
+=== ingest: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts --dataset=s --runId=lme_20260501092103_83yz --limit=10 --maxSessions=5 ===
+[db] Database ready
+[ingest] dataset=s runId=lme_20260501092103_83yz instances=10
+[ingest] (1/10) e47becba sessions=5 drawers=42 eta=205s
+[ingest] (2/10) 118b2229 sessions=5 drawers=60 eta=195s
+[ingest] (3/10) 51a45a95 sessions=5 drawers=44 eta=169s
+[ingest] (4/10) 58bf7951 sessions=5 drawers=44 eta=155s
+[ingest] (5/10) 1e043500 sessions=5 drawers=38 eta=123s
+[ingest] (6/10) c5e8278d sessions=5 drawers=55 eta=99s
+[ingest] (7/10) 6ade9755 sessions=5 drawers=52 eta=77s
+[ingest] (8/10) 6f9b354f sessions=5 drawers=56 eta=51s
+[ingest] (9/10) 58ef2f1c sessions=5 drawers=52 eta=26s
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
+[ingest] (10/10) f8c5f88b sessions=5 drawers=41 eta=0s
+[ingest] done in 254.4s
+
+=== retrieve: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/retrieve.ts --dataset=s --runId=lme_20260501092103_83yz --limit=10 ===
+[db] Database ready
+[retrieve] dataset=s runId=lme_20260501092103_83yz ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501092103_83yz.jsonl
+[retrieve] (10/10) eta=0s
+[retrieve] done in 4.6s ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501092103_83yz.jsonl
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 388[handle]. You don't need to do anything, but this indicates a bug.
+
+=== score-retrieval: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/score-retrieval.ts --runId=lme_20260501092103_83yz ===
+[score-retrieval] 10 instances (abstention excluded)
+Session-level metrics:
+	recall_all@5 = 1.0000 (n=10)
+	ndcg_any@5 = 1.0000 (n=10)
+	recall_all@10 = 1.0000 (n=10)
+	ndcg_any@10 = 1.0000 (n=10)
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 176[handle]. You don't need to do anything, but this indicates a bug.
+
+[smoke] OK ΓÇö runId=lme_20260501092103_83yz
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.

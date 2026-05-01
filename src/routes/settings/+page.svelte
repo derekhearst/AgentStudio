@@ -45,6 +45,7 @@
 		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
 		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
 		{ id: 'tools', keywords: 'tools sandbox coding skills agents media image generation disabled enabled toggle' },
+		{ id: 'memory', keywords: 'memory palace recall mining embeddings rerank topk wings rooms drawers' },
 		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
@@ -102,6 +103,7 @@
 				budgetConfig: settings.budgetConfig,
 				contextConfig: settings.contextConfig,
 				toolConfig: settings.toolConfig,
+				memoryConfig: settings.memoryConfig,
 			});
 			settings = updated;
 			applyTheme('AgentStudio-night');
@@ -511,6 +513,55 @@
 						</div>
 					</div>
 				{/each}
+			</div>
+		</section>
+		{/if}
+
+		<!-- ════════════════════════════════════════════════
+		     MEMORY PALACE
+		     ════════════════════════════════════════════════ -->
+		{#if isVisible('memory') && settings?.memoryConfig}
+		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
+				<span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>Memory Palace
+			</p>
+			<div class="space-y-3">
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span>
+						<span class="block text-sm font-medium">Enable memory recall</span>
+						<span class="block text-xs text-base-content/45">Inject relevant past memories into chat as context.</span>
+					</span>
+					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.enabled} />
+				</label>
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span>
+						<span class="block text-sm font-medium">Auto-mine conversations</span>
+						<span class="block text-xs text-base-content/45">Mine each conversation into the palace after completion.</span>
+					</span>
+					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.autoMine} />
+				</label>
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span>
+						<span class="block text-sm font-medium">Use LLM reranker</span>
+						<span class="block text-xs text-base-content/45">Slower but typically improves retrieval precision.</span>
+					</span>
+					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.useRerank} />
+				</label>
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span class="block text-sm font-medium">Top-K results</span>
+					<input type="number" min="1" max="20" class="input input-sm input-bordered w-20" bind:value={settings.memoryConfig.topK} />
+				</label>
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span class="block text-sm font-medium">Rerank model</span>
+					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.rerankModel} />
+				</label>
+				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+					<span class="block text-sm font-medium">Embedding model</span>
+					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.embeddingModel} />
+				</label>
+				<p class="text-xs text-base-content/45">
+					Browse and search your palace at <a href="/memory" class="link link-accent">/memory</a>.
+				</p>
 			</div>
 		</section>
 		{/if}

@@ -103,6 +103,21 @@
 				</svg>
 				Cost
 			</a>
+			<a href="/memory"
+				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/memory')} class:font-medium={isActive('/memory')} class:text-primary={isActive('/memory')}
+				onclick={onNavigate}>
+				<!-- archive / drawers -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="3" y="3" width="18" height="6" rx="1"/>
+					<rect x="3" y="9" width="18" height="6" rx="1"/>
+					<rect x="3" y="15" width="18" height="6" rx="1"/>
+					<line x1="10" y1="6" x2="14" y2="6"/>
+					<line x1="10" y1="12" x2="14" y2="12"/>
+					<line x1="10" y1="18" x2="14" y2="18"/>
+				</svg>
+				Memory
+			</a>
 		</div>
 
 		<!-- Settings — pinned bottom -->

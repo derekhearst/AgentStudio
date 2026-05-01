@@ -78,6 +78,20 @@
       "when": 1777620364000,
       "tag": "0010_chunked_museum",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777623775776,
+      "tag": "0011_memory_palace",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777624109522,
+      "tag": "0012_dapper_cerebro",
+      "breakpoints": true
     }
   ]
 }
