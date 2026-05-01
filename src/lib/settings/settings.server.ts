@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS = {
 		enabled: true,
 		topK: 5,
 		useRerank: false,
-		rerankModel: 'anthropic/claude-haiku-4',
+		rerankModel: 'anthropic/claude-haiku-4.5',
 		embeddingModel: 'openai/text-embedding-3-small',
 		autoMine: true,
 	},

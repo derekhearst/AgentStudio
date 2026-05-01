@@ -1,0 +1,10 @@
+$ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts "--dataset=s" "--limit=50" "--maxSessions=50" --useRerank
+[smoke] runId=lme_20260501203758_9l21 dataset=s limit=50 maxSessions=50
+
+=== ingest: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts --dataset=s --runId=lme_20260501203758_9l21 --limit=50 --maxSessions=50 ===
+[db] Database ready
+[ingest] dataset=s runId=lme_20260501203758_9l21 instances=50
+[ingest] (1/50) e47becba sessions=50 drawers=516 eta=14357s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (2/50) 118b2229 sessions=45 drawers=485 eta=13907s
+[ingest] (3/50) 51a45a95 sessions=50 drawers=529 eta=13926s

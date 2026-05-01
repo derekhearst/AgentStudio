@@ -2,7 +2,11 @@
 
 ## Overview
 
-The whole agent loop — history load, prompt assembly, compaction, tool execution, approval gating, sub-agent invocation, SSE emission, run state updates — lives inside one ~700-line `+server.ts`. This fuses _brain_ (model + prompt), _hands_ (tools + sandbox), and _session_ (event log) into one transport-coupled handler. Extract a transport-agnostic `AgentRuntime` so the same loop powers chat streams, automations, sub-agents, and future channel adapters (Slack, webhook, schedule).
+The whole agent loop — history load, prompt assembly, compaction, tool execution, approval gating, sub-agent invocation, SSE emission, run state updates — lives inside one ~700-line `+server.ts`. This fuses _brain_ (model + prompt), _hands_ (tools + sandbox), and _session_ (event log) into one transport-coupled handler. Extract a transport-agnostic `AgentRuntime` (lives in `src/lib/runtime/`) so the same loop powers chat streams, automations, sub-agents, and future channel adapters (Slack, webhook, schedule). Runtime is also where tool loading, skill loading, and tool-output context policy should be enforced.
+
+> **Depends on:** `docs/structure/plan.md` Steps 3–6 (runs extracted, sessions split, runtime folder created), `docs/tools/plan.md` (active tool budget + output policy), `docs/skills/plan.md` (progressive instruction loading).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
 
@@ -30,7 +34,7 @@ The whole agent loop — history load, prompt assembly, compaction, tool executi
 ### Three primitives
 
 ```ts
-// src/lib/agents/runtime/types.ts
+// src/lib/runtime/types.ts
 type AgentDefinition = {
 	id: string
 	systemPrompt: string // assembled (skills, identity, policies)
@@ -41,7 +45,7 @@ type AgentDefinition = {
 }
 
 type Environment = {
-	workspaceRoot: string // sandbox path (per-run, see sandbox-isolation plan)
+	workspaceRoot: string // sandbox path (per-run, see workspace plan)
 	approvalRequiredTools: Set<string>
 	mcpServers?: McpServerRef[]
 	envVars?: Record<string, string>
@@ -50,7 +54,7 @@ type Environment = {
 
 type Session = {
 	runId: string
-	conversationId: string
+	sessionId: string // FK to sessions table
 	taskId?: string
 	parentRunId?: string
 	emit: (event: RunEvent) => Promise<void> // dual-writes to SSE + run_events
@@ -64,7 +68,7 @@ type Session = {
 ### The loop
 
 ```ts
-// src/lib/agents/runtime/loop.ts
+// src/lib/runtime/loop.server.ts
 export async function runAgentLoop(args: {
 	definition: AgentDefinition
 	environment: Environment
@@ -76,9 +80,9 @@ export async function runAgentLoop(args: {
 
 ### Reuse
 
-- Chat stream → builds Session backed by HTTP SSE.
-- Automation engine → builds Session that emits to logs/notifications, no SSE.
-- Sub-agent → builds child Session whose `emit` is forwarded to the parent's event bus (see parallel-subagents plan).
+- Chat stream → builds an SSE-backed Session (`runtime/session/sse.server.ts`).
+- Automation engine → builds a detached Session (`runtime/session/detached.server.ts`) that emits to `run_events` only.
+- Sub-agent → builds child Session whose `emit` is forwarded to the parent's event bus (see `docs/runtime/parallel-subagents.plan.md`).
 
 ## Implementation steps (phased)
 
@@ -92,36 +96,45 @@ export async function runAgentLoop(args: {
 
 - `buildAgentDefinition(conversationId, user)` consolidates: orchestrator vs agent path, skill summaries, policies, tool allow-lists.
 - Returns a fully-resolved object; loop never reads from `conversations`/`agents` tables directly.
+- Only short, relevant skill summaries should be loaded by default; full skill bodies stay out of the live prompt unless explicitly requested or clearly needed.
 
 ### Phase 3 — Define `Environment` descriptor
 
-- Resolves workspace root (depends on sandbox-isolation plan).
+- Resolves workspace root (depends on workspace plan).
 - Reads approval set, capability groups.
 - Stub MCP for future.
 
-### Phase 4 — Replace inline-subagent
+### Phase 4 — Tool and output context policy
+
+- Runtime enforces the active tool budget from the tools plan.
+- Large tool outputs are stored durably and returned to the model as summary + head/tail excerpts + pointer.
+- Old tool outputs are compacted preferentially before higher-value user/task state.
+
+### Phase 5 — Replace inline-subagent
 
 - Sub-agents call `runAgentLoop` with their own Session (event-forwarded to parent).
 - Delete the duplicated loop in `inline-subagent.ts`.
 
-### Phase 5 — Reuse for automations
+### Phase 6 — Reuse for automations
 
 - Automation engine constructs Session that drops events into `run_events` only.
 - Removes any duplicate loop logic in `automation/engine.ts`.
 
 ## Files to create / modify
 
-- `src/lib/agents/runtime/types.ts` (new)
-- `src/lib/agents/runtime/loop.ts` (new — extracted core)
-- `src/lib/agents/runtime/definition.ts` (new — builds AgentDefinition)
-- `src/lib/agents/runtime/environment.ts` (new — builds Environment)
-- `src/lib/agents/runtime/session-sse.ts` (new — SSE-backed Session)
-- `src/lib/agents/runtime/session-detached.ts` (new — for automations/subagents)
-- `src/lib/agents/runtime/index.ts` (barrel)
+- `src/lib/runtime/types.ts` (new)
+- `src/lib/runtime/loop.server.ts` (new — extracted core)
+- `src/lib/runtime/definition.server.ts` (new — builds AgentDefinition)
+- `src/lib/runtime/environment.server.ts` (new — builds Environment, delegates to `workspace/`)
+- `src/lib/skills/skills.server.ts` — summary extraction and relevant-skill lookup
+- `src/lib/runtime/session/sse.server.ts` (new — SSE-backed Session)
+- `src/lib/runtime/session/detached.server.ts` (new — for automations/subagents)
+- `src/lib/runtime/session/types.ts` (new)
+- `src/lib/runtime/index.ts` (barrel)
 - `src/routes/chat/[id]/stream/+server.ts` — slimmed to transport
-- `src/lib/agents/inline-subagent.ts` — replaced by Session adapter
-- `src/lib/automation/engine.ts` — uses runtime
-- `docs/agents-runtime/agents-runtime.md` (domain doc once shipped)
+- `src/lib/agents/inline-subagent.ts` — DELETED (replaced by `runtime/spawn.server.ts`)
+- `src/lib/automations/engine.ts` — uses runtime
+- `docs/runtime/runtime.md` (domain doc once shipped)
 
 ## Migration / backward-compat
 
@@ -133,6 +146,8 @@ export async function runAgentLoop(args: {
 - All existing chat E2E tests pass without change.
 - Unit tests on `runAgentLoop` with a fake Session (capture emitted events).
 - Automation run uses the same loop and emits identical event stream into `run_events`.
+- Large-output regression: oversized tool result is summarized in live context while raw payload remains recoverable.
+- Skill-loading regression: runtime loads skill summaries for relevant capabilities without injecting entire skill bodies on first turn.
 
 ## Out of scope
 

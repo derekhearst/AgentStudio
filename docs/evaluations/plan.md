@@ -4,6 +4,10 @@
 
 AgentStudio runs a single-pass loop: model → tool → model → done. There is no critic, no automated re-plan, no quality gate before a run is marked completed. Anthropic's long-running app harness explicitly uses **planner → generator → evaluator** with sprint contracts; without this loop, the agent has no cybernetic feedback. Add a configurable evaluator pass that runs after generator completion (or per sprint), produces structured findings, and optionally triggers a correction round.
 
+> **Depends on:** `docs/structure/plan.md` (`evaluations/` folder, `runtime/`), `docs/runs/plan.md` (run events), `docs/runtime/parallel-subagents.plan.md` (detached child runs).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
+
 ## Why this matters (harness principles)
 
 - **Cybernetic feedback closes the loop.** Martin Fowler's framing: harness = governor (sensor + actuator).
@@ -91,21 +95,22 @@ runEvaluations: {
   confidence (real), costUsd (numeric), createdAt
 }
 
-// chatRuns additions
+// runs additions
 evalRequired: boolean default false
 evalAttempt: integer default 0
 ```
 
 ## Files to create / modify
 
-- `src/lib/agents/evaluator.ts` (new) — orchestration helpers
-- `src/lib/agents/agents.schema.ts` — `kind` enum
-- `src/lib/chat/chat.schema.ts` — `evalRequired`, `evalAttempt`
 - `src/lib/evaluations/evaluations.schema.ts` (new)
 - `src/lib/evaluations/evaluations.server.ts` (new)
-- `src/lib/agents/runtime/loop.ts` — wire post-run evaluation hook
+- `src/lib/evaluations/index.ts` (new barrel)
+- `src/lib/agents/agents.schema.ts` — `kind` enum (`orchestrator | worker | evaluator`)
+- `src/lib/runs/runs.schema.ts` — `evalRequired`, `evalAttempt`
+- `src/lib/runtime/loop.server.ts` — wire post-run evaluation hook
+- `src/lib/runtime/spawn.server.ts` — spawn evaluator child runs (kind = 'evaluator')
 - `src/routes/chat/[id]/+page.svelte` — render evaluator findings
-- `docs/evaluator/evaluator.md` (domain doc once shipped)
+- `docs/evaluations/evaluations.md` (domain doc once shipped)
 
 ## Migration / backward-compat
 

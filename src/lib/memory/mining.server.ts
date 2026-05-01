@@ -176,10 +176,15 @@ export async function mineSession(opts: {
 
 	const extraction = await extractSession(session)
 
+	const allowedKinds: WingKind[] = ['person', 'project', 'topic', 'agent']
+	const wingKind: WingKind = allowedKinds.includes(extraction.primaryWing.kind as WingKind)
+		? (extraction.primaryWing.kind as WingKind)
+		: 'topic'
+
 	const wing = await getOrCreateWing({
 		userId,
 		agentId: agentId ?? null,
-		kind: extraction.primaryWing.kind,
+		kind: wingKind,
 		name: extraction.primaryWing.name,
 		aliases: extraction.primaryWing.aliases,
 	})

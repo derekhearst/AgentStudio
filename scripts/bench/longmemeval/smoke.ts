@@ -20,6 +20,7 @@ const dataset = args.dataset ?? 'oracle'
 const limit = args.limit ?? '5'
 const runId = args.runId ?? newRunId()
 const maxSessions = args.maxSessions
+const useRerank = process.argv.includes('--useRerank')
 
 function run(label: string, cmd: string[]): void {
 	const withOverride = ['--tsconfig-override=scripts/bench/tsconfig.json', ...cmd]
@@ -43,12 +44,14 @@ const ingestArgs = [
 ]
 if (maxSessions) ingestArgs.push(`--maxSessions=${maxSessions}`)
 run('ingest', ingestArgs)
-run('retrieve', [
+const retrieveArgs = [
 	'run',
 	'scripts/bench/longmemeval/retrieve.ts',
 	`--dataset=${dataset}`,
 	`--runId=${runId}`,
 	`--limit=${limit}`,
-])
+]
+if (useRerank) retrieveArgs.push('--useRerank')
+run('retrieve', retrieveArgs)
 run('score-retrieval', ['run', 'scripts/bench/longmemeval/score-retrieval.ts', `--runId=${runId}`])
 console.log(`\n[smoke] OK — runId=${runId}`)

@@ -4,6 +4,8 @@
 
 Port MemPalace's hierarchical memory architecture (Wings → Rooms → Closets → Drawers + AAAK index + temporal knowledge graph + hybrid retrieval) directly into AgentStudio as a TypeScript/Drizzle/pgvector implementation — no Python dependency. Auto-mine on conversation end and retrieve on every user turn. Validate by porting LongMemEval's retrieval + QA evaluator and exposing them as `bun run bench:longmemeval:*` scripts that download the HuggingFace dataset, ingest, retrieve, score R@5, and run QA judging via GPT-4o through OpenRouter. Target: ≥96% R@5 raw on `longmemeval_s`.
 
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
+
 ## Decisions (confirmed)
 
 - **Embeddings**: OpenAI/OpenRouter embeddings API (`text-embedding-3-small` @ 1536 dim).

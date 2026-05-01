@@ -2,7 +2,11 @@
 
 ## Overview
 
-`SANDBOX_WORKSPACE/<userId>` is shared across every conversation, agent, and run for a given user. Any two parallel runs (let alone sub-agents) collide on the filesystem. Move to per-run isolated workspaces — the single most repeated pattern across orchestrators in the awesome-agent-harness list.
+`SANDBOX_WORKSPACE/<userId>` is shared across every session, agent, and run for a given user. Any two parallel runs (let alone sub-agents) collide on the filesystem. Move to per-run isolated workspaces — the single most repeated pattern across orchestrators in the awesome-agent-harness list. The work lives in a new top-level domain `src/lib/workspace/` extracted from `tools/`.
+
+> **Depends on:** `docs/structure/plan.md` Step 7 (extract `workspace/` from `tools/`).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
 
@@ -85,12 +89,16 @@ All filesystem tools take `Environment` (not `userId`) when computing paths. The
 
 ## Files to create / modify
 
-- `src/lib/agents/runtime/environment.ts` — workspace resolver
-- `src/lib/tools/tools.server.ts` — paths from Environment
-- `src/lib/tools/workspace.server.ts` (new) — create/destroy/GC helpers
-- `src/lib/automation/engine.ts` — schedule GC job
+- `src/lib/runtime/environment.server.ts` — calls into `workspace/` to resolve paths
+- `src/lib/workspace/workspace.server.ts` (new) — create/destroy/resolve helpers
+- `src/lib/workspace/gc.server.ts` (new) — daily cleanup
+- `src/lib/workspace/worktree.server.ts` (new) — git worktree mode
+- `src/lib/workspace/index.ts` (new barrel)
+- `src/lib/tools/catalog/fs.server.ts` — paths from Environment, no longer resolves itself
+- `src/lib/tools/catalog/shell.server.ts` — same
+- `src/lib/automations/engine.ts` — schedule GC job
 - `scripts/gc-workspaces.ts` (new) — manual GC CLI
-- `docs/sandbox-isolation/sandbox-isolation.md` (domain doc once shipped)
+- `docs/workspace/workspace.md` (domain doc once shipped)
 
 ## Migration / backward-compat
 

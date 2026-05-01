@@ -4,6 +4,8 @@
 
 `run_subagent` today blocks the parent stream: [runInlineSubagent](../../src/lib/agents/inline-subagent.ts) runs synchronously inside the parent's controller, emits nested SSE events, and returns the result string before the parent continues. This precludes parallelism and forces the parent loop to wait. Replace with detached child runs joined by an event bus, so the parent can fan out N children and the UI can render the run tree.
 
+> **Depends on:** `docs/runs/plan.md` (run_events log), `docs/runtime/plan.md` (Session abstraction), `docs/structure/plan.md` (`runtime/` folder, `sessions.kind` discriminator).
+
 ## Why this matters (harness principles)
 
 - **Corrections are cheap, waiting is expensive.** The whole point of orchestrators is throughput.
@@ -30,7 +32,7 @@
 
 ### Schema
 
-`chatRuns` adds `parentRunId uuid null`.
+`runs` adds `parentRunId uuid null`. Child sessions are created with `kind = 'agent_subagent'`, `parentSessionId = <parent>`, `visibleToUser = false`.
 
 ### Tool surface
 
@@ -49,10 +51,18 @@
 ### Spawning
 
 ```ts
+// src/lib/runtime/spawn.server.ts
 async function spawnSubagent(parent: Session, step: SubagentStep): Promise<{ childRunId: string }> {
+	const childSessionId = await createSession({
+		kind: 'agent_subagent',
+		parentSessionId: parent.sessionId,
+		visibleToUser: false,
+		agentId: step.agentId,
+	})
+	const childRunId = await createRun({ sessionId: childSessionId, parentRunId: parent.runId })
 	const childDef = await buildAgentDefinition({ agentId: step.agentId })
 	const childEnv = await buildEnvironment({ runId: childRunId, workspaceMode: 'ephemeral' })
-	const childSession = makeDetachedSession({ runId: childRunId, parentRunId: parent.runId })
+	const childSession = makeDetachedSession({ runId: childRunId, sessionId: childSessionId, parentRunId: parent.runId })
 	// Run in background — do not await
 	void runAgentLoop({ definition: childDef, environment: childEnv, session: childSession })
 	return { childRunId }
@@ -99,13 +109,14 @@ async function spawnSubagent(parent: Session, step: SubagentStep): Promise<{ chi
 
 ## Files to create / modify
 
-- `src/lib/chat/chat.schema.ts` — `parentRunId`
-- `src/lib/agents/runtime/spawn.ts` (new) — `spawnSubagent`, `awaitSubagents`
-- `src/lib/agents/inline-subagent.ts` — delete after migration
-- `src/lib/tools/tools.server.ts` — `run_subagent` returns childRunId; new `await_subagents` tool
-- `src/routes/chat/[id]/stream/+server.ts` — subscribe to child events
-- `src/lib/chat/SubagentBlockCard.svelte` — show status + link to child
-- `src/lib/chat/RunTree.svelte` (new)
+- `src/lib/runs/runs.schema.ts` — `parentRunId`
+- `src/lib/sessions/sessions.schema.ts` — `kind`, `parentSessionId`, `visibleToUser` (already from Structure plan)
+- `src/lib/runtime/spawn.server.ts` (new) — `spawnSubagent`, `awaitSubagents`
+- `src/lib/agents/inline-subagent.ts` — DELETED after migration
+- `src/lib/tools/catalog/meta.server.ts` — `run_subagent` returns childRunId; new `await_subagents` tool
+- `src/routes/chat/[id]/stream/+server.ts` — subscribe to child events via `run_events`
+- `src/lib/sessions/components/SubagentBlockCard.svelte` — show status + link to child
+- `src/lib/sessions/components/RunTree.svelte` (new)
 
 ## Migration / backward-compat
 

@@ -2,7 +2,11 @@
 
 ## Overview
 
-`ORCHESTRATOR_IDENTITY` is a TypeScript constant ([src/lib/agents/orchestrator.ts](../../src/lib/agents/orchestrator.ts)). Agent system prompts live in the `agents` table but are only editable through a single textarea. There is no `AGENTS.md` boot loader and no way to version-control or reuse prompt fragments. Move all prompts into editable artifacts (skills + optional repo files) so the harness becomes its own system of record.
+`ORCHESTRATOR_IDENTITY` is a TypeScript constant ([src/lib/agents/orchestrator.ts](../../src/lib/agents/orchestrator.ts)). Agent system prompts live in the `agents` table but are only editable through a single textarea. There is no `AGENTS.md` boot loader and no way to version-control or reuse prompt fragments. Move all prompts into editable artifacts (skills + optional repo files) so the harness becomes its own system of record. After the Structure refactor, prompt composition lives in `src/lib/agents/identity.server.ts` (records-only `agents/` folder) and is consumed by `src/lib/runtime/definition.server.ts`. Companion skills should also become the place where tool-usage guidance and repeatable workflows live, rather than bloating agent identity prompts.
+
+> **Depends on:** `docs/structure/plan.md` Steps 5–6 (runtime/ created, agents/ slimmed), `docs/skills/plan.md` (skill taxonomy + loading rules), `docs/tools/plan.md` (companion skills for capability groups).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
 
@@ -71,6 +75,8 @@ Last-write-wins between DB and repo controlled by `AGENT_SOURCE_PRIORITY=repo|db
 5. Tool usage policies (auto)
 6. Capability groups summary (auto)
 
+Identity prompts should stay short. Detailed operating guidance for tools, workflows, and verification belongs in companion skills that runtime loads progressively.
+
 ## Implementation steps (phased)
 
 ### Phase 1 — Move orchestrator identity into a skill
@@ -99,16 +105,23 @@ Last-write-wins between DB and repo controlled by `AGENT_SOURCE_PRIORITY=repo|db
 - Reusable fragments (e.g., "tool usage policy", "approval policy") as skills.
 - Identity skill can `@import` fragments by name.
 
+### Phase 6 — Companion skill bundles for agents
+
+- Define which companion skills each agent should suggest or auto-load by role.
+- Example: coding agents prefer `tools/fs-editing`, `tools/run-verification`; evaluator agents prefer read-only review skills.
+- Keep identity prompt stable while operational guidance evolves in separate skills.
+
 ## Files to create / modify
 
-- `src/lib/agents/orchestrator.ts` — read identity from skill
+- `src/lib/runtime/definition.server.ts` — read identity from skill (was `agents/orchestrator.ts`)
 - `src/lib/agents/agents.schema.ts` — `identitySkillId` column
 - `src/lib/agents/identity.server.ts` (new) — composition + seeders
 - `src/lib/skills/skills.server.ts` — boot seeder hook
+- `src/lib/skills/skills.schema.ts` — support skill metadata needed for role/capability matching if missing
 - `src/routes/agents/[id]/identity/+page.svelte` (new)
 - `src/lib/agents/agent-source-loader.server.ts` (new) — `AGENTS.md` scan
 - `src/hooks.server.ts` — kick off scanner on boot
-- `docs/agent-source/agent-source.md` (domain doc once shipped)
+- `docs/agents/agents.md` (domain doc once shipped)
 
 ## Migration / backward-compat
 
@@ -121,6 +134,7 @@ Last-write-wins between DB and repo controlled by `AGENT_SOURCE_PRIORITY=repo|db
 - Edit orchestrator skill in UI → next chat uses new identity without restart.
 - Drop an `AGENTS.md` in repo → boot scan upserts agent → visible in `/agents`.
 - E2E: agent prompt change persists across restarts and matches skill content.
+- Agent role regression: coding agent loads companion tool-skill summaries without inflating the base identity prompt.
 
 ## Out of scope
 

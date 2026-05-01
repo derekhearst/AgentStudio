@@ -2,7 +2,11 @@
 
 ## Overview
 
-Today `conversations` does the work of three different concepts: a _task_ (the user's intent), a _run_ (one execution attempt), and a _thread_ (the message tape). Introduce an explicit `tasks` layer above conversations so the orchestrator can persist plans, the system can support multi-attempt retries, and the UI can offer kanban/DAG views like the rest of the orchestrator field.
+Today `conversations` does the work of three different concepts: a _task_ (the user's intent), a _run_ (one execution attempt), and a _thread_ (the message tape). The Structure plan splits the latter two into `sessions/` and `runs/`. This plan adds the missing top layer: an explicit `tasks` table so the orchestrator can persist plans, the system can support multi-attempt retries, and the UI can offer kanban/DAG views like the rest of the orchestrator field.
+
+> **Depends on:** `docs/structure/plan.md` (sessions + runs split).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
 
@@ -23,7 +27,7 @@ Today `conversations` does the work of three different concepts: a _task_ (the u
 - `conversations` table is the top-level unit; `chatRuns` is per-HTTP-stream.
 - The orchestrator emits "plans" as inline assistant text — there is no DAG, no persistent step structure, no retry primitive.
 - The route `/chat/[id]/plan-decide` exists but only handles one decision per stream.
-- Sub-agents run inline ([inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)) and produce ad-hoc child conversations with no parent linkage beyond `metadata.parentConversationId`.
+- Sub-agents run inline ([inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)) and produce ad-hoc child sessions with no parent linkage beyond `metadata.parentConversationId`.
 
 ## Target design
 
@@ -38,7 +42,7 @@ tasks: {
   status: enum(pending, planning, awaiting_approval, running, blocked, completed, failed, canceled),
   parentTaskId: uuid | null,     // DAG parent (planner spawns children)
   ownerAgentId: uuid | null,     // responsible agent
-  rootConversationId: uuid | null, // first conversation that produced the task
+  rootSessionId: uuid | null,    // first session that produced the task
   priority: int,
   budgetUsd: numeric | null,
   metadata: jsonb,
@@ -47,11 +51,11 @@ tasks: {
 }
 
 task_attempts: {
-  id, taskId, runId (chatRuns.id), status, attemptNumber, startedAt, finishedAt, error, costUsd
+  id, taskId, runId, status, attemptNumber, startedAt, finishedAt, error, costUsd
 }
 ```
 
-`chatRuns` gains optional `taskId` + `taskAttemptId` columns.
+`runs` (was `chatRuns`) gains optional `taskId` + `taskAttemptId` columns.
 
 ### Behaviors
 
@@ -60,15 +64,15 @@ task_attempts: {
 3. Each run is a `task_attempt`. A failed attempt leaves the task `blocked`; user/orchestrator can spawn a new attempt.
 4. UI surfaces:
    - `/tasks` kanban view (status columns).
-   - Task detail page with timeline of attempts and conversations.
-   - Existing `/chat/[id]` shows the task badge if attached.
+   - Task detail page with timeline of attempts and child sessions.
+   - Existing `/chat/[id]` shows the task badge when the user-facing session is attached to a task.
 
 ## Implementation steps (phased)
 
 ### Phase 1 — Schema + barrels
 
 - Add `tasks` and `task_attempts` tables.
-- Add nullable `taskId` / `taskAttemptId` to `chatRuns`.
+- Add nullable `taskId` / `taskAttemptId` to `runs` (renamed from `chatRuns` per Structure plan).
 - Domain barrel `src/lib/tasks/index.ts`, server fns, remote fns.
 
 ### Phase 2 — Orchestrator emits tasks
@@ -98,9 +102,9 @@ task_attempts: {
 - `src/lib/tasks/tasks.server.ts` (new)
 - `src/lib/tasks/tasks.remote.ts` (new)
 - `src/lib/tasks/index.ts` (new barrel)
-- `src/lib/agents/orchestrator.ts` — wire `propose_plan` to task creation
-- `src/lib/tools/tools.server.ts` — register task tools
-- `src/lib/chat/chat.schema.ts` — `taskId` / `taskAttemptId` on `chatRuns`
+- `src/lib/runtime/definition.server.ts` — wire `propose_plan` into the prompt
+- `src/lib/tools/catalog/meta.server.ts` — register task tools (`propose_plan`, `update_task`)
+- `src/lib/runs/runs.schema.ts` — `taskId` / `taskAttemptId` columns
 - `src/routes/tasks/+page.svelte` (new)
 - `src/routes/tasks/[id]/+page.svelte` (new)
 - `src/routes/chat/[id]/plan-decide/+server.ts` — promote plan to tasks

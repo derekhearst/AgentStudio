@@ -4,6 +4,8 @@
 
 Make every agent run survive process restarts, browser reloads, and SSE disconnects. Today the harness depends on in-memory `Map`s and live promises for tool approval, `ask_user`, and streaming partials — any pod restart drops a run on the floor and any reload shows nothing until the SSE pipe reconnects. The state primitive must move into the database.
 
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
+
 ## Why this matters (harness principles)
 
 - **State is a primitive.** LangChain's "Anatomy of an Agent Harness" lists durable, resumable, observable state as the first thing a harness must own.
@@ -26,9 +28,11 @@ Make every agent run survive process restarts, browser reloads, and SSE disconne
 - The big stream loop in [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) buffers `streamBlocks` only in memory; nothing is persisted until the run ends.
 - Restarting the server while a run waits on approval or `ask_user` orphans the run forever.
 
+> **Note:** This plan assumes `docs/structure/plan.md` Step 3 (extract `runs/` from `chat/`) has landed. Final paths use `src/lib/runs/`. If the rename has not happened yet, apply the changes inside `src/lib/chat/` and migrate them with the Structure refactor.
+
 ## Target design
 
-### Schema additions on `chatRuns`
+### Schema additions on `runs`
 
 | Column             | Type          | Purpose                                                                   |
 | ------------------ | ------------- | ------------------------------------------------------------------------- | ---- | -------------------------------- |
@@ -40,7 +44,7 @@ Make every agent run survive process restarts, browser reloads, and SSE disconne
 
 ### New tables
 
-- `run_events` (append-only): `{id, runId, seq, type, payload, createdAt}` — the canonical event log used to drive both live SSE and resume reads.
+- `run_events` (append-only): `{id, runId, seq, type, payload, createdAt}` — the canonical event log used to drive both live SSE and resume reads. Lives in `src/lib/runs/events.server.ts`.
 
 ### Behavior
 
@@ -84,11 +88,12 @@ Make every agent run survive process restarts, browser reloads, and SSE disconne
 
 ## Files to create / modify
 
-- `src/lib/chat/chat.schema.ts` — schema columns + new `runEvents` table
-- `src/lib/chat/runs.server.ts` — resume helpers, event append, polling helpers
-- `src/lib/chat/runs-resume.server.ts` (new) — pure resume reader
+- `src/lib/runs/runs.schema.ts` — schema columns + new `runEvents` table
+- `src/lib/runs/runs.server.ts` — resume helpers, event append, polling helpers
+- `src/lib/runs/events.server.ts` (new) — append-only event log
+- `src/lib/runs/resume.server.ts` (new) — pure resume reader
 - `src/lib/tools/tools.server.ts` — replace approval/question registries
-- `src/routes/chat/[id]/stream/+server.ts` — emit-and-persist
+- `src/routes/chat/[id]/stream/+server.ts` — emit-and-persist (transport only after Runtime extraction)
 - `src/routes/chat/[id]/stream/resume/+server.ts` (new) — replay endpoint
 - `src/routes/chat/[id]/tool-approve/+server.ts` — DB update instead of in-mem resolve
 - `src/routes/chat/[id]/ask-user/+server.ts` — same

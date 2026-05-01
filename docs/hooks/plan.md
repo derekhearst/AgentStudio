@@ -2,7 +2,11 @@
 
 ## Overview
 
-There is no way today to extend harness behavior without editing `+server.ts`. OpenCode's 44 lifecycle hooks and the popular "Oh My OpenCode/Codex/Claude Code" projects exist precisely because users want to instrument and customize the harness without forking it. Add a typed hook surface — `before_run`, `after_run`, `before_tool`, `after_tool`, `on_compact`, `on_evaluator`, etc. — that any agent (or the orchestrator) can subscribe to.
+There is no way today to extend harness behavior without editing `+server.ts`. OpenCode's 44 lifecycle hooks and the popular "Oh My OpenCode/Codex/Claude Code" projects exist precisely because users want to instrument and customize the harness without forking it. Add a typed hook surface — `before_run`, `after_run`, `before_tool`, `after_tool`, `on_compact`, `on_evaluator`, etc. — that any agent (or the orchestrator) can subscribe to. Lives in `src/lib/hooks/`, invoked from `src/lib/runtime/loop.server.ts`. Hooks should also be able to observe and, where safe, enforce tool/skill/context policy.
+
+> **Depends on:** `docs/structure/plan.md` (`runtime/` and `hooks/` folders), `docs/runtime/plan.md` (well-defined emit points in the loop), `docs/tools/plan.md` (tool budget + output lifecycle), `docs/skills/plan.md` (skill-backed guidance).
+
+> **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
 
@@ -43,6 +47,8 @@ There is no way today to extend harness behavior without editing `+server.ts`. O
 | `on_approval_required` | `{ runId, toolName, args, token }`                       | On pending approval   |
 | `on_user_question`     | `{ runId, questions, token }`                            | On `ask_user`         |
 | `on_run_failed`        | `{ runId, error }`                                       | On error              |
+| `on_skill_loaded`      | `{ runId, skillSlug, loadKind }`                         | When a skill summary or body is loaded |
+| `on_tool_output_archived` | `{ runId, toolName, handle, wasSummarized }`          | When large tool output is offloaded |
 
 ### Hook implementations
 
@@ -64,10 +70,12 @@ Hook execution rules:
 
 ### Built-in hooks (migrated from inline code)
 
-- `before_run`: capability auto-suggest (from progressive-tools plan).
+- `before_run`: capability auto-suggest (from tools plan).
 - `after_run`: activity emit + cost log + memory capture (from memory plan).
 - `on_compact`: emit notification if compaction lost critical info (LLM check).
 - `after_tool`: telemetry / failure pattern detection.
+- `after_tool`: large-output summarization / archive hooks and policy checks.
+- `on_skill_loaded`: telemetry on skill usefulness and prompt bloat.
 
 ## Implementation steps (phased)
 
@@ -81,6 +89,7 @@ Hook execution rules:
 
 - Move activity emit / cost log / memory capture from inline → hooks.
 - Verify identical observable behavior.
+- Add built-ins for large tool output archival notifications and skill-load telemetry.
 
 ### Phase 3 — Skill-based hooks
 
@@ -115,7 +124,9 @@ hookInvocations: {
 - `src/lib/hooks/builtins/` (new) — migrated built-ins
 - `src/lib/hooks/hooks.schema.ts` (new) — invocation log
 - `src/lib/hooks/skill-hook-runner.ts` (new) — Phase 3
-- `src/lib/agents/runtime/loop.ts` — emit hook events at every boundary
+- `src/lib/hooks/index.ts` (new barrel)
+- `src/lib/runtime/loop.server.ts` — emit hook events at every boundary
+- `src/lib/skills/skills.server.ts` — trigger `on_skill_loaded`
 - `src/lib/agents/agents.schema.ts` — `config.hooks` shape
 - `src/routes/settings/hooks/+page.svelte` (new)
 - `src/routes/agents/[id]/hooks/+page.svelte` (new)

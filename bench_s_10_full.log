@@ -1,0 +1,78 @@
+$ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/smoke.ts "--dataset=s" "--limit=10" "--maxSessions=50"
+[smoke] runId=lme_20260501191334_nsin dataset=s limit=10 maxSessions=50
+
+=== ingest: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/ingest.ts --dataset=s --runId=lme_20260501191334_nsin --limit=10 --maxSessions=50 ===
+[db] Database ready
+[ingest] dataset=s runId=lme_20260501191334_nsin instances=10
+[ingest] (1/10) e47becba sessions=50 drawers=516 eta=2849s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (2/10) 118b2229 sessions=45 drawers=485 eta=2434s
+[ingest] FAILED 51a45a95 36 |   async queryWithCache(queryString, params, query) {
+37 |     if (this.cache === void 0 || is(this.cache, NoopCache) || this.queryMetadata === void 0) {
+38 |       try {
+39 |         return await query();
+40 |       } catch (e) {
+41 |         throw new DrizzleQueryError(queryString, params, e);
+                       ^
+error: Failed query: insert into "memory_wings" ("id", "user_id", "agent_id", "kind", "name", "slug", "aliases", "summary", "created_at", "updated_at") values (default, $1, $2, $3, $4, $5, $6, default, default, default) returning "id", "user_id", "agent_id", "kind", "name", "slug", "aliases", "summary", "created_at", "updated_at"
+params: 24f95df2-77c0-5b53-8905-098b48e48899,,musical,Hadestown,hadestown,{"hadestown: a folk opera"}
+  query: "insert into \"memory_wings\" (\"id\", \"user_id\", \"agent_id\", \"kind\", \"name\", \"slug\", \"aliases\", \"summary\", \"created_at\", \"updated_at\") values (default, $1, $2, $3, $4, $5, $6, default, default, default) returning \"id\", \"user_id\", \"agent_id\", \"kind\", \"name\", \"slug\", \"aliases\", \"summary\", \"created_at\", \"updated_at\"",
+ params: [
+  "24f95df2-77c0-5b53-8905-098b48e48899", null, "musical", "Hadestown", "hadestown", "{\"hadestown: a folk opera\"}"
+],
+
+      at queryWithCache (C:\Users\derek\Documents\Projects\AgentStudio\node_modules\drizzle-orm\pg-core\session.js:41:19)
+      at processTicksAndRejections (native:7:39)
+
+810 |   }
+811 | 
+812 |   function ErrorResponse(x) {
+813 |     if (query) {
+814 |       (query.cursorFn || query.describeFirst) && write(Sync)
+815 |       errorResponse = Errors.postgres(parseError(x))
+                                   ^
+PostgresError: invalid input value for enum memory_wing_kind: "musical"
+ severity_local: "ERROR",
+   severity: "ERROR",
+      where: "unnamed portal parameter $3 = '...'",
+       file: "enum.c",
+    routine: "enum_in",
+       code: "22P02"
+
+      at ErrorResponse (C:\Users\derek\Documents\Projects\AgentStudio\node_modules\postgres\src\connection.js:815:30)
+      at handle (C:\Users\derek\Documents\Projects\AgentStudio\node_modules\postgres\src\connection.js:765:5)
+      at data (C:\Users\derek\Documents\Projects\AgentStudio\node_modules\postgres\src\connection.js:457:5)
+      at emit (node:events:95:22)
+      at addChunk (internal:streams/readable:264:47)
+      at readableAddChunkPushByteMode (internal:streams/readable:242:18)
+      at data (node:net:280:52)
+
+[ingest] (3/10) 58bf7951 sessions=50 drawers=509 eta=2252s
+[ingest] (4/10) 1e043500 sessions=50 drawers=510 eta=1942s
+[ingest] (5/10) c5e8278d sessions=44 drawers=469 eta=1576s
+[ingest] (6/10) 6ade9755 sessions=50 drawers=505 eta=1256s
+[ingest] (7/10) 6f9b354f sessions=50 drawers=500 eta=954s
+[ingest] (8/10) 58ef2f1c sessions=50 drawers=518 eta=653s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (9/10) f8c5f88b sessions=46 drawers=487 eta=325s
+[ingest] done in 2920.9s
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 400[handle]. You don't need to do anything, but this indicates a bug.
+
+=== retrieve: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/retrieve.ts --dataset=s --runId=lme_20260501191334_nsin --limit=10 ===
+[db] Database ready
+[retrieve] dataset=s runId=lme_20260501191334_nsin ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501191334_nsin.jsonl
+[retrieve] (10/10) eta=0s
+[retrieve] done in 3.2s ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501191334_nsin.jsonl
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 388[handle]. You don't need to do anything, but this indicates a bug.
+
+=== score-retrieval: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/score-retrieval.ts --runId=lme_20260501191334_nsin ===
+[score-retrieval] 10 instances (abstention excluded)
+Session-level metrics:
+	recall_all@5 = 0.9000 (n=10)
+	ndcg_any@5 = 0.9000 (n=10)
+	recall_all@10 = 0.9000 (n=10)
+	ndcg_any@10 = 0.9000 (n=10)
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 172[handle]. You don't need to do anything, but this indicates a bug.
+
+[smoke] OK ΓÇö runId=lme_20260501191334_nsin
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 400[handle]. You don't need to do anything, but this indicates a bug.
