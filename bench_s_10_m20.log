@@ -10,3 +10,28 @@ $ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmeme
 [ingest] (4/10) 58bf7951 sessions=20 drawers=221 eta=754s
 [ingest] (5/10) 1e043500 sessions=20 drawers=197 eta=617s
 [ingest] (6/10) c5e8278d sessions=20 drawers=202 eta=483s
+[ingest] (7/10) 6ade9755 sessions=20 drawers=209 eta=360s
+[ingest] (8/10) 6f9b354f sessions=20 drawers=220 eta=244s
+[ingest] (9/10) 58ef2f1c sessions=20 drawers=179 eta=119s
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 180[handle]. You don't need to do anything, but this indicates a bug.
+[ingest] (10/10) f8c5f88b sessions=20 drawers=194 eta=0s
+[ingest] done in 1186.8s
+
+=== retrieve: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/retrieve.ts --dataset=s --runId=lme_20260501092655_g5kx --limit=10 ===
+[db] Database ready
+[retrieve] dataset=s runId=lme_20260501092655_g5kx ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501092655_g5kx.jsonl
+[retrieve] (10/10) eta=0s
+[retrieve] done in 4.5s ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501092655_g5kx.jsonl
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
+
+=== score-retrieval: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/score-retrieval.ts --runId=lme_20260501092655_g5kx ===
+[score-retrieval] 10 instances (abstention excluded)
+Session-level metrics:
+	recall_all@5 = 1.0000 (n=10)
+	ndcg_any@5 = 1.0000 (n=10)
+	recall_all@10 = 1.0000 (n=10)
+	ndcg_any@10 = 1.0000 (n=10)
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
+
+[smoke] OK ΓÇö runId=lme_20260501092655_g5kx
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
