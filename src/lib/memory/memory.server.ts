@@ -17,11 +17,7 @@ export async function mineConversation(opts: {
 	conversationId: string
 	userIdOverride?: string
 }): Promise<{ drawerIds: string[]; wingIds: string[]; roomIds: string[]; closetIds: string[] }> {
-	const [conversation] = await db
-		.select()
-		.from(conversations)
-		.where(eq(conversations.id, opts.conversationId))
-		.limit(1)
+	const [conversation] = await db.select().from(conversations).where(eq(conversations.id, opts.conversationId)).limit(1)
 	if (!conversation) {
 		return { drawerIds: [], wingIds: [], roomIds: [], closetIds: [] }
 	}
@@ -49,7 +45,6 @@ export async function mineConversation(opts: {
 			if (row.sourceMessageId) minedIds.add(row.sourceMessageId)
 		}
 	}
-
 
 	const session: MiningSession = {
 		conversationId: opts.conversationId,

@@ -14,13 +14,7 @@ import { db } from '../../../src/lib/db.server'
 import { users } from '../../../src/lib/auth/auth.schema'
 import { eq } from 'drizzle-orm'
 import { mineSession, type MiningSession } from '../../../src/lib/memory/mining.server'
-import {
-	loadDataset,
-	syntheticUserId,
-	syntheticUuid,
-	type DatasetKey,
-	type LmeInstance,
-} from './bench.config'
+import { loadDataset, syntheticUserId, syntheticUuid, type DatasetKey, type LmeInstance } from './bench.config'
 
 type Args = {
 	dataset: DatasetKey
@@ -132,11 +126,7 @@ async function main() {
 	const startedAt = Date.now()
 	for (const instance of slice) {
 		try {
-			const { drawers, sessions } = await ingestInstance(
-				args.runId,
-				instance,
-				args.maxSessions,
-			)
+			const { drawers, sessions } = await ingestInstance(args.runId, instance, args.maxSessions)
 			done += 1
 			const eta = ((Date.now() - startedAt) / done) * (slice.length - done)
 			console.log(

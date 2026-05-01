@@ -8,13 +8,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import {
-	GENERATION_LOG_DIR,
-	RETRIEVAL_LOG_DIR,
-	ensureDir,
-	loadDataset,
-	type DatasetKey,
-} from './bench.config'
+import { GENERATION_LOG_DIR, RETRIEVAL_LOG_DIR, ensureDir, loadDataset, type DatasetKey } from './bench.config'
 import { chat } from '../../../src/lib/openrouter.server'
 
 type Args = {
@@ -41,7 +35,11 @@ const QA_SYSTEM = `You are answering a question about events from a long, multi-
 
 Carefully extract the answer from the evidence. If the evidence is insufficient or contradictory, say so explicitly. Be concise (1-3 sentences).`
 
-function buildPrompt(question: string, questionDate: string, evidence: Array<{ score: number; content: string; wing: string; closet: string }>): string {
+function buildPrompt(
+	question: string,
+	questionDate: string,
+	evidence: Array<{ score: number; content: string; wing: string; closet: string }>,
+): string {
 	const evidenceBlock = evidence
 		.map((e, i) => `[${i + 1}] (${e.wing} › ${e.closet}, score ${e.score.toFixed(3)})\n${e.content}`)
 		.join('\n\n')
@@ -81,7 +79,8 @@ async function main() {
 	for (const r of slice) {
 		const ref = refMap.get(r.question_id)
 		if (!ref) {
-			console.warn(`[qa] skipping ${r.question_id} (no ref)`) ;continue
+			console.warn(`[qa] skipping ${r.question_id} (no ref)`)
+			continue
 		}
 		const evidence = r.retrieval_results.retrieved.slice(0, args.topK)
 		const prompt = buildPrompt(ref.question, ref.question_date, evidence)

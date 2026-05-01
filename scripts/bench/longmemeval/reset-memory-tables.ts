@@ -11,9 +11,15 @@ async function main() {
 	// Truncate the legacy rooms/wings so the ALTER TABLE ADD COLUMN NOT NULL succeeds
 	await sql.unsafe(`TRUNCATE TABLE memory_rooms, memory_wings CASCADE`)
 	// Rewind last 2 migration history entries so 0011/0012 reapply
-	const journal = await sql.unsafe(`SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 5`).catch(() => [])
+	const journal = await sql
+		.unsafe(`SELECT id, hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 5`)
+		.catch(() => [])
 	console.log('journal tail:', journal)
-	await sql.unsafe(`DELETE FROM drizzle.__drizzle_migrations WHERE id IN (SELECT id FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 2)`).catch((e) => console.error('hist:', e.message))
+	await sql
+		.unsafe(
+			`DELETE FROM drizzle.__drizzle_migrations WHERE id IN (SELECT id FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 2)`,
+		)
+		.catch((e) => console.error('hist:', e.message))
 	console.log('reset complete')
 	await sql.end()
 }

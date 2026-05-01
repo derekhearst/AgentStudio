@@ -59,9 +59,7 @@ export function ensureDir(dir: string) {
 export function loadDataset(key: DatasetKey): LmeInstance[] {
 	const file = path.join(DATA_DIR, DATASETS[key])
 	if (!fs.existsSync(file)) {
-		throw new Error(
-			`Dataset ${key} not found at ${file}. Run "bun run bench:longmemeval:download" first.`,
-		)
+		throw new Error(`Dataset ${key} not found at ${file}. Run "bun run bench:longmemeval:download" first.`)
 	}
 	return JSON.parse(fs.readFileSync(file, 'utf-8'))
 }
@@ -82,7 +80,10 @@ export function syntheticUserId(runId: string, questionId: string): string {
 }
 
 export function newRunId(): string {
-	const stamp = new Date().toISOString().replace(/[:.TZ-]/g, '').slice(0, 14)
+	const stamp = new Date()
+		.toISOString()
+		.replace(/[:.TZ-]/g, '')
+		.slice(0, 14)
 	const rand = Math.random().toString(36).slice(2, 6)
 	return `lme_${stamp}_${rand}`
 }

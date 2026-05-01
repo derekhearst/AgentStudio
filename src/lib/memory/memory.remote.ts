@@ -7,12 +7,7 @@ import { z } from 'zod'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
-import {
-	memoryClosets,
-	memoryDrawers,
-	memoryRooms,
-	memoryWings,
-} from '$lib/memory/memory.schema'
+import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
 import { recallForUser } from '$lib/memory/memory.server'
 
 const searchSchema = z.object({
@@ -25,11 +20,7 @@ const drawerIdSchema = z.object({ id: z.string().uuid() })
 
 export const listMemoryWingsQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
-	return db
-		.select()
-		.from(memoryWings)
-		.where(eq(memoryWings.userId, user.id))
-		.orderBy(memoryWings.name)
+	return db.select().from(memoryWings).where(eq(memoryWings.userId, user.id)).orderBy(memoryWings.name)
 })
 
 const wingIdSchema = z.object({ wingId: z.string().uuid() })
@@ -42,11 +33,7 @@ export const listMemoryRoomsQuery = query(wingIdSchema, async ({ wingId }) => {
 		.where(and(eq(memoryWings.id, wingId), eq(memoryWings.userId, user.id)))
 		.limit(1)
 	if (!wing) return []
-	return db
-		.select()
-		.from(memoryRooms)
-		.where(eq(memoryRooms.wingId, wingId))
-		.orderBy(desc(memoryRooms.occurredAt))
+	return db.select().from(memoryRooms).where(eq(memoryRooms.wingId, wingId)).orderBy(desc(memoryRooms.occurredAt))
 })
 
 const roomIdSchema = z.object({ roomId: z.string().uuid() })
@@ -81,8 +68,6 @@ export const searchMemoryQuery = query(searchSchema, async ({ query: q, topK, us
 
 export const deleteMemoryDrawerCommand = command(drawerIdSchema, async ({ id }) => {
 	const user = requireAuthenticatedRequestUser()
-	await db
-		.delete(memoryDrawers)
-		.where(and(eq(memoryDrawers.id, id), eq(memoryDrawers.userId, user.id)))
+	await db.delete(memoryDrawers).where(and(eq(memoryDrawers.id, id), eq(memoryDrawers.userId, user.id)))
 	return { ok: true }
 })

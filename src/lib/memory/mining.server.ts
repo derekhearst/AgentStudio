@@ -14,18 +14,8 @@ import { count, eq } from 'drizzle-orm'
 import { chat } from '$lib/openrouter.server'
 import { db } from '$lib/db.server'
 import { logLlmUsage } from '$lib/cost/usage'
-import {
-	memoryClosets,
-	memoryDrawers,
-	memoryRooms,
-	memoryWings,
-} from '$lib/memory/memory.schema'
-import {
-	getOrCreateCloset,
-	getOrCreateRoom,
-	getOrCreateWing,
-	type WingKind,
-} from '$lib/memory/palace.server'
+import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
+import { getOrCreateCloset, getOrCreateRoom, getOrCreateWing, type WingKind } from '$lib/memory/palace.server'
 import { embed, toPgVector } from '$lib/memory/embeddings.server'
 import { encodeAaak, type AaakTags } from '$lib/memory/aaak.server'
 
@@ -90,12 +80,7 @@ function tryParseExtractor(content: string): ExtractorOutput | null {
 		.replace(/\s*```$/i, '')
 	try {
 		const parsed = JSON.parse(cleaned)
-		if (
-			parsed &&
-			typeof parsed === 'object' &&
-			parsed.primaryWing &&
-			Array.isArray(parsed.turns)
-		) {
+		if (parsed && typeof parsed === 'object' && parsed.primaryWing && Array.isArray(parsed.turns)) {
 			return parsed as ExtractorOutput
 		}
 	} catch {
@@ -109,9 +94,7 @@ async function extractSession(session: MiningSession): Promise<ExtractorOutput> 
 		return fallbackExtraction(session)
 	}
 
-	const transcript = session.turns
-		.map((turn, i) => `[${i + 1}] ${turn.role.toUpperCase()}: ${turn.content}`)
-		.join('\n')
+	const transcript = session.turns.map((turn, i) => `[${i + 1}] ${turn.role.toUpperCase()}: ${turn.content}`).join('\n')
 
 	try {
 		const result = await chat(
@@ -162,10 +145,7 @@ async function extractSession(session: MiningSession): Promise<ExtractorOutput> 
 }
 
 async function nextDrawerNumber(closetId: string): Promise<number> {
-	const [row] = await db
-		.select({ count: count() })
-		.from(memoryDrawers)
-		.where(eq(memoryDrawers.closetId, closetId))
+	const [row] = await db.select({ count: count() }).from(memoryDrawers).where(eq(memoryDrawers.closetId, closetId))
 	return (row?.count ?? 0) + 1
 }
 
@@ -204,8 +184,7 @@ export async function mineSession(opts: {
 		aliases: extraction.primaryWing.aliases,
 	})
 
-	const roomLabel =
-		session.sessionLabel ?? session.occurredAt.toISOString().slice(0, 10)
+	const roomLabel = session.sessionLabel ?? session.occurredAt.toISOString().slice(0, 10)
 
 	const room = await getOrCreateRoom({
 		wingId: wing.id,

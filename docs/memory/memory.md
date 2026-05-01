@@ -36,7 +36,7 @@ This compresses navigation across the palace and gives us a deterministic keywor
    - keyword: `ts_rank(to_tsvector(content), to_tsquery(query))`
    - temporal: `exp(-Δdays / decayDays)`
    - preference boost: most-recent drawer per (closet, role) gets +0.05
-   Final = `semantic * w_s + keyword * w_k + temporal * w_t + boost`. The top-K drawers are wrapped in a `<memory_context>` system block and prepended to the LLM call.
+     Final = `semantic * w_s + keyword * w_k + temporal * w_t + boost`. The top-K drawers are wrapped in a `<memory_context>` system block and prepended to the LLM call.
 3. **(Optional) Rerank** — When `useRerank` is enabled, the top-`candidatePoolSize` (default 20) candidates are re-ranked by a cheap LLM (`anthropic/claude-haiku-4` by default) before the final `topK` are returned.
 4. **Knowledge graph** — Mining can populate entities/relations with validity windows; queries respect `valid_from <= at AND (valid_to IS NULL OR valid_to > at)`.
 
@@ -44,14 +44,14 @@ This compresses navigation across the palace and gives us a deterministic keywor
 
 Per-user settings under **Settings → Memory Palace** (also exposed via `app_settings.memory_config`):
 
-| Key | Default | Notes |
-| --- | --- | --- |
-| `enabled` | `true` | Inject memory context into chat. |
-| `autoMine` | `true` | Mine conversations after each completed run. |
-| `topK` | `5` | Drawers injected into context. |
-| `useRerank` | `false` | Toggle Claude Haiku reranking. |
-| `rerankModel` | `anthropic/claude-haiku-4` | Override the rerank model. |
-| `embeddingModel` | `openai/text-embedding-3-small` | Embedding model (1536 dim assumed). |
+| Key              | Default                         | Notes                                        |
+| ---------------- | ------------------------------- | -------------------------------------------- |
+| `enabled`        | `true`                          | Inject memory context into chat.             |
+| `autoMine`       | `true`                          | Mine conversations after each completed run. |
+| `topK`           | `5`                             | Drawers injected into context.               |
+| `useRerank`      | `false`                         | Toggle Claude Haiku reranking.               |
+| `rerankModel`    | `anthropic/claude-haiku-4`      | Override the rerank model.                   |
+| `embeddingModel` | `openai/text-embedding-3-small` | Embedding model (1536 dim assumed).          |
 
 ## Browser UI
 
@@ -83,6 +83,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 ```
 
 Outputs:
+
 - `retrieval_logs/<runId>.jsonl` — per-question retrieved drawers + session metrics
 - `generation_logs/<runId>.jsonl` — RAG hypotheses
 - `generation_logs/<runId>.jsonl.eval.jsonl` — judge labels

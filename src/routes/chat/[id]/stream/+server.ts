@@ -240,14 +240,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	// --- Context Engineering: Memory Palace Recall ---
-	const memoryConfig = (currentSettings.memoryConfig ?? null) as
-		| {
-				enabled?: boolean
-				topK?: number
-				useRerank?: boolean
-				rerankModel?: string
-		  }
-		| null
+	const memoryConfig = (currentSettings.memoryConfig ?? null) as {
+		enabled?: boolean
+		topK?: number
+		useRerank?: boolean
+		rerankModel?: string
+	} | null
 	const memoryEnabled = memoryConfig?.enabled !== false
 	if (memoryEnabled && body.content && body.content.trim().length > 0) {
 		try {

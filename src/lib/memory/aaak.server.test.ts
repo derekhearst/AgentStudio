@@ -43,10 +43,7 @@ describe('aaak encode/decode', () => {
 	})
 
 	test('aaakKeywords joins all tag values', () => {
-		const encoded = encodeAaak(
-			{ wing: 1, room: 1, drawer: 1 },
-			{ p: ['Alice', 'Alice', 'Bob'], i: ['tea'] },
-		)
+		const encoded = encodeAaak({ wing: 1, room: 1, drawer: 1 }, { p: ['Alice', 'Alice', 'Bob'], i: ['tea'] })
 		const kws = aaakKeywords(encoded)
 		expect(kws).toContain('alice')
 		expect(kws).toContain('bob')

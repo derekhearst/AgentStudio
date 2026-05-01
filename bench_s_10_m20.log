@@ -9,3 +9,4 @@ $ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmeme
 [ingest] (3/10) 51a45a95 sessions=20 drawers=220 eta=890s
 [ingest] (4/10) 58bf7951 sessions=20 drawers=221 eta=754s
 [ingest] (5/10) 1e043500 sessions=20 drawers=197 eta=617s
+[ingest] (6/10) c5e8278d sessions=20 drawers=202 eta=483s

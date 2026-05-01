@@ -93,10 +93,7 @@ export async function queryRelations(query: KgQuery): Promise<MemoryKgRelation[]
 	const conditions = [eq(memoryKgRelations.userId, query.userId)]
 	if (query.entityId) {
 		conditions.push(
-			or(
-				eq(memoryKgRelations.fromEntityId, query.entityId),
-				eq(memoryKgRelations.toEntityId, query.entityId),
-			)!,
+			or(eq(memoryKgRelations.fromEntityId, query.entityId), eq(memoryKgRelations.toEntityId, query.entityId))!,
 		)
 	}
 	if (query.relation) {
@@ -104,12 +101,7 @@ export async function queryRelations(query: KgQuery): Promise<MemoryKgRelation[]
 	}
 	if (query.at) {
 		conditions.push(lte(memoryKgRelations.validFrom, query.at))
-		conditions.push(
-			or(
-				isNull(memoryKgRelations.validTo),
-				sql`${memoryKgRelations.validTo} > ${query.at}`,
-			)!,
-		)
+		conditions.push(or(isNull(memoryKgRelations.validTo), sql`${memoryKgRelations.validTo} > ${query.at}`)!)
 	}
 	return db
 		.select()
@@ -118,20 +110,14 @@ export async function queryRelations(query: KgQuery): Promise<MemoryKgRelation[]
 		.orderBy(desc(memoryKgRelations.validFrom))
 }
 
-export async function timeline(opts: {
-	userId: string
-	entityId: string
-}): Promise<MemoryKgRelation[]> {
+export async function timeline(opts: { userId: string; entityId: string }): Promise<MemoryKgRelation[]> {
 	return db
 		.select()
 		.from(memoryKgRelations)
 		.where(
 			and(
 				eq(memoryKgRelations.userId, opts.userId),
-				or(
-					eq(memoryKgRelations.fromEntityId, opts.entityId),
-					eq(memoryKgRelations.toEntityId, opts.entityId),
-				)!,
+				or(eq(memoryKgRelations.fromEntityId, opts.entityId), eq(memoryKgRelations.toEntityId, opts.entityId))!,
 			),
 		)
 		.orderBy(memoryKgRelations.validFrom)

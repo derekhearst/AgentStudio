@@ -39,7 +39,10 @@ export const memoryWings = pgTable(
 		kind: memoryWingKindEnum('kind').notNull().default('topic'),
 		name: text('name').notNull(),
 		slug: text('slug').notNull(),
-		aliases: text('aliases').array().notNull().default(sql`ARRAY[]::text[]`),
+		aliases: text('aliases')
+			.array()
+			.notNull()
+			.default(sql`ARRAY[]::text[]`),
 		summary: text('summary'),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -64,10 +67,7 @@ export const memoryRooms = pgTable(
 		occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [
-		index('memory_rooms_wing_idx').on(t.wingId),
-		index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt),
-	],
+	(t) => [index('memory_rooms_wing_idx').on(t.wingId), index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt)],
 )
 
 export const memoryClosets = pgTable(
@@ -114,10 +114,7 @@ export const memoryDrawers = pgTable(
 		index('memory_drawers_user_occurred_idx').on(t.userId, t.occurredAt),
 		// HNSW index for cosine semantic search; added by hand-edited migration.
 		index('memory_drawers_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
-		index('memory_drawers_content_tsv_idx').using(
-			'gin',
-			sql`to_tsvector('english', ${t.content})`,
-		),
+		index('memory_drawers_content_tsv_idx').using('gin', sql`to_tsvector('english', ${t.content})`),
 	],
 )
 

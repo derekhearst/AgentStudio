@@ -118,9 +118,7 @@ export const getFullPromptPreview = query(async () => {
 		rawParts.push({ label: `Tools (${tools.length})`, content: toolsJson })
 
 		const totalChars = systemPrompt.length + toolsJson.length
-		const estimatedTokens =
-			estimateTokens(systemPrompt) +
-			estimateToolDefinitionTokens(tools)
+		const estimatedTokens = estimateTokens(systemPrompt) + estimateToolDefinitionTokens(tools)
 
 		return {
 			label,

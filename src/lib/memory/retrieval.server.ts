@@ -13,12 +13,7 @@
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations } from '$lib/chat/chat.schema'
-import {
-	memoryClosets,
-	memoryDrawers,
-	memoryRooms,
-	memoryWings,
-} from '$lib/memory/memory.schema'
+import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
 import { embedOne, toPgVector } from '$lib/memory/embeddings.server'
 
 export type RetrievedDrawer = {
@@ -78,11 +73,7 @@ function buildTsQuery(query: string): string {
 	return tokens.map((token) => `${token}:*`).join(' | ')
 }
 
-export async function recall(
-	userId: string,
-	query: string,
-	options: RecallOptions = {},
-): Promise<RetrievedDrawer[]> {
+export async function recall(userId: string, query: string, options: RecallOptions = {}): Promise<RetrievedDrawer[]> {
 	const opts = { ...DEFAULTS, ...options }
 	const queryEmbedding = await embedOne(query)
 	const vec = toPgVector(queryEmbedding)
@@ -122,10 +113,7 @@ export async function recall(
 		const semantic = Number(row.semantic ?? 0)
 		const keyword = Number(row.keyword ?? 0)
 		const temporal = temporalScore(row.occurredAt, opts.queryDate, opts.temporalDecayDays)
-		const finalScore =
-			opts.semanticWeight * semantic +
-			opts.keywordWeight * keyword +
-			opts.temporalWeight * temporal
+		const finalScore = opts.semanticWeight * semantic + opts.keywordWeight * keyword + opts.temporalWeight * temporal
 		return {
 			drawerId: row.drawerId,
 			roomId: row.roomId,

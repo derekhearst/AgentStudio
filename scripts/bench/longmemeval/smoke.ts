@@ -31,10 +31,24 @@ function run(label: string, cmd: string[]): void {
 	}
 }
 
-console.log(`[smoke] runId=${runId} dataset=${dataset} limit=${limit}${maxSessions ? ` maxSessions=${maxSessions}` : ''}`)
-const ingestArgs = ['run', 'scripts/bench/longmemeval/ingest.ts', `--dataset=${dataset}`, `--runId=${runId}`, `--limit=${limit}`]
+console.log(
+	`[smoke] runId=${runId} dataset=${dataset} limit=${limit}${maxSessions ? ` maxSessions=${maxSessions}` : ''}`,
+)
+const ingestArgs = [
+	'run',
+	'scripts/bench/longmemeval/ingest.ts',
+	`--dataset=${dataset}`,
+	`--runId=${runId}`,
+	`--limit=${limit}`,
+]
 if (maxSessions) ingestArgs.push(`--maxSessions=${maxSessions}`)
 run('ingest', ingestArgs)
-run('retrieve', ['run', 'scripts/bench/longmemeval/retrieve.ts', `--dataset=${dataset}`, `--runId=${runId}`, `--limit=${limit}`])
+run('retrieve', [
+	'run',
+	'scripts/bench/longmemeval/retrieve.ts',
+	`--dataset=${dataset}`,
+	`--runId=${runId}`,
+	`--limit=${limit}`,
+])
 run('score-retrieval', ['run', 'scripts/bench/longmemeval/score-retrieval.ts', `--runId=${runId}`])
 console.log(`\n[smoke] OK — runId=${runId}`)

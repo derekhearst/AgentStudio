@@ -18,13 +18,15 @@ import {
 export type WingKind = 'person' | 'project' | 'topic' | 'agent'
 
 export function slugify(value: string): string {
-	return value
-		.trim()
-		.toLowerCase()
-		.replace(/[\s_/]+/g, '-')
-		.replace(/[^a-z0-9-]/g, '')
-		.replace(/-+/g, '-')
-		.replace(/^-|-$/g, '') || 'untitled'
+	return (
+		value
+			.trim()
+			.toLowerCase()
+			.replace(/[\s_/]+/g, '-')
+			.replace(/[^a-z0-9-]/g, '')
+			.replace(/-+/g, '-')
+			.replace(/^-|-$/g, '') || 'untitled'
+	)
 }
 
 export async function getOrCreateWing(opts: {
@@ -53,7 +55,10 @@ export async function getOrCreateWing(opts: {
 			.where(
 				and(
 					eq(memoryWings.userId, opts.userId),
-					sql`${memoryWings.aliases} && ARRAY[${sql.join(aliases.map((a) => sql`${a}`), sql`, `)}]::text[]`,
+					sql`${memoryWings.aliases} && ARRAY[${sql.join(
+						aliases.map((a) => sql`${a}`),
+						sql`, `,
+					)}]::text[]`,
 				),
 			)
 			.limit(1)

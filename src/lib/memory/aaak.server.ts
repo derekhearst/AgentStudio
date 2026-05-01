@@ -110,7 +110,10 @@ export function decodeAaak(pointer: string): { address: AaakAddress; tags: AaakT
 		const match = lines[i].match(TAG_RE)
 		if (!match) continue
 		const key = match[1].trim() as keyof AaakTags
-		tags[key] = match[2].split('~').map((value) => value.trim()).filter(Boolean)
+		tags[key] = match[2]
+			.split('~')
+			.map((value) => value.trim())
+			.filter(Boolean)
 	}
 	return { address, tags }
 }

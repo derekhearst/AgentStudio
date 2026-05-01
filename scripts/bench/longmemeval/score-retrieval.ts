@@ -34,7 +34,13 @@ function main() {
 		.readFileSync(file, 'utf-8')
 		.split('\n')
 		.filter((line) => line.trim().length > 0)
-		.map((line) => JSON.parse(line) as { question_id: string; retrieval_results: { metrics: { session: Record<string, number> } } })
+		.map(
+			(line) =>
+				JSON.parse(line) as {
+					question_id: string
+					retrieval_results: { metrics: { session: Record<string, number> } }
+				},
+		)
 		// LongMemEval skips abstention questions in retrieval scoring
 		.filter((e) => !e.question_id.includes('_abs'))
 
