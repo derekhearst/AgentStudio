@@ -4,7 +4,6 @@ import {
 	cleanupPrefixedRecords,
 	seedAgent,
 	seedConversation,
-	seedMemory,
 	seedNotification,
 	seedTask,
 	uniquePrefix,
@@ -19,7 +18,6 @@ test('dashboard shows live seeded activity and workspace navigation', async ({ p
 		const agent = await seedAgent(prefix, { name: `${prefix} Agent` })
 		const task = await seedTask(prefix, agent.id, { title: `${prefix} Dashboard Task`, status: 'review' })
 		const conversation = await seedConversation(prefix, { title: `${prefix} Dashboard Conversation` })
-		await seedMemory(prefix, { content: `${prefix} dashboard memory` })
 		await seedNotification(prefix, { title: `${prefix} Dashboard Notification` })
 
 		await page.goto('/')

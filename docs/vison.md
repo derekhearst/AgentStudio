@@ -8,7 +8,7 @@ Everything flows through the orchestrator. Everything reports back to the orches
 
 ## The Orchestrator
 
-The orchestrator is not an agent. It is the platform's brain. It sits above every agent, every task, every project, and every tool. It knows your memory, your preferences, your active projects, your goals, and the current state of every running workflow. When you speak to AgentStudio, you are speaking to the orchestrator.
+The orchestrator is not an agent. It is the platform's brain. It sits above every agent, every task, every project, and every tool. It knows your preferences, your active projects, your goals, and the current state of every running workflow. When you speak to AgentStudio, you are speaking to the orchestrator.
 
 The orchestrator's job is to understand what you want and decompose it into work. When you say "something's broken in the auth flow," it doesn't start writing code. It reasons about what needs to happen, plans a pipeline of work, creates tasks with dependencies, assigns the right specialist agents, and monitors the whole thing to completion. It is a dispatcher, a coordinator, and a narrator — never a laborer.
 
@@ -38,7 +38,7 @@ If you want to see what's scheduled, you ask. If you want to change something, y
 
 ## The UI Is a Window, Not a Control Panel
 
-AgentStudio has pages — a task board, a cost dashboard, a memory explorer, agent profiles, project views. These are read-only windows into what's happening. You look at the Kanban board to see where tasks stand. You look at the cost dashboard to understand spending. You browse the memory explorer to see what the system knows about you.
+AgentStudio has pages — a task board, a cost dashboard, agent profiles, project views. These are read-only windows into what's happening. You look at the Kanban board to see where tasks stand. You look at the cost dashboard to understand spending.
 
 But you never create or edit anything through these views. Every action that changes state flows through the orchestrator via conversation. The task board doesn't have a "new task" button. The agent page doesn't have a configuration form. The settings page doesn't have input fields you fill out manually.
 
@@ -58,7 +58,7 @@ If you want to change an agent's behavior, you tell the orchestrator. "Make the 
 
 ## Teams Are Pipelines With Persistent Roles
 
-When the orchestrator plans a pipeline, it can assign agents from a standing team — a group of specialists that work together repeatedly on a domain. The "AgentStudio self-improvement team" always has the same research agent, coding agent, testing agent, and docs agent. They share context about the project, know the codebase conventions, and get better over time because the memory system captures their patterns.
+When the orchestrator plans a pipeline, it can assign agents from a standing team — a group of specialists that work together repeatedly on a domain. The "AgentStudio self-improvement team" always has the same research agent, coding agent, testing agent, and docs agent. They share context about the project and know the codebase conventions.
 
 Teams aren't managed through a UI. You say "I want a team dedicated to improving AgentStudio." The orchestrator builds it. You say "add a design agent to the team that generates wireframe options." The orchestrator updates it. The team page in the UI shows you who's on the team and what they've accomplished — but it's a window, not a control panel.
 
@@ -74,106 +74,12 @@ Artifacts get updated through conversation. You tell the orchestrator "I had a c
 
 Think of them like widgets on a phone home screen, except each one was built by your AI through conversation, tailored exactly to what you need, and backed by its own little database.
 
----
-
-## The Memory Palace
-
-AgentStudio's memory system is inspired by the ancient method of loci — the memory palace technique where knowledge is organized spatially into an imaginary building. Instead of dumping memories into a flat vector store and hoping semantic search finds the right one, AgentStudio organizes everything you've ever discussed into a navigable structure of wings, rooms, halls, tunnels, closets, and drawers.
-
-This isn't a cosmetic metaphor. Structured spatial retrieval consistently outperforms flat search by over 30%. When the orchestrator knows which wing and room to look in, it finds the right memory almost every time.
-
-### The Structure
-
-**Wings** are the top-level domains of your life. Each major person, project, or topic gets its own wing in the palace. You might have:
-
-- A wing for AgentStudio (the platform itself)
-- A wing for Brown & Root (your day job)
-- A wing for your D&D campaign
-- A wing for personal life (home, health, finances)
-- A wing for each person you interact with frequently
-
-Wings are created automatically as the system detects new domains in your conversations. You never manually create one.
-
-**Rooms** are specific subjects within a wing. The AgentStudio wing has rooms for the auth system, the memory architecture, the artifact system, deployment, the orchestrator design. The Brown & Root wing has rooms for each project, each codebase, each team process. Rooms emerge naturally from conversation topics — the dream cycle detects when a new subject has accumulated enough context to warrant its own room.
-
-**Halls** are memory types that exist in every wing, acting as corridors that categorize what kind of knowledge each memory represents:
-
-- `hall_facts` — decisions made, choices locked in, concrete information
-- `hall_events` — sessions, milestones, debugging moments, things that happened
-- `hall_discoveries` — breakthroughs, new insights, things learned
-- `hall_preferences` — habits, likes, opinions, ways of working
-- `hall_advice` — recommendations, solutions, approaches that worked
-
-When you say "we decided to use Drizzle instead of Prisma," that's a fact in the AgentStudio wing. When you say "I figured out the streaming bug was caused by a missing await," that's a discovery. The system categorizes automatically.
-
-**Tunnels** are connections between wings. When the same topic appears in different domains, a tunnel links them. If both your Brown & Root wing and your AgentStudio wing have rooms about "auth patterns," a tunnel cross-references them. This means when you're working on auth in one project, the system can surface relevant decisions and patterns from the other without you asking.
-
-**Closets** are summaries that point to the original content. They're the quick-access layer — concise descriptions that tell the system where to find the full context. When the orchestrator is assembling context for a new conversation, it reads closets first to figure out what's relevant, then pulls full content from drawers only when needed.
-
-**Drawers** are the original verbatim content. Every conversation, every coding session, every agent run — the exact words are preserved. Nothing is ever summarized away or lost. Closets help find things fast, but drawers ensure you can always go back to the source.
-
-### Why This Matters
-
-The palace structure solves the biggest problem with AI memory: retrieval quality. A flat vector store with 10,000 memories returns fuzzy results because everything is searched against everything. The palace narrows the search space before semantic similarity even runs:
-
-1. The orchestrator identifies the relevant wing (are we talking about work? AgentStudio? personal?)
-2. It narrows to the relevant hall (is this about a fact? a preference? an event?)
-3. It searches within the relevant rooms
-4. Semantic similarity runs on a focused subset instead of the entire memory store
-
-Each layer of narrowing improves recall dramatically. Wing filtering alone adds 12%. Wing + room adds 34%. By the time the system searches, it's looking in exactly the right place.
-
-### The Dream Cycle Maintains the Palace
-
-The dream cycle isn't just consolidation — it's the palace architect. During each cycle, the system:
-
-**Builds new rooms** when it detects a topic has accumulated enough context to warrant its own space. Three conversations about "deployment pipeline" in the AgentStudio wing? That becomes a room.
-
-**Creates tunnels** when it discovers the same concept appearing in different wings. You mentioned rate limiting in both your Brown & Root work and your AgentStudio project? A tunnel links those rooms.
-
-**Updates closets** with fresh summaries as new content arrives in drawers. The closet for the "auth" room gets updated when new auth-related decisions are made.
-
-**Resolves contradictions** when newer information conflicts with older memories. "We decided to use SQLite" gets superseded by "We switched to Postgres for pgvector support." The old fact is marked as historical, the new fact takes precedence, and a relation connects them so the reasoning chain is preserved.
-
-**Prunes decayed memories** that haven't been accessed and have low importance scores. The forgetting curve ensures the palace stays clean and relevant. Important memories that are frequently accessed stay sharp. Irrelevant details naturally fade.
-
-**Enriches the knowledge graph** by creating typed relations between memories — supports, contradicts, depends_on, part_of. This is the tunnel and hall infrastructure that makes cross-domain reasoning possible.
-
-### The Memory Stack
-
-Not all memory is loaded at once. The system uses a layered approach:
-
-| Layer | What                                                        | Size        | When                   |
-| ----- | ----------------------------------------------------------- | ----------- | ---------------------- |
-| L0    | Identity — who is the user, core preferences                | ~50 tokens  | Always loaded          |
-| L1    | Critical facts — active projects, key people, current goals | ~120 tokens | Always loaded          |
-| L2    | Room recall — recent sessions, current topic context        | On demand   | When a topic comes up  |
-| L3    | Deep search — semantic query across all closets and drawers | On demand   | When explicitly needed |
-
-The orchestrator wakes up with L0 + L1 and already knows your world. It knows your name, your job, your active projects, your preferences. When you start talking about a specific topic, L2 kicks in and loads the relevant room context. If you ask about something from months ago, L3 does a deep search across the full palace.
-
-This means the orchestrator is always contextually aware without burning thousands of tokens loading memories that aren't relevant to the current conversation.
-
-### Every Agent Gets a Wing
-
-Sub-agents don't share a flat memory space. Each specialist agent gets its own wing in the palace. The coding agent's wing accumulates patterns about codebases, debugging approaches, and conventions. The research agent's wing captures sources, findings, and evaluation criteria. The testing agent's wing remembers test patterns, failure modes, and coverage strategies.
-
-When an agent is assigned a task, it loads context from its own wing plus the relevant project wing. This scoped retrieval means agents get exactly the right context without drowning in irrelevant memories from other domains.
-
-### Memory Is Invisible
-
-You never interact with the palace directly. You don't create wings, name rooms, or organize memories. The orchestrator and the dream cycle handle all of that automatically. The memory explorer in the UI is a read-only window — you can browse the palace structure, see what's in each wing and room, check importance scores and access patterns. But you never edit it manually. If something is wrong, you tell the orchestrator: "that's outdated, we switched to Postgres." The orchestrator updates the memory, and the dream cycle cleans up the relations.
-
-The palace exists to make the AI smarter. Its complexity is hidden. All you experience is an AI that remembers everything, finds the right context instantly, and gets better the more you use it.
-
----
-
 ## The Endgame
 
 The endgame is never having to write, debug, or test code yourself. You describe what you want. The orchestrator plans it. Specialist agents build it, test it, and record proof that it works. You review finished products and approve them with full confidence.
 
 AgentStudio manages its own codebase. It researches its own competitors. It implements its own features. It tests its own changes. It manages its own GitHub releases. You are the CEO of a one-person AI company, and your only job is deciding what matters and saying yes or no to finished work.
 
-The memory palace grows with every interaction, every decision, every project. Six months from now, AgentStudio knows your entire professional history, your coding patterns, your design preferences, your team's conventions, and the reasoning behind every decision you've ever made. It doesn't just remember facts — it understands context, connections, and consequences.
+Over time, AgentStudio can reflect your professional history, your coding patterns, your design preferences, your team's conventions, and the reasoning behind key decisions.
 
-The platform doesn't just use AI. The platform is AI. Conversation is the interface. Agents are the workforce. The palace is the institutional knowledge. And the orchestrator ties it all together into a system that gets smarter and more capable every single day.
+The platform doesn't just use AI. The platform is AI. Conversation is the interface. Agents are the workforce. And the orchestrator ties it all together into a system that gets smarter and more capable every single day.

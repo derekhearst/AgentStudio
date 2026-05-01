@@ -4,7 +4,6 @@ import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/setting
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
-import { assembleContext } from '$lib/memory/memory'
 import { capabilityGroups, estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
 
 const settingsUpdateSchema = z.object({
@@ -95,10 +94,6 @@ export const getFullPromptPreview = query(async () => {
 					.join('\n')
 			: undefined
 
-	// Memory context sample
-	const memoryContext = await assembleContext('sample conversation')
-	const memoryPrompt = memoryContext.memories.length > 0 ? memoryContext.systemPrompt : undefined
-
 	function buildScenario(label: string) {
 		const sections: string[] = []
 		if (settings.systemPrompt?.trim()) sections.push(settings.systemPrompt)
@@ -110,16 +105,12 @@ export const getFullPromptPreview = query(async () => {
 
 		const rawParts: Array<{ label: string; content: string }> = []
 		rawParts.push({ label: 'System Message', content: systemPrompt })
-		if (memoryPrompt) {
-			rawParts.push({ label: 'Memory Context', content: memoryPrompt })
-		}
 		rawParts.push({ label: `Tools (${tools.length})`, content: toolsJson })
 
-		const totalChars = systemPrompt.length + (memoryPrompt?.length ?? 0) + toolsJson.length
+		const totalChars = systemPrompt.length + toolsJson.length
 		const estimatedTokens =
 			estimateTokens(systemPrompt) +
-			estimateToolDefinitionTokens(tools) +
-			(memoryPrompt ? estimateTokens(memoryPrompt) : 0)
+			estimateToolDefinitionTokens(tools)
 
 		return {
 			label,

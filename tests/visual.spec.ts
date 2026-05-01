@@ -4,7 +4,6 @@ import {
 	cleanupPrefixedRecords,
 	seedAgent,
 	seedConversation,
-	seedMemory,
 	seedTask,
 	uniquePrefix,
 } from './helpers'
@@ -18,7 +17,6 @@ test('visual regression: dashboard shell', async ({ page }) => {
 		const agent = await seedAgent(prefix)
 		await seedTask(prefix, agent.id, { title: `${prefix} task`, status: 'review' })
 		await seedConversation(prefix, { title: `${prefix} conversation` })
-		await seedMemory(prefix, { content: `${prefix} memory` })
 
 		await page.goto('/')
 		await expect(page.getByRole('heading', { name: /AgentStudio dashboard/i })).toBeVisible()

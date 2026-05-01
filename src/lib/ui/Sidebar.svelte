@@ -57,18 +57,6 @@
 				</svg>
 				Agents
 			</a>
-			<a href="/artifacts"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/artifacts')} class:font-medium={isActive('/artifacts')} class:text-primary={isActive('/artifacts')}
-				onclick={onNavigate}>
-				<!-- layers / documents -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<polygon points="12 2 2 7 12 12 22 7 12 2"/>
-					<polyline points="2 17 12 22 22 17"/>
-					<polyline points="2 12 12 17 22 12"/>
-				</svg>
-				Artifacts
-			</a>
 			<a href="/skills"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
 				class:bg-base-200={isActive('/skills')} class:font-medium={isActive('/skills')} class:text-primary={isActive('/skills')}
@@ -95,18 +83,6 @@
 		<!-- Insights group -->
 		<p class="nav-section-title mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest opacity-40">Insights</p>
 		<div class="mb-4 space-y-0.5">
-			<a href="/memory"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/memory')} class:font-medium={isActive('/memory')} class:text-primary={isActive('/memory')}
-				onclick={onNavigate}>
-				<!-- circle-stack / brain -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<ellipse cx="12" cy="5" rx="9" ry="3"/>
-					<path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
-					<path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
-				</svg>
-				Memory
-			</a>
 			<a href="/activity"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
 				class:bg-base-200={isActive('/activity')} class:font-medium={isActive('/activity')} class:text-primary={isActive('/activity')}

@@ -13,7 +13,6 @@
 	import { savePartialAssistant } from '$lib/chat/chat.remote';
 	import { getAvailableModels } from '$lib/models';
 	import { getSettings } from '$lib/settings';
-	import { getArtifact, getArtifactsByConversation, pinArtifact as pinArtifactCommand } from '$lib/artifacts';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
@@ -22,7 +21,6 @@
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
-	import ArtifactPanel from '$lib/artifacts/ArtifactPanel.svelte';
 
 	type ChatAttachment = {
 		id: string;
@@ -206,40 +204,6 @@
 		} finally {
 			retryBusy = false;
 		}
-	}
-
-	// Artifact panel state
-	type PanelMode = 'collapsed' | 'panel' | 'fullscreen';
-	let activeArtifact = $state<Awaited<ReturnType<typeof getArtifact>> | null>(null);
-	let artifactPanelMode = $state<PanelMode>('collapsed');
-	let conversationArtifacts = $state<Awaited<ReturnType<typeof getArtifactsByConversation>>>([]);
-
-	async function openArtifact(artifactId: string) {
-		const result = await getArtifact(artifactId);
-		if (result) {
-			activeArtifact = result;
-			artifactPanelMode = 'panel';
-		}
-	}
-
-	function closeArtifactPanel() {
-		activeArtifact = null;
-		artifactPanelMode = 'collapsed';
-	}
-
-	async function handlePinArtifact(id: string, pinned: boolean) {
-		await pinArtifactCommand({ id, pinned });
-		if (activeArtifact && activeArtifact.id === id) {
-			activeArtifact = { ...activeArtifact, pinned };
-		}
-	}
-
-	async function loadConversationArtifacts() {
-		if (!conversationId) {
-			conversationArtifacts = [];
-			return;
-		}
-		conversationArtifacts = await getArtifactsByConversation(conversationId);
 	}
 
 	async function scrollToBottom() {
@@ -804,7 +768,7 @@
 	}
 
 	async function refreshAll() {
-		await Promise.all([loadConversationState(), loadConversationArtifacts()]);
+		await loadConversationState();
 	}
 
 	function stopStreaming() {
@@ -1124,13 +1088,6 @@
 						);
 					}
 
-					if (eventName === 'artifact_created') {
-						// Artifact was created during tool execution — open it
-						if (payload.artifactId) {
-							void openArtifact(payload.artifactId);
-						}
-					}
-
 					if (eventName === 'subagent_start') {
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
@@ -1364,8 +1321,8 @@
 	}
 </script>
 
-<div class="flex min-h-0 w-full flex-1 gap-0" class:artifact-split={artifactPanelMode === 'panel'}>
-	<section class="relative flex min-h-0 flex-1 flex-col gap-1 px-0 pt-0 pb-0 desktop:px-1 desktop:pb-1" class:max-w-full={artifactPanelMode !== 'panel'}>
+<div class="flex min-h-0 w-full flex-1 gap-0">
+	<section class="relative flex min-h-0 flex-1 flex-col gap-1 px-0 pt-0 pb-0 desktop:px-1 desktop:pb-1">
 		{#if !conversationData}
 			<div class="flex flex-1 items-center justify-center">
 				<span class="loading loading-spinner loading-sm opacity-50"></span>
@@ -1400,7 +1357,7 @@
 
 			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
 				{#each displayedMessages as message (message.id)}
-					<MessageBubble {message} artifacts={conversationArtifacts} onEdit={handleEdit} onRegenerate={handleRegenerate} onOpenArtifact={openArtifact} />
+					<MessageBubble {message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
 				{/each}
 
 				{#if waitingForFirstToken && streaming && streamingBlocks.length === 0}
@@ -1505,17 +1462,6 @@
 			/>
 		</div>
 	</section>
-
-	{#if artifactPanelMode === 'panel' || artifactPanelMode === 'fullscreen'}
-		<div class="hidden min-h-0 w-[55%] shrink-0 border-l border-base-300 lg:block" class:!block={artifactPanelMode === 'fullscreen'}>
-			<ArtifactPanel
-				artifact={activeArtifact}
-				mode={artifactPanelMode}
-				onClose={closeArtifactPanel}
-				onPin={handlePinArtifact}
-			/>
-		</div>
-	{/if}
 </div>
 
 

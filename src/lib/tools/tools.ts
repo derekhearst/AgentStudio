@@ -8,8 +8,8 @@ type ToolName = string
 export const capabilityGroups = {
 	core: {
 		label: 'Core',
-		description: 'Web search and memory lookup',
-		tools: ['web_search', 'memory_search', 'ask_user', 'list_automations'] as ToolName[],
+		description: 'Web search and orchestration essentials',
+		tools: ['web_search', 'ask_user', 'list_automations'] as ToolName[],
 		alwaysOn: true,
 	},
 	sandbox: {
@@ -28,12 +28,6 @@ export const capabilityGroups = {
 			'file_info',
 			'browser_screenshot',
 		] as ToolName[],
-		alwaysOn: false,
-	},
-	artifacts: {
-		label: 'Artifacts',
-		description: 'Create and update persistent versioned documents, code, diagrams, and more',
-		tools: ['artifact_create', 'artifact_update', 'artifact_storage_update'] as ToolName[],
 		alwaysOn: false,
 	},
 	skills: {
@@ -119,7 +113,7 @@ export function estimateToolDefinitionTokens(
 	return estimateTokens(JSON.stringify(tools))
 }
 
-export type BuiltinToolGroup = 'core' | 'sandbox' | 'artifacts' | 'skills' | 'agents' | 'media'
+export type BuiltinToolGroup = 'core' | 'sandbox' | 'skills' | 'agents' | 'media'
 
 export type BuiltinTool = {
 	name: string
@@ -131,7 +125,6 @@ export type BuiltinTool = {
 const groupLabels: Record<BuiltinToolGroup, string> = {
 	core: 'Core',
 	sandbox: 'Coding Sandbox',
-	artifacts: 'Artifacts',
 	skills: 'Skills',
 	agents: 'Agents',
 	media: 'Image Generation',
@@ -139,7 +132,6 @@ const groupLabels: Record<BuiltinToolGroup, string> = {
 
 const toolDefinitions: Array<{ name: string; description: string; group: BuiltinToolGroup }> = [
 	{ name: 'web_search', description: 'Search the web for information.', group: 'core' },
-	{ name: 'memory_search', description: 'Search persistent memory for relevant information.', group: 'core' },
 	{
 		name: 'ask_user',
 		description: 'Ask the user one or more clarifying questions with predefined answer options.',
@@ -186,23 +178,6 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 		group: 'sandbox',
 	},
 	{ name: 'browser_screenshot', description: 'Take a screenshot of a web page.', group: 'sandbox' },
-	{
-		name: 'artifact_create',
-		description:
-			'Create a persistent artifact (document, code, config, diagram, etc.). Use for code snippets over 15 lines, full documents, configs, diagrams, data tables, HTML pages, and Svelte components.',
-		group: 'artifacts',
-	},
-	{
-		name: 'artifact_update',
-		description: 'Update the content of an existing artifact. Creates a new version automatically.',
-		group: 'artifacts',
-	},
-	{
-		name: 'artifact_storage_update',
-		description:
-			"Update a key in an artifact's persistent storage. Used for reactive/living artifacts like trackers and dashboards.",
-		group: 'artifacts',
-	},
 	{
 		name: 'list_skills',
 		description:

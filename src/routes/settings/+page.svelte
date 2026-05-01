@@ -44,7 +44,7 @@
 	const sections = [
 		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
 		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
-		{ id: 'tools', keywords: 'tools sandbox coding artifacts skills agents media image generation disabled enabled toggle' },
+		{ id: 'tools', keywords: 'tools sandbox coding skills agents media image generation disabled enabled toggle' },
 		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },

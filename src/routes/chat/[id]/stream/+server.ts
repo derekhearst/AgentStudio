@@ -3,10 +3,6 @@ import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, conversations, messages } from '$lib/chat/chat.schema'
 import { streamChat, type LlmMessage } from '$lib/openrouter.server'
-import { extractAndPersist } from '$lib/memory/memory'
-import { shouldFetchMemory } from '$lib/memory/memory'
-import { bumpAccessCount } from '$lib/memory/memory.server'
-import { MemoryStack } from '$lib/memory/layers'
 import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
@@ -21,18 +17,7 @@ import { runInlineSubagent } from '$lib/agents/inline-subagent'
 
 const encoder = new TextEncoder()
 
-const DREAMING_ONLY_TOOLS = new Set([
-	'palace_create_wing',
-	'palace_create_room',
-	'palace_place_drawer',
-	'palace_update_closet',
-	'palace_search',
-	'palace_check_duplicate',
-	'palace_decay',
-	'palace_prune',
-	'palace_detect_contradictions',
-	'palace_regenerate_l1',
-])
+const DREAMING_ONLY_TOOLS = new Set<string>()
 
 type StreamPayload = {
 	conversationId: string
@@ -183,8 +168,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return { role: row.role, content: row.content }
 		})
 
-	const userContent = body.content?.trim() ?? ''
-
 	// --- Context Engineering: Unified System Prompt ---
 	const toolConfig = currentSettings.toolConfig as
 		| {
@@ -195,20 +178,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const approvalRequiredTools = new Set(
 		toolConfig?.approvalRequiredTools ?? (toolConfig?.approvalMode === 'confirm' ? ['*'] : []),
 	)
-
-	// --- Context Engineering: Conditional Memory ---
-	const fetchMemory = shouldFetchMemory(userContent)
-	if (fetchMemory) {
-		const stack = new MemoryStack(user.id)
-		const memoryContext = await stack.wakeUp(body.content ?? conversation.title)
-		if (memoryContext.recalledMemoryIds.length > 0) {
-			llmMessages.unshift({
-				role: 'system',
-				content: memoryContext.systemPrompt,
-			})
-			await Promise.all(memoryContext.recalledMemoryIds.map((memoryId) => bumpAccessCount(memoryId)))
-		}
-	}
 
 	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
 	let skillSummariesText: string | undefined
@@ -244,7 +213,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	if (currentSettings.systemPrompt?.trim()) {
-		// systemPrompt deprecated ΓÇô memory layers will replace this
+		// Reserved for optional future system prompt handling.
 	}
 	if (isOrchestrator) {
 		systemSections.push(
@@ -749,18 +718,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 						toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
 
-						// Emit artifact_created if this was an artifact_create tool
-						if (tc.name === 'artifact_create' && toolResult.success && toolResult.result) {
-							const artifactResult = toolResult.result as { artifactId?: string; title?: string; type?: string }
-							if (artifactResult.artifactId) {
-								emit('artifact_created', {
-									artifactId: artifactResult.artifactId,
-									title: artifactResult.title,
-									type: artifactResult.type,
-								})
-							}
-						}
-
 						emit('tool_result', {
 							id: tc.id,
 							name: tc.name,
@@ -850,22 +807,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					})
 					.returning()
 
-				// Link any artifacts created in this exchange to this message
-				if (allToolCalls.length > 0) {
-					const { artifacts: artifactsTable } = await import('$lib/artifacts/artifacts.schema')
-					for (const tc of allToolCalls) {
-						if (tc.name === 'artifact_create') {
-							const result = tc.result as { artifactId?: string } | undefined
-							if (result?.artifactId) {
-								await db
-									.update(artifactsTable)
-									.set({ messageId: assistantMessage.id })
-									.where(eq(artifactsTable.id, result.artifactId))
-							}
-						}
-					}
-				}
-
 				await db
 					.update(conversations)
 					.set({
@@ -886,15 +827,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							// Non-critical ΓÇö title stays as default
 						})
 				}
-
-				const extractionMessages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string }> = []
-				if (!body.regenerate && body.content?.trim()) {
-					extractionMessages.push({ role: 'user', content: body.content.trim() })
-				}
-				extractionMessages.push({ role: 'assistant', content: allTextContent || assistantContent || '(no output)' })
-				void extractAndPersist(extractionMessages).catch(() => {
-					// Ignore extraction failures to avoid impacting chat streaming.
-				})
 
 				await updateRun({
 					state: 'completed',

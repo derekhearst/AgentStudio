@@ -17,8 +17,6 @@
 		{ value: 'task_created', label: 'Task Created' },
 		{ value: 'task_status_changed', label: 'Status Changed' },
 		{ value: 'agent_action', label: 'Agent Action' },
-		{ value: 'memory_created', label: 'Memory' },
-		{ value: 'dream_cycle', label: 'Dream Cycle' },
 		{ value: 'chat_started', label: 'Chat' },
 		{ value: 'review_action', label: 'Review' },
 		{ value: 'skill_created', label: 'Skill' },
@@ -55,8 +53,6 @@
 				return null;
 			case 'agent':
 				return `/agents/${row.entityId}`;
-			case 'memory':
-				return `/memory/${row.entityId}`;
 			case 'conversation':
 				return `/chat/${row.entityId}`;
 			default:
@@ -68,8 +64,6 @@
 		task_created: 'badge-info',
 		task_status_changed: 'badge-warning',
 		agent_action: 'badge-primary',
-		memory_created: 'badge-secondary',
-		dream_cycle: 'badge-accent',
 		chat_started: 'badge-success',
 		review_action: 'badge-error',
 		project_created: 'badge-info',

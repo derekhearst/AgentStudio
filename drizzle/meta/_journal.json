@@ -64,6 +64,20 @@
       "when": 1775710053310,
       "tag": "0008_windy_ink",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777620363000,
+      "tag": "0009_solid_mindscape",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777620364000,
+      "tag": "0010_chunked_museum",
+      "breakpoints": true
     }
   ]
 }

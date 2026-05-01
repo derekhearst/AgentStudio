@@ -10,8 +10,6 @@ const listActivitySchema = z.object({
 			'task_created',
 			'task_status_changed',
 			'agent_action',
-			'memory_created',
-			'dream_cycle',
 			'chat_started',
 			'review_action',
 			'skill_created',

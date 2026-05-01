@@ -4,8 +4,6 @@ export const activityEventTypeEnum = pgEnum('activity_event_type', [
 	'task_created',
 	'task_status_changed',
 	'agent_action',
-	'memory_created',
-	'dream_cycle',
 	'chat_started',
 	'review_action',
 	'skill_created',

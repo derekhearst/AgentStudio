@@ -111,8 +111,6 @@ export async function cleanupPrefixedRecords(prefix: string) {
 	await sql`delete from agent_tasks where title like ${`${prefix}%`} or description like ${`${prefix}%`}`
 	await sql`delete from messages where conversation_id in (select id from conversations where title like ${`${prefix}%`})`
 	await sql`delete from conversations where title like ${`${prefix}%`}`
-	await sql`delete from memory_relations where source_memory_id in (select id from memories where content like ${`${prefix}%`}) or target_memory_id in (select id from memories where content like ${`${prefix}%`})`
-	await sql`delete from memories where content like ${`${prefix}%`} or category like ${`${prefix}%`}`
 	await sql`delete from notifications where title like ${`${prefix}%`} or body like ${`${prefix}%`}`
 	await sql`delete from push_subscriptions where device_label like ${`${prefix}%`}`
 	await sql`delete from agents where name like ${`${prefix}%`} or role like ${`${prefix}%`}`
@@ -211,24 +209,6 @@ export async function seedConversation(
 	`
 
 	return conversation
-}
-
-export async function seedMemory(
-	prefix: string,
-	overrides?: { content?: string; category?: string; importance?: number },
-) {
-	const sql = getSql()
-	const [row] = await sql<{ id: string; content: string }[]>`
-		insert into memories (content, category, importance, updated_at)
-		values (
-			${overrides?.content ?? `${prefix} memory content`},
-			${overrides?.category ?? 'general'},
-			${overrides?.importance ?? 0.6},
-			now()
-		)
-		returning id, content
-	`
-	return row
 }
 
 export async function seedNotification(prefix: string, overrides?: { title?: string; body?: string; read?: boolean }) {

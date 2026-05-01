@@ -2,7 +2,7 @@ import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle
 
 export const llmUsage = pgTable('llm_usage', {
 	id: uuid('id').primaryKey().defaultRandom(),
-	source: text('source').notNull(), // 'chat' | 'agent_planner' | 'agent_synthesis' | 'titlegen' | 'memory_extract' | 'image_gen'
+	source: text('source').notNull(), // 'chat' | 'agent_planner' | 'agent_synthesis' | 'titlegen' | 'image_gen'
 	model: text('model').notNull(),
 	tokensIn: integer('tokens_in').notNull().default(0),
 	tokensOut: integer('tokens_out').notNull().default(0),

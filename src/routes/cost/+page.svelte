@@ -60,7 +60,6 @@
 		agent_planner: 'Agent Planner',
 		agent_synthesis: 'Agent Synthesis',
 		titlegen: 'Title Generation',
-		memory_extract: 'Memory Extraction',
 		image_gen: 'Image Generation',
 	};
 

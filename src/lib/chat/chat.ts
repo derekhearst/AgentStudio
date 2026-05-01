@@ -85,11 +85,6 @@ const TOOL_COPY: Record<string, ToolCopy> = {
 		completed: 'Searched the web',
 		denied: 'Web search was denied',
 	},
-	memory_search: {
-		inProgress: 'Searching memory',
-		completed: 'Searched memory',
-		denied: 'Memory search was denied',
-	},
 	search_files: {
 		inProgress: 'Searching files',
 		completed: 'Searched files',
@@ -189,7 +184,7 @@ export function getFriendlyToolLabel(name: string, args: unknown, status: ToolCa
 			? (copy?.completed ?? `Completed ${fallbackToolLabel(name).toLowerCase()}`)
 			: (copy?.inProgress ?? `${fallbackToolLabel(name)} in progress`)
 
-	if (query && ['web_search', 'memory_search', 'search_files'].includes(name)) {
+	if (query && ['web_search', 'search_files'].includes(name)) {
 		return `${base} for "${query}"`
 	}
 
@@ -276,7 +271,6 @@ export function trimToolResult(toolName: string, resultStr: string): string {
 		file_read: 32000,
 		shell: 16000,
 		browser_screenshot: Infinity,
-		memory_search: 8000,
 		run_subagent: 16000,
 	}
 

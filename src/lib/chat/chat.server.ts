@@ -174,7 +174,7 @@ export async function compactMessages(
 1. Key decisions and conclusions reached
 2. Important facts, data, or context mentioned
 3. Current task state and what remains to be done
-4. Any tool results or artifacts that were created
+	4. Any tool results that were produced
 5. User preferences or corrections expressed
 
 Write in third-person past tense. Be concise but don't lose critical details. Keep under 800 words.`,

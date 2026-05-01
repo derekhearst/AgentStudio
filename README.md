@@ -1,6 +1,6 @@
 # AgentStudio
 
-Self-hosted autonomous AI agent platform with persistent memory, user-scoped tool sandboxes, and passkey authentication.
+Self-hosted autonomous AI agent platform with user-scoped tool sandboxes and passkey authentication.
 
 ## Feature Overview
 
@@ -14,12 +14,6 @@ Creation workflows are chat-led: New Agent and New Skill actions launch a fresh 
 
 Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page provides a read-only browser for viewing agent status and navigating to agent details.
 Agent detail pages allow editing the assigned model and system prompt.
-
-### Memory Palace and Dreaming Agent
-
-The memory system stores, retrieves, and consolidates facts over time using PostgreSQL + pgvector. Memory Palace organization is active (wings, rooms, halls, drawers, and closets), and chat context now uses the layered memory stack (L0 identity, L1 essential story, L2 recall, L3 semantic fallback).
-
-Dreaming Agent is a real visible agent that owns memory consolidation work. Its periodic consolidation runs are modeled as standard automations and produce normal chat sessions.
 
 ### Settings
 
@@ -171,5 +165,4 @@ Notes:
 - `/cost` Cost dashboard
 - `/agents` Agent management
 - `/automations` Scheduled automation workflows
-- `/memory` Memory explorer
 - `/settings` App configuration

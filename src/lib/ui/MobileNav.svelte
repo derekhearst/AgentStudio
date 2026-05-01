@@ -11,9 +11,7 @@
 	}
 
 	const moreItems = [
-		{ href: '/memory', label: 'Memory' },
 		{ href: '/activity', label: 'Activity' },
-		{ href: '/artifacts', label: 'Artifacts' },
 		{ href: '/skills', label: 'Skills' },
 		{ href: '/automations', label: 'Automations' },
 		{ href: '/cost', label: 'Cost' },
@@ -32,16 +30,6 @@
 			label: 'Agents',
 			// cpu
 			paths: ['M7 7h10v10H7z', 'M7 9H4 M7 12H4 M7 15H4 M17 9h3 M17 12h3 M17 15h3 M9 7V4 M12 7V4 M15 7V4 M9 17v3 M12 17v3 M15 17v3']
-		},
-		{
-			href: '/artifacts',
-			label: 'Artifacts',
-			paths: ['M12 2 2 7 12 12 22 7 12 2', 'M2 17 12 22 22 17', 'M2 12 12 17 22 12']
-		},
-		{
-			href: '/memory',
-			label: 'Memory',
-			paths: ['M12 5a9 3 0 0 1 0 0', 'M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5', 'M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6']
 		}
 	] as const;
 </script>
@@ -69,14 +57,6 @@
 					{:else if item.href === '/agents'}
 						<rect x="7" y="7" width="10" height="10" rx="1"/>
 						<path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3"/>
-					{:else if item.href === '/artifacts'}
-						<polygon points="12 2 2 7 12 12 22 7 12 2"/>
-						<polyline points="2 17 12 22 22 17"/>
-						<polyline points="2 12 12 17 22 12"/>
-					{:else if item.href === '/memory'}
-						<ellipse cx="12" cy="5" rx="9" ry="3"/>
-						<path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
-						<path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
 					{/if}
 				</svg>
 				<span class="truncate">{item.label}</span>
@@ -101,9 +81,7 @@
 <div id="mobile-more-menu" popover class="mobile-more-popover">
 	<div class="grid grid-cols-3 gap-1 p-3">
 		{#each [
-			{ href: '/memory', label: 'Memory', icon: 'db' },
 			{ href: '/activity', label: 'Activity', icon: 'activity' },
-			{ href: '/artifacts', label: 'Artifacts', icon: 'layers' },
 			{ href: '/skills', label: 'Skills', icon: 'cap' },
 			{ href: '/automations', label: 'Automations', icon: 'cycle' },
 			{ href: '/cost', label: 'Cost', icon: 'dollar' },
@@ -118,16 +96,8 @@
 				}}
 			>
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-					{#if item.icon === 'db'}
-						<ellipse cx="12" cy="5" rx="9" ry="3"/>
-						<path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
-						<path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
-					{:else if item.icon === 'activity'}
+					{#if item.icon === 'activity'}
 						<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-					{:else if item.icon === 'layers'}
-						<polygon points="12 2 2 7 12 12 22 7 12 2"/>
-						<polyline points="2 17 12 22 22 17"/>
-						<polyline points="2 12 12 17 22 12"/>
 					{:else if item.icon === 'cap'}
 						<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
 						<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>

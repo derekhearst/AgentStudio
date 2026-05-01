@@ -16,10 +16,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { promisify } from 'node:util'
-import { searchMemories } from '$lib/memory/memory.server'
 import { db } from '$lib/db.server'
-import { artifacts, artifactVersions } from '$lib/artifacts/artifacts.schema'
-import { eq, max } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { requireAdminRequestUser, normalizeUsername } from '$lib/auth/auth.server'
 import { users } from '$lib/auth/auth.schema'
 import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
@@ -29,9 +27,6 @@ import {
 	listAutomationsForUser,
 	updateAutomationRecord,
 } from '$lib/automation/automation.server'
-import { createRoom, createWing, getClosetForRoom, placeMemory, traverseFromRoom } from '$lib/memory/palace.store'
-import { decayMemories, pruneMemories } from '$lib/memory/memory.server'
-import { listMemories } from '$lib/memory/memory.server'
 import {
 	listSkillSummaries,
 	getSkillByName,
@@ -692,7 +687,6 @@ export const toolSchemas = {
 	}),
 	file_info: z.object({ path: z.string().min(1) }),
 	browser_screenshot: z.object({ url: z.string().url().optional() }),
-	memory_search: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).default(5) }),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -702,36 +696,6 @@ export const toolSchemas = {
 		prompt: z.string().min(1).max(2000),
 		model: z.enum(['flux', 'sdxl', 'dall-e']).default('flux'),
 		size: z.enum(['256x256', '512x512', '1024x1024']).default('1024x1024'),
-	}),
-	artifact_create: z.object({
-		type: z.enum([
-			'markdown',
-			'code',
-			'config',
-			'image',
-			'svg',
-			'mermaid',
-			'html',
-			'svelte',
-			'data_table',
-			'chart',
-			'audio',
-			'video',
-		]),
-		title: z.string().min(1).max(200),
-		content: z.string(),
-		language: z.string().max(60).optional(),
-		category: z.string().max(60).optional(),
-	}),
-	artifact_update: z.object({
-		artifactId: z.string().uuid(),
-		content: z.string(),
-		title: z.string().min(1).max(200).optional(),
-	}),
-	artifact_storage_update: z.object({
-		artifactId: z.string().uuid(),
-		key: z.string().min(1).max(200),
-		value: z.unknown(),
 	}),
 	update_agent: z.object({
 		agentId: z.string().uuid(),
@@ -771,48 +735,6 @@ export const toolSchemas = {
 	}),
 	delete_automation: z.object({
 		automationId: z.string().uuid(),
-	}),
-	palace_create_wing: z.object({
-		name: z.string().min(1).max(120),
-		description: z.string().max(500).optional(),
-	}),
-	palace_create_room: z.object({
-		wingId: z.string().uuid(),
-		name: z.string().min(1).max(120),
-		description: z.string().max(500).optional(),
-		closetForRoomId: z.string().uuid().optional(),
-	}),
-	palace_place_drawer: z.object({
-		content: z.string().min(1),
-		category: z.string().min(1).optional(),
-		importance: z.number().min(0).max(1).optional(),
-		wingId: z.string().uuid().optional(),
-		roomId: z.string().uuid().optional(),
-		hallType: z.enum(['facts', 'events', 'discoveries', 'preferences', 'advice']).optional(),
-	}),
-	palace_update_closet: z.object({
-		roomId: z.string().uuid(),
-		summary: z.string().min(1),
-	}),
-	palace_search: z.object({
-		query: z.string().min(1),
-		limit: z.number().int().min(1).max(20).default(8),
-	}),
-	palace_check_duplicate: z.object({
-		content: z.string().min(1),
-		limit: z.number().int().min(1).max(20).default(6),
-	}),
-	palace_decay: z.object({
-		lambda: z.number().min(0).max(1).default(0.03),
-	}),
-	palace_prune: z.object({
-		threshold: z.number().min(0).max(1).default(0.08),
-	}),
-	palace_detect_contradictions: z.object({
-		limit: z.number().int().min(1).max(30).default(20),
-	}),
-	palace_regenerate_l1: z.object({
-		limit: z.number().int().min(3).max(20).default(10),
 	}),
 	ask_user: z.object({
 		questions: z
@@ -884,15 +806,9 @@ const toolDescriptions: Record<ToolName, string> = {
 	search_files: 'Search file contents in the workspace (ripgrep-style) with optional regex and ignore controls.',
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
-	memory_search: 'Search persistent memory for relevant information.',
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
-	artifact_create:
-		'Create a persistent artifact (document, code, config, diagram, etc.). Use for code snippets over 15 lines, full documents, configs, diagrams, data tables, HTML pages, and Svelte components.',
-	artifact_update: 'Update the content of an existing artifact. Creates a new version automatically.',
-	artifact_storage_update:
-		"Update a key in an artifact's persistent storage. Used for reactive/living artifacts like trackers and dashboards.",
 	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
 	pause_agent: 'Pause an agent so it is not used for delegations.',
 	resume_agent: 'Resume a paused agent and mark it active again.',
@@ -901,16 +817,6 @@ const toolDescriptions: Record<ToolName, string> = {
 	list_automations: 'List automations for the current user.',
 	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',
 	delete_automation: 'Delete an automation by id.',
-	palace_create_wing: 'Create a Memory Palace wing for a domain.',
-	palace_create_room: 'Create a Memory Palace room within a wing.',
-	palace_place_drawer: 'Insert a raw memory drawer into a specific wing/room/hall.',
-	palace_update_closet: 'Update or create the closet summary for a room.',
-	palace_search: 'Search the Memory Palace memories using semantic + text retrieval.',
-	palace_check_duplicate: 'Check likely duplicate memories for a candidate drawer.',
-	palace_decay: 'Apply memory decay to non-pinned memories.',
-	palace_prune: 'Prune low-importance memories from the palace.',
-	palace_detect_contradictions: 'Detect likely contradictory memory pairs.',
-	palace_regenerate_l1: 'Regenerate a concise L1 always-on memory summary set.',
 	ask_user:
 		'Ask the user one or more focused clarifying questions with prefilled answer options. Each question should have ~3 prefilled options — prefer splitting a broad inquiry into multiple focused questions rather than providing many options in a single question. Use when you need explicit user input before proceeding.',
 	list_skills:
@@ -1130,18 +1036,6 @@ export async function executeTool(call: ToolCall, userId: string) {
 				}
 			}
 
-			if (call.name === 'memory_search') {
-				const input = toolSchemas.memory_search.parse(call.arguments)
-				const matches = await searchMemories(input.query, input.limit)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: matches,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
 			if (call.name === 'image_generate') {
 				const input = toolSchemas.image_generate.parse(call.arguments)
 				const result = await generateImage(input.prompt, input.model, input.size)
@@ -1150,103 +1044,6 @@ export async function executeTool(call: ToolCall, userId: string) {
 					tool: call.name,
 					input,
 					result,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'artifact_create') {
-				const input = toolSchemas.artifact_create.parse(call.arguments)
-				const [artifact] = await db
-					.insert(artifacts)
-					.values({
-						type: input.type,
-						title: input.title,
-						content: input.content,
-						language: input.language ?? null,
-						category: input.category ?? null,
-						conversationId: (call as ToolCallWithContext).conversationId ?? null,
-						messageId: (call as ToolCallWithContext).messageId ?? null,
-					})
-					.returning()
-
-				await db.insert(artifactVersions).values({
-					artifactId: artifact.id,
-					version: 1,
-					content: input.content,
-					language: input.language ?? null,
-					metadata: {},
-				})
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { artifactId: artifact.id, title: artifact.title, type: artifact.type },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'artifact_update') {
-				const input = toolSchemas.artifact_update.parse(call.arguments)
-
-				const [existing] = await db.select().from(artifacts).where(eq(artifacts.id, input.artifactId)).limit(1)
-				if (!existing) {
-					return { success: false, tool: call.name, error: 'Artifact not found', executionMs: Date.now() - startedAt }
-				}
-
-				const updates: Record<string, unknown> = { content: input.content, updatedAt: new Date() }
-				if (input.title) updates.title = input.title
-
-				await db.update(artifacts).set(updates).where(eq(artifacts.id, input.artifactId))
-
-				// Auto-version
-				const [maxRow] = await db
-					.select({ maxVersion: max(artifactVersions.version) })
-					.from(artifactVersions)
-					.where(eq(artifactVersions.artifactId, input.artifactId))
-
-				const nextVersion = (maxRow?.maxVersion ?? 0) + 1
-				await db.insert(artifactVersions).values({
-					artifactId: input.artifactId,
-					version: nextVersion,
-					content: input.content,
-					language: existing.language,
-					metadata: {},
-				})
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { artifactId: input.artifactId, version: nextVersion },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'artifact_storage_update') {
-				const input = toolSchemas.artifact_storage_update.parse(call.arguments)
-
-				const [existing] = await db
-					.select({ storage: artifacts.storage })
-					.from(artifacts)
-					.where(eq(artifacts.id, input.artifactId))
-					.limit(1)
-
-				if (!existing) {
-					return { success: false, tool: call.name, error: 'Artifact not found', executionMs: Date.now() - startedAt }
-				}
-
-				const newStorage = { ...existing.storage, [input.key]: input.value }
-				await db
-					.update(artifacts)
-					.set({ storage: newStorage, updatedAt: new Date() })
-					.where(eq(artifacts.id, input.artifactId))
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { artifactId: input.artifactId, updatedKey: input.key },
 					executionMs: Date.now() - startedAt,
 				}
 			}
@@ -1390,201 +1187,6 @@ export async function executeTool(call: ToolCall, userId: string) {
 					tool: call.name,
 					input,
 					result: { deleted: input.automationId },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_create_wing') {
-				const input = toolSchemas.palace_create_wing.parse(call.arguments)
-				const created = await createWing(userId, input.name, input.description)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: created,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_create_room') {
-				const input = toolSchemas.palace_create_room.parse(call.arguments)
-				const created = await createRoom(input.wingId, input.name, {
-					description: input.description,
-					closetForRoomId: input.closetForRoomId,
-				})
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: created,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_place_drawer') {
-				const input = toolSchemas.palace_place_drawer.parse(call.arguments)
-				const created = await placeMemory({
-					content: input.content,
-					category: input.category,
-					importance: input.importance,
-					wingId: input.wingId,
-					roomId: input.roomId,
-					hallType: input.hallType,
-					isCloset: false,
-				})
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: created,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_update_closet') {
-				const input = toolSchemas.palace_update_closet.parse(call.arguments)
-				const closet = await getClosetForRoom(input.roomId)
-				if (closet) {
-					const updated = await placeMemory({
-						content: input.summary,
-						category: 'closet',
-						importance: 0.8,
-						wingId: closet.wingId,
-						roomId: closet.id,
-						hallType: 'discoveries',
-						isCloset: true,
-						closetForRoomId: input.roomId,
-					})
-					return {
-						success: true,
-						tool: call.name,
-						input,
-						result: updated,
-						executionMs: Date.now() - startedAt,
-					}
-				}
-
-				const roomGraph = await traverseFromRoom(input.roomId, 1)
-				if (!roomGraph) {
-					return { success: false, tool: call.name, error: 'Room not found', executionMs: Date.now() - startedAt }
-				}
-				const newClosetRoom = await createRoom(roomGraph.room.wingId, `${roomGraph.room.name} Closet`, {
-					description: `Summary closet for ${roomGraph.room.name}`,
-					closetForRoomId: input.roomId,
-				})
-
-				const created = await placeMemory({
-					content: input.summary,
-					category: 'closet',
-					importance: 0.8,
-					wingId: newClosetRoom.wingId,
-					roomId: newClosetRoom.id,
-					hallType: 'discoveries',
-					isCloset: true,
-					closetForRoomId: input.roomId,
-				})
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: created,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_search') {
-				const input = toolSchemas.palace_search.parse(call.arguments)
-				const matches = await searchMemories(input.query, input.limit)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: matches,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_check_duplicate') {
-				const input = toolSchemas.palace_check_duplicate.parse(call.arguments)
-				const matches = await searchMemories(input.content, input.limit)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: matches,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_decay') {
-				const input = toolSchemas.palace_decay.parse(call.arguments)
-				await decayMemories(input.lambda)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { decayed: true },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_prune') {
-				const input = toolSchemas.palace_prune.parse(call.arguments)
-				const pruned = await pruneMemories(input.threshold)
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { pruned },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_detect_contradictions') {
-				const input = toolSchemas.palace_detect_contradictions.parse(call.arguments)
-				const rows = await listMemories({ limit: Math.max(40, input.limit * 2) })
-				const contradictions: Array<{ aId: string; bId: string; a: string; b: string }> = []
-
-				for (let i = 0; i < rows.length; i++) {
-					const a = rows[i]
-					for (let j = i + 1; j < rows.length; j++) {
-						const b = rows[j]
-						const aText = a.content.toLowerCase().trim()
-						const bText = b.content.toLowerCase().trim()
-						if (
-							(aText.startsWith('not ') && aText.replace(/^not\s+/, '') === bText) ||
-							(bText.startsWith('not ') && bText.replace(/^not\s+/, '') === aText)
-						) {
-							contradictions.push({ aId: a.id, bId: b.id, a: a.content, b: b.content })
-							if (contradictions.length >= input.limit) break
-						}
-					}
-					if (contradictions.length >= input.limit) break
-				}
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: contradictions,
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'palace_regenerate_l1') {
-				const input = toolSchemas.palace_regenerate_l1.parse(call.arguments)
-				const rows = await listMemories({ limit: 120 })
-				const summaries = rows
-					.filter((row) => !row.isCloset)
-					.sort((a, b) => Number(b.importance) - Number(a.importance))
-					.slice(0, input.limit)
-					.map((row) => ({ id: row.id, hallType: row.hallType, content: row.content }))
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: summaries,
 					executionMs: Date.now() - startedAt,
 				}
 			}

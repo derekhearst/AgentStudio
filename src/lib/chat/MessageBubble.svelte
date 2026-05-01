@@ -2,17 +2,7 @@
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import SubagentBlockCard from './SubagentBlockCard.svelte';
-	import ArtifactPreviewCard from '$lib/artifacts/ArtifactPreviewCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
-
-	type ArtifactPreview = {
-		id: string;
-		type: string;
-		title: string;
-		content: string;
-		language: string | null;
-		messageId: string | null;
-	};
 
 	type MessageRow = {
 		id: string;
@@ -53,19 +43,13 @@
 
 	let {
 		message,
-		artifacts = [],
 		onEdit,
 		onRegenerate,
-		onOpenArtifact,
 	} = $props<{
 		message: MessageRow;
-		artifacts?: ArtifactPreview[];
 		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
-		onOpenArtifact?: ((artifactId: string) => void) | undefined;
 	}>();
-
-	const messageArtifacts = $derived(artifacts.filter((a: ArtifactPreview) => a.messageId === message.id));
 
 	let editing = $state(false);
 	let editingBusy = $state(false);
@@ -334,13 +318,6 @@
 		</div>
 	{/if}
 
-	{#if messageArtifacts.length > 0}
-		<div class="mt-2 w-full space-y-1">
-			{#each messageArtifacts as artifact (artifact.id)}
-				<ArtifactPreviewCard {artifact} onOpen={onOpenArtifact} />
-			{/each}
-		</div>
-	{/if}
 </article>
 
 <style>

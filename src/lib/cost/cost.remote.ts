@@ -51,7 +51,7 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 			.groupBy(llmUsage.model)
 			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`),
 
-		// Cost by source (chat, agent, titlegen, memory, etc.)
+		// Cost by source (chat, agent, titlegen, etc.)
 		db
 			.select({
 				source: llmUsage.source,

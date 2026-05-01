@@ -8,9 +8,7 @@
 	import Sidebar from '$lib/ui/Sidebar.svelte';
 	import MobileNav from '$lib/ui/MobileNav.svelte';
 	import RecentChats from '$lib/chat/RecentChats.svelte';
-	import DreamCycles from '$lib/memory/DreamCycles.svelte';
 	import SidePanel from '$lib/ui/SidePanel.svelte';
-	import { dreamPanel } from '$lib/state.svelte';
 	import SkillStats from '$lib/skills/SkillStats.svelte';
 	import { skillsPanel } from '$lib/state.svelte';
 
@@ -20,12 +18,11 @@
 	const isLoginRoute = $derived(page.url.pathname.startsWith('/login'));
 	const isChatRoute = $derived(page.url.pathname.startsWith('/chat'));
 	const isChatDetailRoute = $derived(/^\/chat\/[^/]+$/.test(page.url.pathname));
-	const isMemoryRoute = $derived(page.url.pathname.startsWith('/memory'));
 	const isSettingsRoute = $derived(page.url.pathname.startsWith('/settings'));
 	const isSkillsRoute = $derived(page.url.pathname.startsWith('/skills'));
 	const isChatOrHome = $derived(isChatRoute || page.url.pathname === '/');
 	const showRecentChats = $derived(isChatRoute || page.url.pathname === '/');
-	const showAside = $derived(showRecentChats || isMemoryRoute || isSkillsRoute);
+	const showAside = $derived(showRecentChats || isSkillsRoute);
 
 	if (browser) {
 		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -149,10 +146,6 @@
 				{#if showRecentChats}
 					<SidePanel bind:open={chatPanelOpen}>
 						<RecentChats />
-					</SidePanel>
-				{:else if isMemoryRoute}
-					<SidePanel bind:open={dreamPanel.open}>
-						<DreamCycles />
 					</SidePanel>
 				{:else if isSkillsRoute}
 					<SidePanel bind:open={skillsPanel.open}>

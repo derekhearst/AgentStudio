@@ -17,7 +17,7 @@ const SYSTEM_SKILL_FILES = [
 ## What this app is best at
 - Conversational coding assistance across your local workspace
 - Tool-driven task execution (files, shell, web, browser automation)
-- Persistent memory and reusable skills for consistent responses
+- Reusable skills for consistent responses
 - Agent/task orchestration for larger work items
 
 ## Daily workflow
@@ -25,7 +25,7 @@ const SYSTEM_SKILL_FILES = [
 2. Pick the model and reasoning effort appropriate for the task.
 3. State your goal plus constraints (files, deadlines, style, no-go zones).
 4. Ask for concrete outputs: code edits, tests, docs updates, and validation.
-5. Review artifacts, tool calls, and diffs before finalizing.
+5. Review tool calls and diffs before finalizing.
 
 ## Prompting pattern that works
 Use this format:
@@ -50,17 +50,11 @@ Use for interactive implementation, debugging, design iteration, and code review
 ## Skills
 Use /skills to store repeatable instructions, standards, and domain playbooks.
 
-## Memory
-Use /memory for durable facts, context, and relationships that should persist between sessions.
-
 ## Agents
 Use /agents to manage sub-agents and their configurations.
 
-## Artifacts
-Use /artifacts for durable outputs: docs, code snippets, diagrams, and generated assets.
-
 ## Automations
-Use /automations for scheduled and recurring agent workflows (dream cycles, etc.).
+Use /automations for scheduled and recurring agent workflows.
 
 ## Cost
 Use /cost to track usage and budgets.
@@ -95,7 +89,6 @@ Configure defaults (model, budgets, notifications, behavior preferences) in /set
 
 ## Build reusable knowledge
 - Promote repeated guidance into /skills.
-- Save stable facts into /memory for better future context.
 
 ## Review mindset
 When requesting review, prioritize bugs, regressions, and missing tests before style feedback.`,

@@ -23,9 +23,7 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Model picker per conversation
 - Composer-level reasoning effort picker (`off`, `minimal`, `low`, `medium`, `high`, `max`) for supported models
 - File attachments (images, PDFs, CSV, JSON, Excel)
-- Artifact side panel (collapsed, panel, fullscreen modes)
 - Auto-title generation
-- Memory context auto-injection before each response
 - Tool call visibility with collapsible cards
 - ask_user prompt surface docked above the composer (inline dropdown, not modal)
 - Multi-question ask_user flow with previous/next navigation and per-question focus
@@ -54,33 +52,13 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - One-click duplicate from any existing automation to pre-fill a new automation draft
 - Lifecycle actions in-page: enable/disable, delete, and jump to the linked conversation thread
 
-### 4. Memory System
-
-- Vector embeddings via pgvector for semantic search
-- Hybrid retrieval: semantic similarity + keyword matching
-- Typed memory relations (supports, contradicts, depends_on, part_of) with strength scores
-- Automatic extraction from conversations and agent runs
-- Dreaming Agent consolidation via automations: decay, prune, deduplicate, categorize, resolve contradictions
-- Memory Palace foundation: wings, rooms, hall types, and closet/drawer metadata on memories
-- Layered runtime memory loading in chat (L0 identity, L1 essential story, L2 topic recall)
-- Memory explorer with search, category filters, importance sorting, relation graph
-- Pin memories to disable decay
-
-### 5. Artifacts
-
-- 14 artifact types: markdown, code, config, image, SVG, Mermaid, HTML, Svelte, data table, chart, audio, video
-- Automatic versioning on each update
-- Gallery view (list, grid, fullscreen) with search and filters
-- Linked to conversations and messages
-- Delete control (pin, tag editing, category editing, and rollback removed — content managed via chat)
-
-### 6. Web Search
+### 4. Web Search
 
 - Privacy-respecting metasearch via self-hosted SearXNG
 - Available as an agent tool during task execution and chat
 - Structured results: title, URL, snippet
 
-### 7. Code Sandbox
+### 5. Code Sandbox
 
 - Shell execution with timeout and buffer limits
 - File operations: read (full or line-range), write, unified-diff patch apply, deterministic string replace, delete, list, move/rename, content search, and metadata lookup
@@ -89,26 +67,26 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Built into the Docker container (no external sandbox dependency)
 - Per-user workspace isolation (filesystem and shell tools run inside a user-scoped root)
 
-### 8. Model Selection
+### 6. Model Selection
 
 - Uses the exact model selected by the user for each prompt
 - Falls back to the default model from settings when no model is explicitly selected
 - Configurable via settings
 
-### 9. Cost Tracking
+### 7. Cost Tracking
 
 - Daily, weekly, and monthly spend views
 - Per-model and per-conversation cost breakdowns
 - Budget alerts with daily and monthly limits
 - Progress bars for spend vs budget
 
-### 10. Activity Feed
+### 8. Activity Feed
 
-- Chronological event stream: agent action, memory created, consolidation run, chat started
+- Chronological event stream: agent action, chat started, review and skill events
 - Type filter pills and refresh
 - Badge-coded entries with entity links
 
-### 12. Notifications & PWA
+### 9. Notifications & PWA
 
 - Installable on mobile and desktop as a Progressive Web App
 - Offline app shell caching with stale cache cleanup
@@ -116,26 +94,26 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - In-app notification feed with read/unread markers
 - Test notification sender in settings
 
-### 13. Settings
+### 10. Settings
 
 - Default model selection
 - Theme (AgentStudio-night)
 - Notification preferences
-- Automation and tool approval configuration (plus memory consolidation controls via Dreaming Agent tools)
+- Automation and tool approval configuration
 - Per-tool approval checkboxes (configure exactly which tools require approval)
 - Budget configuration (daily and monthly limits)
 - Context window configuration (reserved response, auto-compact threshold, compaction model)
 - Push subscription management
 - PWA install prompt
 
-### 14. Skills
+### 11. Skills
 
 - Skill library for reusable instruction bundles used by chat and agents
 - Nested skill files for focused, modular guidance
 - Read-only browse-only skills page (creation and management via chat orchestrator)
 - Built-in onboarding skill (`drokbot-guide`) visible in `/skills`
 
-### 15. Authentication and User Management
+### 12. Authentication and User Management
 
 - Multi-user account system with lowercase usernames
 - WebAuthn passkey login and account claiming
@@ -144,10 +122,10 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 - Admin-only user management page for add/remove (soft-delete) accounts
 - Server hook enforces authentication and admin-only routes (`/users`)
 
-### 16. Database Bootstrap
+### 13. Database Bootstrap
 
 - On startup, the server ensures the PostgreSQL database named in `DATABASE_URL` exists before handling requests
-- Required extensions are installed automatically: `pgcrypto` for UUID defaults and `vector` for memory embeddings
+- Required extensions are installed automatically: `pgcrypto` for UUID defaults
 - Bundled Drizzle SQL migrations are applied automatically on startup so container deploys do not require a separate manual migration step
 - If the database has AgentStudio schema objects but no recorded Drizzle migrations, startup resets the app schemas and reapplies migrations from scratch
 
@@ -182,9 +160,6 @@ AgentStudio is a SvelteKit PWA that provides a personal, self-hosted AI agent yo
 | `/automations`              | Automation board + creation studio |
 | `/skills`                   | Skills browser (read-only)         |
 | `/skills/[id]`              | Skill detail + files               |
-| `/memory`                   | Memory explorer (read-only)        |
-| `/memory/[id]`              | Memory detail + relation graph     |
-| `/artifacts`                | Artifact gallery (delete only)     |
 | `/cost`                     | Cost tracking + budgets            |
 | `/activity`                 | Activity event feed                |
 | `/settings`                 | Configuration + tool toggles       |
