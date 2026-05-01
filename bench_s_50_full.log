@@ -8,3 +8,45 @@ $ bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmeme
 [memory] extractor returned unusable JSON, using fallback
 [ingest] (2/50) 118b2229 sessions=45 drawers=485 eta=13907s
 [ingest] (3/50) 51a45a95 sessions=50 drawers=529 eta=13926s
+[ingest] (4/50) 58bf7951 sessions=50 drawers=509 eta=13731s
+[ingest] (5/50) 1e043500 sessions=50 drawers=510 eta=13363s
+[ingest] (6/50) c5e8278d sessions=44 drawers=469 eta=12852s
+[ingest] (7/50) 6ade9755 sessions=50 drawers=505 eta=12519s
+[ingest] (8/50) 6f9b354f sessions=50 drawers=500 eta=12273s
+[ingest] (9/50) 58ef2f1c sessions=50 drawers=518 eta=12047s
+[ingest] (10/50) f8c5f88b sessions=46 drawers=487 eta=11620s
+[ingest] (11/50) 5d3d2817 sessions=50 drawers=475 eta=11238s
+[ingest] (12/50) 7527f7e2 sessions=45 drawers=490 eta=10881s
+[ingest] (13/50) c960da58 sessions=46 drawers=504 eta=10630s
+[ingest] FAILED 3b6f954b 72 | 	const out: number[][] = new Array(texts.length)
+73 | 
+74 | 	for (let start = 0; start < texts.length; start += MAX_BATCH) {
+75 | 		const slice = texts.slice(start, start + MAX_BATCH)
+76 | 		const result = await callEmbeddings(model, slice)
+77 | 		for (const item of result.data) {
+                          ^
+TypeError: undefined is not an object (evaluating 'result.data')
+      at embed (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\embeddings.server.ts:77:22)
+      at mineSession (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\mining.server.ts:209:27)
+      at ingestInstance (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:109:24)
+      at main (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:129:40)
+      at processTicksAndRejections (native:7:39)
+
+[ingest] (14/50) 726462e0 sessions=48 drawers=501 eta=10925s
+[ingest] (15/50) 94f70d80 sessions=49 drawers=510 eta=10496s
+[ingest] (16/50) 66f24dbb sessions=50 drawers=507 eta=10118s
+[ingest] (17/50) ad7109d1 sessions=44 drawers=466 eta=9705s
+[ingest] (18/50) af8d2e46 sessions=50 drawers=495 eta=9417s
+[ingest] (19/50) dccbc061 sessions=49 drawers=505 eta=9085s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (20/50) c8c3f81d sessions=50 drawers=463 eta=8733s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (21/50) 8ebdbe50 sessions=48 drawers=487 eta=8421s
+[ingest] (22/50) 6b168ec8 sessions=50 drawers=482 eta=8124s
+[ingest] (23/50) 75499fd8 sessions=50 drawers=468 eta=7784s
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (24/50) 21436231 sessions=50 drawers=512 eta=7476s
+[ingest] (25/50) 95bcc1c8 sessions=46 drawers=487 eta=7332s
+[ingest] (26/50) 0862e8bf sessions=50 drawers=490 eta=7067s
+[ingest] (27/50) 853b0a1d sessions=50 drawers=495 eta=6844s
+[ingest] (28/50) a06e4cfe sessions=50 drawers=508 eta=6633s
