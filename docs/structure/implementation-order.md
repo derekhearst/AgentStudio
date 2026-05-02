@@ -19,7 +19,7 @@ This is the execution-order backlog for all planned domain work. It is optimized
 | 0    | Repo structure stable               | structure, llm, ui                                 | 3              |
 | 1    | Core execution state stable         | runs, context, cost, chat, workspace               | 4              |
 | 2    | Runtime composition stable          | tools, skills, runtime, tasks                      | 3              |
-| 3    | Governance controls stable          | policies, hooks, evaluations                       | 3              |
+| 3    | Governance controls stable          | settings, hooks, evaluations                       | 3              |
 | 4    | Feature services stable             | projects, memory, jobs, research                   | 4              |
 | 5    | End-to-end product workflows stable | source-control, observability, automations, agents | 4              |
 
@@ -101,8 +101,8 @@ UX-1. [ ] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 
 ### Wave 3 — Governance and Safety
 
-12. [ ] Policy engine and enforcement points
-    - Source: ../policies/plan.md
+12. [ ] Governance rules and enforcement points (approvals/denies/audit)
+    - Source: ../settings/plan.md
     - Depends on: #8, #11
     - Gate: deny/approve/audit paths enforced server-side
 
@@ -158,7 +158,7 @@ UX-1. [ ] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 22. [ ] Agents prompt-source + identity architecture
     - Source: ../agents/plan.md
     - Depends on: #9, #10
-    - Gate: prompt edits hot-reload via skills; no hardcoded orchestrator identity
+    - Gate: prompt edits hot-reload via skills; no hardcoded main-agent identity or agent-kind behavior
 
 ---
 
@@ -179,7 +179,7 @@ Use these lanes for multi-agent execution. A lane can run independently once its
 - Wave 3: #13
 - Wave 5: #22
 
-### Lane C — Cost/Policy/Review
+### Lane C — Cost/Governance/Review
 
 - Wave 1: #5 + #6
 - Wave 3: #12 + #14
@@ -221,7 +221,7 @@ Use these lanes for multi-agent execution. A lane can run independently once its
 
 ### Gate G3 (after Wave 3)
 
-- [ ] Policy denies are enforced and audited
+- [ ] Governance denies/approvals are enforced and audited
 - [ ] Hook failures cannot crash active runs
 - [ ] Evaluations emit durable findings attached to run/task
 
