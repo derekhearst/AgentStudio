@@ -21,6 +21,7 @@ import { eq } from 'drizzle-orm'
 import { requireAdminRequestUser, normalizeUsername } from '$lib/auth/auth.server'
 import { users } from '$lib/auth/auth.schema'
 import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
+import { resolveWorkspaceRoot, safePathWithin, ensureWorkspace } from '$lib/workspace/workspace.server'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -70,32 +71,22 @@ const execFileAsync = promisify(execFile)
 let browser: Browser | null = null
 let page: Page | null = null
 
-const toolUserContext = new AsyncLocalStorage<{ userId: string }>()
-
-function sanitizeUserId(userId: string) {
-	if (!/^[a-zA-Z0-9_-]+$/.test(userId)) {
-		throw new Error('Invalid user context for sandbox workspace')
-	}
-	return userId
-}
+const toolUserContext = new AsyncLocalStorage<{ userId: string; runId?: string | null }>()
 
 function getWorkspace() {
 	const ctx = toolUserContext.getStore()
 	if (!ctx?.userId) {
 		throw new Error('Missing user context for tool execution')
 	}
-	const baseRoot = env.SANDBOX_WORKSPACE || '/workspace/users'
-	return resolve(baseRoot, sanitizeUserId(ctx.userId))
+	return resolveWorkspaceRoot({
+		userId: ctx.userId,
+		runId: ctx.runId ?? null,
+		sandboxRoot: env.SANDBOX_WORKSPACE,
+	})
 }
 
 function safePath(userPath: string): string {
-	const workspace = getWorkspace()
-	const resolved = resolve(workspace, userPath)
-	const workspaceWithSep = workspace.endsWith(sep) ? workspace : `${workspace}${sep}`
-	if (!(resolved === workspace || resolved.startsWith(workspaceWithSep))) {
-		throw new Error(`Path escapes sandbox workspace: ${userPath}`)
-	}
-	return resolved
+	return safePathWithin(getWorkspace(), userPath)
 }
 
 interface ShellOpts {
@@ -105,7 +96,15 @@ interface ShellOpts {
 }
 
 async function ensureWorkspaceDir() {
-	await mkdir(getWorkspace(), { recursive: true })
+	const ctx = toolUserContext.getStore()
+	if (!ctx?.userId) {
+		throw new Error('Missing user context for tool execution')
+	}
+	await ensureWorkspace({
+		userId: ctx.userId,
+		runId: ctx.runId ?? null,
+		sandboxRoot: env.SANDBOX_WORKSPACE,
+	})
 }
 
 async function shellExec(command: string, opts: ShellOpts = {}) {
@@ -876,8 +875,8 @@ function normalizeToolName(name: string): ToolName | null {
 	return null
 }
 
-export async function executeTool(call: ToolCall, userId: string) {
-	return toolUserContext.run({ userId }, async () => {
+export async function executeTool(call: ToolCall, userId: string, runId?: string | null) {
+	return toolUserContext.run({ userId, runId: runId ?? null }, async () => {
 		const startedAt = Date.now()
 		const normalizedName = normalizeToolName(call.name)
 		if (!normalizedName) {

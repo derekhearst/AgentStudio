@@ -134,7 +134,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-02 — Phase 1 (per-run ephemeral workspace dirs) shipped on branch `claude/nervous-kapitsa-18255e`. New `src/lib/workspace/workspace.server.ts` exports `resolveWorkspaceRoot({ userId, runId?, sandboxRoot? })`, `safePathWithin`, and `ensureWorkspace`. The `tools.server.ts` AsyncLocalStorage now carries `runId` alongside `userId`; FS tools resolve to `<sandbox>/<userId>/runs/<runId>` per active run, falling back to legacy `<sandbox>/<userId>` when no runId is in context (back-compat for ad-hoc/admin invocations). `executeTool(call, userId, runId?)` accepts the optional runId; chat-stream and inline-subagent call sites pass `run.id`. Phases 2-5 (persistent mode, GC job, git worktree, container isolation) still pending.
 
 
 

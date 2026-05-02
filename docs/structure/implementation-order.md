@@ -143,6 +143,14 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 7. [ ] Workspace sandbox baseline and task execution isolation
    - Source: ../workspace/plan.md
    - Gate: isolated workspaces proven with e2e checks
+   - Evidence (Phase 1 — per-run ephemeral workspace dirs, 2026-05-02):
+     - New module: [src/lib/workspace/workspace.server.ts](../../src/lib/workspace/workspace.server.ts) — `resolveWorkspaceRoot`, `safePathWithin`, `ensureWorkspace`
+     - Barrel: [src/lib/workspace/index.ts](../../src/lib/workspace/index.ts)
+     - `executeTool(call, userId, runId?)` accepts optional runId; AsyncLocalStorage now carries it: [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts)
+     - Call sites pass `run.id`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)
+     - Unit tests for path resolution + traversal rejection: [tests/workspace.isolation.spec.ts](../../tests/workspace.isolation.spec.ts)
+     - Live test proving a `file_write` from chat lands in `<sandbox>/<userId>/runs/<runId>/`: [tests/workspace.live.spec.ts](../../tests/workspace.live.spec.ts)
+   - Phases 2-5 (persistent mode, GC job, git worktree, container isolation) still pending — keep `[ ]` until all phases land.
 
 ### Wave 2 — Orchestration Core
 

@@ -782,7 +782,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							messageId: null,
 						}
 
-						const toolResult = await executeTool(toolCall, user.id)
+						const toolResult = await executeTool(toolCall, user.id, run.id)
 
 						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 						const resultStr = trimToolResult(tc.name, rawResultStr)

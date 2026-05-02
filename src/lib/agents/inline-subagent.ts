@@ -265,7 +265,7 @@ export async function runInlineSubagent(
 					conversationId: subConversation.id,
 					messageId: null,
 				}
-				const toolResult = await executeTool(toolCall, userId)
+				const toolResult = await executeTool(toolCall, userId, run.id)
 				const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 				const resultStr = trimToolResult(tc.name, rawResultStr)
 
