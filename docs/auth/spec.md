@@ -2,36 +2,37 @@
 
 ## Overview
 
-Auth handles user identity, session management, and access control for AgentStudio. Authentication is exclusively passkey-based (WebAuthn) — no passwords. The first admin account is claimed via a one-time bootstrap token set in environment variables. Sessions are cookie-based with server-side token hashing.
+Auth handles user identity, session management, and access control for AgentStudio. Two authentication methods are supported: username/password (the default) and passkeys (WebAuthn, optional per-user). The first admin account is created through a guided setup page shown when no users exist — no environment variable bootstrap required. New users are added by an admin directly or via invite links.
 
 ## Data Model
 
 ### `users` table
 
-| Column        | Type        | Notes                                                     |
-| ------------- | ----------- | --------------------------------------------------------- |
-| `id`          | uuid        | Primary key                                               |
-| `name`        | text        | Display name                                              |
-| `username`    | text        | Unique, URL-safe (letters, numbers, `_`, `-`, 3–32 chars) |
-| `role`        | enum        | `admin` or `user`                                         |
-| `isActive`    | boolean     | Soft-disabled users cannot log in                         |
-| `claimedAt`   | timestamptz | Set when the bootstrap claim is consumed                  |
-| `lastLoginAt` | timestamptz | Updated on each successful login                          |
-| `deletedAt`   | timestamptz | Soft delete timestamp                                     |
-| `createdAt`   | timestamptz |                                                           |
+| Column         | Type        | Notes                                                     |
+| -------------- | ----------- | --------------------------------------------------------- |
+| `id`           | uuid        | Primary key                                               |
+| `name`         | text        | Display name                                              |
+| `username`     | text        | Unique, URL-safe (letters, numbers, `_`, `-`, 3–32 chars) |
+| `role`         | enum        | `admin` or `user`                                         |
+| `passwordHash` | text?       | bcrypt hash of password; null if user has no password set |
+| `isActive`     | boolean     | Soft-disabled users cannot log in                         |
+| `lastLoginAt`  | timestamptz | Updated on each successful login                          |
+| `deletedAt`    | timestamptz | Soft delete timestamp                                     |
+| `createdAt`    | timestamptz |                                                           |
 
 ### `userPasskeys` table
 
-| Column         | Type        | Notes                           |
-| -------------- | ----------- | ------------------------------- |
-| `id`           | uuid        | Primary key                     |
-| `userId`       | uuid        | FK → `users`                    |
-| `credentialId` | text        | WebAuthn credential ID (unique) |
-| `publicKey`    | text        | Stored public key               |
-| `counter`      | integer     | Replay-attack counter           |
-| `transports`   | text[]      | Authenticator transports        |
-| `createdAt`    | timestamptz |                                 |
-| `lastUsedAt`   | timestamptz | Updated on each successful auth |
+| Column         | Type        | Notes                                             |
+| -------------- | ----------- | ------------------------------------------------- |
+| `id`           | uuid        | Primary key                                       |
+| `userId`       | uuid        | FK → `users`                                      |
+| `credentialId` | text        | WebAuthn credential ID (unique)                   |
+| `publicKey`    | text        | Stored public key                                 |
+| `counter`      | integer     | Replay-attack counter                             |
+| `label`        | text        | Human label (e.g., "Touch ID", "YubiKey")         |
+| `transports`   | text[]      | Authenticator transports                          |
+| `createdAt`    | timestamptz |                                                   |
+| `lastUsedAt`   | timestamptz | Updated on each successful auth                   |
 
 ### `authChallenges` table
 
@@ -58,79 +59,125 @@ Short-lived rows used during WebAuthn registration and authentication ceremonies
 
 The raw session token is stored only in the HTTP-only cookie. Only the hash is persisted.
 
-### `bootstrapClaims` table
+### `userInvites` table
 
-| Column      | Type        | Notes                                               |
-| ----------- | ----------- | --------------------------------------------------- |
-| `id`        | uuid        | Primary key                                         |
-| `tokenHash` | text        | SHA-256 of the claim key (unique)                   |
-| `expiresAt` | timestamptz | 30 minutes from creation                            |
-| `usedAt`    | timestamptz | Set when claimed; claim cannot be reused after this |
-| `createdAt` | timestamptz |                                                     |
+| Column      | Type        | Notes                                                   |
+| ----------- | ----------- | ------------------------------------------------------- |
+| `id`        | uuid        | Primary key                                             |
+| `tokenHash` | text        | SHA-256 of the invite code (unique)                     |
+| `role`      | enum        | `admin` or `user` — role granted on registration        |
+| `createdBy` | uuid        | FK → `users` — admin who created the invite             |
+| `expiresAt` | timestamptz | Configurable; default 7 days                            |
+| `usedAt`    | timestamptz | Set when invite is consumed                             |
+| `usedBy`    | uuid?       | FK → `users` — user who registered with this invite     |
+| `createdAt` | timestamptz |                                                         |
 
-## Authentication Flow
+---
 
-### Bootstrap (first admin)
+## Authentication Flows
 
-1. Admin sets `USER_NAME` and `CLAIM_KEY` environment variables.
-2. On first boot, the server creates the admin user and a `bootstrapClaims` row hashed from `CLAIM_KEY`.
-3. Admin navigates to `/login`, enters their username, and uses the claim key to register their first passkey.
-4. `claimedAt` is set on the user; the bootstrap claim is marked as used. Cannot be replayed.
+### First-run setup
 
-### Passkey registration
+When no users exist in the database, the application redirects all routes to `/setup`. The setup page:
 
-1. Client calls `generateRegistrationChallenge(userId)` — creates an `authChallenges` row and returns WebAuthn options.
-2. User's device produces a credential response.
-3. Client calls `verifyRegistration(userId, response)` — verifies the challenge, inserts a `userPasskeys` row, creates a session.
+1. Prompts for a display name, username, and password.
+2. Creates the first user with `role = 'admin'` and the hashed password.
+3. Creates an `authSessions` row and sets the session cookie.
+4. Redirects to `/`.
 
-### Passkey authentication
+Once any user exists, `/setup` is permanently unavailable (returns 404).
 
-1. Client calls `generateAuthenticationChallenge(userId)` — creates an `authChallenges` row, returns WebAuthn options.
-2. User's device signs the challenge.
-3. Client calls `verifyAuthentication(userId, response)` — verifies signature and counter, updates `lastUsedAt`, creates a session, sets cookie.
+### Username / password login
 
-### Session validation
+1. User submits username and password via `POST /auth/login`.
+2. Server loads the user by username. If not found or `isActive = false`, return a generic "invalid credentials" error — do not distinguish missing user from wrong password.
+3. Server compares the submitted password against `passwordHash` using bcrypt.
+4. On success: create `authSessions` row, set `HttpOnly; SameSite=Strict; Secure` cookie, update `lastLoginAt`.
+5. On failure: return error after a minimum constant response delay (prevents timing attacks).
 
-`requireAuth(cookies)` — reads the session cookie, hashes the token, looks up `authSessions`, validates expiry, returns `AuthenticatedUser`. Throws `401` if absent or expired. Used in every server load function and API route that requires authentication.
+### Password change
 
-## Roles & Permissions
+`POST /auth/change-password` — requires current session + current password confirmation. Hashes the new password and updates `users.passwordHash`. All existing sessions except the current one are invalidated by deleting their `authSessions` rows.
 
-| Role    | Capabilities                                                   |
-| ------- | -------------------------------------------------------------- |
-| `admin` | Full access including user management, all observability views |
-| `user`  | Access to own data, own sessions, own approvals                |
+### Passkey registration (optional)
 
-Role checks are enforced server-side. The `requireAdmin()` helper throws `403` if the authenticated user is not an admin.
+Any authenticated user can add one or more passkeys from `/settings/security`:
+
+1. Client calls `GET /auth/passkey/register/begin` — server creates an `authChallenges` row and returns WebAuthn registration options.
+2. User completes authenticator gesture.
+3. Client calls `POST /auth/passkey/register/complete` — server verifies the response, creates a `userPasskeys` row, deletes the challenge.
+
+Passkeys are additive. A user with both a password and passkeys can use either to log in. Removing all passkeys does not affect password login.
+
+### Passkey login
+
+1. Client calls `POST /auth/passkey/login/begin` with username — server creates a challenge if the user has passkeys registered.
+2. User completes authenticator gesture.
+3. Client calls `POST /auth/passkey/login/complete` — server verifies assertion, updates `userPasskeys.counter` and `lastUsedAt`, creates session.
+
+### Invite-based registration
+
+Admin generates an invite link from `/admin/users/invite`:
+
+1. Server creates a `userInvites` row with a secure random token (only the hash is stored).
+2. Admin shares the link: `/register?invite=<token>`.
+3. New user opens the link, enters display name, username, and password.
+4. Server verifies the invite token (hash match, not expired, not used), creates the user, marks the invite used.
+
+---
+
+## Session Management
+
+Sessions expire after 30 days. On each request the server reads the cookie, hashes it, and looks up the `authSessions` row. If found and not expired, the request is authenticated. Sessions are not automatically renewed — users re-login after expiry.
+
+Admins can invalidate all sessions for a user from `/admin/users/[id]` (deletes all their `authSessions` rows).
+
+---
+
+## User Management
+
+`/admin/users` — list all users with role, last login, and active status.
+`/admin/users/invite` — generate invite links with configurable expiry and role.
+`/admin/users/[id]` — view user, change role, activate/deactivate, force-expire all sessions.
+
+Admins cannot view another user's password hash. Password resets are done by generating a new invite link and having the user re-register — invite registration overwrites `passwordHash` if the username is already claimed.
+
+---
 
 ## Key Functions
 
 | Function                                | Purpose                                    |
 | --------------------------------------- | ------------------------------------------ |
 | `requireAuth(cookies)`                  | Returns `AuthenticatedUser` or throws 401  |
-| `requireAdmin(cookies)`                 | Same as above but also enforces admin role |
+| `requireAdmin(cookies)`                 | Same but also enforces admin role          |
 | `createSessionForUser(userId, cookies)` | Creates session row + sets cookie          |
 | `signOut(cookies)`                      | Deletes session row + clears cookie        |
-| `normalizeUsername(input)`              | Trims input                                |
+| `normalizeUsername(input)`              | Trims and lowercases input                 |
 | `validateUsername(input)`               | Enforces character and length rules        |
+
+## Roles & Permissions
+
+| Role    | Capabilities                                                    |
+| ------- | --------------------------------------------------------------- |
+| `admin` | Full access including user management, all observability views  |
+| `user`  | Access to own data, own sessions, own approvals                 |
 
 ## Security Notes
 
-- Session tokens are never stored in plaintext — only their SHA-256 hash is persisted.
-- Challenges expire after 10 minutes and are single-use.
-- Bootstrap claims expire after 30 minutes and are single-use.
-- WebAuthn counter validation prevents credential replay attacks.
-- Cookies are `HttpOnly`, `SameSite=Strict`, and `Secure` in production.
+- Passwords are hashed with bcrypt, work factor ≥ 12.
+- Login errors never distinguish "user not found" from "wrong password."
+- Session tokens are 32 random bytes; only their SHA-256 hash is persisted — a stolen DB row cannot be used directly.
+- All auth cookies are `HttpOnly`, `SameSite=Strict`, `Secure`.
+- Challenge rows expire in 10 minutes and are single-use.
+- Invite tokens follow the same hash-only storage pattern as session tokens.
 - Soft-deleted users (`deletedAt` set) cannot authenticate.
-
-## Rewrite Authority
-
-The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+- WebAuthn counter validation prevents credential replay attacks.
 
 ## UI Contract
 
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
-
+- Surfaces: `/setup` first-run wizard, `/login` (password + passkey toggle), `/register` invite flow, `/settings/security` passkey management, `/admin/users` management list.
+- Validation and error behavior: username format errors shown inline; WebAuthn ceremony failures show a retry prompt with a non-technical summary.
+- Blocking actions: account disable and role change require explicit confirmation.
+- Mobile behavior: login and setup forms use single-column layout with persistent primary action.

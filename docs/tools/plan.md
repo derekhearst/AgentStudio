@@ -8,6 +8,8 @@ The `capabilityGroups` registry in [src/lib/tools/tools.ts](../../src/lib/tools/
 
 > **Depends on:** `docs/structure/plan.md` Step 8 (split `tools/catalog/` by family), `docs/skills/plan.md` (companion skills + context loading rules).
 
+> **Bootstrap slice (cycle-free):** Ship `alwaysOn` enforcement, `enable_capability`, and active-tool budgeting without companion-skill loading or agent-role specialization. This slice can land independently.
+
 > **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
@@ -132,10 +134,12 @@ If output exceeds threshold:
 
 1. Store the **full raw output** in durable storage (run event payload, workspace file, or artifact-like blob).
 2. Return to the model only:
-  - a short summary
-  - head excerpt
-  - tail excerpt
-  - a pointer/handle for reopening the full result
+
+- a short summary
+- head excerpt
+- tail excerpt
+- a pointer/handle for reopening the full result
+
 3. Allow the model to request the full payload later via explicit follow-up tooling.
 
 This matches Anthropic's context-management guidance and LangChain's tool-offloading guidance.
@@ -238,8 +242,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-

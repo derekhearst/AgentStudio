@@ -20,6 +20,7 @@ Tools are defined in code (`src/lib/tools/catalog/`), not in the database. Their
 | `projects` | no         | `create_project`, `open_artifact`, `save_artifact`, `list_artifacts`                              |
 | `memory`   | no         | `recall_memory`, `save_note`                                                                      |
 | `media`    | no         | `generate_image`, `describe_image`                                                                |
+| `research` | no         | `web_fetch`, `pdf_read`                                                                           |
 
 ### Tool definition shape
 
@@ -60,7 +61,7 @@ Capability groups persist for the duration of the run; they do not reset between
 The only tool available for enabling other tools. Always active.
 
 ```
-enable_capability(group: 'sandbox' | 'browser' | 'agents' | 'skills' | 'projects' | 'memory' | 'media')
+enable_capability(group: 'sandbox' | 'browser' | 'agents' | 'skills' | 'projects' | 'memory' | 'media' | 'research' | `mcp/<slug>`)
 → Returns: list of newly available tools and a one-line summary of the companion skill
 ```
 
@@ -117,9 +118,9 @@ Outputs that are under the threshold are returned inline.
 
 Tool calls that involve side effects (writes, deletes, shell commands) can be configured to require human approval before execution. The default approval requirement per tool is set in the tool definition and can be overridden:
 
-- Per-capability-group in agent config
-- Per-tool in agent config or session policy
-- Platform-wide in the policies domain
+- Per-capability-group in agent config (`agents.config.capabilityGroups`)
+- Per-tool in agent config
+- Per-user globally in settings (`appSettings.toolConfig.approvalRequiredTools`)
 
 Approval requests create a review inbox item and suspend the run durably (see runs spec).
 
@@ -137,7 +138,7 @@ All filesystem and shell tools operate against the run's isolated workspace dire
 
 ## Roles & Permissions
 
-Tool access is governed by the policies domain. The tools domain enforces the active capability set; the policies domain determines what is allowed.
+Tool access is governed by capability groups and per-agent config. The policies domain has been removed — tool access is now solely determined by the agent's `capabilityGroups` list and the `requiresApproval` flag per tool.
 
 | Actor           | Default capability groups            |
 | --------------- | ------------------------------------ |
@@ -158,6 +159,7 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [Lessons from Building Claude Code: Seeing Like an Agent — Thariq](https://x.com/trq212/status/2027463795355095314) — fewer, more expressive tools
 - [How the Claude Code Team Designs Agent Tools](https://www.anup.io/how-the-claude-code-team-designs-agent-tools/)
 - [Best Practices for Claude Code — Anthropic](https://www.anthropic.com/engineering/claude-code-best-practices)
@@ -165,4 +167,3 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - [GenericAgent](https://github.com/lsdefine/GenericAgent) — 6× efficiency from scoped capabilities
 - [DeerFlow 2.0](https://github.com/bytedance/deer-flow) — on-demand skill + tool loading
 - **Internal:** `src/lib/tools/catalog/`, `src/lib/tools/tools.ts`, `src/lib/tools/tools.server.ts`
-

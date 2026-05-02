@@ -105,14 +105,15 @@ The existing `getCostSummary` query is extended to support:
 
 ### Budget limit enforcement
 
-Before starting a new run (or before a new LLM call inside a run), the system checks whether any applicable budget limit would be exceeded:
+Before starting a new run (or before a new LLM call inside a run), the system checks whether any applicable budget limit would be exceeded.
 
-1. Compute current period spend for all limits that apply to the user/project/agent
-2. If projected spend + current spend > `limitUsd` and `action` = `block`: reject with a clear error, surface in the Review Inbox
-3. If projected spend + current spend > `warnUsd`: fire a notification but allow the call to proceed
-4. Log a `budget_alerts` row for each threshold event
+**Hard limit** — configured by setting `limitUsd` and `enabled = true` on a `budget_limits` row. When `enabled = false`, the row is stored but not enforced; the user can toggle it back on without recreating it. When `action = 'block'` and the projected spend would exceed `limitUsd`, the run is rejected with a clear error and a `budget_exceeded` review item is created in the observability inbox.
 
-Limits are evaluated in order: `run` → `agent` → `project` → `global`. The most restrictive blocking limit wins.
+**Soft cap (warn threshold)** — configured by setting `warnUsd` on the same row (can exist without a hard limit by setting `action = 'notify_only'`). When current spend crosses `warnUsd`, a notification fires but the run is allowed to proceed. A `budget_alerts` row is written for the warn event.
+
+Enforcement order: `run` → `agent` → `project` → `global`. The most restrictive blocking limit among all active limits wins. Warn thresholds are evaluated independently and can fire multiple times per period.
+
+A hard limit with `action = 'block'` **does not interrupt a run already in progress** — the check happens at run-start and at each new LLM call initiation. If the limit is crossed mid-run, no new LLM calls are made after the threshold is detected, and the run fails with a `budget_exceeded` error.
 
 ### Budget alert notifications
 
@@ -167,9 +168,8 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [../runs/spec.md](../runs/spec.md) — run context passed to usage logging
 - [../tasks/spec.md](../tasks/spec.md) — task context for cost rollups
 - [../agents/spec.md](../agents/spec.md) — agent-level budget limits
-- [../observability/spec.md](../observability/spec.md) — notifications and review inbox for budget alerts
-- [../policies/spec.md](../policies/spec.md) — policy-driven spend controls
-
+- [../observability/spec.md](../observability/spec.md) — `budget_exceeded` review items are written to the observability inbox; run traces show per-call cost inline

@@ -32,6 +32,22 @@ Notifications delivers real-time alerts to users when significant events require
 
 One user can have multiple push subscriptions (one per device/browser). Subscriptions are upserted by endpoint — registering the same endpoint updates keys and label.
 
+### `pushDeliveries` table
+
+Audit record of every push delivery attempt.
+
+| Column           | Type        | Notes                                    |
+| ---------------- | ----------- | ---------------------------------------- |
+| `id`             | uuid        | Primary key                              |
+| `notificationId` | uuid        | FK → `notifications`                     |
+| `subscriptionId` | uuid        | FK → `pushSubscriptions`                 |
+| `status`         | enum        | `sent`, `failed`, `expired`              |
+| `statusCode`     | integer?    | HTTP status returned by the push service |
+| `error`          | text?       | Error message on failure                 |
+| `sentAt`         | timestamptz |                                          |
+
+Delivery rows are written for every subscription attempted. A notification with 3 devices produces 3 rows. Failed deliveries with HTTP 410 (subscription expired) trigger automatic removal of the `pushSubscriptions` row.
+
 ## Notification Categories
 
 Notification preferences are stored in `appSettings.notificationPrefs` and control which categories are sent:
@@ -40,7 +56,6 @@ Notification preferences are stored in `appSettings.notificationPrefs` and contr
 | --------------- | ---------------------------------------------- |
 | `taskCompleted` | Task transitions to `completed` or `failed`    |
 | `needsInput`    | Agent pauses waiting for `ask_user` answer     |
-| `dreamSummary`  | Overnight dream run summary                    |
 | `agentErrors`   | Agent encounters a hard error during execution |
 
 ## Key Functions
@@ -53,6 +68,19 @@ Notification preferences are stored in `appSettings.notificationPrefs` and contr
 | `getVapidPublicKey()`               | Returns the VAPID public key for client-side push registration                      |
 | `listNotifications(userId)`         | Returns unread + recent read notifications for inbox                                |
 | `markRead(id)`                      | Marks a notification as read                                                        |
+| `markAllRead(userId)`               | Marks all unread notifications as read                                              |
+
+## In-App Inbox
+
+All notifications are persisted to the `notifications` table regardless of whether push is configured. The in-app inbox at `/notifications` (and as a slide-over panel accessible from any route) shows:
+
+- Unread count badge on the bell icon in the top navigation
+- Chronological list with title, body, relative timestamp, and read/unread state
+- Tap/click navigates to the `url` deep-link
+- Mark individual or all as read
+- Notifications older than 90 days are soft-hidden (not deleted)
+
+The inbox is the fallback for users without push subscriptions. For approvals and `ask_user` blocks, the chat session UI is the primary surface — the notification is a secondary signal for users who are not actively watching the chat.
 
 ## Web Push Setup
 
@@ -80,8 +108,8 @@ Notifications are emitted by:
 
 - `tasks/` — task completed, task failed
 - `runs/` — agent needs input, agent error
-- `jobs/` — dream run summary
 - `observability/` — review item requires action
+- `cost/` — budget warn and block threshold events
 
 ## Rewrite Authority
 
@@ -91,7 +119,9 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
-
+- Surfaces: notifications inbox panel/page, push-subscription device manager, and per-category preference toggles in settings.
+- States and badges: unread, read, action-required, delivery-failed, muted-category, and broadcast.
+- Delivery feedback: push registration failures and invalid subscriptions surface actionable remediation (retry, re-register, remove device).
+- Blocking actions: disabling critical categories (for example needs-input) requires confirmation with consequence text.
+- Mobile behavior: inbox supports quick mark-read gestures, grouped cards by recency, and sticky filter chips.
+- Deep links: tapping a notification must navigate to the owning route and preserve return path to inbox.

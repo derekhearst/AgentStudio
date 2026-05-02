@@ -2,7 +2,7 @@
 
 ## Overview
 
-An agent is a named, configurable AI persona that the runtime can instantiate for a run. AgentStudio ships with one built-in orchestrator agent and supports any number of user-defined worker agents. Each agent has an identity (what it is), a model, a capability set (what tools it can use), and a set of companion skills (how it should use them). Agents are not code — they are editable records in the database, optionally sourced from a repo file.
+An agent is a named, configurable AI persona that the runtime can instantiate for a run. AgentStudio uses one unified agent catalog for everything: the main chat agent, category-routed subagents (coding, UI design, research, etc.), and evaluator runs. Each agent has an identity (what it is), a model, a capability set (what tools it can use), and a set of companion skills (how it should use them). Agents are not code — they are editable records in the database, optionally sourced from a repo file.
 
 ## Data Model
 
@@ -14,14 +14,43 @@ An agent is a named, configurable AI persona that the runtime can instantiate fo
 | `name`            | text      | Display name                                                                  |
 | `slug`            | text      | URL-safe unique identifier                                                    |
 | `role`            | text      | Short description of what this agent does                                     |
-| `kind`            | enum      | `orchestrator`, `worker`, `evaluator`                                         |
 | `identitySkillId` | uuid?     | FK to `skills` — linked skill whose content becomes the system prompt base    |
 | `model`           | string    | Default OpenRouter model slug                                                 |
 | `config`          | jsonb     | Extended config: capabilityGroups, hooks, memory overrides, environment, etc. |
+| `tags`            | text[]    | Optional labels for filtering (e.g., `coding`, `ui_design`, `eval`)           |
 | `isActive`        | boolean   | Whether the agent is available for new runs                                   |
 | `sourceFile`      | text?     | Path to the `AGENT.md` repo file that seeded this record, if any              |
 | `createdAt`       | timestamp |                                                                               |
 | `updatedAt`       | timestamp |                                                                               |
+
+### `agentRoleBindings` table
+
+Workspace-level bindings that decide which agent fills core runtime roles.
+
+| Column      | Type      | Description                                                  |
+| ----------- | --------- | ------------------------------------------------------------ |
+| `id`        | uuid      | Primary key                                                  |
+| `scope`     | enum      | `workspace`, `project`                                       |
+| `scopeId`   | uuid?     | Null for workspace scope; FK to `projects` for project scope |
+| `role`      | enum      | `main`, `evaluator`                                          |
+| `agentId`   | uuid      | FK to `agents`                                               |
+| `createdAt` | timestamp |                                                              |
+| `updatedAt` | timestamp |                                                              |
+
+### `agentCategoryBindings` table
+
+Category routing from orchestration intent to candidate agents.
+
+| Column      | Type      | Description                                                                           |
+| ----------- | --------- | ------------------------------------------------------------------------------------- |
+| `id`        | uuid      | Primary key                                                                           |
+| `scope`     | enum      | `workspace`, `project`                                                                |
+| `scopeId`   | uuid?     | Null for workspace scope; FK to `projects` for project scope                          |
+| `category`  | enum      | `coding`, `ui_design`, `research`, `debugging`, `refactor`, `testing`, `docs`, `data` |
+| `agentId`   | uuid      | FK to `agents`                                                                        |
+| `priority`  | integer   | Lower number wins when multiple agents are mapped                                     |
+| `createdAt` | timestamp |                                                                                       |
+| `updatedAt` | timestamp |                                                                                       |
 
 ### `config` jsonb shape
 
@@ -31,25 +60,29 @@ An agent is a named, configurable AI persona that the runtime can instantiate fo
 	"hooks": { "after_run": ["hook/memory-capture"] },
 	"memory": { "enabled": true, "topK": 5 },
 	"environment": { "workspaceMode": "ephemeral", "networkPolicy": "restricted" },
-	"companionSkills": ["tools/fs-editing", "tools/run-verification"]
+	"companionSkills": ["tools/fs-editing", "tools/run-verification"],
+	"categories": ["coding", "refactor"],
+	"defaultEvaluatorCandidate": false
 }
 ```
 
 ## Features
 
-### Three agent kinds
+### Unified catalog: main, category workers, evaluator
 
-**Orchestrator** — the user-facing planner. Coordinates the overall session: proposes plans, spawns workers, asks the user questions. Only one orchestrator is active at a time per session. Has access to the `agents` capability group (can call `run_subagent`, `propose_plan`, `ask_user`).
+All agents are first-class rows in one list and use the same configuration surface (identity skill, model, capabilities, companion skills).
 
-**Worker** — executes a specific task or capability. Workers have narrow tool sets appropriate to their role (e.g., a coding worker gets `sandbox`; a research worker gets `web_search`). Workers are spawned by the orchestrator as sub-agent runs.
+- The **main agent** is selected through `agentRoleBindings(role = 'main')` and powers the chat session's agent execution posture.
+- **Category workers** are selected through `agentCategoryBindings` (for categories like coding or UI design) when the main agent spawns subagents.
+- The **evaluator agent** is selected through `agentRoleBindings(role = 'evaluator')`.
 
-**Evaluator** — reviews completed work and returns a structured verdict. Evaluators use a cheap model, have read-only tools, and produce a `{ verdict, findings, confidence }` output. See the evaluations spec for full details.
+No `agents.kind` field is required to determine runtime behavior.
 
 ### Identity as an editable skill
 
 Each agent's system prompt is not a static text field. It is the content of a linked `skills` record (`agents.identitySkillId`). Editing the skill in the `/agents/[id]/identity` route updates the agent's behavior on the next run — no redeploy required.
 
-The orchestrator's identity is seeded as a `system/orchestrator-identity` skill on first boot. It can be edited like any other skill.
+The main agent's identity is edited in the exact same way as every other agent identity.
 
 ### Prompt composition order
 
@@ -68,9 +101,9 @@ Identity prompts are intentionally short. Detailed how-to guidance for tools, wo
 
 `config.companionSkills` lists skill slugs that should have their summaries pre-loaded into the system prompt for this agent. Examples:
 
-- Coding worker: `["tools/fs-editing", "tools/run-verification", "workflow/fix-failing-test"]`
-- Research worker: `["tools/web-search", "workflow/review-pr"]`
-- Evaluator: `["workflow/review-pr", "domain/agentstudio-runs"]`
+- Coding profile: `["tools/fs-editing", "tools/run-verification", "workflow/fix-failing-test"]`
+- Research profile: `["tools/web-search", "workflow/review-pr"]`
+- Evaluator profile: `["workflow/review-pr", "domain/agentstudio-runs"]`
 
 Full skill bodies are only loaded when the model calls `read_skill` or when a hook determines they are needed.
 
@@ -78,7 +111,7 @@ Full skill bodies are only loaded when the model calls `read_skill` or when a ho
 
 On startup (or admin trigger), AgentStudio scans the repo root and `docs/agents/` for agent definition files:
 
-- `AGENTS.md` at repo root → upserts the orchestrator identity skill
+- `AGENTS.md` at repo root → optional defaults and seed identities
 - `docs/agents/<slug>/AGENT.md` → upserts the agent record for `<slug>`
 
 YAML frontmatter in the agent file:
@@ -107,19 +140,30 @@ Priority when both DB and repo file exist: controlled by `AGENT_SOURCE_PRIORITY=
 
 ### Per-agent memory configuration
 
-`config.memory.enabled` controls whether memory recall is injected at the start of the agent's runs. Memory recall is on by default for the orchestrator and off by default for evaluators.
+`config.memory.enabled` controls whether memory recall is injected at the start of the agent's runs. Defaults are profile-based (for example: on for main/coding agents, off for evaluator binding) and can be overridden per agent.
+
+### Category-based subagent routing
+
+When the main agent requests a subagent, it provides a category (`coding`, `ui_design`, `research`, etc.) rather than a hard-coded agent ID. Resolver order:
+
+1. Project-scoped `agentCategoryBindings`
+2. Workspace-scoped `agentCategoryBindings`
+3. Main agent as fallback
+
+Subagent runs are ephemeral execution instances, but they reuse persistent agent definitions by `agentId`.
 
 ### Agent management UI
 
-`/agents` — list of all agents with kind badge, model, active status, and last used timestamp.
+`/agents` — list of all agents with model, active status, tags, and usage badges (`Main`, `Evaluator`, category assignments).
 `/agents/[id]` — agent detail with tabs for: Identity (markdown editor), Config, Hooks, Skills, Runs.
 `/agents/new` — create a new agent from a form or by pasting an AGENT.md.
 
 ## Behavior Contracts
 
-- The orchestrator identity skill (`system/orchestrator-identity`) always exists. Boot seeder creates it if missing.
+- Exactly one active `main` binding exists per scope (`workspace` or `project`).
+- At most one active `evaluator` binding exists per scope (`workspace` or `project`).
 - Deleting an agent does not delete its historical runs. `agentId` on old runs becomes a dangling reference (soft delete only: `agents.isActive = false`).
-- An evaluator agent must have read-only tools only. The runtime enforces this; if an evaluator's capability groups include write tools, those tools are removed from the active set.
+- Evaluator safety is enforced by runtime policy, not by agent type metadata. If the evaluator binding points to an agent with write tools, write tools are removed from the active set for evaluation runs.
 - The assembled system prompt is frozen at run start. Editing the identity skill mid-run does not affect the current run.
 - `agents.slug` is unique and immutable after creation. Renaming an agent creates a new slug; old runs reference the record by `id`, not slug.
 
@@ -131,6 +175,8 @@ Priority when both DB and repo file exist: controlled by `AGENT_SOURCE_PRIORITY=
 | Create an agent             | Authenticated user, admin |
 | Edit identity skill         | Owner user, admin         |
 | Edit agent config           | Owner user, admin         |
+| Bind main/evaluator roles   | Admin only                |
+| Bind category routing       | Admin only                |
 | Activate / deactivate agent | Admin only                |
 | Delete agent                | Admin only                |
 | View another user's agents  | Admin only                |

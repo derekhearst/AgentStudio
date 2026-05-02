@@ -22,20 +22,19 @@ Activity is a lightweight audit log for significant user-facing events across Ag
 
 ### Event types
 
-| Type                     | Triggered when                          |
-| ------------------------ | --------------------------------------- |
-| `task_created`           | A task is created                       |
-| `task_status_changed`    | A task moves to a new status            |
-| `agent_action`           | An agent completes a significant action |
-| `chat_started`           | A chat conversation is started          |
-| `review_action`          | A review item is approved or denied     |
-| `skill_created`          | A skill is created                      |
-| `project_created`        | A project is created                    |
-| `project_status_changed` | A project moves to a new status         |
-| `goal_created`           | A goal is created                       |
-| `strategy_submitted`     | A strategy is submitted for review      |
-| `strategy_approved`      | A strategy is approved                  |
-| `strategy_rejected`      | A strategy is rejected                  |
+| Type                     | Triggered when                                          |
+| ------------------------ | ------------------------------------------------------- |
+| `task_created`           | A task is created                                       |
+| `task_status_changed`    | A task moves to a new status                            |
+| `agent_action`           | An agent completes a significant action                 |
+| `chat_started`           | A chat conversation is started                          |
+| `review_action`          | A review item is approved or denied                     |
+| `skill_created`          | A skill is created                                      |
+| `project_created`        | A project is created                                    |
+| `project_status_changed` | A project moves to a new status                         |
+| `memory_mined`           | Memory mining completed for a conversation              |
+| `memory_conflict`        | Memory mining produced a conflicting entity or relation |
+| `memory_updated`         | A user manually edited or deleted a memory entry        |
 
 ## Key Behaviors
 
@@ -63,6 +62,7 @@ Activity events are emitted by all major domains:
 - `observability/` on review approvals/denials
 - `skills/` on skill creation
 - `projects/` on create and status change
+- `memory/` on mining completion, conflicts, and user edits
 
 ## Rewrite Authority
 
@@ -75,4 +75,3 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Surfaces in this domain must align with the shared desktop/mobile shell patterns.
 - Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
-

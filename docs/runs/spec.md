@@ -4,6 +4,8 @@
 
 A run is the durable, resumable record of one agent execution attempt. Every message exchanged, every tool call made, every approval requested, and every SSE event emitted during an agent loop is captured in the run and its associated event log. Runs survive process restarts, browser reloads, and SSE disconnects. The run is the canonical source of truth for what happened during an agent execution.
 
+**Run vs. session:** A session (owned by the chat domain) is the long-lived conversation container a user sees in the sidebar. A run is a single agent execution _within_ that session — one user message triggers one run, which completes and writes its output messages back to the session's `sessionMessages`. A session accumulates many runs over its lifetime; a run always belongs to exactly one session.
+
 ## Data Model
 
 ### `runs` table
@@ -28,6 +30,7 @@ A run is the durable, resumable record of one agent execution attempt. Every mes
 | `finishedAt`       | timestamp? | When the run entered a terminal state                                                           |
 | `error`            | jsonb?     | Error details if state = `failed`                                                               |
 | `evalRequired`     | boolean    | Whether an evaluator pass is required before marking completed                                  |
+| `mcpServerIds`     | uuid[]     | MCP servers that were active for this run (snapshot at run start)                               |
 | `metadata`         | jsonb      | Arbitrary runtime metadata                                                                      |
 | `createdAt`        | timestamp  |                                                                                                 |
 
@@ -125,9 +128,9 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — durable state, event log, resumability
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — stateful session as independent primitive
 - [Honcho](https://github.com/plastic-labs/honcho) — agent state memory library
 - [Zylos](https://github.com/zylos-ai/zylos-core) — persistent agent harness with tiered state
 - **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/chat/chat.schema.ts` (predecessor)
-

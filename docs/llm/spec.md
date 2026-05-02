@@ -94,12 +94,25 @@ type ReasoningConfig = {
 
 Reasoning tokens appear in `onToken` with a distinct `reasoning` flag, and are stored separately in message metadata.
 
+## Retry Behavior
+
+`streamChat()` retries automatically on transient failures before propagating an error to the caller:
+
+- **Retried:** HTTP 5xx responses, network timeouts, connection resets.
+- **Not retried:** HTTP 4xx responses (bad request, auth failure, model not found) — these are caller bugs, not transient failures.
+- **Retry policy:** up to 3 attempts with exponential backoff starting at 500 ms, capped at 5 s. Each attempt re-opens the stream from the beginning (there is no partial-stream resume).
+- If all attempts fail, `streamChat()` throws a typed `LlmError` with `{ attempt, statusCode, message }`.
+
+OpenRouter availability is not treated as a special case. If the service is down, retries exhaust and the run fails normally — there is no fallback provider.
+
+`listModels()` is not retried. If the catalog fetch fails, the last in-memory cache is returned regardless of age. If there is no cache, an empty array is returned.
+
 ## Behavior Contracts
 
-- Model catalog is always fetched fresh if the cache is older than 1 hour. If the OpenRouter API is unavailable, the last cached value is returned.
 - `calculateCost()` returns 0 if the model is not found in the catalog — never throws.
 - `streamChat()` always calls `onUsage` before resolving, even if the response was empty.
 - Tool call arguments are accumulated across streaming chunks before `onToolCall` is fired.
+- Retry attempts are transparent to callers — `onToken`, `onToolCall`, and `onUsage` are only called for the successful attempt.
 
 ## Configuration
 
@@ -122,6 +135,6 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [../cost/spec.md](../cost/spec.md) — `calculateCost()` is used by cost logging
 - [../structure/plan.md](../structure/plan.md) — consolidation of `models/` + `openrouter.server.ts` into `llm/`
-

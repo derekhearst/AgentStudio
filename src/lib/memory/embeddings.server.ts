@@ -77,10 +77,14 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 export async function embed(texts: string[], options: EmbedOptions = {}): Promise<number[][]> {
 	if (texts.length === 0) return []
 	const model = options.model ?? DEFAULT_EMBEDDING_MODEL
-	const out: number[][] = new Array(texts.length)
+	// text-embedding-3-small caps inputs at 8192 tokens (~24K chars conservatively).
+	// Truncate to avoid hard 400s on long drawers.
+	const MAX_CHARS = 24000
+	const safeTexts = texts.map((t) => (t.length > MAX_CHARS ? t.slice(0, MAX_CHARS) : t))
+	const out: number[][] = new Array(safeTexts.length)
 
-	for (let start = 0; start < texts.length; start += MAX_BATCH) {
-		const slice = texts.slice(start, start + MAX_BATCH)
+	for (let start = 0; start < safeTexts.length; start += MAX_BATCH) {
+		const slice = safeTexts.slice(start, start + MAX_BATCH)
 		const result = await callEmbeddings(model, slice)
 		for (const item of result.data) {
 			out[start + item.index] = item.embedding

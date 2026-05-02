@@ -10,26 +10,28 @@ The runtime is the transport-agnostic core of AgentStudio's agent loop. It owns 
 
 The fully-resolved description of the agent for one run. Assembled once before the loop starts; the loop never re-reads tables.
 
-| Field              | Type              | Description                                                       |
-| ------------------ | ----------------- | ----------------------------------------------------------------- |
-| `id`               | string            | Agent record ID                                                   |
-| `systemPrompt`     | string            | Assembled from identity skill + role + policies + skill summaries |
-| `model`            | string            | OpenRouter model slug                                             |
-| `reasoning`        | ReasoningConfig?  | Extended thinking settings                                        |
-| `toolAllowList`    | string[]?         | Explicit tool allow-list; null = use capability groups            |
-| `capabilityGroups` | CapabilityGroup[] | Active groups for this run                                        |
+| Field              | Type              | Description                                                    |
+| ------------------ | ----------------- | -------------------------------------------------------------- |
+| `id`               | string            | Agent record ID                                                |
+| `systemPrompt`     | string            | Assembled from identity skill + role + skill summaries         |
+| `model`            | string            | OpenRouter model slug                                          |
+| `reasoning`        | ReasoningConfig?  | Extended thinking settings                                     |
+| `toolAllowList`    | string[]?         | Explicit tool allow-list; null = use capability groups         |
+| `capabilityGroups` | CapabilityGroup[] | Active groups for this run (first-party + `mcp/<slug>` groups) |
 
 ### Environment
 
 The execution environment for one run. Constructed by `buildEnvironment`, which delegates to the workspace domain.
 
-| Field                   | Type                             | Description                                        |
-| ----------------------- | -------------------------------- | -------------------------------------------------- |
-| `workspaceRoot`         | string                           | Absolute path to the run's sandbox directory       |
-| `approvalRequiredTools` | Set\<string\>                    | Tools that require human approval before execution |
-| `mcpServers`            | McpServerRef[]?                  | MCP server references for this run                 |
-| `envVars`               | Record\<string, string\>?        | Process-level env overrides                        |
-| `networkPolicy`         | 'open' \| 'restricted' \| 'none' | Network access level for sandboxed tools           |
+| Field                   | Type                             | Description                                                |
+| ----------------------- | -------------------------------- | ---------------------------------------------------------- |
+| `workspaceRoot`         | string                           | Absolute path to the run's sandbox directory               |
+| `approvalRequiredTools` | Set\<string\>                    | Tools that require human approval before execution         |
+| `mcpServers`            | McpServerRef[]                   | Resolved MCP servers assigned to this agent; empty if none |
+| `envVars`               | Record\<string, string\>?        | Process-level env overrides                                |
+| `networkPolicy`         | 'open' \| 'restricted' \| 'none' | Network access level for sandboxed tools                   |
+
+`McpServerRef` carries the server ID, transport config, and decrypted auth credentials resolved at build time. The loop never reads `mcpServers` DB rows directly.
 
 ### Session
 
@@ -57,12 +59,12 @@ A stateful event bus for one run. The Session is the only thing that touches SSE
 
 Before the loop starts, the runtime assembles the system prompt in this order:
 
-1. Identity skill content (from `agents.identitySkillId` linked skill)
+1. Identity skill content (from the resolved run agent's `identitySkillId`; main agent comes from session pin or scoped `main` binding)
 2. Agent role description
 3. Active task spec (if `session.taskId` is set)
 4. Companion skill summaries relevant to the current capability groups
-5. Tool usage policies (injected automatically from the policies domain)
-6. Capability group summary
+5. Tool usage guidance (injected from companion skills, not a separate policies domain)
+6. Capability group summary (including any `mcp/<slug>` groups)
 
 The loop never modifies the assembled system prompt mid-run.
 
@@ -97,6 +99,18 @@ When the context window approaches capacity:
 3. User messages and the current task spec are preserved as long as possible
 4. `on_compact` hook event fires with before/after token counts and the compaction summary
 
+### MCP server lifecycle
+
+For each `McpServerRef` in `environment.mcpServers`:
+
+1. At run start, `buildEnvironment` opens connections to all assigned MCP servers (spawns stdio process or opens SSE/HTTP client).
+2. Each connected server has its tools registered as a `mcp/<slug>` capability group in `definition.capabilityGroups`.
+3. When the model calls `enable_capability('mcp/github')`, the runtime activates that group and injects the server's tool descriptions.
+4. MCP tool calls are proxied: the runtime strips the `<slug>__` prefix, forwards the call to the server, and returns the result through the normal tool output pipeline (including size-cap archival).
+5. At run end (or on error), all stdio processes spawned for this run are terminated.
+
+If a server fails to connect at run start, its capability group is silently omitted — the run proceeds without it. A `hook_failure`-level event is emitted.
+
 ### Approval gating
 
 If a tool is in `environment.approvalRequiredTools`, the loop suspends via `session.pendingApproval` before executing. The suspension is durable — the loop can resume after a process restart because approvals are persisted in the `runs` table, not held in memory.
@@ -105,7 +119,7 @@ If a tool is in `environment.approvalRequiredTools`, the loop suspends via `sess
 
 A sub-agent run is a `runAgentLoop` call with:
 
-- Its own `AgentDefinition` (narrower tools, different model)
+- Its own `AgentDefinition` resolved from category bindings (for example `coding` or `ui_design`)
 - A child `Session` whose `emit` forwards events to the parent's event bus
 - `parentRunId` set to the parent run
 
@@ -142,7 +156,7 @@ The runtime fires typed hook events at every significant boundary:
 - Any authenticated user can start a run via a chat session.
 - Automation engine starts runs as a system actor (no user session).
 - Admin users can inspect live run state and terminate runs.
-- Tool execution is governed by the policies domain, not by the runtime directly. The runtime delegates the decision; it does not make it.
+- Tool execution policy is resolved from runtime settings and capability-level approval rules before execution. The runtime enforces the resolved decision.
 
 ## Rewrite Authority
 
@@ -157,10 +171,10 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — brain/hands/session primitive decoupling
 - [Building Effective Agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — composable primitives over opinionated workflows
 - [How the Claude Code Team Designs Agent Tools](https://www.anup.io/how-the-claude-code-team-designs-agent-tools/) — tool surface + output policy
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — durable event log, context offloading
 - [LangGraph](https://github.com/langchain-ai/langgraph) — graph-based runtime reference
 - **Internal:** `src/lib/runtime/loop.server.ts`, `src/lib/runtime/types.ts`, `src/lib/runtime/definition.server.ts`
-

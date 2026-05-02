@@ -8,6 +8,8 @@ AgentStudio already has a `src/lib/skills/` domain, but it does not yet have a m
 
 > **Depends on:** `docs/structure/plan.md` (`skills/`, `tools/`, `runtime/`), `docs/tools/plan.md` (progressive tool disclosure), `docs/agents/plan.md` (identity + prompt composition), `docs/hooks/plan.md` (hook-backed workflows).
 
+> **Bootstrap slice (cycle-free):** Ship skill metadata schema, summary extraction, and manual skill browsing/loading without companion-tool auto-mapping, hook triggers, or agent role auto-binding. This slice can land independently.
+
 > **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters
@@ -56,6 +58,7 @@ A skill is a reusable markdown bundle that answers one of these questions:
 Explain how to use one tool or one capability group.
 
 Examples:
+
 - `tools/fs-editing`
 - `tools/browser-debugging`
 - `tools/run-tests`
@@ -68,6 +71,7 @@ These are the missing pieces the current plan set implies but does not define.
 Encode repeatable multi-step flows.
 
 Examples:
+
 - `workflow/fix-failing-test`
 - `workflow/review-pr`
 - `workflow/create-agent`
@@ -78,6 +82,7 @@ Examples:
 Project-specific knowledge loaded when relevant.
 
 Examples:
+
 - `domain/agentstudio-runs`
 - `domain/agentstudio-projects`
 - `domain/longmemeval`
@@ -87,6 +92,7 @@ Examples:
 Human-readable usage rules that complement runtime enforcement.
 
 Examples:
+
 - `policy/tool-approvals`
 - `policy/artifact-editing`
 - `policy/memory-privacy`
@@ -95,15 +101,15 @@ Examples:
 
 Every non-trivial tool or capability group should have at least one companion skill.
 
-| Tool / group | Companion skill requirement |
-|---|---|
-| `fs` / sandbox tools | how to inspect first, patch safely, verify changes |
-| `shell` | how to scope commands, read output, rerun verification |
-| `browser` | how to compare screenshots/logs and avoid noisy browsing |
-| `skills` | how to search/select/apply skills |
-| `agents` | how to delegate and what not to delegate |
-| `projects` / `artifacts` | when to edit existing artifact vs create new |
-| `memory` | when to recall, when to mine, what not to store |
+| Tool / group             | Companion skill requirement                              |
+| ------------------------ | -------------------------------------------------------- |
+| `fs` / sandbox tools     | how to inspect first, patch safely, verify changes       |
+| `shell`                  | how to scope commands, read output, rerun verification   |
+| `browser`                | how to compare screenshots/logs and avoid noisy browsing |
+| `skills`                 | how to search/select/apply skills                        |
+| `agents`                 | how to delegate and what not to delegate                 |
+| `projects` / `artifacts` | when to edit existing artifact vs create new             |
+| `memory`                 | when to recall, when to mine, what not to store          |
 
 ### Recommended skill frontmatter
 
@@ -148,6 +154,7 @@ This makes skills the instruction analogue of progressive tool disclosure.
 #### Layer 1 — Live context
 
 What the model sees now:
+
 - current user turn
 - active task/run state
 - short tool definitions for active tools only
@@ -157,6 +164,7 @@ What the model sees now:
 #### Layer 2 — Session log
 
 What is durably stored but not always injected:
+
 - full tool outputs
 - run events
 - approval events
@@ -166,6 +174,7 @@ What is durably stored but not always injected:
 #### Layer 3 — Retrieval surfaces
 
 What can be recalled on demand:
+
 - memory drawers
 - artifact history
 - prior run summaries
@@ -177,6 +186,7 @@ What can be recalled on demand:
 For larger outputs, do not keep the full payload in live context indefinitely.
 
 Default behavior:
+
 1. Keep full tool result in immediate observation for the next reasoning step when small.
 2. If result exceeds threshold, keep:
    - short summary
@@ -190,6 +200,7 @@ This follows the same pattern described in Anthropic and LangChain harness guida
 ### Skill output policy
 
 Skill content should also be layered:
+
 - summary first
 - detailed body on demand
 - examples only when needed
@@ -232,6 +243,7 @@ A skill should not dump an entire tutorial into context on first load.
 ### Phase 4 — Companion skills for core tools
 
 Ship first-party skills for:
+
 - file editing
 - shell usage
 - browser debugging
@@ -279,8 +291,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-

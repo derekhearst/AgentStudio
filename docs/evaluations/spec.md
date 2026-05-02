@@ -35,15 +35,15 @@ For long-running tasks, sprint contracts define intermediate deliverables and wh
 
 ## Features
 
-### Evaluator agent kind
+### Evaluator agent binding
 
-Evaluator agents are a distinct `agents.kind = 'evaluator'`. They differ from worker agents in three ways:
+Evaluation uses the agent selected by `agentRoleBindings(role = 'evaluator')` (project scope first, then workspace scope). Evaluator behavior is enforced at runtime rather than by an `agents.kind` column:
 
-1. They run a cheap model by default (configurable, default: `openai/gpt-4o-mini`)
-2. Their active tool set is restricted to read-only tools: `file_read`, `list_directory`, `web_search`
-3. They produce a structured JSON output: `{ verdict, confidence, findings }`
+1. Cheap model by default (configurable, default: `openai/gpt-4o-mini`)
+2. Active tool set restricted to read-only tools: `file_read`, `list_directory`, `web_search`
+3. Structured JSON output required: `{ verdict, confidence, findings }`
 
-A default evaluator agent is seeded on first boot. Users can create additional evaluators with different models or read-only skill configurations.
+Any editable agent can be assigned as evaluator. Safety constraints are applied automatically for evaluator runs.
 
 ### Trigger conditions
 
@@ -116,7 +116,7 @@ Admins and run owners can trigger an evaluator pass on any completed run from `/
 | View evaluation results          | Run/task owner, admin                |
 | Trigger manual evaluation        | Run owner, admin                     |
 | Override a verdict (force pass)  | Admin only                           |
-| Create an evaluator agent        | Admin only                           |
+| Configure evaluator binding      | Admin only                           |
 
 ## Rewrite Authority
 
@@ -131,10 +131,10 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 
 ## References
+
 - [Harness Design for Long-Running Application Development — Anthropic](https://www.anthropic.com/engineering/harness-design-long-running-apps) — planner/generator/evaluator pattern
 - [Multi-Agent Coordination Patterns — Anthropic](https://claude.com/blog/multi-agent-coordination-patterns) — cheap executor + expensive advisor
 - [Hive — aden-hive](https://github.com/aden-hive/hive) — outcome-driven checkpoints
 - [Harness Engineering Is Cybernetics — George](https://x.com/odysseus0z/article/2030416758138634583) — evaluator as sensor
 - [Meta-Harness — Yoonho Lee](https://yoonholee.com/meta-harness/) — Claude Code as harness optimizer
 - **Internal:** `src/lib/evaluations/evaluations.schema.ts`, `src/lib/evaluations/evaluations.server.ts`, `src/routes/runs/[id]/evaluation/`
-

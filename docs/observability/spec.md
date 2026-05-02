@@ -26,24 +26,24 @@ A normalized step timeline for each run, optimized for display and querying.
 
 The Review Inbox. Every human-required action creates a row here.
 
-| Column       | Type       | Description                                                                                                                                                              |
-| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`         | uuid       | Primary key                                                                                                                                                              |
-| `type`       | enum       | `approval_request`, `user_question`, `evaluation_failure`, `job_failure`, `job_stuck`, `hook_failure`, `artifact_conflict`, `memory_conflict`, `policy_override_request` |
-| `status`     | enum       | `open`, `in_progress`, `resolved`, `dismissed`                                                                                                                           |
-| `severity`   | enum       | `info`, `warning`, `critical`                                                                                                                                            |
-| `runId`      | uuid?      | FK to `runs`                                                                                                                                                             |
-| `sessionId`  | uuid?      | FK to `sessions`                                                                                                                                                         |
-| `taskId`     | uuid?      | FK to `tasks`                                                                                                                                                            |
-| `jobId`      | uuid?      | FK to `jobs`                                                                                                                                                             |
-| `projectId`  | uuid?      | FK to `projects`                                                                                                                                                         |
-| `artifactId` | uuid?      | FK to `artifacts`                                                                                                                                                        |
-| `payload`    | jsonb      | Type-specific context and data needed to resolve the item                                                                                                                |
-| `assignedTo` | uuid?      | FK to `users` — optional assignment                                                                                                                                      |
-| `resolvedBy` | uuid?      | FK to `users`                                                                                                                                                            |
-| `resolvedAt` | timestamp? |                                                                                                                                                                          |
-| `createdAt`  | timestamp  |                                                                                                                                                                          |
-| `updatedAt`  | timestamp  |                                                                                                                                                                          |
+| Column       | Type       | Description                                                                                                                                                                                 |
+| ------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`         | uuid       | Primary key                                                                                                                                                                                 |
+| `type`       | enum       | `approval_request`, `user_question`, `evaluation_failure`, `job_failure`, `job_stuck`, `hook_failure`, `artifact_conflict`, `memory_conflict`, `policy_override_request`, `budget_exceeded` |
+| `status`     | enum       | `open`, `in_progress`, `resolved`, `dismissed`                                                                                                                                              |
+| `severity`   | enum       | `info`, `warning`, `critical`                                                                                                                                                               |
+| `runId`      | uuid?      | FK to `runs`                                                                                                                                                                                |
+| `sessionId`  | uuid?      | FK to `sessions`                                                                                                                                                                            |
+| `taskId`     | uuid?      | FK to `tasks`                                                                                                                                                                               |
+| `jobId`      | uuid?      | FK to `jobs`                                                                                                                                                                                |
+| `projectId`  | uuid?      | FK to `projects`                                                                                                                                                                            |
+| `artifactId` | uuid?      | FK to `artifacts`                                                                                                                                                                           |
+| `payload`    | jsonb      | Type-specific context and data needed to resolve the item                                                                                                                                   |
+| `assignedTo` | uuid?      | FK to `users` — optional assignment                                                                                                                                                         |
+| `resolvedBy` | uuid?      | FK to `users`                                                                                                                                                                               |
+| `resolvedAt` | timestamp? |                                                                                                                                                                                             |
+| `createdAt`  | timestamp  |                                                                                                                                                                                             |
+| `updatedAt`  | timestamp  |                                                                                                                                                                                             |
 
 ### `operationalMetrics` table
 
@@ -63,17 +63,18 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 
 `/review` is the primary inbox for human-required actions. Items are sorted by severity (critical first) then by age. The inbox unifies:
 
-| Item type                 | Severity | Triggered by                                             |
-| ------------------------- | -------- | -------------------------------------------------------- |
-| `approval_request`        | critical | Tool call requires human approval                        |
-| `user_question`           | critical | `ask_user` tool call waiting for answer                  |
-| `evaluation_failure`      | warning  | Evaluator returned `fail` verdict                        |
-| `job_failure`             | warning  | Job exhausted all retry attempts                         |
-| `job_stuck`               | warning  | Job in `running` state with expired lease                |
-| `hook_failure`            | info     | A hook invocation returned an error                      |
-| `artifact_conflict`       | warning  | Two runs attempted concurrent artifact edits             |
-| `memory_conflict`         | info     | Memory mining produced a conflicting entity/relation     |
-| `policy_override_request` | critical | An actor requested a policy exception requiring approval |
+| Item type                 | Severity | Triggered by                                                |
+| ------------------------- | -------- | ----------------------------------------------------------- |
+| `approval_request`        | critical | Tool call requires human approval                           |
+| `user_question`           | critical | `ask_user` tool call waiting for answer                     |
+| `evaluation_failure`      | warning  | Evaluator returned `fail` verdict                           |
+| `job_failure`             | warning  | Job exhausted all retry attempts                            |
+| `job_stuck`               | warning  | Job in `running` state with expired lease                   |
+| `hook_failure`            | info     | A hook invocation returned an error                         |
+| `artifact_conflict`       | warning  | Two runs attempted concurrent artifact edits                |
+| `memory_conflict`         | info     | Memory mining produced a conflicting entity/relation        |
+| `policy_override_request` | critical | An actor requested a policy exception requiring approval    |
+| `budget_exceeded`         | warning  | A run was blocked or mid-run spending exceeded a hard limit |
 
 ### Inbox actions
 
@@ -94,20 +95,11 @@ Each item type has a resolution action appropriate to the item:
 `/observability` shows:
 
 - Active runs count by status
-- Recent run costs (last 24h, 7d, 30d)
 - Job queue depths by queue name
 - Hook invocation failure rates
 - Average run latency by agent
 - Policy decision breakdown (allow/deny/approval rates)
-
-### Cost tracking
-
-Every LLM call, embedding call, and memory mining pass is attributed to a `runId` and aggregated into `runs.costUsd`. The cost dashboard shows:
-
-- Total cost by user, agent, and model
-- Cost per run and cost per task
-- Day-over-day change
-- Top 10 most expensive runs in the last 7 days
+- Link to `/cost` for spend breakdown and budget status
 
 ### Metric collection
 
@@ -137,16 +129,15 @@ Review items with severity `critical` trigger a notification:
 
 ## Roles & Permissions
 
-| Action                              | Who can do it      |
-| ----------------------------------- | ------------------ |
-| View own review inbox               | Authenticated user |
-| Resolve own approval/question items | Owner user, admin  |
-| View all open items                 | Admin only         |
-| Resolve items assigned to others    | Admin only         |
-| View run traces                     | Run owner, admin   |
-| View operational dashboard          | Admin only         |
-| View cost breakdown (own)           | Authenticated user |
-| View cost breakdown (all users)     | Admin only         |
+| Action                              | Who can do it                    |
+| ----------------------------------- | -------------------------------- |
+| View own review inbox               | Authenticated user               |
+| Resolve own approval/question items | Owner user, admin                |
+| View all open items                 | Admin only                       |
+| Resolve items assigned to others    | Admin only                       |
+| View run traces                     | Run owner, admin                 |
+| View operational dashboard          | Admin only                       |
+| View cost breakdown (own/all)       | See [cost spec](../cost/spec.md) |
 
 ## Rewrite Authority
 
@@ -163,6 +154,7 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines review/trace/cost
 
 ## References
 
+- [../cost/spec.md](../cost/spec.md) — cost data, budget limits, and spend dashboard
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — observability as a harness primitive
 - [Harness Engineering Is Cybernetics — George](https://x.com/odysseus0z/article/2030416758138634583) — sensing and feedback loops
 - [Oh My Codex — HUD pattern](https://github.com/Yeachan-Heo/oh-my-codex) — unified status + action surface

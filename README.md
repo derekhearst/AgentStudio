@@ -137,13 +137,17 @@ Notes:
 
 ## Docs
 
-- High-level contract: `docs/features.md`
-- Full implementation plan: `docs/plan.md`
-- Memory Palace: `docs/memory/memory.md`
+- Master implementation order: `docs/structure/implementation-order.md`
+- Architecture refactor plan: `docs/structure/plan.md`
+- Runtime spec: `docs/runtime/spec.md`
+- Chat plan: `docs/chat/plan.md`
+- Memory spec: `docs/memory/spec.md`
+- UI spec: `docs/ui/spec.md`
+- Operations spec: `docs/operations/spec.md`
 
 ## Memory Palace
 
-AgentStudio includes an in-house port of [MemPalace](https://github.com/wcw9/mempalace) for long-term memory. Conversations are auto-mined into a Wing → Room → Closet → Drawer hierarchy with vector + tsvector + temporal hybrid recall, and recalled drawers are injected as a `<memory_context>` system block before each user turn. Configurable from **Settings → Memory Palace**, browsable at `/memory`. See [docs/memory/memory.md](docs/memory/memory.md) for the full pipeline, schema, and bench harness.
+AgentStudio includes an in-house port of [MemPalace](https://github.com/wcw9/mempalace) for long-term memory. Conversations are auto-mined into a Wing → Room → Closet → Drawer hierarchy with vector + tsvector + temporal hybrid recall, and recalled drawers are injected as a `<memory_context>` system block before each user turn. Configurable from **Settings → Memory Palace**, browsable at `/memory`. See [docs/memory/spec.md](docs/memory/spec.md) for the full pipeline, schema, and bench harness.
 
 A LongMemEval evaluation harness mirrors the upstream methodology:
 

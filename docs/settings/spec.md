@@ -2,7 +2,7 @@
 
 ## Overview
 
-Settings stores per-user application preferences that control model selection, memory behavior, context compaction, tool approval policy, notification preferences, and UI theme. Settings are user-scoped — each user has one settings row, created with defaults on first access. Settings are read on every request that needs them; they are not system-wide.
+Settings stores per-user application preferences that control model selection, memory behavior, context compaction, tool approval policy, notification preferences, and UI theme. Dream run configuration has been removed — background memory work is now managed by the memory domain. Settings are user-scoped — each user has one settings row, created with defaults on first access. Settings are read on every request that needs them; they are not system-wide.
 
 ## Data Model
 
@@ -17,7 +17,6 @@ One row per user. Created with defaults when the user first accesses settings.
 | `defaultModel`       | text        | OpenRouter model ID for chat/agents               |
 | `transcriptionModel` | text        | OpenRouter model ID for audio transcription       |
 | `notificationPrefs`  | jsonb       | See notification prefs shape below                |
-| `dreamConfig`        | jsonb       | Overnight dream run config                        |
 | `budgetConfig`       | jsonb       | Daily / monthly spend limits                      |
 | `contextConfig`      | jsonb       | Compaction thresholds and model                   |
 | `toolConfig`         | jsonb       | Tools that require explicit approval per-request  |
@@ -35,18 +34,7 @@ One row per user. Created with defaults when the user first accesses settings.
 {
 	taskCompleted: boolean // notify when task finishes
 	needsInput: boolean // notify when agent needs answer
-	dreamSummary: boolean // notify on overnight run summary
 	agentErrors: boolean // notify on agent hard errors
-}
-```
-
-**`dreamConfig`**
-
-```ts
-{
-	autoRun: boolean // whether overnight jobs run automatically
-	frequencyHours: number // how often dream runs trigger
-	aggressiveness: number // 0.0–1.0 scale for how boldly the dream agent acts
 }
 ```
 
@@ -107,7 +95,6 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Tools** — approval-required list
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
-- **Dream** — overnight run config
 
 The `PromptPreviewPanel` component provides an inline preview of how the assembled system prompt will look given current settings, used on the agent and settings pages.
 
@@ -127,7 +114,9 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
-
+- Surfaces: `/settings` category panels (models, memory, context, budget, tools, notifications, appearance) plus prompt preview panel.
+- States and badges: clean, unsaved, saving, saved, validation-error, and out-of-policy.
+- Save behavior: edits are section-scoped, optimistic when safe, and show rollback on write failure; unsaved changes warn before navigation.
+- Blocking actions: lowering budget caps below current spend and disabling required safety controls require explicit confirmation.
+- Mobile behavior: settings sections render as stacked accordions with sticky save/discard actions and clear section-level validation summaries.
+- Accessibility: every toggle/slider/select has a persistent label and helper text; validation errors are announced and linked.

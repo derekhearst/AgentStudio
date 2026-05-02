@@ -8,6 +8,8 @@ There is no way today to extend harness behavior without editing `+server.ts`. O
 
 > **Depends on:** `docs/structure/plan.md` (`runtime/` and `hooks/` folders), `docs/runtime/plan.md` (well-defined emit points in the loop), `docs/tools/plan.md` (tool budget + output lifecycle), `docs/skills/plan.md` (skill-backed guidance).
 
+> **Bootstrap slice (cycle-free):** Ship typed hook bus, runtime emit points, and built-in TypeScript hooks only; defer skill-backed hooks and companion-skill/tool policy coupling to later phases. This slice can land independently.
+
 > **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
 ## Why this matters (harness principles)
@@ -35,22 +37,22 @@ There is no way today to extend harness behavior without editing `+server.ts`. O
 
 ### Hook events (initial set)
 
-| Event                  | Payload                                                  | When                  |
-| ---------------------- | -------------------------------------------------------- | --------------------- |
-| `before_run`           | `{ runId, definition, environment, conversationId }`     | Before loop starts    |
-| `after_run`            | `{ runId, result, costUsd, durationMs }`                 | After loop ends       |
-| `before_round`         | `{ runId, round, messages }`                             | Before each LLM round |
-| `after_round`          | `{ runId, round, content, toolCalls }`                   | After each LLM round  |
-| `before_tool`          | `{ runId, toolName, args }`                              | Before tool execution |
-| `after_tool`           | `{ runId, toolName, args, result, success, durationMs }` | After tool execution  |
-| `on_compact`           | `{ runId, before, after, summary }`                      | On context compaction |
-| `on_evaluator`         | `{ runId, verdict, findings }`                           | On evaluator result   |
-| `on_subagent_spawn`    | `{ parentRunId, childRunId, agentId }`                   | On `run_subagent`     |
-| `on_approval_required` | `{ runId, toolName, args, token }`                       | On pending approval   |
-| `on_user_question`     | `{ runId, questions, token }`                            | On `ask_user`         |
-| `on_run_failed`        | `{ runId, error }`                                       | On error              |
-| `on_skill_loaded`      | `{ runId, skillSlug, loadKind }`                         | When a skill summary or body is loaded |
-| `on_tool_output_archived` | `{ runId, toolName, handle, wasSummarized }`          | When large tool output is offloaded |
+| Event                     | Payload                                                  | When                                   |
+| ------------------------- | -------------------------------------------------------- | -------------------------------------- |
+| `before_run`              | `{ runId, definition, environment, conversationId }`     | Before loop starts                     |
+| `after_run`               | `{ runId, result, costUsd, durationMs }`                 | After loop ends                        |
+| `before_round`            | `{ runId, round, messages }`                             | Before each LLM round                  |
+| `after_round`             | `{ runId, round, content, toolCalls }`                   | After each LLM round                   |
+| `before_tool`             | `{ runId, toolName, args }`                              | Before tool execution                  |
+| `after_tool`              | `{ runId, toolName, args, result, success, durationMs }` | After tool execution                   |
+| `on_compact`              | `{ runId, before, after, summary }`                      | On context compaction                  |
+| `on_evaluator`            | `{ runId, verdict, findings }`                           | On evaluator result                    |
+| `on_subagent_spawn`       | `{ parentRunId, childRunId, agentId }`                   | On `run_subagent`                      |
+| `on_approval_required`    | `{ runId, toolName, args, token }`                       | On pending approval                    |
+| `on_user_question`        | `{ runId, questions, token }`                            | On `ask_user`                          |
+| `on_run_failed`           | `{ runId, error }`                                       | On error                               |
+| `on_skill_loaded`         | `{ runId, skillSlug, loadKind }`                         | When a skill summary or body is loaded |
+| `on_tool_output_archived` | `{ runId, toolName, handle, wasSummarized }`             | When large tool output is offloaded    |
 
 ### Hook implementations
 
@@ -165,8 +167,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-
