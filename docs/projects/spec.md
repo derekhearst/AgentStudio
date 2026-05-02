@@ -140,8 +140,8 @@ This domain follows [../ui/spec.md](../ui/spec.md) and governs project/worktree 
 - Mobile behavior: project metadata panels collapse into stacked sections; destructive actions remain guarded.
 
 ## References
+
 - [Artifacts — Anthropic Claude](https://www.anthropic.com/news/artifacts) — first-class artifact model in Claude
 - [Harness Design for Long-Running Apps — Anthropic](https://www.anthropic.com/engineering/harness-design-long-running-apps) — durable artifacts as sprint deliverables
 - [Spec Kit — GitHub](https://github.com/github/spec-kit) — versioned structured artifacts
 - **Internal:** `src/lib/projects/projects.schema.ts`, `src/lib/projects/projects.server.ts`, `src/routes/projects/`
-

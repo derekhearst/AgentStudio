@@ -52,11 +52,7 @@ If any closeout checkbox is not done, the TODO is not complete.
    - Parallel with: #1 after target folders exist
    - Gate: all LLM callers moved; model list + chat streaming parity
 
-UX-1. [ ] UI platform and interaction system (cross-cutting)
-    - Source: ../ui/plan.md
-    - Starts in Wave 0 and continues through Wave 5
-    - Blocks: final UX acceptance for #6, #15, #18, #19, #20, #22
-    - Gate: desktop/mobile shell, action cards, and multi-session UX contracts implemented
+UX-1. [ ] UI platform and interaction system (cross-cutting) - Source: ../ui/plan.md - Starts in Wave 0 and continues through Wave 5 - Blocks: final UX acceptance for #6, #15, #18, #19, #20, #22 - Gate: desktop/mobile shell, action cards, and multi-session UX contracts implemented
 
 ### Wave 1 — Core Runtime Inputs/Outputs
 

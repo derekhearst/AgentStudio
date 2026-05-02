@@ -162,9 +162,9 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines review/trace/cost
 - Mobile behavior: inbox triage must support quick filters and swipe-safe action affordances.
 
 ## References
+
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — observability as a harness primitive
 - [Harness Engineering Is Cybernetics — George](https://x.com/odysseus0z/article/2030416758138634583) — sensing and feedback loops
 - [Oh My Codex — HUD pattern](https://github.com/Yeachan-Heo/oh-my-codex) — unified status + action surface
 - [Hive — aden-hive](https://github.com/aden-hive/hive) — outcome-driven checkpoints and review
 - **Internal:** `src/lib/observability/observability.schema.ts`, `src/lib/activity/activity.server.ts`, `src/routes/review/`, `src/routes/observability/`
-

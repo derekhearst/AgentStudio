@@ -228,8 +228,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Visual QA: mode selector states, profile editor forms, and skill attachment chips are snapshot-covered.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-

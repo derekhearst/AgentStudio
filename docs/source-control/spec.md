@@ -218,10 +218,10 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines branch/PR workflo
 - Mobile behavior: PR and conflict details render as focused drill-down views with sticky resolve actions.
 
 ## References
+
 - [../workspace/spec.md](../workspace/spec.md) - worktree environments
 - [../tasks/spec.md](../tasks/spec.md) - task approval and attempts
 - [../policies/spec.md](../policies/spec.md) - push and merge permissions
 - [../observability/spec.md](../observability/spec.md) - review inbox and operational visibility
 - [Symphony - OpenAI](https://github.com/openai/symphony) - issue to branch to PR workflow
 - [Vibe Kanban - BloopAI](https://github.com/BloopAI/vibe-kanban) - worktree-per-task execution
-

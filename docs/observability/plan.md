@@ -201,8 +201,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Visual QA: inbox state filters, timeline rows, and decision dialogs are included in snapshots.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-

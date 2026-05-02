@@ -182,8 +182,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Visual QA: branch status chips, conflict indicators, and PR action cards are included in snapshot coverage.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-
-

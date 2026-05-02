@@ -239,6 +239,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Visual QA: planning card, source timeline, and final report artifact views are snapshot-covered.
 
 ## Completion
+
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-

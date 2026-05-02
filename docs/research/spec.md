@@ -207,6 +207,7 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines plan-first resear
 - Mobile behavior: source and citation views collapse into tabbed sheets with persistent report actions.
 
 ## References
+
 - [OpenAI Deep Research announcement](https://openai.com/index/introducing-deep-research/) — multi-step RL-trained browsing + Python tool use, 5–30 min async, full citations
 - [Gemini Deep Research](https://blog.google/products/gemini/google-gemini-deep-research/) — plan-first, iterative browse, Markdown report export
 - [Gemini Deep Research Max](https://blog.google/innovation-and-ai/models-and-research/gemini-models/next-generation-gemini-deep-research/) — MCP support, native charts, two tiers (fast/max), asynchronous background workflows
@@ -215,4 +216,3 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines plan-first resear
 - [docs/tools/spec.md](../tools/spec.md) — capability groups, progressive disclosure, companion skills
 - [docs/tasks/spec.md](../tasks/spec.md) — task DAG, approval gate
 - [docs/observability/spec.md](../observability/spec.md) — Review Inbox, run traces, cost tracking
-

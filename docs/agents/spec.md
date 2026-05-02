@@ -149,10 +149,10 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines mode identity and
 - Mobile behavior: preset switch and identity editor use compact forms with explicit save/preview actions.
 
 ## References
+
 - [agents.md open standard](https://agents.md/) — project-level agent instructions format
 - [AGENTS.md — OpenAI](https://openai.com/index/introducing-agents-md/) — boot loader concept
 - [Skills Are Harness Engineering You Can Do in a Markdown File — ikangai](https://www.ikangai.com/skills-are-harness-engineering-you-can-do-in-a-markdown-file)
 - [GitAgent](https://github.com/open-gitagent/gitagent) — `agent.yaml` + `SOUL.md` + `RULES.md` pattern
 - [Spec Kit — GitHub](https://github.com/github/spec-kit) — structured spec generation
 - **Internal:** `src/lib/agents/agents.schema.ts`, `src/lib/agents/identity.server.ts`, `src/lib/agents/orchestrator.ts`, `src/routes/agents/`
-
