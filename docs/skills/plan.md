@@ -1,4 +1,6 @@
-# Skills System Plan
+# Skills Plan
+
+Status: active
 
 ## Overview
 
@@ -263,3 +265,10 @@ Ship first-party skills for:
 3. Skills should be loaded progressively, just like tools.
 4. Large tool outputs belong in durable storage first and live context second.
 5. Tool design, skill design, and context design must be planned together, not separately.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

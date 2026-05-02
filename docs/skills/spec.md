@@ -84,12 +84,16 @@ Behavioral guardrails that apply across tools and workflows.
 
 #### Identity skills
 
-System prompt bases for agent roles. Linked via `agents.identitySkillId`.
+System prompt bases for agent roles. Linked via `agents.identitySkillId`. Mode identity skills are also stored here — one per conversation mode.
 
-| Slug                           | Covers                                   |
-| ------------------------------ | ---------------------------------------- |
-| `system/orchestrator-identity` | Orchestrator persona and operating rules |
-| `agent/<slug>/identity`        | Per-agent identity content               |
+| Slug                           | Covers                                                           | Seeding                 |
+| ------------------------------ | ---------------------------------------------------------------- | ----------------------- |
+| `system/orchestrator-identity` | Orchestrator persona and operating rules                         | DB-seeded on first boot |
+| `system/mode-chat`             | Chat mode posture — collaborative, low-assumption                | DB-seeded on first boot |
+| `system/mode-research`         | Research mode — skeptical, cites uncertainty, asks before acting | DB-seeded on first boot |
+| `system/mode-plan`             | Plan mode — Karpathy four principles, proposes before executing  | DB-seeded on first boot |
+| `system/mode-agent`            | Agent mode — autonomous executor, interrupts only for blockers   | DB-seeded on first boot |
+| `agent/<slug>/identity`        | Per-agent identity content                                       | User-created            |
 
 #### Hook skills
 
@@ -125,6 +129,25 @@ list_skills(category?: string) → Returns all active skills with their summarie
 `/skills` — paginated list of all skills grouped by category, with search.
 `/skills/[slug]` — full-page markdown editor for the skill content and summary. Saving increments `version` and takes effect on the next skill load.
 `/skills/new` — create a skill with a slug, category, summary, and body.
+
+### Skill seeding strategy
+
+System skills are seeded in two distinct ways depending on their purpose:
+
+**In-code constants (read-only system docs)**
+
+Skills like `drokbot-guide` are hardcoded as TypeScript constants with fixed UUIDs. They are synthesized at read time — they never write to the DB. All edit/delete operations are blocked by `isSystemSkill()` guards. Use this pattern for content that should never be accidentally deleted or corrupted: quickstart guides, feature maps, onboarding docs.
+
+**DB-seeded on first boot (editable identity skills)**
+
+Mode identity skills (`system/mode-*`) and the orchestrator identity (`system/orchestrator-identity`) are inserted into the DB on first boot using `INSERT ... ON CONFLICT DO NOTHING`. This means:
+
+- The default content is written once and then the DB record is the source of truth
+- The user (or an agent) can edit the content through the Skills UI without a redeploy
+- If reset is needed, delete the skill row — the next boot re-seeds the default
+- Changes take effect on the next turn, not the next deploy
+
+This is the correct pattern for any skill that is meant to be tunable — particularly behavioral identity prompts.
 
 ### Repo file boot loader
 
@@ -177,3 +200,5 @@ Skill slugs starting with `hook/` are treated as hook implementations. When a ho
 - [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) — skills/instincts patterns
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — skills as progressive disclosure primitive
 - **Internal:** `src/lib/skills/`, `src/lib/skills/skills.schema.ts`, `src/lib/skills/skills.server.ts`, `src/routes/skills/`
+- [../chat/spec.md](../chat/spec.md) — mode selector and mode-aware skill loading
+- [../agents/plan.md](../agents/plan.md) — Phase 7: mode identity skill seeding

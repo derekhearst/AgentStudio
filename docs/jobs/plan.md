@@ -1,4 +1,6 @@
-# Jobs & Background Execution Plan
+# Jobs Plan
+
+Status: active
 
 ## Overview
 
@@ -200,3 +202,10 @@ jobLeases: {
 3. Cancellation is cooperative, not thread-kill style.
 4. Queue separation by latency class is required before heavy memory/evaluation workloads land.
 5. Every background feature must declare idempotency before being queued.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

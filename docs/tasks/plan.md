@@ -1,4 +1,6 @@
-# Tasks Layer Plan
+# Tasks Plan
+
+Status: active
 
 ## Overview
 
@@ -126,3 +128,10 @@ task_attempts: {
 - External issue tracker integration (Linear/GitHub) — separate doc later.
 - Cross-user task assignment.
 - Task scheduling beyond what `automations` already does.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

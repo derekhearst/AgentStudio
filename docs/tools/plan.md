@@ -1,4 +1,6 @@
-# Tools & Progressive Disclosure Plan
+# Tools Plan
+
+Status: active
 
 ## Overview
 
@@ -222,3 +224,10 @@ This matches Anthropic's context-management guidance and LangChain's tool-offloa
 
 - MCP-based tool dynamic discovery (separate doc).
 - Tool composition/macros.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

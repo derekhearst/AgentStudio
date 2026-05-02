@@ -1,4 +1,6 @@
-# Projects & Artifacts Plan
+# Projects Plan
+
+Status: active
 
 ## Overview
 
@@ -268,3 +270,10 @@ Do not execute this phase until the memory workstream has merged its schema/modu
 3. **No auto-project inference**: User or AI must explicitly set project context; don't infer from conversation topic.
 4. **Memory bridge**: Artifacts are first-class; Memory augments via references, not vice versa.
 5. **Slug uniqueness**: Per project (not global), simplifies routing and mental model.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

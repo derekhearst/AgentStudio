@@ -12,51 +12,51 @@ A user submits a research query. The agent first produces a structured **researc
 
 ### `research` table
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `userId` | text FK → users | owner |
-| `agentId` | text FK → agents | agent that ran the research |
-| `runId` | uuid FK → runs | the run that spawned this |
-| `query` | text | original user query |
-| `status` | enum | `planning` `searching` `synthesizing` `complete` `failed` |
-| `plan` | jsonb | array of `{ subQuestion, rationale }` |
-| `report` | text | final Markdown report with inline citations |
-| `tokensBudget` | int | max tokens the research loop may spend |
-| `tokensUsed` | int | actual tokens consumed |
-| `searchCount` | int | total `web_search` calls made |
-| `fetchCount` | int | total `web_fetch` calls made |
-| `createdAt` | timestamptz | |
-| `completedAt` | timestamptz | nullable |
-| `errorMessage` | text | nullable, set on failure |
+| Column         | Type             | Notes                                                     |
+| -------------- | ---------------- | --------------------------------------------------------- |
+| `id`           | uuid PK          |                                                           |
+| `userId`       | text FK → users  | owner                                                     |
+| `agentId`      | text FK → agents | agent that ran the research                               |
+| `runId`        | uuid FK → runs   | the run that spawned this                                 |
+| `query`        | text             | original user query                                       |
+| `status`       | enum             | `planning` `searching` `synthesizing` `complete` `failed` |
+| `plan`         | jsonb            | array of `{ subQuestion, rationale }`                     |
+| `report`       | text             | final Markdown report with inline citations               |
+| `tokensBudget` | int              | max tokens the research loop may spend                    |
+| `tokensUsed`   | int              | actual tokens consumed                                    |
+| `searchCount`  | int              | total `web_search` calls made                             |
+| `fetchCount`   | int              | total `web_fetch` calls made                              |
+| `createdAt`    | timestamptz      |                                                           |
+| `completedAt`  | timestamptz      | nullable                                                  |
+| `errorMessage` | text             | nullable, set on failure                                  |
 
 ### `researchSources` table
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `researchId` | uuid FK → research | |
-| `url` | text | |
-| `title` | text | |
-| `fetchedAt` | timestamptz | |
-| `contentSnippet` | text | 500-char extract fed to the model |
-| `fullText` | text | full extracted page text, stored for re-use |
-| `relevanceScore` | float | 0–1, LLM-judged relevance to the query |
-| `citedInReport` | boolean | whether the source appears in the final report |
-| `subQuestion` | text | which sub-question this source helped answer |
+| Column           | Type               | Notes                                          |
+| ---------------- | ------------------ | ---------------------------------------------- |
+| `id`             | uuid PK            |                                                |
+| `researchId`     | uuid FK → research |                                                |
+| `url`            | text               |                                                |
+| `title`          | text               |                                                |
+| `fetchedAt`      | timestamptz        |                                                |
+| `contentSnippet` | text               | 500-char extract fed to the model              |
+| `fullText`       | text               | full extracted page text, stored for re-use    |
+| `relevanceScore` | float              | 0–1, LLM-judged relevance to the query         |
+| `citedInReport`  | boolean            | whether the source appears in the final report |
+| `subQuestion`    | text               | which sub-question this source helped answer   |
 
 ### `researchSteps` table
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | uuid PK | |
-| `researchId` | uuid FK → research | |
-| `stepIndex` | int | ordering |
-| `stepType` | enum | `plan` `search` `fetch` `synthesize` `report` |
-| `input` | jsonb | what was sent to the tool/model |
-| `output` | jsonb | what came back |
-| `tokensUsed` | int | |
-| `createdAt` | timestamptz | |
+| Column       | Type               | Notes                                         |
+| ------------ | ------------------ | --------------------------------------------- |
+| `id`         | uuid PK            |                                               |
+| `researchId` | uuid FK → research |                                               |
+| `stepIndex`  | int                | ordering                                      |
+| `stepType`   | enum               | `plan` `search` `fetch` `synthesize` `report` |
+| `input`      | jsonb              | what was sent to the tool/model               |
+| `output`     | jsonb              | what came back                                |
+| `tokensUsed` | int                |                                               |
+| `createdAt`  | timestamptz        |                                               |
 
 ---
 
@@ -69,6 +69,7 @@ Before any searching begins the agent produces an explicit research plan. The pl
 ### 2. `web_fetch` Tool
 
 A new tool in the `research` capability group. Given a URL it returns the full readable text content of the page (HTML stripped, JS rendered if needed via Playwright). Returns:
+
 - `title` — page title
 - `text` — extracted readable text (up to 50k chars)
 - `url` — final URL after redirects
@@ -83,6 +84,7 @@ Reads a PDF from a URL or sandbox file path and returns extracted text (via `pdf
 ### 4. Search–Fetch–Synthesize Loop
 
 The runtime executes the research loop as a `research` job type (see `jobs` domain). Each iteration:
+
 1. **Search** — calls `web_search` with a sub-question-derived query; up to 10 results returned.
 2. **Select** — model picks up to 3 URLs to read based on titles/snippets.
 3. **Fetch** — calls `web_fetch` for each selected URL; content stored in `researchSources`.
@@ -92,6 +94,7 @@ The runtime executes the research loop as a `research` job type (see `jobs` doma
 The loop continues until all sub-questions are covered or the token budget is exhausted. The model may spawn additional searches if it determines a sub-question is still under-answered.
 
 **Loop limits:**
+
 - Max searches: 30 per research run
 - Max fetches: 50 per research run
 - Max token budget: configurable per agent (default 200k tokens)
@@ -100,6 +103,7 @@ The loop continues until all sub-questions are covered or the token budget is ex
 ### 5. Report Generation
 
 After the loop completes the agent synthesizes a final Markdown report:
+
 - Executive summary paragraph
 - Section per sub-question with findings
 - Inline citations using `[N]` notation
@@ -114,6 +118,7 @@ If the same URL is encountered across multiple sub-question searches, only one f
 ### 7. Progress Streaming
 
 The research job emits SSE events visible in the chat sidebar while running:
+
 - `research:planning` — plan generated, listing sub-questions
 - `research:search` — search issued, query shown
 - `research:fetch` — URL being fetched, title shown
@@ -125,11 +130,11 @@ The research job emits SSE events visible in the chat sidebar while running:
 
 Tools are organized into a new `research` capability group:
 
-| Tool | Description |
-|---|---|
+| Tool         | Description                                               |
+| ------------ | --------------------------------------------------------- |
 | `web_search` | Search the web (already in `core`) — also referenced here |
-| `web_fetch` | Fetch full text of a URL |
-| `pdf_read` | Extract text from a PDF (URL or sandbox path) |
+| `web_fetch`  | Fetch full text of a URL                                  |
+| `pdf_read`   | Extract text from a PDF (URL or sandbox path)             |
 
 The group is `alwaysOn: false`. The research orchestrator skill enables it at the start of every research run.
 
@@ -140,6 +145,7 @@ Research runs are enqueued as a `research` job type in the `research` queue (med
 ### 10. Research Trigger
 
 Research is triggered in two ways:
+
 1. **Explicit** — user selects a "Deep Research" mode in the chat composer before sending (analogous to Claude/Gemini's mode toggle). The agent immediately routes the message to the research orchestrator.
 2. **Implicit** — the orchestrator agent detects that the query warrants deep research (e.g., "write a comprehensive report on…", "research all options for…") and decides to invoke the research capability autonomously via `run_subagent`.
 
@@ -150,14 +156,15 @@ Users can attach files (PDFs, CSVs, text documents) as research context. Attache
 ### 12. Per-Agent Research Config
 
 Each agent record can carry a `researchConfig` JSONB field:
+
 ```jsonc
 {
-  "maxSearches": 20,
-  "maxFetches": 30,
-  "tokenBudget": 150000,
-  "requirePlanApproval": false,
-  "allowedDomains": [],     // empty = unrestricted
-  "blockedDomains": []
+	"maxSearches": 20,
+	"maxFetches": 30,
+	"tokenBudget": 150000,
+	"requirePlanApproval": false,
+	"allowedDomains": [], // empty = unrestricted
+	"blockedDomains": [],
 }
 ```
 
@@ -178,11 +185,11 @@ Each agent record can carry a `researchConfig` JSONB field:
 
 ## Roles & Permissions
 
-| Role | Capability |
-|---|---|
-| User | Submit research queries, view own research records and reports |
-| Agent (orchestrator) | Trigger research jobs, read any research record in their scope |
-| Admin | View all research records, cancel stuck jobs, adjust per-agent research config |
+| Role                 | Capability                                                                     |
+| -------------------- | ------------------------------------------------------------------------------ |
+| User                 | Submit research queries, view own research records and reports                 |
+| Agent (orchestrator) | Trigger research jobs, read any research record in their scope                 |
+| Admin                | View all research records, cancel stuck jobs, adjust per-agent research config |
 
 ---
 

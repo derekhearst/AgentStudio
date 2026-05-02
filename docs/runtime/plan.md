@@ -1,4 +1,6 @@
-# Agent Runtime — Brain / Hands / Session Decoupling Plan
+# Runtime Plan
+
+Status: active
 
 ## Overview
 
@@ -154,3 +156,10 @@ export async function runAgentLoop(args: {
 - Replacing OpenRouter SDK.
 - Streaming protocol changes (still SSE).
 - Multi-region runtime distribution.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

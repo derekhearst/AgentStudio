@@ -50,3 +50,56 @@ TypeError: undefined is not an object (evaluating 'result.data')
 [ingest] (26/50) 0862e8bf sessions=50 drawers=490 eta=7067s
 [ingest] (27/50) 853b0a1d sessions=50 drawers=495 eta=6844s
 [ingest] (28/50) a06e4cfe sessions=50 drawers=508 eta=6633s
+[ingest] (29/50) 37d43f65 sessions=49 drawers=533 eta=6413s
+[ingest] FAILED b86304ba 72 | 	}
+73 | 
+74 | 	throw lastError ?? new Error('Embeddings request exhausted retries')
+75 | }
+76 | 
+77 | export async function embed(texts: string[], options: EmbedOptions = {}): Promise<number[][]> {
+                          ^
+TypeError: undefined is not an object (evaluating 'result.data')
+      at embed (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\embeddings.server.ts:77:22)
+      at mineSession (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\mining.server.ts:209:27)
+      at ingestInstance (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:109:24)
+      at main (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:129:40)
+      at processTicksAndRejections (native:7:39)
+
+[ingest] (30/50) d52b4f67 sessions=50 drawers=455 eta=6368s
+[ingest] (31/50) 25e5aa4f sessions=45 drawers=506 eta=6080s
+[ingest] (32/50) caf9ead2 sessions=43 drawers=466 eta=5799s
+[ingest] (33/50) 8550ddae sessions=42 drawers=453 eta=5515s
+[ingest] (34/50) 60d45044 sessions=50 drawers=533 eta=5272s
+[memory] extractor returned unusable JSON, using fallback
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (35/50) 3f1e9474 sessions=50 drawers=500 eta=4943s
+[ingest] (36/50) 86b68151 sessions=47 drawers=485 eta=4626s
+[memory] extractor call failed RequestTimeoutError: Request timed out: TimeoutError: The operation timed out.
+      at C:\Users\derek\Documents\Projects\AgentStudio\node_modules\@openrouter\sdk\esm\lib\sdks.js:181:36
+      at processTicksAndRejections (native:7:39)
+
+[memory] extractor returned unusable JSON, using fallback
+[ingest] (37/50) 577d4d32 sessions=46 drawers=487 eta=4416s
+[ingest] (38/50) ec81a493 sessions=50 drawers=493 eta=4099s
+[ingest] (39/50) 15745da0 sessions=47 drawers=474 eta=3755s
+[ingest] (40/50) e01b8e2f sessions=50 drawers=497 eta=3413s
+[ingest] (41/50) bc8a6e93 sessions=48 drawers=537 eta=3066s
+[ingest] (42/50) ccb36322 sessions=46 drawers=471 eta=2728s
+[ingest] (43/50) 001be529 sessions=50 drawers=504 eta=2406s
+[ingest] (44/50) b320f3f8 sessions=46 drawers=463 eta=2069s
+[ingest] FAILED 19b5f2b3 53 | }
+54 | 
+55 | /** Slug a token down to lowercase + hyphen for stable AAAK fragments. */
+56 | export function slugifyToken(value: string): string {
+57 | 	return value
+58 | 		.trim()
+        ^
+TypeError: value.trim is not a function. (In 'value.trim()', 'value.trim' is undefined)
+      at slugifyToken (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\aaak.server.ts:58:4)
+      at normaliseTagValues (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\aaak.server.ts:71:16)
+      at encodeAaak (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\aaak.server.ts:83:18)
+      at mineSession (C:\Users\derek\Documents\Projects\AgentStudio\src\lib\memory\mining.server.ts:225:16)
+      at ingestInstance (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:109:24)
+      at main (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:129:40)
+      at processTicksAndRejections (native:7:39)
+

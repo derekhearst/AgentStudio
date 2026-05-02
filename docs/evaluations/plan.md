@@ -1,4 +1,6 @@
-# Evaluator / Critic Loop Plan
+# Evaluations Plan
+
+Status: active
 
 ## Overview
 
@@ -128,3 +130,10 @@ evalAttempt: integer default 0
 - Multi-evaluator voting / consensus.
 - Human-in-the-loop evaluator with reviews UI (separate later).
 - ML-based finding clustering.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

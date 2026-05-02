@@ -51,9 +51,7 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 			if (json && Array.isArray(json.data)) {
 				return json as EmbeddingResponse
 			}
-			lastError = new Error(
-				`Embeddings response missing data: ${JSON.stringify(json).slice(0, 300)}`,
-			)
+			lastError = new Error(`Embeddings response missing data: ${JSON.stringify(json).slice(0, 300)}`)
 			const backoff = Math.min(2000 * 2 ** attempt, 16_000)
 			await new Promise((r) => setTimeout(r, backoff))
 			attempt += 1

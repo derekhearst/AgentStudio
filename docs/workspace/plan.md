@@ -1,4 +1,6 @@
-# Sandbox Isolation Plan
+# Workspace Plan
+
+Status: active
 
 ## Overview
 
@@ -117,3 +119,10 @@ All filesystem tools take `Environment` (not `userId`) when computing paths. The
 - Container/VM isolation (Phase 5 is a stub).
 - Network egress policy (separate doc).
 - Cross-run data sharing primitives.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

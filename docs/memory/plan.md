@@ -1,4 +1,6 @@
-# Plan: Port MemPalace memory into AgentStudio + LongMemEval validation
+# Memory Plan
+
+Status: active
 
 ## TL;DR
 
@@ -150,3 +152,10 @@ Create `scripts/bench/longmemeval/`:
 1. **Embedding model dimension**: pgvector column dim must match the chosen embedding model. Using `text-embedding-3-small` (1536) fixed for v1 to keep indexes simple.
 2. **Mining cost**: A small LLM call per session for entity extraction. Using `openai/gpt-4o-mini` via OpenRouter for parity with title generation.
 3. **Test DB isolation for bench**: The 500 instances must not pollute the dev/prod database. Using a dedicated `longmemeval_<runid>` Postgres schema scoped per-run, dropped after.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

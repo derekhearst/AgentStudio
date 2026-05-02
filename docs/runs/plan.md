@@ -1,4 +1,6 @@
-# Resumable, Durable Chat Runs Plan
+# Runs Plan
+
+Status: active
 
 ## Overview
 
@@ -117,3 +119,10 @@ Make every agent run survive process restarts, browser reloads, and SSE disconne
 - Multi-pod coordination / leader election (single-process polling is sufficient at current scale).
 - Cross-user run sharing.
 - Replacing SSE with WebSockets.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

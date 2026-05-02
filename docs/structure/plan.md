@@ -1,4 +1,6 @@
-# Library Structure Refactor Plan
+# Structure Plan
+
+Status: active
 
 ## Overview
 
@@ -20,24 +22,38 @@
 
 ## Vocabulary decisions
 
-| Term              | Meaning                                                                                           | Folder           |
-| ----------------- | ------------------------------------------------------------------------------------------------- | ---------------- |
-| **Runtime**       | The agent loop + the Brain/Hands/Session primitives that drive it                                 | `runtime/`       |
-| **Session**       | Durable message tape + metadata. Many sessions can exist; only some are user-visible.             | `sessions/`      |
-| **Run**           | One execution attempt against a session (stream, retry, resume). Has state machine, cost, events. | `runs/`          |
-| **Task**          | User intent / spec. May spawn one or more sessions.                                               | `tasks/`         |
-| **Conversation**  | Synonym for "user-facing session" — UI label only, not a folder.                                  | (n/a)            |
-| **Agent**         | Identity record (name, role, identity skill, model, capability bindings). Not the loop.           | `agents/`        |
-| **Environment**   | Per-run sandbox (workspace, tool allow-list, network policy).                                     | `workspace/`     |
-| **Hook**          | Lifecycle callback (`before_tool`, `after_run`, …).                                               | `hooks/`         |
-| **Evaluation**    | Critic verdict on a run/task.                                                                     | `evaluations/`   |
-| **Job**           | Durable background work item that schedules, retries, and supervises execution.                   | `jobs/`          |
-| **Memory**        | Cross-session durable knowledge with retrieval.                                                   | `memory/`        |
-| **Policy**        | Runtime-enforced access rules, approvals, ACLs, and admin overrides.                              | `policies/`      |
-| **Observability** | Traces, operational metrics, incidents, and the unified review inbox.                             | `observability/` |
-| **Skill**         | Composable markdown bundle, lazy-loaded.                                                          | `skills/`        |
-| **Tool**          | A callable capability surfaced to the LLM.                                                        | `tools/`         |
-| **LLM**           | Model provider adapter + model catalog.                                                           | `llm/`           |
+### When a domain earns its own folder
+
+A domain gets its own `src/lib/<domain>/` folder (and a matching `docs/<domain>/`) when it has **at least one** of:
+
+- Its own DB tables with non-trivial state
+- Its own async job, loop, or state machine logic
+- Its own non-trivial server-side services that other domains call
+
+This is why `research/` is a real domain (DB tables, job loop, tool group) while "research mode" and "research skill" are not — those are thin configurations inside `agents/` and `skills/` respectively. The docs and lib structure mirror each other: every `docs/<domain>/` should eventually have a `src/lib/<domain>/`.
+
+### Term table
+
+| Term              | Meaning                                                                                                                                            | Folder           |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| **Runtime**       | The agent loop + the Brain/Hands/Session primitives that drive it                                                                                  | `runtime/`       |
+| **Session**       | Durable message tape + metadata. Many sessions can exist; only some are user-visible.                                                              | `sessions/`      |
+| **Run**           | One execution attempt against a session (stream, retry, resume). Has state machine, cost, events.                                                  | `runs/`          |
+| **Task**          | User intent / spec. May spawn one or more sessions.                                                                                                | `tasks/`         |
+| **Conversation**  | Synonym for "user-facing session" — UI label only, not a folder.                                                                                   | (n/a)            |
+| **Agent**         | Identity record (name, role, identity skill, model, capability bindings). Not the loop.                                                            | `agents/`        |
+| **Environment**   | Per-run sandbox (workspace, tool allow-list, network policy).                                                                                      | `workspace/`     |
+| **Hook**          | Lifecycle callback (`before_tool`, `after_run`, …).                                                                                                | `hooks/`         |
+| **Evaluation**    | Critic verdict on a run/task.                                                                                                                      | `evaluations/`   |
+| **Job**           | Durable background work item that schedules, retries, and supervises execution.                                                                    | `jobs/`          |
+| **Memory**        | Cross-session durable knowledge with retrieval.                                                                                                    | `memory/`        |
+| **Policy**        | Runtime-enforced access rules, approvals, ACLs, and admin overrides.                                                                               | `policies/`      |
+| **Observability** | Traces, operational metrics, incidents, and the unified review inbox.                                                                              | `observability/` |
+| **Skill**         | Composable markdown bundle, lazy-loaded.                                                                                                           | `skills/`        |
+| **Tool**          | A callable capability surfaced to the LLM.                                                                                                         | `tools/`         |
+| **Research**      | Autonomous search-fetch-synthesize loop, DB tables, job type, report output. Distinct from "research mode" (agents) and "research skill" (skills). | `research/`      |
+| **Context**       | Slot-based system prompt assembly, compaction, token budgets. Has own schema (`compactionEvents`, `contextSlotConfigs`).                           | `context/`       |
+| **LLM**           | Model provider adapter + model catalog.                                                                                                            | `llm/`           |
 
 Why **`sessions/` not `conversations/`**: a sub-agent that the user never sees still has a message tape, runs, costs. That isn't a conversation in any normal sense — it's a session. "Conversation" is the UI label for sessions where `kind = 'user_chat'`.
 
@@ -163,6 +179,20 @@ src/lib/
     index.ts
 
   activity/               # event log — already fine
+
+  # ── Docs-parallel domains (not yet built) ───────────────
+  research/               # autonomous search-fetch-synthesize loop (see docs/research/spec.md)
+    research.schema.ts            # research + researchSources + researchSteps
+    research.server.ts
+    research.remote.ts
+    loop.server.ts                # search-fetch-synthesize loop logic
+    index.ts
+
+  context/                # slot-based context assembly + compaction (see docs/context/spec.md)
+    slots.server.ts               # ContextSlot type + assembleSystemPrompt()
+    compaction.server.ts          # moved from sessions/ once context/ exists
+    context.schema.ts             # compactionEvents + contextSlotConfigs
+    index.ts
 
   # ── Operations ───────────────────────────────────────────
   automations/            # renamed from automation/ for plural consistency
@@ -310,3 +340,10 @@ This refactor mostly _moves_ files. Notable creations:
 ## Status
 
 This plan is a prerequisite for the runtime, runs, tasks, workspace, runtime parallel-subagents, evaluations, hooks, tools, skills, agents, jobs, policies, and observability plans. Land Steps 1–6 before doing major work in those areas; remaining steps can interleave with feature plans.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

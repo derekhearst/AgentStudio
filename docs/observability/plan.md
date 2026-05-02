@@ -1,4 +1,6 @@
-# Observability & Review Inbox Plan
+# Observability Plan
+
+Status: active
 
 ## Overview
 
@@ -184,3 +186,10 @@ operationalMetrics: {
 3. Trace events should be normalized enough for dashboards, not raw unbounded logs only.
 4. Operational metrics should come from domain events, not hand-maintained counters.
 5. Any state that requires human action should become a review item.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

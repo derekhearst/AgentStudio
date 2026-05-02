@@ -1,4 +1,6 @@
-# Policies, Permissions & Admin Controls Plan
+# Policies Plan
+
+Status: active
 
 ## Overview
 
@@ -189,3 +191,10 @@ A single resolver evaluates policy in this order:
 3. Sensitive actions default deny unless explicitly allowed.
 4. Every deny/approval outcome must be audit logged.
 5. Admin override exists, but override actions are always visible in audit history.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

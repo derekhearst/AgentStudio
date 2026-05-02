@@ -1,4 +1,6 @@
-# Agent Source — Prompts as Editable Artifacts Plan
+# Agents Plan
+
+Status: active
 
 ## Overview
 
@@ -136,8 +138,85 @@ Identity prompts should stay short. Detailed operating guidance for tools, workf
 - E2E: agent prompt change persists across restarts and matches skill content.
 - Agent role regression: coding agent loads companion tool-skill summaries without inflating the base identity prompt.
 
+### Phase 7 — Conversation Modes
+
+Modes are session-level behavioral contracts. A mode governs the orchestrator's cognitive stance — how much it assumes, how collaborative vs. autonomous it is, which tools are available, and which companion skills auto-load. The mode's identity prompt is stored as a skill (editable), but the mode itself is a configuration bundle, not a skill.
+
+**Four modes:**
+
+| Mode       | Posture                                                                             | Assumption level             | Primary tools              |
+| ---------- | ----------------------------------------------------------------------------------- | ---------------------------- | -------------------------- |
+| `chat`     | Conversational partner — answers directly, minimal tool use                         | Low                          | core only                  |
+| `research` | Skeptical investigator — surfaces uncertainty, cites sources, challenges premises   | Minimal — asks before acting | web, memory, read-only     |
+| `plan`     | Structured proposer — proposes before executing, validates scope explicitly         | Medium — confirms intent     | plan tools, no write tools |
+| `agent`    | Autonomous executor — proceeds on best interpretation, interrupts only for blockers | High — acts on judgment      | all tools                  |
+
+**Key design rule:** A mode is not a skill. A mode's identity prompt is stored as a skill (so it's editable without code changes), but the mode bundles more than a prompt — it also carries tool policy and auto-loaded companion skills.
+
+#### 7.1 Seed system mode identity skills
+
+On boot, seed four skills if not present:
+
+- `system/mode-chat` — collaborative conversationalist, Karpathy "Think Before Coding" principles, pushback license
+- `system/mode-research` — skeptical investigator, always cites uncertainty, asks before proceeding, no write tools
+- `system/mode-plan` — structured proposer, Karpathy full four principles, proposes plan with success criteria before any execution
+- `system/mode-agent` — heads-down executor, minimal interruptions, still flags genuine blockers
+
+Each skill is editable from the Skills UI — changing it changes the mode's behavior on the next turn, no redeploy.
+
+#### 7.2 Add `mode` to `conversations`
+
+```sql
+ALTER TABLE conversations ADD COLUMN mode text NOT NULL DEFAULT 'chat'
+  CHECK (mode IN ('chat', 'research', 'plan', 'agent'));
+```
+
+#### 7.3 Mode-aware identity loading in stream server
+
+In `buildSystemPrompt`, load the mode identity skill instead of the hardcoded `ORCHESTRATOR_IDENTITY`:
+
+```ts
+const modeSkillName = `system/mode-${conversation.mode}`
+const modeIdentity = (await loadSkillByName(modeSkillName)) ?? ORCHESTRATOR_IDENTITY_FALLBACK
+```
+
+Tool filtering also reads from the mode: research mode removes all write tools; plan mode removes execute tools but keeps plan tools.
+
+#### 7.4 Mode switch anchor message
+
+When the user switches mode mid-conversation, inject a system message as a semantic anchor:
+
+```
+[Mode switched: plan → agent]
+Prior research and plan decisions are in the conversation above.
+You are now in agent mode: execute the approved plan, surface blockers, minimize interruptions.
+```
+
+This tells the model its posture changed without requiring it to re-read everything.
+
+#### 7.5 Mode selector in chat UI
+
+See `docs/chat/spec.md` — mode selector lives in the composer. Default mode from `chatWorkbenchPreferences.defaultMode`.
+
+#### 7.6 Update files
+
+- `src/lib/agents/orchestrator.ts` — mode-aware identity loading
+- `src/lib/chat/chat.schema.ts` — `mode` column on `conversations`
+- `src/lib/agents/identity.server.ts` — `loadModeIdentity(mode, userId)` function
+- `src/lib/skills/skills.server.ts` — boot seeder for four mode skills
+- `src/routes/chat/[id]/stream/+server.ts` — pass mode to identity loader, filter tools by mode
+- `drizzle/` — migration for `conversations.mode`
+
 ## Out of scope
 
 - Git commits triggered by agents (a future "agent-as-author" feature).
 - Multi-language prompt support.
 - Prompt A/B testing (separate eval-tooling doc later).
+- Per-user custom modes beyond the four system modes (post-v1).
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+

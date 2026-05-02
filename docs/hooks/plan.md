@@ -1,4 +1,6 @@
-# Lifecycle Hooks Plan
+# Hooks Plan
+
+Status: active
 
 ## Overview
 
@@ -149,3 +151,10 @@ hookInvocations: {
 - Hooks running outside the host process (queues / lambdas).
 - Conditional hooks (filter expressions) — start with all-or-nothing per agent.
 - Hook marketplace / sharing across instances.
+
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- Pending.
+
+
