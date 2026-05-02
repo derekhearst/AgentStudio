@@ -218,6 +218,11 @@ In `/agents/[id]/settings`, add a "Context" tab with slot budget controls.
 - `drizzle/` — migrations for `compaction_events`, `context_slot_configs`
 - `src/lib/chat/ContextWindow.svelte` — token bar + compaction marker
 
+## Completion
+
+- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
+- 2026-05-02 — Phase 1 (slot-based system-prompt assembly) shipped on branch `claude/nervous-kapitsa-18255e`. New `src/lib/context/slots.server.ts` exports `ContextSlot` and `assembleSystemPrompt(slots, budgetTokens?)` returning `{ systemPrompt, includedSlots, droppedSlots, truncatedSlots, estimatedTokens }`. The chat stream's `systemSections[]` array replaced with structured slots (`identity` p100, `tool_policy` p90, `skills` p70 truncatable, `memory` p60 truncatable). No behavior change when no budget is supplied — joined output is byte-identical to the previous `\n\n`-joined string. Phases 2-8 (token estimation upgrade, compaction integrity, relevance-filtered skills, memory write-back, sub-agent context, UI utilization indicator, per-agent slot config) still pending.
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.

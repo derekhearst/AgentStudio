@@ -115,6 +115,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 4. [ ] Context slot assembly + compaction invariants
    - Source: ../context/plan.md
    - Gate: token budget respected; tool call/result pair integrity preserved
+   - Evidence (Phase 1 — slot-based system-prompt assembly, 2026-05-02):
+     - New module: [src/lib/context/slots.server.ts](../../src/lib/context/slots.server.ts) — `ContextSlot`, `assembleSystemPrompt`
+     - Barrel: [src/lib/context/index.ts](../../src/lib/context/index.ts)
+     - Stream handler migrated from `systemSections[]` to slots: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Unit tests: [tests/context.slots.spec.ts](../../tests/context.slots.spec.ts)
+   - Phases 2-8 (token estimation upgrade, compaction integrity, relevance-filtered skills, memory write-back, sub-agent context, UI utilization indicator, per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md

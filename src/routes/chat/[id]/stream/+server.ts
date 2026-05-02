@@ -19,6 +19,7 @@ import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
+import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
 
 const encoder = new TextEncoder()
 
@@ -197,20 +198,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.join('\n')
 	}
 
-	const systemSections: string[] = []
+	const contextSlots: ContextSlot[] = []
 	let scopedAgentTools: string[] | null = null
 
 	// --- Context Engineering: Orchestrator / Agent Identity ---
 	const isOrchestrator = !conversation.agentId
 	if (isOrchestrator) {
 		const orchestratorPrompt = await buildOrchestratorPrompt()
-		systemSections.push(orchestratorPrompt)
+		contextSlots.push({ name: 'identity', priority: 100, content: orchestratorPrompt })
 	} else {
-		// Agent conversation ΓÇö load agent's own system prompt
+		// Agent conversation — load agent's own system prompt
 		const { agents: agentsTable } = await import('$lib/agents/agents.schema')
 		const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, conversation.agentId!)).limit(1)
 		if (agent) {
-			systemSections.push(agent.systemPrompt)
+			contextSlots.push({ name: 'identity', priority: 100, content: agent.systemPrompt })
 			const config = agent.config as { allowedTools?: string[] } | null
 			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
 				scopedAgentTools = config.allowedTools
@@ -222,26 +223,35 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// Reserved for optional future system prompt handling.
 	}
 	if (isOrchestrator) {
-		systemSections.push(
-			[
+		contextSlots.push({
+			name: 'tool_policy',
+			priority: 90,
+			content: [
 				'Tool usage policy:',
 				'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
 				"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
 				'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
 				'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
 			].join('\n'),
-		)
+		})
 	} else {
-		systemSections.push(
-			[
+		contextSlots.push({
+			name: 'tool_policy',
+			priority: 90,
+			content: [
 				'Tool usage policy:',
 				'- You cannot call ask_user directly in agent conversations.',
 				'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
 			].join('\n'),
-		)
+		})
 	}
 	if (skillSummariesText) {
-		systemSections.push(`Available skills (use read_skill to load full content when relevant):\n${skillSummariesText}`)
+		contextSlots.push({
+			name: 'skills',
+			priority: 70,
+			content: `Available skills (use read_skill to load full content when relevant):\n${skillSummariesText}`,
+			truncationStrategy: 'truncate-end',
+		})
 	}
 
 	// --- Context Engineering: Memory Palace Recall ---
@@ -260,13 +270,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				rerankModel: memoryConfig?.rerankModel,
 			})
 			const memoryBlock = renderMemoryContext(recalled)
-			if (memoryBlock) systemSections.push(memoryBlock)
+			if (memoryBlock) {
+				contextSlots.push({
+					name: 'memory',
+					priority: 60,
+					content: memoryBlock,
+					truncationStrategy: 'truncate-end',
+				})
+			}
 		} catch (err) {
 			console.warn('[memory] recall failed', err)
 		}
 	}
 
-	const capabilityPrompt = systemSections.join('\n\n')
+	const assembled = assembleSystemPrompt(contextSlots)
+	const capabilityPrompt = assembled.systemPrompt
 
 	if (capabilityPrompt) {
 		llmMessages.unshift({
