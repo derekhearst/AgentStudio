@@ -58,23 +58,23 @@ Direct database imports from `.server.ts` files inside components or `+page.svel
 
 ### Current domains
 
-| Domain folder          | What it owns                                                  |
-| ---------------------- | ------------------------------------------------------------- |
-| `activity/`            | Append-only audit event log and feed                          |
-| `agents/`              | Agent records, identity skills, orchestrator                  |
-| `auth/`                | Users, sessions, passkeys, invites                            |
-| `automations/`         | Scheduled and event-triggered automation runs                 |
-| `chat/`                | Chat UI and streaming orchestration                           |
-| `costs/`               | LLM usage tracking, budget limits, spend dashboard            |
-| `memory/`              | Memory palace, knowledge graph, retrieval pipeline            |
-| `llm/`                 | OpenRouter chat client, model catalog, and model selector UI  |
-| `notifications/`       | Push subscriptions, in-app notification inbox                 |
-| `runs/`                | Active run state, run monitoring queries, run schema          |
-| `sessions/`            | Conversation/session tape schema and ownership boundary        |
-| `settings/`            | Per-user preferences (model, context, budget, memory, tools)  |
-| `skills/`              | Skill library, runtime loading, SKILL.md boot loader          |
-| `tools/`               | Tool catalog, capability groups, tool execution               |
-| `ui/`                  | Shared components, design tokens, layout primitives           |
+| Domain folder    | What it owns                                                 |
+| ---------------- | ------------------------------------------------------------ |
+| `activity/`      | Append-only audit event log and feed                         |
+| `agents/`        | Agent records, identity skills, orchestrator                 |
+| `auth/`          | Users, sessions, passkeys, invites                           |
+| `automations/`   | Scheduled and event-triggered automation runs                |
+| `chat/`          | Chat UI and streaming orchestration                          |
+| `costs/`         | LLM usage tracking, budget limits, spend dashboard           |
+| `memory/`        | Memory palace, knowledge graph, retrieval pipeline           |
+| `llm/`           | OpenRouter chat client, model catalog, and model selector UI |
+| `notifications/` | Push subscriptions, in-app notification inbox                |
+| `runs/`          | Active run state, run monitoring queries, run schema         |
+| `sessions/`      | Conversation/session tape schema and ownership boundary      |
+| `settings/`      | Per-user preferences (model, context, budget, memory, tools) |
+| `skills/`        | Skill library, runtime loading, SKILL.md boot loader         |
+| `tools/`         | Tool catalog, capability groups, tool execution              |
+| `ui/`            | Shared components, design tokens, layout primitives          |
 
 Planned/upcoming domains that do not yet have folders:
 

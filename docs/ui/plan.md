@@ -5,6 +5,7 @@ Status: active (Wave 0 gate satisfied; Phases 2–7 continue through Wave 5)
 ## Wave 0 Completion (Phase 1 + 2.1 + 4.1)
 
 Completed 2025-05-02.
+
 - Phase 1.1 shell definition: documented in [spec.md](spec.md) — Shell Implementation Contract section
 - Phase 1.2 UI contract template: added copy-paste template to [spec.md](spec.md) — Domain Integration Contracts section
 - Phase 2.1 running sessions dock: [src/lib/ui/RunningSessionsDock.svelte](../../src/lib/ui/RunningSessionsDock.svelte)

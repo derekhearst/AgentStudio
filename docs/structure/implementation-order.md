@@ -46,36 +46,30 @@ If any closeout checkbox is not done, the TODO is not complete.
    - Source: ../structure/plan.md
    - Blocks: all downstream waves
    - Gate: build/test passes; no unresolved imports; route parity verified
-    - Evidence:
-      - Domain rename slice completed: [src/lib/automations/index.ts](../../src/lib/automations/index.ts), [src/lib/costs/index.ts](../../src/lib/costs/index.ts)
-      - Runs extraction slice completed: [src/lib/runs/index.ts](../../src/lib/runs/index.ts), [src/lib/runs/runs.server.ts](../../src/lib/runs/runs.server.ts), [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)
-    - Run schema ownership moved out of chat into runs: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)
-    - Run schema imports updated at call sites: [src/lib/chat/chat.remote.ts](../../src/lib/chat/chat.remote.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
-    - Schema-level conversation/message dependencies moved behind sessions: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts), [src/lib/automations/automation.schema.ts](../../src/lib/automations/automation.schema.ts), [src/lib/memory/memory.schema.ts](../../src/lib/memory/memory.schema.ts), [src/lib/db.server.ts](../../src/lib/db.server.ts)
-    - DB schema registration includes runs + sessions: [src/lib/db.server.ts](../../src/lib/db.server.ts)
-    - Sessions scaffold started for chat split: [src/lib/sessions/index.ts](../../src/lib/sessions/index.ts), [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts)
-    - Session schema ownership handoff completed: [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts)
-    - Session imports moved in core flows: [src/lib/chat/chat.remote.ts](../../src/lib/chat/chat.remote.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts), [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts), [src/lib/memory/memory.server.ts](../../src/lib/memory/memory.server.ts), [src/lib/memory/retrieval.server.ts](../../src/lib/memory/retrieval.server.ts), [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
-      - Compatibility shims removed after call-site migration: src/lib/chat/chat.schema.ts, src/lib/chat/runs.server.ts (deleted)
-      - Monitor routes moved to runs domain: [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts)
+   - Evidence:
+     - Domain rename slice completed: [src/lib/automations/index.ts](../../src/lib/automations/index.ts), [src/lib/costs/index.ts](../../src/lib/costs/index.ts)
+     - Runs extraction slice completed: [src/lib/runs/index.ts](../../src/lib/runs/index.ts), [src/lib/runs/runs.server.ts](../../src/lib/runs/runs.server.ts), [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)
+   - Run schema ownership moved out of chat into runs: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)
+   - Run schema imports updated at call sites: [src/lib/chat/chat.remote.ts](../../src/lib/chat/chat.remote.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+   - Schema-level conversation/message dependencies moved behind sessions: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts), [src/lib/automations/automation.schema.ts](../../src/lib/automations/automation.schema.ts), [src/lib/memory/memory.schema.ts](../../src/lib/memory/memory.schema.ts), [src/lib/db.server.ts](../../src/lib/db.server.ts)
+   - DB schema registration includes runs + sessions: [src/lib/db.server.ts](../../src/lib/db.server.ts)
+   - Sessions scaffold started for chat split: [src/lib/sessions/index.ts](../../src/lib/sessions/index.ts), [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts)
+   - Session schema ownership handoff completed: [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts)
+   - Session imports moved in core flows: [src/lib/chat/chat.remote.ts](../../src/lib/chat/chat.remote.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts), [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts), [src/lib/memory/memory.server.ts](../../src/lib/memory/memory.server.ts), [src/lib/memory/retrieval.server.ts](../../src/lib/memory/retrieval.server.ts), [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
+     - Compatibility shims removed after call-site migration: src/lib/chat/chat.schema.ts, src/lib/chat/runs.server.ts (deleted)
+     - Monitor routes moved to runs domain: [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts)
 
 2. [x] LLM consolidation (`openrouter.server.ts` + `models/` → `llm/`)
    - Source: ../llm/plan.md
    - Parallel with: #1 after target folders exist
    - Gate: all LLM callers moved; model list + chat streaming parity
-    - Evidence:
-      - New llm domain: [src/lib/llm/index.ts](../../src/lib/llm/index.ts), [src/lib/llm/chat.server.ts](../../src/lib/llm/chat.server.ts), [src/lib/llm/models.server.ts](../../src/lib/llm/models.server.ts), [src/lib/llm/models.remote.ts](../../src/lib/llm/models.remote.ts), [src/lib/llm/ModelSelector.svelte](../../src/lib/llm/ModelSelector.svelte)
-      - Representative callers updated: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts), [src/lib/memory/mining.server.ts](../../src/lib/memory/mining.server.ts), [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts)
-    - Legacy files removed (git diff evidence): openrouter.server.ts and models/* were deleted in this migration.
-      - Plan closeout: [docs/llm/plan.md](../llm/plan.md)
+   - Evidence:
+     - New llm domain: [src/lib/llm/index.ts](../../src/lib/llm/index.ts), [src/lib/llm/chat.server.ts](../../src/lib/llm/chat.server.ts), [src/lib/llm/models.server.ts](../../src/lib/llm/models.server.ts), [src/lib/llm/models.remote.ts](../../src/lib/llm/models.remote.ts), [src/lib/llm/ModelSelector.svelte](../../src/lib/llm/ModelSelector.svelte)
+     - Representative callers updated: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts), [src/lib/memory/mining.server.ts](../../src/lib/memory/mining.server.ts), [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts)
+   - Legacy files removed (git diff evidence): openrouter.server.ts and models/\* were deleted in this migration.
+     - Plan closeout: [docs/llm/plan.md](../llm/plan.md)
 
-UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/plan.md - Starts in Wave 0 and continues through Wave 5 - Blocks: final UX acceptance for #6, #15, #18, #19, #20, #22 - Gate: desktop/mobile shell, action cards, and multi-session UX contracts implemented
-     - Evidence:
-         - Shell contract documented: [docs/ui/spec.md](../ui/spec.md) — Shell Implementation Contract
-         - UI contract template added: [docs/ui/spec.md](../ui/spec.md) — Domain Integration Contracts
-         - Running sessions dock: [src/lib/ui/RunningSessionsDock.svelte](../../src/lib/ui/RunningSessionsDock.svelte)
-         - Unified action card: [src/lib/ui/ActionCard.svelte](../../src/lib/ui/ActionCard.svelte)
-         - Dock wired into sidebar: [src/lib/ui/Sidebar.svelte](../../src/lib/ui/Sidebar.svelte)
+UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/plan.md - Starts in Wave 0 and continues through Wave 5 - Blocks: final UX acceptance for #6, #15, #18, #19, #20, #22 - Gate: desktop/mobile shell, action cards, and multi-session UX contracts implemented - Evidence: - Shell contract documented: [docs/ui/spec.md](../ui/spec.md) — Shell Implementation Contract - UI contract template added: [docs/ui/spec.md](../ui/spec.md) — Domain Integration Contracts - Running sessions dock: [src/lib/ui/RunningSessionsDock.svelte](../../src/lib/ui/RunningSessionsDock.svelte) - Unified action card: [src/lib/ui/ActionCard.svelte](../../src/lib/ui/ActionCard.svelte) - Dock wired into sidebar: [src/lib/ui/Sidebar.svelte](../../src/lib/ui/Sidebar.svelte)
 
 ### Wave 1 — Core Runtime Inputs/Outputs
 
@@ -225,15 +219,15 @@ Use these lanes for multi-agent execution. A lane can run independently once its
 ### Gate G0 (after Wave 0)
 
 - [ ] App boots without import errors
-    - Evidence: latest diagnostics are clean for changed Wave 0 surfaces: [src/lib/runs/runs.server.ts](../../src/lib/runs/runs.server.ts), [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts), [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts), [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts)
-    - Evidence: client/server import boundary fixed for llm barrel: [src/lib/llm/index.ts](../../src/lib/llm/index.ts), [src/lib/chat/RecentChats.svelte](../../src/lib/chat/RecentChats.svelte), [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
+  - Evidence: latest diagnostics are clean for changed Wave 0 surfaces: [src/lib/runs/runs.server.ts](../../src/lib/runs/runs.server.ts), [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts), [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts), [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts)
+  - Evidence: client/server import boundary fixed for llm barrel: [src/lib/llm/index.ts](../../src/lib/llm/index.ts), [src/lib/chat/RecentChats.svelte](../../src/lib/chat/RecentChats.svelte), [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
 - [ ] Playwright smoke tests pass
-    - Evidence: Wave 0 smoke suite passes: [tests/wave0-smoke.spec.ts](../../tests/wave0-smoke.spec.ts) (2 passed) using [playwright.config.ts](../../playwright.config.ts).
-    - Evidence: broader legacy UI-flow tests remain red and need modernization: [tests/chat.spec.ts](../../tests/chat.spec.ts), [tests/agents.spec.ts](../../tests/agents.spec.ts).
+  - Evidence: Wave 0 smoke suite passes: [tests/wave0-smoke.spec.ts](../../tests/wave0-smoke.spec.ts) (2 passed) using [playwright.config.ts](../../playwright.config.ts).
+  - Evidence: broader legacy UI-flow tests remain red and need modernization: [tests/chat.spec.ts](../../tests/chat.spec.ts), [tests/agents.spec.ts](../../tests/agents.spec.ts).
 - [ ] No route regressions in chat, agents, settings
-    - Evidence: route handlers updated and type-checked: [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/routes/settings/+page.svelte](../../src/routes/settings/+page.svelte)
+  - Evidence: route handlers updated and type-checked: [src/routes/api/chat/monitor/+server.ts](../../src/routes/api/chat/monitor/+server.ts), [src/routes/api/agents/monitor/+server.ts](../../src/routes/api/agents/monitor/+server.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/routes/settings/+page.svelte](../../src/routes/settings/+page.svelte)
 - [ ] UI shell contract approved (desktop + mobile IA + action-card standards)
-    - Evidence: pending UX-1 implementation and approval artifacts. Reference plan: [docs/ui/plan.md](../ui/plan.md)
+  - Evidence: pending UX-1 implementation and approval artifacts. Reference plan: [docs/ui/plan.md](../ui/plan.md)
 
 ### Gate G1 (after Wave 1)
 

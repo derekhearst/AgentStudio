@@ -71,6 +71,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Dependencies
+
 - [../structure/plan.md](../structure/plan.md) Step 2 — this is that step
 - No other plans depend on this; it is a pure rename/consolidation
 
@@ -78,6 +79,3 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - 2026-05-01 - Completed in local-uncommitted - Consolidated OpenRouter + model catalog + selector into `src/lib/llm/` and moved callers to `llm` imports.
-
-
-

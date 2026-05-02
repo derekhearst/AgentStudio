@@ -131,6 +131,26 @@
 		const trimmed = value.trim();
 		return trimmed.length > 0 ? trimmed : null;
 	}
+
+	function normalizeText(value: string): string {
+		return value.toLowerCase().replace(/\s+/g, ' ').trim();
+	}
+
+	function askQuestionAlreadyInMessage(question: string | undefined, blocks: SavedBlock[] | null): boolean {
+		const q = normalizeText(question ?? '');
+		if (!q) return false;
+
+		if (blocks) {
+			for (const block of blocks) {
+				if (block.kind !== 'text') continue;
+				const text = normalizeText(block.content ?? '');
+				if (text.includes(q)) return true;
+			}
+		}
+
+		const messageText = normalizeText(message.content ?? '');
+		return messageText.includes(q);
+	}
 	const lastThinkingBlockIndex = $derived(
 		savedBlocks
 			? savedBlocks.reduce((latest, block, index) => (block.kind === 'thinking' ? index : latest), -1)
@@ -252,9 +272,11 @@
 				{@const askQuestions = getAskUserQuestions(block.arguments, block.result)}
 				{#if askQuestions.length > 0}
 					{#each askQuestions as q}
-						<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
-							<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
-						</div>
+						{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
+							<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
+							</div>
+						{/if}
 						{@const answer = getAskUserAnswer(block.result, q.header)}
 						{#if answer}
 							<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
@@ -305,9 +327,11 @@
 					{@const askQuestions = getAskUserQuestions(call.arguments, call.result)}
 					{#if askQuestions.length > 0}
 						{#each askQuestions as q}
-							<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
-								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
-							</div>
+							{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
+								<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+									<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
+								</div>
+							{/if}
 							{@const answer = getAskUserAnswer(call.result, q.header)}
 							{#if answer}
 								<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">

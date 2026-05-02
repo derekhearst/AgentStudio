@@ -201,11 +201,11 @@ Generic boilerplate is not sufficient. Each domain must provide domain-specific 
 
 > References: [UI spec](../ui/spec.md)
 
-| Field            | Value                                                                |
-| ---------------- | -------------------------------------------------------------------- |
-| Primary surface  | e.g. left rail list item / chat inline card / right workbench tab   |
-| Status badges    | e.g. running (green pulse) / blocked (orange) / done (ghost)        |
-| Blocking actions | e.g. ask_user card — resolved via ActionCard (ask_user type)        |
+| Field            | Value                                                                         |
+| ---------------- | ----------------------------------------------------------------------------- |
+| Primary surface  | e.g. left rail list item / chat inline card / right workbench tab             |
+| Status badges    | e.g. running (green pulse) / blocked (orange) / done (ghost)                  |
+| Blocking actions | e.g. ask_user card — resolved via ActionCard (ask_user type)                  |
 | Mobile behavior  | e.g. surface appears in bottom-sheet tab; blocking card sticky above composer |
 ```
 
@@ -215,20 +215,20 @@ The following components implement the canonical desktop and mobile shells. Doma
 
 ### Desktop (≥ `tablet` breakpoint)
 
-| Zone              | Component                            | Notes                                          |
-| ----------------- | ------------------------------------ | ---------------------------------------------- |
-| Left rail         | `src/lib/ui/Sidebar.svelte`          | w-48 (tablet), w-56 (desktop). Contains nav groups, RunningSessionsDock, and settings link. |
-| Running sessions  | `src/lib/ui/RunningSessionsDock.svelte` | Renders inside left rail above settings. Live SSE from `/api/chat/monitor`. |
-| Center canvas     | `<main>` in `src/routes/+layout.svelte` | Thread, HUD, composer. Responsive rounding on tablet+. |
-| Right workbench   | `src/lib/ui/SidePanel.svelte`        | 320 px aside panel. Mode-aware content (RecentChats, SkillStats, …). |
+| Zone             | Component                               | Notes                                                                                       |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Left rail        | `src/lib/ui/Sidebar.svelte`             | w-48 (tablet), w-56 (desktop). Contains nav groups, RunningSessionsDock, and settings link. |
+| Running sessions | `src/lib/ui/RunningSessionsDock.svelte` | Renders inside left rail above settings. Live SSE from `/api/chat/monitor`.                 |
+| Center canvas    | `<main>` in `src/routes/+layout.svelte` | Thread, HUD, composer. Responsive rounding on tablet+.                                      |
+| Right workbench  | `src/lib/ui/SidePanel.svelte`           | 320 px aside panel. Mode-aware content (RecentChats, SkillStats, …).                        |
 
 ### Mobile (< `tablet` breakpoint)
 
-| Zone              | Component                            | Notes                                    |
-| ----------------- | ------------------------------------ | ---------------------------------------- |
-| Bottom nav        | `src/lib/ui/MobileNav.svelte`        | Hides on chat detail route (slide-off).  |
-| Full-screen canvas | `<main>` (full viewport)            | No border radius or padding on mobile.  |
-| Right workbench   | Not shown inline; bottom sheet TBD  | Phase 3.1 work.                          |
+| Zone               | Component                          | Notes                                   |
+| ------------------ | ---------------------------------- | --------------------------------------- |
+| Bottom nav         | `src/lib/ui/MobileNav.svelte`      | Hides on chat detail route (slide-off). |
+| Full-screen canvas | `<main>` (full viewport)           | No border radius or padding on mobile.  |
+| Right workbench    | Not shown inline; bottom sheet TBD | Phase 3.1 work.                         |
 
 ### Action cards
 

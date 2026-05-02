@@ -143,7 +143,11 @@ async function findActiveBootstrapClaim(claimKey: string) {
 			.select()
 			.from(bootstrapClaims)
 			.where(
-				and(eq(bootstrapClaims.tokenHash, tokenHash), isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)),
+				and(
+					eq(bootstrapClaims.tokenHash, tokenHash),
+					isNull(bootstrapClaims.usedAt),
+					gt(bootstrapClaims.expiresAt, now),
+				),
 			)
 			.limit(1)
 
