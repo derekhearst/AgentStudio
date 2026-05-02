@@ -20,6 +20,7 @@ import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import { getModeAnchorPrompt } from '$lib/chat/mode.server'
 
 const encoder = new TextEncoder()
 
@@ -200,6 +201,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const contextSlots: ContextSlot[] = []
 	let scopedAgentTools: string[] | null = null
+
+	// --- Context Engineering: Mode Posture (chat workbench mode) ---
+	if (conversation.mode && conversation.mode !== 'chat') {
+		contextSlots.push({
+			name: `mode_${conversation.mode}`,
+			priority: 95,
+			content: getModeAnchorPrompt(conversation.mode),
+		})
+	}
 
 	// --- Context Engineering: Orchestrator / Agent Identity ---
 	const isOrchestrator = !conversation.agentId

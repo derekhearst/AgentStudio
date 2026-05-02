@@ -3,6 +3,10 @@ import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool'])
+export const chatModeEnum = pgEnum('chat_mode', ['chat', 'research', 'plan', 'agent'])
+
+export type ChatMode = 'chat' | 'research' | 'plan' | 'agent'
+export const CHAT_MODES: ChatMode[] = ['chat', 'research', 'plan', 'agent']
 
 export const conversations = pgTable('conversations', {
 	id: uuid('id').primaryKey().defaultRandom(),
@@ -11,6 +15,7 @@ export const conversations = pgTable('conversations', {
 	userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 	agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 	model: text('model').notNull().default('anthropic/claude-sonnet-4'),
+	mode: chatModeEnum('mode').notNull().default('chat'),
 	totalTokens: integer('total_tokens').notNull().default(0),
 	totalCost: numeric('total_cost', { precision: 18, scale: 12 }).notNull().default('0'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

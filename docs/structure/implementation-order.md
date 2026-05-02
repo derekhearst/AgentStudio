@@ -139,6 +139,15 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
    - Source: ../chat/plan.md
    - Depends on: #3, #4
    - Gate: mode switch anchors persisted; approval cards mutate durable state
+   - Evidence (Phase 1 + server half of Phase 2 — mode column, workbench prefs, anchor messages, mode-aware identity slot, 2026-05-02):
+     - New `chat_mode` enum + `mode` column on conversations: [src/lib/sessions/sessions.schema.ts](../../src/lib/sessions/sessions.schema.ts)
+     - New `chat_workbench_preferences` table: [src/lib/chat/chat.workbench.schema.ts](../../src/lib/chat/chat.workbench.schema.ts)
+     - Drizzle migration: [drizzle/0018_foamy_santa_claus.sql](../../drizzle/0018_foamy_santa_claus.sql)
+     - Mode helpers (`setConversationMode` writes system anchor message, `getWorkbenchPreferences` seeds defaults): [src/lib/chat/mode.server.ts](../../src/lib/chat/mode.server.ts)
+     - Mode remote functions: [src/lib/chat/chat.remote.ts](../../src/lib/chat/chat.remote.ts)
+     - Stream handler reads `conversation.mode` and prepends mode-posture slot: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Schema constraint + behavior + live-LLM tests: [tests/chat.mode.spec.ts](../../tests/chat.mode.spec.ts)
+   - UI mode-selector component (Phase 2 client half), Phases 3-9 (mode identity skills, plan approval card, run HUD, inline approval cards, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
 
 7. [ ] Workspace sandbox baseline and task execution isolation
    - Source: ../workspace/plan.md

@@ -2,10 +2,16 @@ import { command, query } from '$app/server'
 import { and, asc, desc, eq, gt, isNull, ne, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
-import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { conversations, messages, CHAT_MODES, type ChatMode } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import {
+	getWorkbenchPreferences as readWorkbenchPreferences,
+	setDefaultMode as writeDefaultMode,
+	setShowRightPanel as writeShowRightPanel,
+	setConversationMode as writeConversationMode,
+} from '$lib/chat/mode.server'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -285,3 +291,51 @@ export const updateConversationMeta = command(updateConversationMetaSchema, asyn
 		.where(and(eq(conversations.id, input.id), eq(conversations.userId, user.id)))
 	return { success: true as const }
 })
+
+
+const chatModeSchema = z.enum(["chat", "research", "plan", "agent"])
+
+const setConversationModeSchema = z.object({
+	conversationId: z.string().uuid(),
+	mode: chatModeSchema,
+})
+
+const setDefaultModeSchema = z.object({ mode: chatModeSchema })
+
+const setShowRightPanelSchema = z.object({ showRightPanel: z.boolean() })
+
+export const getWorkbenchPreferences = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	const prefs = await readWorkbenchPreferences(user.id)
+	return {
+		defaultMode: prefs.defaultMode,
+		showRightPanel: prefs.showRightPanel,
+		panelLayout: prefs.panelLayout,
+		updatedAt: prefs.updatedAt,
+	}
+})
+
+export const setDefaultMode = command(setDefaultModeSchema, async ({ mode }) => {
+	const user = requireAuthenticatedRequestUser()
+	const prefs = await writeDefaultMode(user.id, mode)
+	return { success: true as const, defaultMode: prefs.defaultMode }
+})
+
+export const setShowRightPanel = command(setShowRightPanelSchema, async ({ showRightPanel }) => {
+	const user = requireAuthenticatedRequestUser()
+	const prefs = await writeShowRightPanel(user.id, showRightPanel)
+	return { success: true as const, showRightPanel: prefs.showRightPanel }
+})
+
+export const setConversationMode = command(setConversationModeSchema, async ({ conversationId, mode }) => {
+	const user = requireAuthenticatedRequestUser()
+	const result = await writeConversationMode(conversationId, mode, { userId: user.id })
+	return {
+		success: true as const,
+		previousMode: result.previousMode,
+		mode: result.mode,
+		anchorMessageId: result.anchorMessageId,
+	}
+})
+
+export const listChatModes = query(async () => CHAT_MODES)

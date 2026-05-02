@@ -16,6 +16,7 @@ import * as skillsSchema from '$lib/skills/skills.schema'
 import * as automationSchema from '$lib/automations/automation.schema'
 import * as runsSchema from '$lib/runs/runs.schema'
 import * as memorySchema from '$lib/memory/memory.schema'
+import * as chatWorkbenchSchema from '$lib/chat/chat.workbench.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 const databaseUrl = env.DATABASE_URL
@@ -33,6 +34,7 @@ const schema = {
 	...memorySchema,
 	...automationSchema,
 	...runsSchema,
+	...chatWorkbenchSchema,
 }
 
 const MIGRATIONS_SCHEMA = 'drizzle'
