@@ -120,7 +120,11 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Barrel: [src/lib/context/index.ts](../../src/lib/context/index.ts)
      - Stream handler migrated from `systemSections[]` to slots: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Unit tests: [tests/context.slots.spec.ts](../../tests/context.slots.spec.ts)
-   - Phases 2-8 (token estimation upgrade, compaction integrity, relevance-filtered skills, memory write-back, sub-agent context, UI utilization indicator, per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 3 — compaction tool-pair integrity, 2026-05-02):
+     - New pure module: [src/lib/chat/compaction.ts](../../src/lib/chat/compaction.ts) — `findSafeSplitPoint`
+     - `compactMessages` uses safe split, structured summary prompt, KEEP_RECENT_MESSAGES raised 6→8: [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts)
+     - Unit tests: [tests/context.compaction.spec.ts](../../tests/context.compaction.spec.ts)
+   - Phases 2 (tokenizer upgrade), 4-8 (relevance-filtered skills, memory write-back, sub-agent context, UI utilization indicator, per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md

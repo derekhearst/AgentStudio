@@ -2,12 +2,16 @@ import { chat, type LlmMessage } from '$lib/llm/chat.server'
 import { estimateTokens, getContextWindowSize } from '$lib/tools/tools'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { logLlmUsage } from '$lib/costs/usage'
+import { findSafeSplitPoint as findSafeSplitPointPure } from '$lib/chat/compaction'
+
+export { findSafeSplitPoint } from '$lib/chat/compaction'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
 const DEFAULT_COMPACTION_MODEL = 'openai/gpt-4o-mini'
-const KEEP_RECENT_MESSAGES = 6
+const KEEP_RECENT_MESSAGES = 8
 const MIN_MESSAGES_FOR_COMPACTION = 10
+
 
 export async function generateTitle(messages: Message[]): Promise<string> {
 	const transcript = messages.map((m) => `${m.role.toUpperCase()}: ${m.content.slice(0, 400)}`).join('\n')
@@ -149,10 +153,15 @@ export async function compactMessages(
 	const systemMessages = messages.filter((m) => m.role === 'system')
 	const conversationMessages = messages.filter((m) => m.role !== 'system')
 
-	const keepCount = Math.min(KEEP_RECENT_MESSAGES, conversationMessages.length)
-	const earlyMessages = conversationMessages.slice(0, -keepCount)
-	const recentMessages = conversationMessages.slice(-keepCount)
+	const desiredKeep = Math.min(KEEP_RECENT_MESSAGES, conversationMessages.length)
+	const desiredSplit = Math.max(0, conversationMessages.length - desiredKeep)
+	const safeSplit = findSafeSplitPointPure(conversationMessages, desiredSplit)
 
+	const earlyMessages = conversationMessages.slice(0, safeSplit)
+	const recentMessages = conversationMessages.slice(safeSplit)
+
+	// If the safe-split rule pushed the boundary too far up to make summarization worthwhile,
+	// or if there isn't enough history to summarize, skip compaction entirely.
 	if (earlyMessages.length < 4) {
 		return { compacted: messages, summary: '', originalTokens, compactedTokens: originalTokens }
 	}
@@ -160,7 +169,11 @@ export async function compactMessages(
 	const earlyText = earlyMessages
 		.map((m) => {
 			const content = typeof m.content === 'string' ? m.content : '[multimodal content]'
-			return `[${m.role}]: ${content.slice(0, 2000)}`
+			const toolCallSummary =
+				m.role === 'assistant' && Array.isArray(m.toolCalls) && m.toolCalls.length > 0
+					? ` [tool_calls: ${m.toolCalls.map((tc) => tc.function.name).join(', ')}]`
+					: ''
+			return `[${m.role}${toolCallSummary}]: ${content.slice(0, 2000)}`
 		})
 		.join('\n\n')
 
@@ -174,10 +187,17 @@ export async function compactMessages(
 1. Key decisions and conclusions reached
 2. Important facts, data, or context mentioned
 3. Current task state and what remains to be done
-	4. Any tool results that were produced
-5. User preferences or corrections expressed
+4. Any tool calls that were made and the key results they produced (preserve tool names + outcomes)
+5. User preferences, corrections, or explicit constraints they expressed
 
-Write in third-person past tense. Be concise but don't lose critical details. Keep under 800 words.`,
+Write in third-person past tense. Output four sections in this exact order, using markdown headings:
+
+## Decisions
+## Key Facts
+## Task State
+## Tool Results
+
+Be concise but don't lose critical details. Keep under 800 words total.`,
 			},
 			{
 				role: 'user',
