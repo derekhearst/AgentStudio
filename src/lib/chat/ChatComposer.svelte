@@ -1,7 +1,9 @@
 <script lang="ts">
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
+	import ModeSelector from '$lib/chat/ModeSelector.svelte'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+	type ChatMode = 'chat' | 'research' | 'plan' | 'agent'
 
 	const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
 		{ value: 'none', label: 'Reasoning off' },
@@ -17,6 +19,7 @@
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
 		reasoningEffort = 'none',
+		mode = 'chat',
 		placeholder = 'Message AgentStudio...',
 		recording = false,
 		transcribing = false,
@@ -24,6 +27,7 @@
 		onSubmit,
 		onModelChange,
 		onReasoningEffortChange,
+		onModeChange,
 		onCancelGeneration,
 		onAddFiles,
 		onMicClick,
@@ -33,6 +37,7 @@
 		busy?: boolean
 		model?: string
 		reasoningEffort?: ReasoningEffort
+		mode?: ChatMode
 		placeholder?: string
 		recording?: boolean
 		transcribing?: boolean
@@ -40,6 +45,7 @@
 		onSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined
+		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined
 		onCancelGeneration?: (() => Promise<void> | void) | undefined
 		onAddFiles?: (() => Promise<void> | void) | undefined
 		onMicClick?: (() => Promise<void> | void) | undefined
@@ -90,6 +96,11 @@
 		</div>
 
 		<div class="flex items-center gap-1">
+			<ModeSelector
+				{mode}
+				{busy}
+				onModeChange={(next) => onModeChange?.(next)}
+			/>
 			<div>
 				<ModelSelector
 					value={model}

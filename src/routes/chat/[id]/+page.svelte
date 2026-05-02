@@ -10,7 +10,9 @@
 		getConversation,
 		getMessageStats,
 	} from '$lib/chat';
-	import { savePartialAssistant } from '$lib/chat/chat.remote';
+	import { savePartialAssistant, setConversationMode } from '$lib/chat/chat.remote';
+
+	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 	import { getAvailableModels } from '$lib/llm';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
@@ -561,6 +563,30 @@
 	});
 
 	const messages = $derived(conversationData?.messages ?? []);
+	const conversationMode = $derived<ChatMode>(
+		(conversationData?.conversation.mode as ChatMode | undefined) ?? 'chat'
+	);
+
+	async function handleModeChange(next: ChatMode) {
+		if (!conversationId || next === conversationMode) return;
+		try {
+			await setConversationMode({ conversationId, mode: next });
+			// Optimistically reflect the new mode locally so the composer re-renders
+			// immediately; loadConversationState refreshes the rest of the message list.
+			if (conversationData) {
+				conversationData = {
+					...conversationData,
+					conversation: { ...conversationData.conversation, mode: next },
+				};
+			}
+			await getConversation(conversationId).refresh();
+			await loadConversationState();
+		} catch (error) {
+			logChatUi('error', 'Mode switch failed', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 	const initialPrompt = $derived(page.url.searchParams.get('prompt')?.trim() ?? '');
 	const estimateTokens = (value: string | null | undefined) =>
 		Math.max(0, Math.ceil((value?.length ?? 0) / 4));
@@ -1562,10 +1588,12 @@
 				onCancelGeneration={stopStreaming}
 				model={model}
 				reasoningEffort={reasoningEffort}
+				mode={conversationMode}
 				onModelChange={(next) => maybeCompactBeforeModelSwitch(next)}
 				onReasoningEffortChange={(next) => {
 					reasoningEffort = next;
 				}}
+				onModeChange={handleModeChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
 			/>

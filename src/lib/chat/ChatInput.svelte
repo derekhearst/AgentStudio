@@ -11,23 +11,28 @@
 	};
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 
 	let {
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
 		reasoningEffort = 'none',
+		mode = 'chat',
 		onSubmit,
 		onModelChange,
 		onReasoningEffortChange,
+		onModeChange,
 		onCancelGeneration,
 		estimatedRemaining = 128000
 	} = $props<{
 		busy?: boolean;
 		model?: string;
 		reasoningEffort?: ReasoningEffort;
+		mode?: ChatMode;
 		onSubmit?: ((content: string, attachments: ChatAttachment[]) => Promise<void> | void) | undefined;
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined;
+		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined;
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
 	}>();
@@ -251,6 +256,7 @@
 		busy={busy || uploadBusy}
 		{model}
 		{reasoningEffort}
+		{mode}
 		{recording}
 		{transcribing}
 		{speechSupported}
@@ -258,6 +264,7 @@
 		onSubmit={(content) => handleSubmit(content)}
 		onModelChange={(id) => onModelChange?.(id)}
 		onReasoningEffortChange={(effort) => onReasoningEffortChange?.(effort)}
+		onModeChange={(next) => onModeChange?.(next)}
 		onCancelGeneration={() => onCancelGeneration?.()}
 		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}
