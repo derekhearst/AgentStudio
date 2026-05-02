@@ -967,19 +967,68 @@
 
 			streamHandshakeSucceeded = true;
 			logChatUi('info', 'Stream opened', { regenerate });
-			const reader = response.body.getReader();
+			type ChunkReader = ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>;
+			let reader: ChunkReader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
+			let lastSeenSeq = 0;
+			let doneReceived = false;
+			let resumeAttempts = 0;
+			const MAX_RESUME_ATTEMPTS = 3;
+
+			const tryResume = async (): Promise<ChunkReader | null> => {
+				if (doneReceived || stoppedByUser || resumeAttempts >= MAX_RESUME_ATTEMPTS) return null;
+				resumeAttempts += 1;
+				logChatUi('info', 'Attempting stream resume', { lastSeenSeq, attempt: resumeAttempts });
+				try {
+					const resumeResp = await fetch(
+						`/chat/${conversationId}/stream/resume?since=${lastSeenSeq}`,
+						{ signal: abortController.signal }
+					);
+					if (!resumeResp.ok || !resumeResp.body) {
+						logChatUi('warn', 'Resume rejected', { status: resumeResp.status });
+						return null;
+					}
+					return resumeResp.body.getReader();
+				} catch (err) {
+					logChatUi('warn', 'Resume request failed', {
+						error: err instanceof Error ? err.message : String(err),
+					});
+					return null;
+				}
+			};
 
 			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-				buffer += decoder.decode(value, { stream: true });
+				let chunk: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
+				try {
+					chunk = await reader.read();
+				} catch (err) {
+					if (err instanceof DOMException && err.name === 'AbortError') throw err;
+					const next = await tryResume();
+					if (!next) throw err;
+					reader = next;
+					buffer = '';
+					continue;
+				}
+				if (chunk.done) {
+					if (doneReceived || stoppedByUser) break;
+					const next = await tryResume();
+					if (!next) break;
+					reader = next;
+					buffer = '';
+					continue;
+				}
+				buffer += decoder.decode(chunk.value, { stream: true });
 				const events = buffer.split('\n\n');
 				buffer = events.pop() ?? '';
 
 				for (const raw of events) {
 					const lines = raw.split('\n');
+					const idLine = lines.find((line) => line.startsWith('id: '));
+					if (idLine) {
+						const parsed = Number.parseInt(idLine.slice(4).trim(), 10);
+						if (Number.isFinite(parsed) && parsed > lastSeenSeq) lastSeenSeq = parsed;
+					}
 					const eventLine = lines.find((line) => line.startsWith('event: '));
 					const dataLine = lines.find((line) => line.startsWith('data: '));
 					if (!eventLine || !dataLine) continue;
@@ -1197,6 +1246,7 @@
 					}
 
 					if (eventName === 'done') {
+						doneReceived = true;
 						waitingForFirstToken = false;
 						if (payload.error) {
 							const message = String(payload.error);

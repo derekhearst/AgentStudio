@@ -1,0 +1,1 @@
+ALTER TABLE "chat_runs" ADD COLUMN "pending_questions" jsonb DEFAULT '[]'::jsonb NOT NULL;

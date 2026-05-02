@@ -73,9 +73,44 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 
 ### Wave 1 — Core Runtime Inputs/Outputs
 
-3. [ ] Runs durability and resume semantics
+3. [x] Runs durability and resume semantics
    - Source: ../runs/plan.md
    - Gate: pause/resume/retry pass; blocked-state recovery proven
+   - Evidence (Phase 1 — persist pending tool approvals, 2026-05-02):
+     - Schema column added: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts) (`pendingApprovals` jsonb)
+     - Drizzle migration: [drizzle/0013_silky_blizzard.sql](../../drizzle/0013_silky_blizzard.sql)
+     - New module with row-locked helpers: [src/lib/runs/approvals.server.ts](../../src/lib/runs/approvals.server.ts)
+     - In-memory approval registry removed: [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts), [src/lib/tools/index.ts](../../src/lib/tools/index.ts)
+     - Stream loop rewired: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Approve/deny endpoint rewired: [src/routes/chat/[id]/tool-approve/+server.ts](../../src/routes/chat/[id]/tool-approve/+server.ts)
+     - Integration tests: [tests/runs.approvals.spec.ts](../../tests/runs.approvals.spec.ts)
+   - Evidence (Phase 2 — persist pending `ask_user` questions, 2026-05-02):
+     - Schema column added: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts) (`pendingQuestions` jsonb)
+     - Drizzle migration: [drizzle/0014_zippy_adam_destine.sql](../../drizzle/0014_zippy_adam_destine.sql)
+     - New module with row-locked helpers: [src/lib/runs/questions.server.ts](../../src/lib/runs/questions.server.ts)
+     - In-memory question registry removed: [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts)
+     - Stream loop rewired: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Answer endpoint rewired: [src/routes/chat/[id]/ask-user/+server.ts](../../src/routes/chat/[id]/ask-user/+server.ts)
+     - Integration tests: [tests/runs.questions.spec.ts](../../tests/runs.questions.spec.ts)
+   - Evidence (Phase 3 — persist incremental stream blocks + tool round counter, 2026-05-02):
+     - Schema columns added: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts) (`streamBlocks` jsonb, `currentRound` integer, shared `StreamBlock` type)
+     - Drizzle migration: [drizzle/0015_dizzy_the_anarchist.sql](../../drizzle/0015_dizzy_the_anarchist.sql)
+     - New module: [src/lib/runs/blocks.server.ts](../../src/lib/runs/blocks.server.ts) (`persistRunBlocks` snapshot, `setRunRound`)
+     - Stream loop mirrors blocks per push and bumps round counter: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Integration tests: [tests/runs.blocks.spec.ts](../../tests/runs.blocks.spec.ts)
+   - Evidence (Phase 4 — run event log, 2026-05-02):
+     - New `run_events` table + `next_event_seq` counter: [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)
+     - Drizzle migration: [drizzle/0016_previous_miracleman.sql](../../drizzle/0016_previous_miracleman.sql)
+     - New module: [src/lib/runs/events.server.ts](../../src/lib/runs/events.server.ts) (`appendRunEvent` transactional insert, `listRunEvents` reader)
+     - Stream emit is now async and dual-writes block-level events: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) (per-token `delta`/`reasoning` events skip persistence — recoverable from `streamBlocks`)
+     - Integration tests: [tests/runs.events.spec.ts](../../tests/runs.events.spec.ts)
+   - Evidence (Phase 5 — resumable streaming, 2026-05-02):
+     - New endpoint: [src/routes/chat/[id]/stream/resume/+server.ts](../../src/routes/chat/[id]/stream/resume/+server.ts) (replay past events, tail new ones until terminal state, emit synthetic `done`)
+     - SSE frames carry seq: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) (`sse(name, payload, seq)` writes `id:` line)
+     - Client reconnects on disconnect: [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte) (tracks `lastSeenSeq`, retries via resume up to 3 attempts)
+     - Integration tests: [tests/runs.resume.spec.ts](../../tests/runs.resume.spec.ts)
+   - Evidence (Phase 6 — drop in-memory state, 2026-05-02):
+     - Deleted orphaned in-memory streaming registry: `src/lib/agents/streaming-state.server.ts` (no remaining consumers; runs domain is now fully durable in Postgres)
 
 4. [ ] Context slot assembly + compaction invariants
    - Source: ../context/plan.md

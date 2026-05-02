@@ -1,0 +1,2 @@
+ALTER TABLE "app_settings" ALTER COLUMN "memory_config" SET DEFAULT '{"enabled":true,"topK":5,"useRerank":false,"rerankModel":"anthropic/claude-haiku-4.5","embeddingModel":"openai/text-embedding-3-small","autoMine":true}'::jsonb;--> statement-breakpoint
+ALTER TABLE "chat_runs" ADD COLUMN "pending_approvals" jsonb DEFAULT '[]'::jsonb NOT NULL;

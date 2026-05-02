@@ -2,15 +2,18 @@ import { json, type RequestHandler } from '@sveltejs/kit'
 import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
-import { chatRuns } from '$lib/runs/runs.schema'
+import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
 import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
 import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { requestApproval } from '$lib/tools/tools.server'
-import { requestUserQuestions, toolSchemas } from '$lib/tools/tools.server'
+import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
+import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { persistRunBlocks, setRunRound } from '$lib/runs/blocks.server'
+import { appendRunEvent } from '$lib/runs/events.server'
+import { toolSchemas } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
@@ -69,8 +72,9 @@ function extractReasoningFragment(details: ReasoningDetail[] | undefined) {
 		.join('\n\n')
 }
 
-function sse(name: string, payload: unknown) {
-	return encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
+function sse(name: string, payload: unknown, seq?: number) {
+	const idLine = seq === undefined ? '' : `id: ${seq}\n`
+	return encoder.encode(`${idLine}event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
 }
 
 export const POST: RequestHandler = async ({ request, locals }) => {
@@ -331,8 +335,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				},
 			} as ReadableStreamDefaultController<Uint8Array>
 
-			const emit = (eventName: string, payload: unknown) => {
-				safeController.enqueue(sse(eventName, payload))
+			const NON_PERSISTED_EVENTS = new Set(['delta', 'reasoning'])
+			const emit = async (eventName: string, payload: unknown) => {
+				let seq: number | undefined
+				if (!NON_PERSISTED_EVENTS.has(eventName)) {
+					try {
+						seq = await appendRunEvent(run.id, eventName, payload)
+					} catch (err) {
+						console.error('[chat/stream] failed to log run event', {
+							runId: run.id,
+							eventName,
+							error: err instanceof Error ? err.message : String(err),
+						})
+					}
+				}
+				safeController.enqueue(sse(eventName, payload, seq))
 			}
 
 			const updateRun = async (patch: {
@@ -374,23 +391,23 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			try {
 				// Notify client if compaction occurred
 				if (didCompact) {
-					emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
+					await emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
 				}
 
 				let currentMessages: LoopMessage[] = [...trimmedMessages]
 				const allToolCalls: Array<Record<string, unknown>> = []
-				// Ordered blocks for interleaved rendering in the UI
-				type StreamBlock =
-					| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
-					| { kind: 'text'; content: string }
-					| { kind: 'tool'; name: string; arguments: unknown; result: unknown; success: boolean; executionMs: number }
+				// Ordered blocks for interleaved rendering in the UI; mirrored to chat_runs.streamBlocks per push.
 				const streamBlocks: StreamBlock[] = []
+				const pushBlock = async (block: StreamBlock) => {
+					streamBlocks.push(block)
+					await persistRunBlocks(run.id, streamBlocks)
+				}
 				let allTextContent = ''
 
 				let reasoningTokens: number | null = null
 
 				for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-					void round
+					await setRunRound(run.id, round)
 					const stream = await streamChat(currentMessages, routedModel, tools, reasoningConfig)
 
 					// Accumulated tool calls for this round (streamed piecewise)
@@ -421,13 +438,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						const reasoningDetailDelta = delta?.reasoningDetails
 						if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
 							assistantReasoning += reasoningDelta
-							emit('reasoning', { content: reasoningDelta })
+							await emit('reasoning', { content: reasoningDelta })
 						} else if (reasoningDetailDelta?.length) {
 							assistantReasoningDetails.push(...reasoningDetailDelta)
 							const fragment = extractReasoningFragment(reasoningDetailDelta)
 							if (fragment) {
 								assistantReasoning += fragment
-								emit('reasoning', { content: fragment })
+								await emit('reasoning', { content: fragment })
 							}
 						}
 						const content = delta?.content
@@ -436,7 +453,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								firstTokenAt = Date.now()
 							}
 							assistantContent += content
-							emit('delta', { content })
+							await emit('delta', { content })
 							await updateRun({
 								state: 'running',
 								label: 'Generating response',
@@ -489,10 +506,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 					// Capture assistant text for this round into ordered blocks
 					if (assistantReasoning.trim()) {
-						streamBlocks.push({ kind: 'thinking', content: assistantReasoning.trim() })
+						await pushBlock({ kind: 'thinking', content: assistantReasoning.trim() })
 					}
 					if (assistantContent) {
-						streamBlocks.push({ kind: 'text', content: assistantContent })
+						await pushBlock({ kind: 'text', content: assistantContent })
 						allTextContent += (allTextContent ? '\n' : '') + assistantContent
 					}
 
@@ -510,21 +527,27 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 						if (requiresApproval) {
 							const approvalToken = crypto.randomUUID()
+							await enqueuePendingApproval(run.id, {
+								token: approvalToken,
+								toolName: tc.name,
+								args: parsedArgs,
+								requestedAt: new Date().toISOString(),
+							})
 							await updateRun({ state: 'waiting_tool_approval', label: `Waiting for approval: ${tc.name}` })
-							emit('tool_pending', {
+							await emit('tool_pending', {
 								token: approvalToken,
 								id: tc.id,
 								name: tc.name,
 								arguments: tc.arguments,
 							})
-							const approved = await requestApproval(approvalToken)
+							const approved = await awaitApprovalDecision(run.id, approvalToken)
 							await updateRun({
 								state: 'running',
 								label: approved ? `Executing ${tc.name}` : `Denied ${tc.name}`,
 								heartbeat: true,
 							})
 							if (!approved) {
-								emit('tool_denied', {
+								await emit('tool_denied', {
 									id: tc.id,
 									name: tc.name,
 								})
@@ -548,7 +571,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 											'Agents cannot ask users directly. Return this question to the orchestrator to gather user input, then resume the agent with those answers.',
 									}),
 								)
-								emit('tool_result', {
+								await emit('tool_result', {
 									id: tc.id,
 									name: tc.name,
 									success: false,
@@ -562,7 +585,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
 									executionMs: 0,
 								})
-								streamBlocks.push({
+								await pushBlock({
 									kind: 'tool',
 									name: tc.name,
 									arguments: parsedArgs,
@@ -585,7 +608,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								input = toolSchemas.ask_user.parse(parsedArgs)
 							} catch {
 								const errorMessage = 'ask_user received invalid arguments.'
-								emit('tool_result', {
+								await emit('tool_result', {
 									name: tc.name,
 									success: false,
 									executionMs: 0,
@@ -602,15 +625,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							}
 
 							const questionToken = crypto.randomUUID()
+							await enqueuePendingQuestion(run.id, {
+								token: questionToken,
+								questions: input.questions,
+								requestedAt: new Date().toISOString(),
+							})
 							await updateRun({ state: 'waiting_user_input', label: 'Waiting for user input' })
-							emit('ask_user', {
+							await emit('ask_user', {
 								token: questionToken,
 								id: tc.id,
 								name: tc.name,
 								questions: input.questions,
 							})
 
-							const answers = await requestUserQuestions(questionToken)
+							const answers = await awaitQuestionAnswers(run.id, questionToken)
 							await updateRun({ state: 'running', label: 'User input received', heartbeat: true })
 
 							const questionResult = {
@@ -620,7 +648,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							}
 							const resultStr = trimToolResult(tc.name, JSON.stringify(questionResult))
 
-							emit('tool_result', {
+							await emit('tool_result', {
 								id: tc.id,
 								name: tc.name,
 								success: answers !== null,
@@ -635,7 +663,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								result: questionResult,
 								executionMs: 0,
 							})
-							streamBlocks.push({
+							await pushBlock({
 								kind: 'tool',
 								name: tc.name,
 								arguments: parsedArgs,
@@ -647,7 +675,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						}
 
 						await updateRun({ state: 'running', label: `Executing ${tc.name}`, heartbeat: true })
-						emit('tool_call', {
+						await emit('tool_call', {
 							id: tc.id,
 							name: tc.name,
 							arguments: tc.arguments,
@@ -679,7 +707,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										}),
 									)
 									toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-									emit('tool_result', {
+									await emit('tool_result', {
 										id: tc.id,
 										name: tc.name,
 										success: true,
@@ -692,7 +720,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										result: { agentConversationId: subResult.conversationId, result: subResult.result.slice(0, 4000) },
 										executionMs: 0,
 									})
-									streamBlocks.push({
+									await pushBlock({
 										kind: 'tool',
 										name: tc.name,
 										arguments: parsedArgs,
@@ -703,7 +731,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								} catch (error) {
 									const errorStr = error instanceof Error ? error.message : 'Sub-agent execution failed'
 									toolResults.push({ call_id: tc.id, name: tc.name, result: `Error: ${errorStr}` })
-									emit('tool_result', {
+									await emit('tool_result', {
 										id: tc.id,
 										name: tc.name,
 										success: false,
@@ -716,7 +744,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										result: { error: errorStr },
 										executionMs: 0,
 									})
-									streamBlocks.push({
+									await pushBlock({
 										kind: 'tool',
 										name: tc.name,
 										arguments: parsedArgs,
@@ -743,7 +771,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 						toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
 
-						emit('tool_result', {
+						await emit('tool_result', {
 							id: tc.id,
 							name: tc.name,
 							success: toolResult.success,
@@ -757,7 +785,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							result: toolResult.success ? toolResult.result : { error: toolResult.error },
 							executionMs: toolResult.executionMs,
 						})
-						streamBlocks.push({
+						await pushBlock({
 							kind: 'tool',
 							name: tc.name,
 							arguments: parsedArgs,
@@ -799,6 +827,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						break
 					}
 				}
+				await persistRunBlocks(run.id, streamBlocks)
 
 				const messageCost = await logLlmUsage({
 					source: 'chat',
@@ -869,7 +898,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					})
 				}
 
-				emit('metrics', {
+				await emit('metrics', {
 					model: routedModel,
 					tokensIn: promptTokens,
 					tokensOut: completionTokens,
@@ -880,7 +909,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					cost: parseFloat(messageCost),
 					modelSelection,
 				})
-				emit('done', { messageId: assistantMessage.id })
+				await emit('done', { messageId: assistantMessage.id })
 				if (clientConnected) {
 					controller.close()
 				}
@@ -892,7 +921,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					error: errorMessage,
 					finished: true,
 				})
-				emit('done', {
+				await emit('done', {
 					error: errorMessage,
 				})
 				if (clientConnected) {

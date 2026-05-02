@@ -1,4 +1,4 @@
-import { index, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
@@ -16,6 +16,46 @@ export const chatRunStateEnum = pgEnum('chat_run_state', [
 
 export const chatRunSourceEnum = pgEnum('chat_run_source', ['chat_stream', 'agent_subagent', 'automation'])
 
+export type PendingApprovalEntry = {
+	token: string
+	toolName: string
+	args: unknown
+	requestedAt: string
+	decision?: 'approved' | 'denied'
+	decidedAt?: string
+}
+
+export type PendingQuestionEntry = {
+	token: string
+	questions: Array<{
+		header: string
+		question: string
+		options: Array<{
+			label: string
+			description?: string
+			recommended?: boolean
+		}>
+		allowFreeformInput: boolean
+	}>
+	requestedAt: string
+	answers?: Record<string, string>
+	decidedAt?: string
+}
+
+export type StreamBlock =
+	| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
+	| { kind: 'text'; content: string }
+	| {
+			kind: 'tool'
+			name: string
+			arguments: unknown
+			result: unknown
+			success: boolean
+			executionMs: number
+	  }
+
+export type RunEventPayload = unknown
+
 export const chatRuns = pgTable(
 	'chat_runs',
 	{
@@ -30,6 +70,11 @@ export const chatRuns = pgTable(
 		label: text('label'),
 		error: text('error'),
 		lastDelta: text('last_delta'),
+		pendingApprovals: jsonb('pending_approvals').$type<PendingApprovalEntry[]>().notNull().default([]),
+		pendingQuestions: jsonb('pending_questions').$type<PendingQuestionEntry[]>().notNull().default([]),
+		streamBlocks: jsonb('stream_blocks').$type<StreamBlock[]>().notNull().default([]),
+		currentRound: integer('current_round').notNull().default(0),
+		nextEventSeq: integer('next_event_seq').notNull().default(0),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		startedAt: timestamp('started_at', { withTimezone: true }),
 		lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
@@ -42,5 +87,22 @@ export const chatRuns = pgTable(
 		agentIdx: index('chat_runs_agent_idx').on(table.agentId),
 		stateIdx: index('chat_runs_state_idx').on(table.state),
 		updatedIdx: index('chat_runs_updated_idx').on(table.updatedAt),
+	}),
+)
+
+export const runEvents = pgTable(
+	'run_events',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		runId: uuid('run_id')
+			.notNull()
+			.references(() => chatRuns.id, { onDelete: 'cascade' }),
+		seq: integer('seq').notNull(),
+		type: text('type').notNull(),
+		payload: jsonb('payload').$type<RunEventPayload>().notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => ({
+		runSeqIdx: index('run_events_run_seq_idx').on(table.runId, table.seq),
 	}),
 )

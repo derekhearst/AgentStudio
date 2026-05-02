@@ -1,6 +1,6 @@
 # Runs Plan
 
-Status: active
+Status: completed
 
 ## Overview
 
@@ -135,4 +135,9 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 ## Completion
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-02 — Phase 1 (persist pending tool approvals) shipped on branch `claude/nervous-kapitsa-18255e`. New `pendingApprovals` jsonb column on `chat_runs`, new `src/lib/runs/approvals.server.ts` with row-locked enqueue/record/await helpers, `requestApproval`/`resolveApproval` removed from tools, stream loop and `/chat/[id]/tool-approve` endpoint rewired to DB.
+- 2026-05-02 — Phase 2 (persist pending `ask_user` questions) shipped on branch `claude/nervous-kapitsa-18255e`. New `pendingQuestions` jsonb column on `chat_runs`, new `src/lib/runs/questions.server.ts` mirroring the approvals pattern, `requestUserQuestions`/`resolveUserQuestions` and the in-memory `pendingQuestions` Map removed from tools, stream loop and `/chat/[id]/ask-user` endpoint rewired to DB.
+- 2026-05-02 — Phase 3 (persist incremental stream blocks + tool round counter) shipped on branch `claude/nervous-kapitsa-18255e`. New `streamBlocks` jsonb and `currentRound` integer columns on `chat_runs`, new `src/lib/runs/blocks.server.ts` with `persistRunBlocks` (full snapshot replace) and `setRunRound`. The stream loop now mirrors every block append to the run row via a `pushBlock` helper and bumps `currentRound` at the start of each tool round, so a live run's progress can be inspected from outside the SSE pipe. The shared `StreamBlock` type moved into `src/lib/runs/runs.schema.ts`.
+- 2026-05-02 — Phase 4 (run event log) shipped on branch `claude/nervous-kapitsa-18255e`. New `run_events` table (`id`, `run_id` FK with cascade delete, gapless `seq`, `type`, `payload jsonb`, `created_at`) with index on `(run_id, seq)`. New `next_event_seq` integer counter on `chat_runs`. New `src/lib/runs/events.server.ts` exporting `appendRunEvent` (atomic counter increment + insert in one transaction) and `listRunEvents(runId, sinceSeq)` for the future resume endpoint. The stream handler's `emit` closure is now async and dual-writes every block-level SSE event into `run_events`; per-token `delta` and `reasoning` events are SSE-only (recoverable from `streamBlocks`). All 17 emit call sites updated to `await emit(...)`.
+- 2026-05-02 — Phase 5 (resumable streaming) shipped on branch `claude/nervous-kapitsa-18255e`. New `GET /chat/[id]/stream/resume?since=<seq>` endpoint replays all `run_events` past the requested seq, then tails new events every 500ms until the run reaches a terminal state, emitting a synthetic `done` to close cleanly. Original `POST /stream` SSE frames now include the SSE `id:` line carrying the event's `seq`. Chat client at `src/routes/chat/[id]/+page.svelte` parses `id:` lines, tracks `lastSeenSeq`, and on reader error or premature stream end (within 3 attempts) reconnects via the resume endpoint and continues processing through the same SSE handler.
+- 2026-05-02 — Phase 6 (drop in-memory state) shipped on branch `claude/nervous-kapitsa-18255e`. Deleted the orphaned `src/lib/agents/streaming-state.server.ts` (Map-based 30-second-staleness registry that no consumer referenced after Phases 1-4). The runs domain is now fully durable: every approval, question, block, event, and stream cursor lives in Postgres. Status flipped to `completed`.
