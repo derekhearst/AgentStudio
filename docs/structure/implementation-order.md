@@ -167,7 +167,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Call sites pass `run.id`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)
      - Unit tests for path resolution + traversal rejection: [tests/workspace.isolation.spec.ts](../../tests/workspace.isolation.spec.ts)
      - Live test proving a `file_write` from chat lands in `<sandbox>/<userId>/runs/<runId>/`: [tests/workspace.live.spec.ts](../../tests/workspace.live.spec.ts)
-   - Phases 2-5 (persistent mode, GC job, git worktree, container isolation) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 3 — workspace GC, 2026-05-02):
+     - Pure GC core: [src/lib/workspace/gc-core.ts](../../src/lib/workspace/gc-core.ts) (`runWorkspaceGcCore` takes `lookupRuns` callback so it's unit-testable without `$env`)
+     - Drizzle-backed wrapper: [src/lib/workspace/gc.server.ts](../../src/lib/workspace/gc.server.ts)
+     - Cron tick runs GC after automations: [src/routes/api/cron/+server.ts](../../src/routes/api/cron/+server.ts)
+     - Manual CLI: [scripts/gc-workspaces.ts](../../scripts/gc-workspaces.ts) (`--dry-run`, `--ttl-days N`)
+     - Tests cover: TTL eviction, active-run skip, recent-finish skip, orphan-keep, legacy-untouched, dry-run, missing-root: [tests/workspace.gc.spec.ts](../../tests/workspace.gc.spec.ts)
+   - Phases 2 (persistent mode), 4 (git worktree), 5 (container isolation) still pending — keep `[ ]` until all phases land.
 
 ### Wave 2 — Orchestration Core
 
