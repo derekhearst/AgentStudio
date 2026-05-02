@@ -174,11 +174,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit git/PR UX criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop: branch, diff, and PR actions remain available from the main workbench without context loss.
+- Mobile: conflict and PR review actions should be grouped into concise step-driven screens.
+- Blocking flows: merge and destructive git actions must show policy rationale and approval source.
+- Visual QA: branch status chips, conflict indicators, and PR action cards are included in snapshot coverage.
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>

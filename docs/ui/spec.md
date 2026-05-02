@@ -126,6 +126,18 @@ Sources:
 - Right panel is default home for deep inspection
 - Artifact timeline must preserve previous versions
 
+### Onboarding and empty states
+
+- First-run users should get contextual starter prompts and mode guidance without modal overload.
+- Empty states must direct users toward the next meaningful action (start chat, pick project, review pending blockers).
+- Multi-session empty states must distinguish "no sessions" from "no active sessions".
+
+### Failure, retry, and degraded states
+
+- Every async surface must define loading, partial, failure, and retry behavior.
+- Blocking action failures (approval submit, ask_user submit, queue send) must show explicit retry paths.
+- Long-running run disruptions should preserve user intent and offer resume/recover options.
+
 ## Visual System
 
 ### Brand and color
@@ -159,6 +171,18 @@ Sources:
 - Session switch perceived latency under 250ms when data is cached
 - Background animation CPU overhead under agreed threshold on mid-tier laptops
 
+## Rollout and Safety Controls
+
+- Major UI changes must be feature-flagged and reversible.
+- New interaction patterns (queueing, action cards, panel changes) must support incremental rollout.
+- UX telemetry should verify no regression in switch speed, approval resolution speed, and interruption success.
+
+## Design QA and Visual Regression
+
+- Define canonical screenshot baselines for key surfaces across desktop and mobile.
+- Run visual regression checks for shell, composer, action cards, and workbench tabs.
+- Maintain a design QA checklist for spacing, contrast, focus states, and animation behavior.
+
 ## Domain Integration Contracts
 
 Every domain spec/plan that has UI surfaces should include a short "UI Contract" subsection that references this file and lists:
@@ -167,6 +191,8 @@ Every domain spec/plan that has UI surfaces should include a short "UI Contract"
 - states and badges it emits
 - blocking actions and resolution paths
 - mobile behavior adjustments
+
+Generic boilerplate is not sufficient. Each domain must provide domain-specific entries.
 
 ## Rewrite Authority
 

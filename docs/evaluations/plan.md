@@ -6,7 +6,7 @@ Status: active
 
 AgentStudio runs a single-pass loop: model → tool → model → done. There is no critic, no automated re-plan, no quality gate before a run is marked completed. Anthropic's long-running app harness explicitly uses **planner → generator → evaluator** with sprint contracts; without this loop, the agent has no cybernetic feedback. Add a configurable evaluator pass that runs after generator completion (or per sprint), produces structured findings, and optionally triggers a correction round.
 
-> **Depends on:** `docs/structure/plan.md` (`evaluations/` folder, `runtime/`), `docs/runs/plan.md` (run events), `docs/runtime/parallel-subagents.plan.md` (detached child runs).
+> **Depends on:** `docs/structure/plan.md` (`evaluations/` folder, `runtime/`), `docs/runs/plan.md` (run events), `docs/runtime/plan.md` (Phase 5 child-run/session forwarding behavior).
 
 > **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 

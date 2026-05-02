@@ -132,11 +132,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and governs project/worktree orchestration surfaces.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: project list, project detail, worktree list, branch metadata, and environment readiness indicators.
+- States and badges: inactive, active, archived, syncing, drifted, conflicted, and failed setup.
+- Blocking actions: archive/delete/rename workflows and branch reset actions require explicit confirmation UX.
+- Mobile behavior: project metadata panels collapse into stacked sections; destructive actions remain guarded.
 
 ## References
 - [Artifacts — Anthropic Claude](https://www.anthropic.com/news/artifacts) — first-class artifact model in Claude

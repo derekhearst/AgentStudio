@@ -193,11 +193,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit review and trace UX criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop: review inbox and event timeline should support rapid triage without route thrash.
+- Mobile: review queues should expose high-signal filters first, with deferred deep inspection.
+- Blocking flows: action-required items must include clear resolution controls and retry visibility.
+- Visual QA: inbox state filters, timeline rows, and decision dialogs are included in snapshots.
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>

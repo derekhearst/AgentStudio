@@ -115,3 +115,19 @@ Internal error: directory mismatch for directory "C:\Users\derek\Documents\Proje
 [retrieve] (10/50) eta=105s
 [retrieve] (20/50) eta=95s
 [retrieve] (30/50) eta=58s
+[retrieve] (40/50) eta=32s
+[retrieve] (50/50) eta=0s
+[retrieve] done in 148.8s ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501203758_9l21.jsonl
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
+
+=== score-retrieval: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/score-retrieval.ts --runId=lme_20260501203758_9l21 ===
+[score-retrieval] 50 instances (abstention excluded)
+Session-level metrics:
+	recall_all@5 = 0.9600 (n=50)
+	ndcg_any@5 = 0.9600 (n=50)
+	recall_all@10 = 0.9600 (n=50)
+	ndcg_any@10 = 0.9600 (n=50)
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 172[handle]. You don't need to do anything, but this indicates a bug.
+
+[smoke] OK ΓÇö runId=lme_20260501203758_9l21
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.

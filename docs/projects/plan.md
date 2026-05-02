@@ -8,7 +8,7 @@ Projects and Artifacts today do not exist as first-class entities in AgentStudio
 
 Implement durable Projects and Artifacts with stable identity, version history, and project membership. AI defaults to _editing the current artifact in place_ (creating a new version), never auto-creating duplicates. Paired with Memory (see [docs/memory/plan.md](../memory/plan.md)), Memory drawers can cite concrete artifact IDs for grounding and routing.
 
-> **Depends on:** `docs/structure/plan.md` (new domains), `docs/sessions/plan.md` (optional: chat → session linkage for audit trail).
+> **Depends on:** `docs/structure/plan.md` (new domains), `docs/chat/plan.md` (optional: chat/session linkage for audit trail).
 
 > **See also:** [spec.md](spec.md) — full feature spec, data model, and behavior contracts.
 
@@ -277,11 +277,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit projects/worktree UX criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop: projects list + detail + worktree status must remain navigable without leaving the main shell.
+- Mobile: project detail and worktree controls should use progressive disclosure and avoid overflowing metadata.
+- Blocking actions: archive/delete/reset branch flows require confirmation and clear rollback/recovery messaging.
+- Visual QA: project list states and worktree conflict badges are included in regression snapshots.
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>

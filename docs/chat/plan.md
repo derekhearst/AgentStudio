@@ -248,11 +248,13 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit chat-workbench criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop shell: left rail + center thread + right workbench tabs must all function together for active runs.
+- Mobile shell: right workbench behavior must collapse into bottom-sheet tabs without losing blocker controls.
+- Blocking interactions: plan approvals, tool approvals, and ask_user prompts must use shared action-card patterns.
+- Session operations: quick session switching and interjection queue controls must be available in the chat surface.
+- Visual QA: chat shell, mode switcher, HUD, and action cards must be covered by visual regression checks.
 
 ## Dependencies
 

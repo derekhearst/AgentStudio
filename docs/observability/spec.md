@@ -154,11 +154,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and defines review/trace/cost visibility surfaces.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: review inbox, run timeline, event detail inspector, and cost summary cards.
+- States and badges: unread, acknowledged, action-required, dismissed, stale, and escalated.
+- Blocking actions: approve/reject/defer decisions must preserve audit metadata and user rationale.
+- Mobile behavior: inbox triage must support quick filters and swipe-safe action affordances.
 
 ## References
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — observability as a harness primitive

@@ -231,11 +231,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit deep-research UX criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop: plan, source progress, and report preview must be visible without losing chat thread continuity.
+- Mobile: planning and source inspection steps must work through staged tabs/sheets with clear step context.
+- Failure/retry: failed fetches or parser failures expose per-source retry and continue-with-partial-results options.
+- Visual QA: planning card, source timeline, and final report artifact views are snapshot-covered.
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>

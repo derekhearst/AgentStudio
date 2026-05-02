@@ -173,6 +173,24 @@ Add telemetry dashboards and automated checks for key UX metrics.
 
 Keyboard, screen reader, contrast, and reduced-motion audits.
 
+### 7.4 Rollout controls
+
+- Feature-flag the major shell and interaction changes.
+- Ship phased rollouts with rollback path for each UX change.
+- Define success/failure thresholds for session switching, approval throughput, and interruption handling.
+
+### 7.5 Empty/error/recovery states
+
+- Define first-run and empty-state behavior for chat, sessions dock, and workbench tabs.
+- Standardize error and retry UX for action cards, panel loads, and run-state fetches.
+- Add degraded-mode behavior for partial service outages (read-only fallbacks where possible).
+
+### 7.6 Visual QA and regression checks
+
+- Establish screenshot baselines for desktop and mobile critical flows.
+- Add visual regression checks for shell, composer, workbench panel, and action cards.
+- Add manual design QA checklist to release process.
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.

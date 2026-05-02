@@ -94,9 +94,9 @@ The right panel is mode-aware.
 
 **Research mode:** source list, plan steps, progress events, report outline.
 
-**Code mode:** changed files, diff summary, workspace info, evaluator status, pull request status.
+**Plan mode:** plan graph, success criteria, estimate summary, and approval controls.
 
-**Review mode:** review items, pull request metadata, findings, approval controls.
+**Agent mode:** changed files, diff summary, workspace info, evaluator status, pull request status, and pending review items.
 
 ### Inline approvals and answers
 
@@ -171,11 +171,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and defines the primary app-shell experience.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: chat thread canvas, composer, mode selector, live run HUD, inline action cards, and mode-aware right panel tabs.
+- States and badges: running, blocked, needs-input, queued interjection, completed, failed, and pending approvals count.
+- Blocking actions: plan approvals, tool approvals, and ask_user responses must resolve through durable review items.
+- Mobile behavior: right panel collapses to bottom-sheet tabs; blocking cards remain visible near composer.
 
 ## References
 

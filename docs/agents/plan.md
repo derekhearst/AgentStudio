@@ -220,11 +220,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md), with explicit agent identity UX criteria.
 
-- Include UX acceptance criteria for desktop and mobile behavior.
-- Include compactness/density behavior where relevant.
-- Include approval, question, and interruption flows where relevant.
+- Desktop: mode presets, instruction previews, and skill attachments must be editable in one flow.
+- Mobile: identity edits should be chunked into short sections with explicit confirmation.
+- Blocking flows: policy-invalid agent configurations must prevent save and explain required fixes.
+- Visual QA: mode selector states, profile editor forms, and skill attachment chips are snapshot-covered.
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>

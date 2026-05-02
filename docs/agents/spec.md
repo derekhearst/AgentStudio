@@ -141,11 +141,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and defines mode identity and skill attachment UX.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: mode preset picker, agent profile editor, skill attachment list, and tool access summaries.
+- States and badges: active-default, overridden, missing-instructions, tool-restricted, and policy-blocked.
+- Blocking actions: changing active mode identity or tool access must show impact summary before save.
+- Mobile behavior: preset switch and identity editor use compact forms with explicit save/preview actions.
 
 ## References
 - [agents.md open standard](https://agents.md/) — project-level agent instructions format

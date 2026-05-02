@@ -210,11 +210,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and defines branch/PR workflows.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: branch status panel, commit timeline, PR creation/review views, and merge readiness checks.
+- States and badges: clean, dirty, conflicted, rebasing, review-requested, approved, and merge-blocked.
+- Blocking actions: push, force-push, merge, and conflict resolution decisions must use explicit approval UI.
+- Mobile behavior: PR and conflict details render as focused drill-down views with sticky resolve actions.
 
 ## References
 - [../workspace/spec.md](../workspace/spec.md) - worktree environments

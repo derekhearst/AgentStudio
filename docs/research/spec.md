@@ -199,11 +199,12 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 ## UI Contract
 
-This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+This domain follows [../ui/spec.md](../ui/spec.md) and defines plan-first research interactions.
 
-- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
-- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
-- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+- Surfaces: research setup card, source queue, progress timeline, citation viewer, and report artifact preview.
+- States and badges: planning, sourcing, synthesizing, blocked-for-input, report-ready, and failed-source.
+- Blocking actions: source approval or policy exceptions must route through action cards and review items.
+- Mobile behavior: source and citation views collapse into tabbed sheets with persistent report actions.
 
 ## References
 - [OpenAI Deep Research announcement](https://openai.com/index/introducing-deep-research/) — multi-step RL-trained browsing + Python tool use, 5–30 min async, full citations

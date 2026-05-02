@@ -84,7 +84,7 @@ export async function runAgentLoop(args: {
 
 - Chat stream → builds an SSE-backed Session (`runtime/session/sse.server.ts`).
 - Automation engine → builds a detached Session (`runtime/session/detached.server.ts`) that emits to `run_events` only.
-- Sub-agent → builds child Session whose `emit` is forwarded to the parent's event bus (see `docs/runtime/parallel-subagents.plan.md`).
+- Sub-agent → builds child Session whose `emit` is forwarded to the parent's event bus (covered in this plan, Phase 5).
 
 ## Implementation steps (phased)
 
