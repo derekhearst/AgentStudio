@@ -834,6 +834,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					model: routedModel,
 					tokensIn: promptTokens,
 					tokensOut: completionTokens,
+					userId: user.id,
+					runId: run.id,
+					agentId: conversation.agentId ?? null,
 					metadata: { conversationId: body.conversationId },
 				})
 

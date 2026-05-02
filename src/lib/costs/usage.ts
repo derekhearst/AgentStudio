@@ -22,6 +22,10 @@ type LogInput = {
 	metadata?: Record<string, unknown>
 	/** Override cost instead of calculating from model pricing (e.g. image gen returns cost directly) */
 	costOverride?: number
+	userId?: string | null
+	runId?: string | null
+	taskId?: string | null
+	agentId?: string | null
 }
 
 let modelCache: ModelInfo[] | null = null
@@ -79,6 +83,10 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 			tokensIn: input.tokensIn,
 			tokensOut: input.tokensOut,
 			cost,
+			userId: input.userId ?? null,
+			runId: input.runId ?? null,
+			taskId: input.taskId ?? null,
+			agentId: input.agentId ?? null,
 			metadata: input.metadata ?? {},
 		})
 		.returning({ id: llmUsage.id, cost: llmUsage.cost })

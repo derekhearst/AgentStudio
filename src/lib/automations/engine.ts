@@ -160,6 +160,8 @@ async function runAutomation(automation: typeof automations.$inferSelect, now: D
 		model,
 		tokensIn: response.usage?.promptTokens ?? 0,
 		tokensOut: response.usage?.completionTokens ?? 0,
+		userId: automation.userId,
+		agentId: automation.agentId ?? null,
 	}).catch(() => {})
 
 	return { conversationId: conversation.id }

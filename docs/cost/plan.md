@@ -174,7 +174,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-02 — Phase 1 (run/task/agent/user linkage on `llm_usage`) shipped on branch `claude/nervous-kapitsa-18255e`. Schema gained `user_id` (FK users), `run_id` (FK chat_runs), `agent_id` (FK agents), and `task_id` (no FK yet — back-populated when item #11 lands), all on-delete-set-null with btree indexes. `LogInput` accepts the four optional fields; `logLlmUsage` writes them through. Chat stream, inline sub-agent, and automation engine call sites now pass full context. `getCostSummary` returns three new rollups: top runs, top agents, top tasks. Memory-side call sites (embeddings/mining/rerank) and title-gen still pass null IDs — plumbing those will require signature changes up the call chain and is left to a follow-up. Phases 2-5 (tool-cost ledger, budget limits, dashboard UI, provider reconciliation) still pending.
 
 
 

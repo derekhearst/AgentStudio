@@ -307,8 +307,10 @@ export async function runInlineSubagent(
 			model: agent.model,
 			tokensIn: promptTokens,
 			tokensOut: completionTokens,
+			userId,
+			runId: run.id,
+			agentId: agent.id,
 			metadata: {
-				agentId: agent.id,
 				conversationId: subConversation.id,
 				parentConversationId,
 			},

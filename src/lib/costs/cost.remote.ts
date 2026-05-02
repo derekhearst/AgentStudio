@@ -1,9 +1,11 @@
 import { query } from '$app/server'
-import { and, desc, eq, gte, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { llmUsage } from '$lib/costs/usage.schema'
+import { agents } from '$lib/agents/agents.schema'
+import { chatRuns } from '$lib/runs/runs.schema'
 
 const costPeriodSchema = z.object({
 	period: z.enum(['day', 'week', 'month']).optional(),
@@ -25,7 +27,7 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 	const p = period ?? 'month'
 	const since = periodStart(p)
 
-	const [totalSpend, byModel, bySource, byConversation, dailyBreakdown] = await Promise.all([
+	const [totalSpend, byModel, bySource, byConversation, dailyBreakdown, byRun, byAgent, byTask] = await Promise.all([
 		// Total spend in period (from llm_usage — all LLM calls)
 		db
 			.select({
@@ -90,6 +92,58 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 			.where(gte(llmUsage.createdAt, since))
 			.groupBy(sql`date_trunc('day', ${llmUsage.createdAt})`)
 			.orderBy(sql`date_trunc('day', ${llmUsage.createdAt})`),
+
+		// Top runs by cost
+		db
+			.select({
+				runId: llmUsage.runId,
+				label: chatRuns.label,
+				state: chatRuns.state,
+				source: chatRuns.source,
+				cost: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text`,
+				tokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
+				tokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
+				count: sql<number>`count(*)::int`,
+			})
+			.from(llmUsage)
+			.leftJoin(chatRuns, eq(chatRuns.id, llmUsage.runId))
+			.where(and(gte(llmUsage.createdAt, since), isNotNull(llmUsage.runId)))
+			.groupBy(llmUsage.runId, chatRuns.label, chatRuns.state, chatRuns.source)
+			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
+			.limit(10),
+
+		// Top agents by cost
+		db
+			.select({
+				agentId: llmUsage.agentId,
+				name: agents.name,
+				role: agents.role,
+				cost: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text`,
+				tokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
+				tokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
+				count: sql<number>`count(*)::int`,
+			})
+			.from(llmUsage)
+			.leftJoin(agents, eq(agents.id, llmUsage.agentId))
+			.where(and(gte(llmUsage.createdAt, since), isNotNull(llmUsage.agentId)))
+			.groupBy(llmUsage.agentId, agents.name, agents.role)
+			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
+			.limit(10),
+
+		// Top tasks by cost (no FK yet — taskId is back-populated when the tasks domain lands)
+		db
+			.select({
+				taskId: llmUsage.taskId,
+				cost: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text`,
+				tokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
+				tokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
+				count: sql<number>`count(*)::int`,
+			})
+			.from(llmUsage)
+			.where(and(gte(llmUsage.createdAt, since), isNotNull(llmUsage.taskId)))
+			.groupBy(llmUsage.taskId)
+			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
+			.limit(10),
 	])
 
 	return {
@@ -103,6 +157,9 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		bySource,
 		topConversations: byConversation,
 		dailyBreakdown,
+		byRun,
+		byAgent,
+		byTask,
 	}
 })
 

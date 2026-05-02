@@ -120,6 +120,14 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
    - Source: ../cost/plan.md
    - Depends on: #3
    - Gate: cost-by-run/task/agent dashboards query correctly
+   - Evidence (Phase 1 — run/task/agent/user linkage on `llm_usage`, 2026-05-02):
+     - Schema columns + FKs + indexes added: [src/lib/costs/usage.schema.ts](../../src/lib/costs/usage.schema.ts)
+     - Drizzle migration: [drizzle/0017_magenta_the_call.sql](../../drizzle/0017_magenta_the_call.sql)
+     - `LogInput` extended with optional `userId`/`runId`/`taskId`/`agentId`: [src/lib/costs/usage.ts](../../src/lib/costs/usage.ts)
+     - Call-site updates pass full context: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts)
+     - `getCostSummary` adds `byRun` / `byAgent` / `byTask` rollups: [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
+     - Integration tests including a live chat that asserts the populated row: [tests/cost.linkage.spec.ts](../../tests/cost.linkage.spec.ts)
+   - Phases 2-5 (tool-usage ledger, budget limits, dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
 
 6. [ ] Chat mode system + inline approvals + HUD
    - Source: ../chat/plan.md
