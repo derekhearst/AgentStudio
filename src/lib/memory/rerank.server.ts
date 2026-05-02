@@ -5,8 +5,8 @@
  * the single best drawer. Mirrors MemPalace's hybrid-v4 + LLM rerank step.
  */
 
-import { chat } from '$lib/openrouter.server'
-import { logLlmUsage } from '$lib/cost/usage'
+import { chat } from '$lib/llm/chat.server'
+import { logLlmUsage } from '$lib/costs/usage'
 import type { RetrievedDrawer } from '$lib/memory/retrieval.server'
 
 const DEFAULT_RERANK_MODEL = 'anthropic/claude-haiku-4.5'

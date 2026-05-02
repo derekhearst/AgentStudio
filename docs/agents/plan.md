@@ -201,7 +201,7 @@ See `docs/chat/spec.md` — mode selector lives in the composer. Default mode fr
 #### 7.6 Update files
 
 - `src/lib/agents/orchestrator.ts` — mode-aware identity loading
-- `src/lib/chat/chat.schema.ts` — `mode` column on `conversations`
+- `src/lib/sessions/sessions.schema.ts` — `mode` column on `conversations`
 - `src/lib/agents/identity.server.ts` — `loadModeIdentity(mode, userId)` function
 - `src/lib/skills/skills.server.ts` — boot seeder for four mode skills
 - `src/routes/chat/[id]/stream/+server.ts` — pass mode to identity loader, filter tools by mode

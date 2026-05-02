@@ -15,7 +15,7 @@ import {
 
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { conversations, messages } from '$lib/chat/chat.schema'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
 
 /**
  * MemPalace memory schema (ported to TypeScript/Drizzle/pgvector).

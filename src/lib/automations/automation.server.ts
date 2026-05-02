@@ -1,8 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { automations } from '$lib/automation/automation.schema'
+import { automations } from '$lib/automations/automation.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { computeNextRunAt } from '$lib/automation/engine'
+import { computeNextRunAt } from '$lib/automations/engine'
 
 export async function listAutomationsForUser(userId: string) {
 	return db

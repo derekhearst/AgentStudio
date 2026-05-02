@@ -1,6 +1,10 @@
 # Structure Plan
 
-Status: active
+Status: completed
+
+## Completion
+
+Completed 2025-05-02. All domain folders renamed, sessions/runs extracted from chat/, compatibility shims removed, db.server.ts updated, import sites migrated. Gate G0 smoke passing.
 
 ## Overview
 

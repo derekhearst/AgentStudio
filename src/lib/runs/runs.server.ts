@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNull, isNotNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { chatRuns } from '$lib/chat/chat.schema'
+import { chatRuns } from '$lib/runs/runs.schema'
 
 export const ACTIVE_CHAT_RUN_STATES = ['queued', 'running', 'waiting_tool_approval', 'waiting_user_input'] as const
 

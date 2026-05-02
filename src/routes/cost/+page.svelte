@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getCostSummary, getBudgetStatus } from '$lib/cost';
+	import { getCostSummary, getBudgetStatus } from '$lib/costs';
 	import { getSettings } from '$lib/settings';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 

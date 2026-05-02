@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/private'
 import { executeTool, toolSchemas, type ToolName } from '$lib/tools/tools.server'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
-import { conversations } from '$lib/chat/chat.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 import { desc, eq } from 'drizzle-orm'
 
 const MCP_API_KEY = env.MCP_API_KEY

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import favicon from '$lib/assets/favicon.svg';
+	import RunningSessionsDock from '$lib/ui/RunningSessionsDock.svelte';
 
 	let {
 		activePath = '/',
@@ -122,6 +123,7 @@
 
 		<!-- Settings — pinned bottom -->
 		<div class="mt-auto">
+			<RunningSessionsDock />
 			<a href="/users"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
 				class:bg-base-200={isActive('/users')} class:font-medium={isActive('/users')} class:text-primary={isActive('/users')}

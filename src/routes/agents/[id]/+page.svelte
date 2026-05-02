@@ -4,7 +4,7 @@
 	import { page } from '$app/state'
 	import { onMount, onDestroy } from 'svelte'
 	import { getAgent, updateAgentCommand } from '$lib/agents'
-	import ModelSelector from '$lib/models/ModelSelector.svelte'
+	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>

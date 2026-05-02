@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit'
-import { listActiveChatRunsForUser } from '$lib/chat/runs.server'
+import { listActiveChatRunsForUser } from '$lib/runs'
 
 const encoder = new TextEncoder()
 

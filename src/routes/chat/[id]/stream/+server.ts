@@ -1,12 +1,13 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { chatRuns, conversations, messages } from '$lib/chat/chat.schema'
-import { streamChat, type LlmMessage } from '$lib/openrouter.server'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { chatRuns } from '$lib/runs/runs.schema'
+import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
 import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
-import { logLlmUsage } from '$lib/cost/usage'
+import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requestApproval } from '$lib/tools/tools.server'
 import { requestUserQuestions, toolSchemas } from '$lib/tools/tools.server'
@@ -611,6 +612,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 							const answers = await requestUserQuestions(questionToken)
 							await updateRun({ state: 'running', label: 'User input received', heartbeat: true })
+
 							const questionResult = {
 								questions: input.questions,
 								answers,

@@ -6,7 +6,7 @@ import {
 	deleteAutomationRecord,
 	listAutomationsForUser,
 	updateAutomationRecord,
-} from '$lib/automation/automation.server'
+} from '$lib/automations/automation.server'
 
 const createAutomationSchema = z.object({
 	agentId: z.string().uuid().nullable().optional(),

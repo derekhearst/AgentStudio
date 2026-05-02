@@ -194,6 +194,50 @@ Every domain spec/plan that has UI surfaces should include a short "UI Contract"
 
 Generic boilerplate is not sufficient. Each domain must provide domain-specific entries.
 
+### UI Contract Template (copy-paste into domain docs)
+
+```markdown
+## UI Contract
+
+> References: [UI spec](../ui/spec.md)
+
+| Field            | Value                                                                |
+| ---------------- | -------------------------------------------------------------------- |
+| Primary surface  | e.g. left rail list item / chat inline card / right workbench tab   |
+| Status badges    | e.g. running (green pulse) / blocked (orange) / done (ghost)        |
+| Blocking actions | e.g. ask_user card — resolved via ActionCard (ask_user type)        |
+| Mobile behavior  | e.g. surface appears in bottom-sheet tab; blocking card sticky above composer |
+```
+
+## Shell Implementation Contract
+
+The following components implement the canonical desktop and mobile shells. Domain teams must not create parallel shell structures.
+
+### Desktop (≥ `tablet` breakpoint)
+
+| Zone              | Component                            | Notes                                          |
+| ----------------- | ------------------------------------ | ---------------------------------------------- |
+| Left rail         | `src/lib/ui/Sidebar.svelte`          | w-48 (tablet), w-56 (desktop). Contains nav groups, RunningSessionsDock, and settings link. |
+| Running sessions  | `src/lib/ui/RunningSessionsDock.svelte` | Renders inside left rail above settings. Live SSE from `/api/chat/monitor`. |
+| Center canvas     | `<main>` in `src/routes/+layout.svelte` | Thread, HUD, composer. Responsive rounding on tablet+. |
+| Right workbench   | `src/lib/ui/SidePanel.svelte`        | 320 px aside panel. Mode-aware content (RecentChats, SkillStats, …). |
+
+### Mobile (< `tablet` breakpoint)
+
+| Zone              | Component                            | Notes                                    |
+| ----------------- | ------------------------------------ | ---------------------------------------- |
+| Bottom nav        | `src/lib/ui/MobileNav.svelte`        | Hides on chat detail route (slide-off).  |
+| Full-screen canvas | `<main>` (full viewport)            | No border radius or padding on mobile.  |
+| Right workbench   | Not shown inline; bottom sheet TBD  | Phase 3.1 work.                          |
+
+### Action cards
+
+All blocking agent actions (ask_user, tool approval, confirmation) render via `src/lib/ui/ActionCard.svelte`. Domains invoke ActionCard with one of three `type` props:
+
+- `ask_user` — question with options and optional freeform input
+- `tool_approval` — tool name + args preview with Allow / Deny buttons
+- `confirmation` — plain message with configurable confirm/cancel labels
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.

@@ -63,13 +63,14 @@ Direct database imports from `.server.ts` files inside components or `+page.svel
 | `activity/`            | Append-only audit event log and feed                          |
 | `agents/`              | Agent records, identity skills, orchestrator                  |
 | `auth/`                | Users, sessions, passkeys, invites                            |
-| `automation/`          | Scheduled and event-triggered automation runs                 |
-| `chat/`                | Conversations, sessions, runs, streaming, composer UI         |
-| `cost/`                | LLM usage tracking, budget limits, spend dashboard            |
+| `automations/`         | Scheduled and event-triggered automation runs                 |
+| `chat/`                | Chat UI and streaming orchestration                           |
+| `costs/`               | LLM usage tracking, budget limits, spend dashboard            |
 | `memory/`              | Memory palace, knowledge graph, retrieval pipeline            |
-| `models/`              | Model catalog, pricing, selector component (wraps openrouter) |
+| `llm/`                 | OpenRouter chat client, model catalog, and model selector UI  |
 | `notifications/`       | Push subscriptions, in-app notification inbox                 |
-| `openrouter.server.ts` | OpenRouter streaming client (will move into an `llm/` domain) |
+| `runs/`                | Active run state, run monitoring queries, run schema          |
+| `sessions/`            | Conversation/session tape schema and ownership boundary        |
 | `settings/`            | Per-user preferences (model, context, budget, memory, tools)  |
 | `skills/`              | Skill library, runtime loading, SKILL.md boot loader          |
 | `tools/`               | Tool catalog, capability groups, tool execution               |

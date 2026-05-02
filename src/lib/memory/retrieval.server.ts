@@ -12,7 +12,7 @@
 
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { conversations } from '$lib/chat/chat.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
 import { embedOne, toPgVector } from '$lib/memory/embeddings.server'
 

@@ -213,7 +213,7 @@ In `/agents/[id]/settings`, add a "Context" tab with slot budget controls.
 - `src/lib/tools/tools.ts` — accurate `estimateTokens`
 - `src/lib/skills/skills.server.ts` — `listRelevantSkillSummaries`
 - `src/lib/memory/memory.server.ts` — `extractMemoryAfterRun`
-- `src/lib/chat/chat.schema.ts` — add `compactionEvents` table
+- `src/lib/sessions/sessions.schema.ts` — add `compactionEvents` table
 - `src/lib/context/context.schema.ts` (new) — `contextSlotConfigs` table
 - `drizzle/` — migrations for `compaction_events`, `context_slot_configs`
 - `src/lib/chat/ContextWindow.svelte` — token bar + compaction marker

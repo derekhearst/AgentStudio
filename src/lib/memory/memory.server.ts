@@ -4,7 +4,7 @@
 
 import { eq, inArray } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { messages, conversations } from '$lib/chat/chat.schema'
+import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { memoryDrawers } from '$lib/memory/memory.schema'
 import { mineSession, mineSessions, type MiningSession } from '$lib/memory/mining.server'
 import { recall, type RecallOptions, type RetrievedDrawer } from '$lib/memory/retrieval.server'

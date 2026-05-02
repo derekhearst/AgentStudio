@@ -1,7 +1,7 @@
 import { boolean, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { conversations } from '$lib/chat/chat.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 
 export const automationConversationModeEnum = pgEnum('automation_conversation_mode', ['new_each_run', 'reuse'])
 

@@ -1,10 +1,10 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { automations } from '$lib/automation/automation.schema'
-import { conversations, messages } from '$lib/chat/chat.schema'
+import { automations } from '$lib/automations/automation.schema'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { chat, type LlmMessage } from '$lib/openrouter.server'
-import { logLlmUsage } from '$lib/cost/usage'
+import { chat, type LlmMessage } from '$lib/llm/chat.server'
+import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 
 function parseField(field: string, min: number, max: number) {

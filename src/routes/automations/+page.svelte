@@ -7,7 +7,7 @@
 		deleteAutomationCommand,
 		listAutomationsQuery,
 		updateAutomationCommand,
-	} from '$lib/automation';
+	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 

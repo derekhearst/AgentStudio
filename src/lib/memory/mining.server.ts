@@ -11,9 +11,9 @@
  */
 
 import { count, eq } from 'drizzle-orm'
-import { chat } from '$lib/openrouter.server'
+import { chat } from '$lib/llm/chat.server'
 import { db } from '$lib/db.server'
-import { logLlmUsage } from '$lib/cost/usage'
+import { logLlmUsage } from '$lib/costs/usage'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
 import { getOrCreateCloset, getOrCreateRoom, getOrCreateWing, type WingKind } from '$lib/memory/palace.server'
 import { embed, toPgVector } from '$lib/memory/embeddings.server'

@@ -73,11 +73,64 @@
 		return typeof value === 'number' && value > 0 ? value : null;
 	});
 
-	const savedBlocks = $derived<SavedBlock[] | null>(
-		Array.isArray((message.metadata as Record<string, unknown> | null | undefined)?.blocks)
-			? ((message.metadata as Record<string, unknown>).blocks as SavedBlock[])
-			: null
-	);
+	function asRecord(value: unknown): Record<string, unknown> | null {
+		if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+		if (typeof value !== 'string') return null;
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+				? (parsed as Record<string, unknown>)
+				: null;
+		} catch {
+			return null;
+		}
+	}
+
+	function asArray(value: unknown): unknown[] {
+		if (Array.isArray(value)) return value;
+		if (typeof value !== 'string') return [];
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+
+	const savedBlocks = $derived.by(() => {
+		const metadata = asRecord(message.metadata) ?? ((message.metadata as Record<string, unknown> | null | undefined) ?? null);
+		const blocks = metadata?.blocks;
+		return Array.isArray(blocks) ? (blocks as SavedBlock[]) : null;
+	});
+
+	const normalizedToolCalls = $derived.by(() => asArray(message.toolCalls));
+
+	function getAskUserQuestions(argumentsValue: unknown, resultValue: unknown): Array<{ header: string; question?: string }> {
+		const args = asRecord(argumentsValue);
+		const result = asRecord(resultValue);
+		const fromArgs = Array.isArray(args?.questions) ? args.questions : [];
+		const fromResult = Array.isArray(result?.questions) ? result.questions : [];
+		const source = fromArgs.length > 0 ? fromArgs : fromResult;
+
+		return source
+			.map((q) => {
+				const row = asRecord(q);
+				const header = typeof row?.header === 'string' ? row.header : '';
+				const question = typeof row?.question === 'string' ? row.question : undefined;
+				return { header, question };
+			})
+			.filter((q) => q.header.length > 0 || (q.question?.length ?? 0) > 0);
+	}
+
+	function getAskUserAnswer(resultValue: unknown, header: string): string | null {
+		const result = asRecord(resultValue);
+		const answers = asRecord(result?.answers);
+		if (!answers) return null;
+		const value = answers[header];
+		if (typeof value !== 'string') return null;
+		const trimmed = value.trim();
+		return trimmed.length > 0 ? trimmed : null;
+	}
 	const lastThinkingBlockIndex = $derived(
 		savedBlocks
 			? savedBlocks.reduce((latest, block, index) => (block.kind === 'thinking' ? index : latest), -1)
@@ -195,7 +248,22 @@
 		</div>
 	{:else if savedBlocks}
 		{#each savedBlocks as block, idx (`${message.id}-block-${idx}`)}
-			{#if block.kind === 'tool'}
+			{#if block.kind === 'tool' && block.name === 'ask_user'}
+				{@const askQuestions = getAskUserQuestions(block.arguments, block.result)}
+				{#if askQuestions.length > 0}
+					{#each askQuestions as q}
+						<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+							<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
+						</div>
+						{@const answer = getAskUserAnswer(block.result, q.header)}
+						{#if answer}
+							<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
+								<p class="whitespace-pre-wrap">{answer}</p>
+							</div>
+						{/if}
+					{/each}
+				{/if}
+			{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 				<div class="mb-1.5 w-full">
 					<ToolCallCard
 						name={String(block.name)}
@@ -230,20 +298,39 @@
 			{/if}
 		{/each}
 	{:else}
-		{#if message.toolCalls && message.toolCalls.length > 0}
+		{#if normalizedToolCalls.length > 0}
 			<div class="mb-2 w-full space-y-2">
-				{#each message.toolCalls as call, idx (`${message.id}-${idx}`)}
+				{#each normalizedToolCalls as call, idx (`${message.id}-${idx}`)}
+				{#if call.name === 'ask_user'}
+					{@const askQuestions = getAskUserQuestions(call.arguments, call.result)}
+					{#if askQuestions.length > 0}
+						{#each askQuestions as q}
+							<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
+							</div>
+							{@const answer = getAskUserAnswer(call.result, q.header)}
+							{#if answer}
+								<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
+									<p class="whitespace-pre-wrap">{answer}</p>
+								</div>
+							{/if}
+						{/each}
+					{/if}
+				{:else}
 					<ToolCallCard
 						name={String(call.name ?? 'tool')}
 						argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
 						result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
 					/>
-				{/each}
+				{/if}
+			{/each}
 			</div>
 		{/if}
-		<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
-			<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
-		</div>
+		{#if message.content?.trim()}
+			<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+				<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
+			</div>
+		{/if}
 	{/if}
 
 	{#if !editing}

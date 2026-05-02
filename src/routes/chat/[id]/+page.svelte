@@ -11,7 +11,7 @@
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant } from '$lib/chat/chat.remote';
-	import { getAvailableModels } from '$lib/models';
+	import { getAvailableModels } from '$lib/llm';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
@@ -414,6 +414,23 @@
 		} catch {
 			return {};
 		}
+	}
+
+	function getAskUserQuestionsFromTool(block: ToolBlock): Array<{ header: string; question: string }> {
+		const args = parseJsonFallback(block.arguments) as Record<string, unknown>;
+		const result = block.result ? (parseJsonFallback(block.result) as Record<string, unknown>) : {};
+		const fromArgs = Array.isArray(args.questions) ? args.questions : [];
+		const fromResult = Array.isArray(result.questions) ? result.questions : [];
+		const source = fromArgs.length > 0 ? fromArgs : fromResult;
+
+		return source
+			.map((entry) => {
+				const row = (entry ?? {}) as Record<string, unknown>;
+				const header = typeof row.header === 'string' ? row.header : '';
+				const question = typeof row.question === 'string' ? row.question : header;
+				return { header, question };
+			})
+			.filter((row) => row.question.trim().length > 0);
 	}
 
 	function getPartialTextFromBlocks() {
@@ -854,6 +871,10 @@
 			}
 
 			clearRecoverableError();
+
+			// ask_user answers should come from streamed/persisted assistant blocks only.
+			// Do not create optimistic user bubbles for ask_user to avoid ordering/race issues.
+
 			pendingAskUser = null;
 			askUserModalOpen = false;
 		} catch (error) {
@@ -1019,10 +1040,34 @@
 
 					if (eventName === 'ask_user') {
 						waitingForFirstToken = false;
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
 						// Collapse any open thinking blocks while waiting for user input
 						streamingBlocks = streamingBlocks.map((b) =>
 							b.kind === 'thinking' ? { ...b, expanded: false } : b
 						);
+						// ask_user does not emit tool_pending/tool_call events, so create a
+						// synthetic live tool block now to render the question immediately.
+						const askUserArgs = JSON.stringify({ questions: payload.questions ?? [] });
+						const existingAsk = streamingBlocks.find(
+							(b) => b.kind === 'tool' && b.id === payload.id
+						);
+						if (!existingAsk && payload.id) {
+							streamingBlocks = [
+								...streamingBlocks.map((b) =>
+									b.kind === 'tool' ? { ...b, expanded: false } : b
+								),
+								{
+									kind: 'tool' as const,
+									id: payload.id,
+									name: payload.name ?? 'ask_user',
+									arguments: askUserArgs,
+									status: 'executing' as const,
+									expanded: true,
+									token: payload.token ?? null,
+								},
+							];
+						}
 						pendingAskUser = {
 							token: payload.token,
 							questions: payload.questions ?? []
@@ -1172,14 +1217,18 @@
 							// Keep content visible until refreshAll() confirms DB message
 							pendingMessageId = payload.messageId;
 							const fullText = getPartialTextFromBlocks();
-							if (fullText.trim()) {
+							const completedToolCalls = getCompletedToolCallsFromBlocks();
+							const hasAskUserTool = completedToolCalls.some(
+								(call) => String(call.name ?? '') === 'ask_user'
+							);
+							if (!hasAskUserTool && (fullText.trim() || completedToolCalls.length > 0)) {
 								pendingAssistantDrafts = [
 									...pendingAssistantDrafts.filter((draft) => draft.id !== payload.messageId),
 									{
 										id: payload.messageId,
 										content: fullText,
 										createdAt: new Date(),
-										toolCalls: getCompletedToolCallsFromBlocks(),
+										toolCalls: completedToolCalls,
 									}
 								];
 							}
@@ -1232,6 +1281,7 @@
 					error: error instanceof Error ? error.message : String(error),
 				});
 			});
+			// ask_user optimistic user bubbles are disabled, so no ask_user cleanup needed here.
 			if (pendingMessageId && messages.some((message) => message.id === pendingMessageId)) {
 				streamingBlocks = [];
 				currentTextTarget = '';
@@ -1369,7 +1419,16 @@
 					</article>
 				{:else if streaming}
 					{#each streamingBlocks as block (block.id)}
-						{#if block.kind === 'tool'}
+						{#if block.kind === 'tool' && block.name === 'ask_user'}
+							{@const askQuestions = getAskUserQuestionsFromTool(block)}
+							{#if askQuestions.length > 0}
+								{#each askQuestions as row (`${block.id}-${row.header}`)}
+									<article class="chat chat-start">
+										<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3"><div class="markdown-body">{@html renderMarkdown(row.question)}</div></div>
+									</article>
+								{/each}
+							{/if}
+						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<LiveToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}

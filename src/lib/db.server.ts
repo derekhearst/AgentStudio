@@ -6,14 +6,15 @@ import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
 import { env } from '$env/dynamic/private'
 import * as authSchema from '$lib/auth/auth.schema'
-import * as chatSchema from '$lib/chat/chat.schema'
+import * as sessionsSchema from '$lib/sessions/sessions.schema'
 import * as agentsSchema from '$lib/agents/agents.schema'
 import * as notificationsSchema from '$lib/notifications/notifications.schema'
 import * as settingsSchema from '$lib/settings/settings.schema'
 import * as activitySchema from '$lib/activity/activity.schema'
-import * as llmUsageSchema from '$lib/cost/usage.schema'
+import * as llmUsageSchema from '$lib/costs/usage.schema'
 import * as skillsSchema from '$lib/skills/skills.schema'
-import * as automationSchema from '$lib/automation/automation.schema'
+import * as automationSchema from '$lib/automations/automation.schema'
+import * as runsSchema from '$lib/runs/runs.schema'
 import * as memorySchema from '$lib/memory/memory.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
@@ -22,7 +23,7 @@ const skipDatabaseInitialization = building
 
 const schema = {
 	...authSchema,
-	...chatSchema,
+	...sessionsSchema,
 	...agentsSchema,
 	...notificationsSchema,
 	...settingsSchema,
@@ -31,6 +32,7 @@ const schema = {
 	...skillsSchema,
 	...memorySchema,
 	...automationSchema,
+	...runsSchema,
 }
 
 const MIGRATIONS_SCHEMA = 'drizzle'

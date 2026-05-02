@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
-import { chatRuns, conversations, messages } from '$lib/chat/chat.schema'
-import { streamChat, type LlmMessage } from '$lib/openrouter.server'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { chatRuns } from '$lib/runs/runs.schema'
+import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
 import {
 	executeTool,
 	getToolDefinitions,
@@ -10,7 +11,7 @@ import {
 	type ToolCallWithContext,
 	type ToolName,
 } from '$lib/tools/tools.server'
-import { logLlmUsage } from '$lib/cost/usage'
+import { logLlmUsage } from '$lib/costs/usage'
 import { trimToolResult } from '$lib/chat/chat'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 

@@ -1,6 +1,6 @@
 # LLM Plan
 
-Status: active
+Status: completed
 
 > **See also:** [spec.md](spec.md), [../structure/plan.md](../structure/plan.md)
 
@@ -77,7 +77,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 ## Completion
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-01 - Completed in local-uncommitted - Consolidated OpenRouter + model catalog + selector into `src/lib/llm/` and moved callers to `llm` imports.
 
 
 

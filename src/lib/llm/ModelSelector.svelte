@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte'
-	import { getAvailableModels } from '$lib/models/models.remote'
-	import type { ModelInfo } from '$lib/models/models'
+	import { getAvailableModels } from '$lib/llm/models.remote'
+	import type { ModelInfo } from '$lib/llm/models.server'
 
 	interface Props {
 		value?: string
@@ -467,7 +467,7 @@
 						{#each grouped as group (group.creator)}
 							<div class="mb-4">
 								<h3 class="mb-2 px-1 text-sm font-semibold capitalize text-base-content/70 sm:text-base">{group.creator}</h3>
-								<div class="grid grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-2 xl:grid-cols-3 {gridSizeClass}">
+								<div class="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 {gridSizeClass}">
 									{#each group.models as m (m.id)}
 										{@render modelCard(m)}
 									{/each}
@@ -475,7 +475,7 @@
 							</div>
 						{/each}
 					{:else if ready}
-						<div class="grid grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-2 xl:grid-cols-3 {gridSizeClass}">
+						<div class="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 {gridSizeClass}">
 							{#each sorted as m (m.id)}
 								{@render modelCard(m)}
 							{/each}

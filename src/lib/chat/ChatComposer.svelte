@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ModelSelector from '$lib/models/ModelSelector.svelte'
+	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 

@@ -1,9 +1,9 @@
 import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
-import { conversations, messages } from '$lib/chat/chat.schema'
-import { automations } from '$lib/automation/automation.schema'
-import { computeNextRunAt } from '$lib/automation/engine'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { automations } from '$lib/automations/automation.schema'
+import { computeNextRunAt } from '$lib/automations/engine'
 
 export type AgentStatus = (typeof agents.$inferSelect)['status']
 

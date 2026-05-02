@@ -133,4 +133,4 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — stateful session as independent primitive
 - [Honcho](https://github.com/plastic-labs/honcho) — agent state memory library
 - [Zylos](https://github.com/zylos-ai/zylos-core) — persistent agent harness with tiered state
-- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/chat/chat.schema.ts` (predecessor)
+- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/sessions/sessions.schema.ts` (conversation/message owner)

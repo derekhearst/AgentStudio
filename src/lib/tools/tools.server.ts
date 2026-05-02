@@ -26,7 +26,7 @@ import {
 	deleteAutomationRecord,
 	listAutomationsForUser,
 	updateAutomationRecord,
-} from '$lib/automation/automation.server'
+} from '$lib/automations/automation.server'
 import {
 	listSkillSummaries,
 	getSkillByName,
@@ -1409,7 +1409,7 @@ export async function executeTool(call: ToolCall, userId: string) {
 
 			if (call.name === 'run_subagent') {
 				const input = toolSchemas.run_subagent.parse(call.arguments)
-				const { chat: llmChat } = await import('$lib/openrouter.server')
+				const { chat: llmChat } = await import('$lib/llm/chat.server')
 				const subagentMessages = [
 					{
 						role: 'system' as const,

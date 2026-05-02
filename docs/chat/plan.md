@@ -45,7 +45,7 @@ CREATE TABLE chat_workbench_preferences (
 
 ### 1.2 Schema file
 
-Add `conversations.mode` to `sessions.schema.ts` (or equivalent). Create `chatWorkbenchPreferences` schema in `src/lib/chat/chat.schema.ts`.
+Add `conversations.mode` to `src/lib/sessions/sessions.schema.ts` (or equivalent). Create `chatWorkbenchPreferences` in a chat-owned schema module (for example `src/lib/chat/chat.workbench.schema.ts`).
 
 ### 1.3 Mode remote functions
 

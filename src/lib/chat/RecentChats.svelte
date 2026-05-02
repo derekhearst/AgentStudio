@@ -2,7 +2,7 @@
 	import { browser } from '$app/environment';
 	import { getConversations } from '$lib/chat';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
-	import { getAvailableModels } from '$lib/models';
+	import { getAvailableModels } from '$lib/llm';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 

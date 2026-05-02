@@ -24,7 +24,7 @@ Make every agent run survive process restarts, browser reloads, and SSE disconne
 
 ## Current state in AgentStudio
 
-- `chatRuns` table exists ([src/lib/chat/chat.schema.ts](../../src/lib/chat/chat.schema.ts)) and tracks `state`, `lastDelta`, `lastHeartbeatAt`, but it is the only durable signal.
+- `chatRuns` table exists ([src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts)) and tracks `state`, `lastDelta`, `lastHeartbeatAt`, but it is the only durable signal.
 - `requestApproval` and `requestUserQuestions` in [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts) resolve via in-memory promises keyed by token.
 - [src/lib/agents/streaming-state.server.ts](../../src/lib/agents/streaming-state.server.ts) is a `Map` with a 30s staleness window.
 - The big stream loop in [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) buffers `streamBlocks` only in memory; nothing is persisted until the run ends.

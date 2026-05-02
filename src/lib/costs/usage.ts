@@ -1,6 +1,6 @@
 import { db } from '$lib/db.server'
-import { llmUsage } from '$lib/cost/usage.schema'
-import { listModels, type ModelInfo } from '$lib/models/models'
+import { llmUsage } from '$lib/costs/usage.schema'
+import { listModels, type ModelInfo } from '$lib/llm/models.server'
 
 export type LlmUsageSource =
 	| 'chat'

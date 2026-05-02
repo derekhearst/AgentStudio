@@ -14,7 +14,7 @@
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
 	import { BUILTIN_TOOLS, capabilityGroups } from '$lib/tools/tools';
-	import ModelSelector from '$lib/models/ModelSelector.svelte';
+	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];

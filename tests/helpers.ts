@@ -69,14 +69,25 @@ export async function authenticateContext(context: BrowserContext) {
 		limit 1
 	`
 
-	if (!user?.id) {
+	let userId = user?.id
+	if (!userId) {
+		const seededUsername = `e2e_admin_${Date.now()}`
+		const [created] = await sql<{ id: string }[]>`
+			insert into users (name, username, role, is_active)
+			values ('E2E Admin', ${seededUsername}, 'admin', true)
+			returning id
+		`
+		userId = created?.id
+	}
+
+	if (!userId) {
 		throw new Error('No active user found for E2E authentication')
 	}
 
 	const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 	await sql`
 		insert into auth_sessions (user_id, token_hash, expires_at)
-		values (${user.id}, ${tokenHash}, ${expiresAt})
+		values (${userId}, ${tokenHash}, ${expiresAt})
 	`
 
 	await context.addCookies([
@@ -104,11 +115,27 @@ export function getSql() {
 	return sqlClient
 }
 
+async function tableExists(tableName: string) {
+	const sql = getSql()
+	const [row] = await sql<{ exists: boolean }[]>`
+		select exists (
+			select 1
+			from information_schema.tables
+			where table_schema = 'public' and table_name = ${tableName}
+		) as exists
+	`
+	return Boolean(row?.exists)
+}
+
 export async function cleanupPrefixedRecords(prefix: string) {
 	const sql = getSql()
 
-	await sql`delete from agent_runs where task_id in (select id from agent_tasks where title like ${`${prefix}%`})`
-	await sql`delete from agent_tasks where title like ${`${prefix}%`} or description like ${`${prefix}%`}`
+	if ((await tableExists('agent_runs')) && (await tableExists('agent_tasks'))) {
+		await sql`delete from agent_runs where task_id in (select id from agent_tasks where title like ${`${prefix}%`})`
+	}
+	if (await tableExists('agent_tasks')) {
+		await sql`delete from agent_tasks where title like ${`${prefix}%`} or description like ${`${prefix}%`}`
+	}
 	await sql`delete from messages where conversation_id in (select id from conversations where title like ${`${prefix}%`})`
 	await sql`delete from conversations where title like ${`${prefix}%`}`
 	await sql`delete from notifications where title like ${`${prefix}%`} or body like ${`${prefix}%`}`

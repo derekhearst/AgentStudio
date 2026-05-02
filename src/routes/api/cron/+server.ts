@@ -1,6 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { env } from '$env/dynamic/private'
-import { checkAndRunAutomations } from '$lib/automation/engine'
+import { checkAndRunAutomations } from '$lib/automations/engine'
 
 function hasCronAccess(request: Request) {
 	const expected = env.CRON_SECRET?.trim()

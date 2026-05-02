@@ -13,6 +13,12 @@ const BOOTSTRAP_CLAIM_TTL_MS = 1000 * 60 * 30
 
 type UserRole = (typeof userRoleEnum.enumValues)[number]
 
+type PgErrorLike = {
+	code?: string
+	message?: string
+	cause?: unknown
+}
+
 export type AuthenticatedUser = {
 	id: string
 	name: string
@@ -21,6 +27,16 @@ export type AuthenticatedUser = {
 }
 
 let bootstrapPromise: Promise<void> | null = null
+
+function isMissingBootstrapClaimsTable(error: unknown): boolean {
+	const candidate = (error ?? {}) as PgErrorLike
+	const cause = (candidate.cause ?? {}) as PgErrorLike
+	const messageText = `${candidate.message ?? ''} ${cause.message ?? ''} ${String(error ?? '')}`
+	if (candidate.code === '42P01' || cause.code === '42P01') {
+		return messageText.includes('bootstrap_claims') || messageText.includes('relation')
+	}
+	return messageText.includes('bootstrap_claims') && messageText.includes('does not exist')
+}
 
 function hashToken(token: string) {
 	return createHash('sha256').update(token).digest('base64url')
@@ -68,23 +84,45 @@ async function ensureBootstrapClaimExists(baseUrl?: string) {
 
 	if (adminUser.claimedAt) return
 
-	const now = new Date()
-	const [activeClaim] = await db
-		.select({ id: bootstrapClaims.id })
-		.from(bootstrapClaims)
-		.where(and(isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)))
-		.limit(1)
+	try {
+		const now = new Date()
+		const [activeClaim] = await db
+			.select({ id: bootstrapClaims.id })
+			.from(bootstrapClaims)
+			.where(and(isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)))
+			.limit(1)
 
-	if (activeClaim) return
+		if (activeClaim) return
 
-	const tokenHash = hashToken(claimKey)
-	const expiresAt = new Date(Date.now() + BOOTSTRAP_CLAIM_TTL_MS)
+		const tokenHash = hashToken(claimKey)
+		const expiresAt = new Date(Date.now() + BOOTSTRAP_CLAIM_TTL_MS)
+		const [existingTokenClaim] = await db
+			.select({ id: bootstrapClaims.id })
+			.from(bootstrapClaims)
+			.where(eq(bootstrapClaims.tokenHash, tokenHash))
+			.limit(1)
 
-	await db.insert(bootstrapClaims).values({ tokenHash, expiresAt })
+		if (existingTokenClaim) {
+			await db
+				.update(bootstrapClaims)
+				.set({ expiresAt, usedAt: null })
+				.where(eq(bootstrapClaims.id, existingTokenClaim.id))
+			return
+		}
 
-	const hintUrl = baseUrl ? `${baseUrl}/login?claim=${encodeURIComponent(claimKey)}` : '(login URL unavailable)'
-	console.log('[auth] Initial admin bootstrap created.')
-	console.log(`[auth] Visit: ${hintUrl}`)
+		await db.insert(bootstrapClaims).values({ tokenHash, expiresAt })
+
+		const hintUrl = baseUrl ? `${baseUrl}/login?claim=${encodeURIComponent(claimKey)}` : '(login URL unavailable)'
+		console.log('[auth] Initial admin bootstrap created.')
+		console.log(`[auth] Visit: ${hintUrl}`)
+	} catch (error) {
+		if (isMissingBootstrapClaimsTable(error)) {
+			console.warn('[auth] bootstrap_claims table missing. Skipping bootstrap claim creation.')
+			return
+		}
+		console.warn('[auth] Failed to create bootstrap claim. Continuing without bootstrap claim.', error)
+		return
+	}
 }
 
 export async function ensureAuthBootstrap(baseUrl?: string) {
@@ -100,15 +138,20 @@ async function findActiveBootstrapClaim(claimKey: string) {
 	const tokenHash = hashToken(claimKey)
 	const now = new Date()
 
-	const [claim] = await db
-		.select()
-		.from(bootstrapClaims)
-		.where(
-			and(eq(bootstrapClaims.tokenHash, tokenHash), isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)),
-		)
-		.limit(1)
+	try {
+		const [claim] = await db
+			.select()
+			.from(bootstrapClaims)
+			.where(
+				and(eq(bootstrapClaims.tokenHash, tokenHash), isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)),
+			)
+			.limit(1)
 
-	return claim ?? null
+		return claim ?? null
+	} catch (error) {
+		if (isMissingBootstrapClaimsTable(error)) return null
+		throw error
+	}
 }
 
 export async function validateBootstrapClaim(claimKey: string) {

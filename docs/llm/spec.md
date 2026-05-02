@@ -2,9 +2,9 @@
 
 ## Overview
 
-The LLM domain is AgentStudio's adapter layer between the application and AI model providers. It wraps the OpenRouter API, provides a typed streaming chat interface, manages the model catalog with per-model pricing and capability metadata, and exposes the `calculateCost()` helper used by the cost domain.
+The LLM domain is AgentStudio's adapter layer between the application and AI model providers. It wraps the OpenRouter API, provides typed chat and streaming interfaces, manages the model catalog with per-model pricing and capability metadata, and provides model data used by the costs domain.
 
-Currently split across two locations — `src/lib/openrouter.server.ts` (chat client) and `src/lib/models/` (model catalog + selector) — which will be consolidated into `src/lib/llm/` as part of the structure refactor.
+The implementation is consolidated under `src/lib/llm/`.
 
 ## Responsibilities
 
@@ -15,7 +15,7 @@ Currently split across two locations — `src/lib/openrouter.server.ts` (chat cl
 
 ## Data Model
 
-LLM has no DB tables of its own. The model catalog is fetched from OpenRouter and cached in memory. Pricing data feeds into the `llm_usage` rows owned by the `cost` domain.
+LLM has no DB tables of its own. The model catalog is fetched from OpenRouter and cached in memory. Pricing data feeds into the `llm_usage` rows owned by the `costs` domain.
 
 ## Key Types
 
@@ -136,5 +136,5 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
 ## References
 
-- [../cost/spec.md](../cost/spec.md) — `calculateCost()` is used by cost logging
-- [../structure/plan.md](../structure/plan.md) — consolidation of `models/` + `openrouter.server.ts` into `llm/`
+- [../cost/spec.md](../cost/spec.md) — model pricing metadata is used by cost logging
+- [../structure/plan.md](../structure/plan.md) — domain structure and ownership boundaries

@@ -7,7 +7,7 @@
  */
 
 import { env } from '$env/dynamic/private'
-import { logLlmUsage } from '$lib/cost/usage'
+import { logLlmUsage } from '$lib/costs/usage'
 
 export const EMBEDDING_DIM = 1536
 export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small'

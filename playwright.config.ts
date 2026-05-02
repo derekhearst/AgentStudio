@@ -9,7 +9,7 @@ export default defineConfig({
 		headless: true,
 	},
 	webServer: {
-		command: 'bun run build && bun run preview --host 127.0.0.1 --port 4173',
+		command: 'bun run dev --host 127.0.0.1 --port 4173',
 		env: {
 			...process.env,
 			E2E_MOCK_EXTERNALS: '0',
