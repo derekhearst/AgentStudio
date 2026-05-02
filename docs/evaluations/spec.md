@@ -118,11 +118,23 @@ Admins and run owners can trigger an evaluator pass on any completed run from `/
 | Override a verdict (force pass)  | Admin only                           |
 | Create an evaluator agent        | Admin only                           |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Harness Design for Long-Running Application Development — Anthropic](https://www.anthropic.com/engineering/harness-design-long-running-apps) — planner/generator/evaluator pattern
 - [Multi-Agent Coordination Patterns — Anthropic](https://claude.com/blog/multi-agent-coordination-patterns) — cheap executor + expensive advisor
 - [Hive — aden-hive](https://github.com/aden-hive/hive) — outcome-driven checkpoints
 - [Harness Engineering Is Cybernetics — George](https://x.com/odysseus0z/article/2030416758138634583) — evaluator as sensor
 - [Meta-Harness — Yoonho Lee](https://yoonholee.com/meta-harness/) — Claude Code as harness optimizer
 - **Internal:** `src/lib/evaluations/evaluations.schema.ts`, `src/lib/evaluations/evaluations.server.ts`, `src/routes/runs/[id]/evaluation/`
+

@@ -135,11 +135,23 @@ Priority when both DB and repo file exist: controlled by `AGENT_SOURCE_PRIORITY=
 | Delete agent                | Admin only                |
 | View another user's agents  | Admin only                |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [agents.md open standard](https://agents.md/) — project-level agent instructions format
 - [AGENTS.md — OpenAI](https://openai.com/index/introducing-agents-md/) — boot loader concept
 - [Skills Are Harness Engineering You Can Do in a Markdown File — ikangai](https://www.ikangai.com/skills-are-harness-engineering-you-can-do-in-a-markdown-file)
 - [GitAgent](https://github.com/open-gitagent/gitagent) — `agent.yaml` + `SOUL.md` + `RULES.md` pattern
 - [Spec Kit — GitHub](https://github.com/github/spec-kit) — structured spec generation
 - **Internal:** `src/lib/agents/agents.schema.ts`, `src/lib/agents/identity.server.ts`, `src/lib/agents/orchestrator.ts`, `src/routes/agents/`
+

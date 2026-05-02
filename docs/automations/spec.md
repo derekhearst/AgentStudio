@@ -141,11 +141,23 @@ A first-class automation recipe exists for your stated goal:
 | Resolve blocked automation budget or policy review | Owner user, admin  |
 | Create org-wide automation                         | Admin only         |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [../jobs/spec.md](../jobs/spec.md) - background execution and scheduling
 - [../research/spec.md](../research/spec.md) - deep research runs
 - [../tasks/spec.md](../tasks/spec.md) - plan and approval flow
 - [../source-control/spec.md](../source-control/spec.md) - repository-aware automations
 - [../observability/spec.md](../observability/spec.md) - review items and failures
 - **Current code:** `src/lib/automation/automation.schema.ts`, `src/lib/automation/engine.ts`, `src/routes/automations/+page.svelte`
+

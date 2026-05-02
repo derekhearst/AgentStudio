@@ -154,10 +154,22 @@ A reconciliation job can import actual spend from OpenRouter (or other provider)
 | Override or delete cost rows | Admin only (audit logged) |
 | Export cost data             | Any authenticated user    |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [../runs/spec.md](../runs/spec.md) — run context passed to usage logging
 - [../tasks/spec.md](../tasks/spec.md) — task context for cost rollups
 - [../agents/spec.md](../agents/spec.md) — agent-level budget limits
 - [../observability/spec.md](../observability/spec.md) — notifications and review inbox for budget alerts
 - [../policies/spec.md](../policies/spec.md) — policy-driven spend controls
+

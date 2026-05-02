@@ -141,10 +141,22 @@ When a policy returns `require_approval`, the runtime suspends the tool call and
 | Grant resource ACLs              | Resource owner, admin |
 | Revoke resource ACLs             | Resource owner, admin |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Scion — Google Cloud](https://github.com/GoogleCloudPlatform/scion) — per-agent credential + access model
 - [Composio Agent Orchestrator](https://github.com/ComposioHQ/agent-orchestrator) — structured permission surface for agents
 - [Building Effective Agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — mechanical safety controls
 - [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/) — injection, excessive agency, insecure output handling
 - **Internal:** `src/lib/policies/policies.schema.ts`, `src/lib/policies/engine.server.ts`, `src/routes/settings/policies/`
+

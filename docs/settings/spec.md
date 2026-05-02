@@ -118,3 +118,16 @@ The `PromptPreviewPanel` component provides an inline preview of how the assembl
 | Read and update own settings   | Authenticated users |
 | Read another user's settings   | Admin only          |
 | Update another user's settings | Admin only          |
+
+## Rewrite Authority
+
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+

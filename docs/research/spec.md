@@ -193,8 +193,19 @@ Each agent record can carry a `researchConfig` JSONB field:
 
 ---
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [OpenAI Deep Research announcement](https://openai.com/index/introducing-deep-research/) — multi-step RL-trained browsing + Python tool use, 5–30 min async, full citations
 - [Gemini Deep Research](https://blog.google/products/gemini/google-gemini-deep-research/) — plan-first, iterative browse, Markdown report export
 - [Gemini Deep Research Max](https://blog.google/innovation-and-ai/models-and-research/gemini-models/next-generation-gemini-deep-research/) — MCP support, native charts, two tiers (fast/max), asynchronous background workflows
@@ -203,3 +214,4 @@ Each agent record can carry a `researchConfig` JSONB field:
 - [docs/tools/spec.md](../tools/spec.md) — capability groups, progressive disclosure, companion skills
 - [docs/tasks/spec.md](../tasks/spec.md) — task DAG, approval gate
 - [docs/observability/spec.md](../observability/spec.md) — Review Inbox, run traces, cost tracking
+

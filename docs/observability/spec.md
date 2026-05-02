@@ -148,10 +148,22 @@ Review items with severity `critical` trigger a notification:
 | View cost breakdown (own)           | Authenticated user |
 | View cost breakdown (all users)     | Admin only         |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — observability as a harness primitive
 - [Harness Engineering Is Cybernetics — George](https://x.com/odysseus0z/article/2030416758138634583) — sensing and feedback loops
 - [Oh My Codex — HUD pattern](https://github.com/Yeachan-Heo/oh-my-codex) — unified status + action surface
 - [Hive — aden-hive](https://github.com/aden-hive/hive) — outcome-driven checkpoints and review
 - **Internal:** `src/lib/observability/observability.schema.ts`, `src/lib/activity/activity.server.ts`, `src/routes/review/`, `src/routes/observability/`
+

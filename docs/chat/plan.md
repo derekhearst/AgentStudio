@@ -242,21 +242,32 @@ Clicking a citation opens a side drawer with:
 - Fetched excerpt
 - Credibility indicator
 
+## Rewrite Authority
+
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
 ## Dependencies
 
-| Phase | Depends on                                                                        |
-| ----- | --------------------------------------------------------------------------------- |
-| 3     | [../skills/plan.md](../skills/plan.md) — skill seeding pattern                    |
-| 3     | [../agents/plan.md](../agents/plan.md) — mode identity skill loading              |
-| 2–3   | [../context/plan.md](../context/plan.md) — slot-based context assembly reads mode |
-| 4     | [../tasks/plan.md](../tasks/plan.md) — plan approval mutates task state           |
-| 5–6   | [../runs/plan.md](../runs/plan.md) — run status + review items                    |
-| 8     | [../projects/plan.md](../projects/plan.md) — artifact versions                    |
-| 9     | [../research/plan.md](../research/plan.md) — research report schema               |
+| Phase | Depends on                                                                              |
+| ----- | --------------------------------------------------------------------------------------- |
+| 3     | [../skills/plan.md](../skills/plan.md) — skill seeding pattern                          |
+| 3     | [../agents/plan.md](../agents/plan.md) — mode identity skill loading                    |
+| 2–3   | [../context/plan.md](../context/plan.md) — slot-based context assembly reads mode       |
+| 4     | [../tasks/plan.md](../tasks/plan.md) — plan approval mutates task state                 |
+| 5–6   | [../runs/plan.md](../runs/plan.md) — run status + review items                          |
+| 8     | [../projects/plan.md](../projects/plan.md) — artifact versions                          |
+| 9     | [../research/plan.md](../research/plan.md) — research report schema                     |
+| 2–8   | [../ui/plan.md](../ui/plan.md) — shell layout, interaction contracts, and mobile parity |
 
 ## Completion
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
-
-

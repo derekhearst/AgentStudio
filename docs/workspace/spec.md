@@ -107,11 +107,23 @@ The `Environment.networkPolicy` field controls what the `shell` tool can reach:
 | Delete a workspace              | Admin only       |
 | View another user's workspace   | Admin only       |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Vibe Kanban — BloopAI](https://github.com/BloopAI/vibe-kanban) — one git worktree per agent task
 - [Emdash — generalaction](https://github.com/generalaction/emdash) — isolated worktrees locally or via SSH
 - [Trellis — mindfold-ai](https://github.com/mindfold-ai/trellis) — git worktree-based parallel harness
 - [Scion — Google Cloud](https://github.com/GoogleCloudPlatform/scion) — container + worktree + credential isolation per agent
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — Environment as an independent primitive
 - **Internal:** `src/lib/workspace/workspace.server.ts`, `src/lib/tools/tools.server.ts` (path injection), `src/routes/runs/[id]/workspace/`
+

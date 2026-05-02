@@ -204,11 +204,23 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 | Merge pull request                        | Owner user, admin                             |
 | View another user's repository connection | Admin only                                    |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [../workspace/spec.md](../workspace/spec.md) - worktree environments
 - [../tasks/spec.md](../tasks/spec.md) - task approval and attempts
 - [../policies/spec.md](../policies/spec.md) - push and merge permissions
 - [../observability/spec.md](../observability/spec.md) - review inbox and operational visibility
 - [Symphony - OpenAI](https://github.com/openai/symphony) - issue to branch to PR workflow
 - [Vibe Kanban - BloopAI](https://github.com/BloopAI/vibe-kanban) - worktree-per-task execution
+

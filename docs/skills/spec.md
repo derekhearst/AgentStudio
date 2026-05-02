@@ -192,8 +192,19 @@ Skill slugs starting with `hook/` are treated as hook implementations. When a ho
 | Delete a skill     | Admin only                |
 | View system skills | Admin only (edit)         |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Skills Are Harness Engineering You Can Do in a Markdown File — ikangai](https://www.ikangai.com/skills-are-harness-engineering-you-can-do-in-a-markdown-file) — central framing
 - [Claude Code CLAUDE.md and SKILL.md conventions — Anthropic](https://www.anthropic.com/engineering/claude-code-best-practices) — progressive disclosure of instructions
 - [DeerFlow 2.0 — ByteDance](https://github.com/bytedance/deer-flow) — on-demand skill loading
@@ -202,3 +213,4 @@ Skill slugs starting with `hook/` are treated as hook implementations. When a ho
 - **Internal:** `src/lib/skills/`, `src/lib/skills/skills.schema.ts`, `src/lib/skills/skills.server.ts`, `src/routes/skills/`
 - [../chat/spec.md](../chat/spec.md) — mode selector and mode-aware skill loading
 - [../agents/plan.md](../agents/plan.md) — Phase 7: mode identity skill seeding
+

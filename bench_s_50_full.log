@@ -103,3 +103,15 @@ TypeError: value.trim is not a function. (In 'value.trim()', 'value.trim' is und
       at main (C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\longmemeval\ingest.ts:129:40)
       at processTicksAndRejections (native:7:39)
 
+[ingest] (45/50) 4fd1909e sessions=50 drawers=500 eta=1735s
+[ingest] (46/50) 545bd2b5 sessions=44 drawers=461 eta=1384s
+[ingest] (47/50) 8a137a7f sessions=50 drawers=507 eta=1038s
+[ingest] done in 16267.1s
+Internal error: directory mismatch for directory "C:\Users\derek\Documents\Projects\AgentStudio\scripts\bench\tsconfig.json", fd 384[handle]. You don't need to do anything, but this indicates a bug.
+
+=== retrieve: bun --tsconfig-override=scripts/bench/tsconfig.json run scripts/bench/longmemeval/retrieve.ts --dataset=s --runId=lme_20260501203758_9l21 --limit=50 --useRerank ===
+[db] Database ready
+[retrieve] dataset=s runId=lme_20260501203758_9l21 ΓåÆ C:\Users\derek\Documents\Projects\AgentStudio\retrieval_logs\lme_20260501203758_9l21.jsonl
+[retrieve] (10/50) eta=105s
+[retrieve] (20/50) eta=95s
+[retrieve] (30/50) eta=58s

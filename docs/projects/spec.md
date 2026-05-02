@@ -126,9 +126,21 @@ When an agent is producing or editing an artifact, the content streams into the 
 | Share a project             | Owner user (with resource ACL)              |
 | View another user's project | Admin only, or via ACL grant                |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Artifacts — Anthropic Claude](https://www.anthropic.com/news/artifacts) — first-class artifact model in Claude
 - [Harness Design for Long-Running Apps — Anthropic](https://www.anthropic.com/engineering/harness-design-long-running-apps) — durable artifacts as sprint deliverables
 - [Spec Kit — GitHub](https://github.com/github/spec-kit) — versioned structured artifacts
 - **Internal:** `src/lib/projects/projects.schema.ts`, `src/lib/projects/projects.server.ts`, `src/routes/projects/`
+

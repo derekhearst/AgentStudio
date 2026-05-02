@@ -112,11 +112,23 @@ Each agent can add custom hooks on top of the built-ins via `config.hooks`. Orde
 | Register a new built-in hook    | Admin only (code change) |
 | View another user's invocations | Admin only               |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [OpenCode (44 lifecycle hooks) — SST](https://github.com/sst/opencode) — reference for hook event taxonomy
 - [Oh My OpenCode](https://github.com/code-yeongyu/oh-my-opencode) — performance harness built on hooks
 - [Oh My Codex](https://github.com/Yeachan-Heo/oh-my-codex) — hooks + agent teams + HUD
 - [Everything Claude Code](https://github.com/affaan-m/everything-claude-code) — skills/instincts/memory hooks
 - [Building Effective Agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — composable primitives
 - **Internal:** `src/lib/hooks/`, `src/lib/hooks/builtins/`, `src/lib/runtime/loop.server.ts`, `src/routes/settings/hooks/`
+

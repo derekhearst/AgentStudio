@@ -225,7 +225,19 @@ RUN apt-get install -y poppler-utils
 4. Confirm: `researchSources` table has ≥5 rows with `citedInReport = true`.
 5. Confirm: total token cost tracked in `research.tokensUsed` and surfaced in the cost domain.
 
-## Completion
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
+## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
+

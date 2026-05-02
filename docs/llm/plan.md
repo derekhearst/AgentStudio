@@ -58,8 +58,19 @@ Return cached models immediately if cache is < 2h old, refresh in background. Pr
 
 Build an in-memory index: `{ supportsVision: string[], supportsTools: string[], supportsReasoning: string[] }` so callers can filter models by capability without scanning the full list.
 
-## Dependencies
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
+## Dependencies
 - [../structure/plan.md](../structure/plan.md) Step 2 — this is that step
 - No other plans depend on this; it is a pure rename/consolidation
 
@@ -67,5 +78,6 @@ Build an in-memory index: `{ supportsVision: string[], supportsTools: string[], 
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
+
 
 

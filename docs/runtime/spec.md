@@ -144,11 +144,23 @@ The runtime fires typed hook events at every significant boundary:
 - Admin users can inspect live run state and terminate runs.
 - Tool execution is governed by the policies domain, not by the runtime directly. The runtime delegates the decision; it does not make it.
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — brain/hands/session primitive decoupling
 - [Building Effective Agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — composable primitives over opinionated workflows
 - [How the Claude Code Team Designs Agent Tools](https://www.anup.io/how-the-claude-code-team-designs-agent-tools/) — tool surface + output policy
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — durable event log, context offloading
 - [LangGraph](https://github.com/langchain-ai/langgraph) — graph-based runtime reference
 - **Internal:** `src/lib/runtime/loop.server.ts`, `src/lib/runtime/types.ts`, `src/lib/runtime/definition.server.ts`
+

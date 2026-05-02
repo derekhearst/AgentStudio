@@ -171,9 +171,21 @@ Based on the current code:
 4. Confirm monthly budget overage blocks a future run.
 5. Confirm a repository-aware code automation can open a draft pull request only after approval.
 
-## Completion
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
+## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
+
 
 

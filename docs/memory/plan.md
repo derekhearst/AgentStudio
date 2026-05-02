@@ -153,9 +153,21 @@ Create `scripts/bench/longmemeval/`:
 2. **Mining cost**: A small LLM call per session for entity extraction. Using `openai/gpt-4o-mini` via OpenRouter for parity with title generation.
 3. **Test DB isolation for bench**: The 500 instances must not pollute the dev/prod database. Using a dedicated `longmemeval_<runid>` Postgres schema scoped per-run, dropped after.
 
-## Completion
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
+## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
+
 
 

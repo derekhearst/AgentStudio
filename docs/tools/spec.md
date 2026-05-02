@@ -145,8 +145,19 @@ Tool access is governed by the policies domain. The tools domain enforces the ac
 | Worker agent    | Per `agents.config.capabilityGroups` |
 | Evaluator agent | `core` only (read-only tools)        |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Lessons from Building Claude Code: Seeing Like an Agent — Thariq](https://x.com/trq212/status/2027463795355095314) — fewer, more expressive tools
 - [How the Claude Code Team Designs Agent Tools](https://www.anup.io/how-the-claude-code-team-designs-agent-tools/)
 - [Best Practices for Claude Code — Anthropic](https://www.anthropic.com/engineering/claude-code-best-practices)
@@ -154,3 +165,4 @@ Tool access is governed by the policies domain. The tools domain enforces the ac
 - [GenericAgent](https://github.com/lsdefine/GenericAgent) — 6× efficiency from scoped capabilities
 - [DeerFlow 2.0](https://github.com/bytedance/deer-flow) — on-demand skill + tool loading
 - **Internal:** `src/lib/tools/catalog/`, `src/lib/tools/tools.ts`, `src/lib/tools/tools.server.ts`
+

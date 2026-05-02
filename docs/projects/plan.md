@@ -271,9 +271,21 @@ Do not execute this phase until the memory workstream has merged its schema/modu
 4. **Memory bridge**: Artifacts are first-class; Memory augments via references, not vice versa.
 5. **Slug uniqueness**: Per project (not global), simplifies routing and mental model.
 
-## Completion
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) and [../ui/spec.md](../ui/spec.md).
+
+- Include UX acceptance criteria for desktop and mobile behavior.
+- Include compactness/density behavior where relevant.
+- Include approval, question, and interruption flows where relevant.
+
+## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
 - Pending.
+
 
 

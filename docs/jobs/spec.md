@@ -131,9 +131,21 @@ Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same
 | Retry a failed job        | Admin only         |
 | Adjust job policies       | Admin only         |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [LangGraph — LangChain](https://github.com/langchain-ai/langgraph) — durable checkpointed execution
 - [Hive — aden-hive](https://github.com/aden-hive/hive) — outcome-driven task scheduling
 - [Building Effective Agents — Anthropic](https://www.anthropic.com/research/building-effective-agents) — background execution patterns
 - **Internal:** `src/lib/jobs/jobs.schema.ts`, `src/lib/jobs/jobs.server.ts`, `src/lib/jobs/worker.server.ts`, `src/routes/jobs/`
+

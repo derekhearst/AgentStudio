@@ -109,7 +109,19 @@ Reasoning tokens appear in `onToken` with a distinct `reasoning` flag, and are s
 | `OPENROUTER_SITE_URL`  | Optional — sent as HTTP referer   |
 | `OPENROUTER_SITE_NAME` | Optional — sent as X-Title header |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [../cost/spec.md](../cost/spec.md) — `calculateCost()` is used by cost logging
 - [../structure/plan.md](../structure/plan.md) — consolidation of `models/` + `openrouter.server.ts` into `llm/`
+

@@ -112,10 +112,22 @@ If `runs.evalRequired = true`, the runtime does not transition the run to `compl
 | Delete a run record       | Admin only                                              |
 | View another user's runs  | Admin only                                              |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [The Anatomy of an Agent Harness — LangChain](https://blog.langchain.com/the-anatomy-of-an-agent-harness/) — durable state, event log, resumability
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — stateful session as independent primitive
 - [Honcho](https://github.com/plastic-labs/honcho) — agent state memory library
 - [Zylos](https://github.com/zylos-ai/zylos-core) — persistent agent harness with tiered state
 - **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/chat/chat.schema.ts` (predecessor)
+

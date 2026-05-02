@@ -106,11 +106,23 @@ Before spawning a new attempt, the system sums all prior attempt costs. If the t
 | View another user's tasks | Admin only                                  |
 | Override task status      | Admin only                                  |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [Symphony — OpenAI](https://github.com/openai/symphony) — Linear issue → isolated agent → PR model
 - [Vibe Kanban — BloopAI](https://github.com/BloopAI/vibe-kanban) — kanban orchestrator, worktree-per-task
 - [Chorus — AIDLC](https://github.com/Chorus-AIDLC/Chorus) — task DAGs and approval gates
 - [Almirant](https://almirant.ai/) — structured lifecycle (plan → implement → review → deploy)
 - [Harness Design for Long-Running Apps — Anthropic](https://www.anthropic.com/engineering/harness-design-long-running-apps) — planner/generator/evaluator loop
 - **Internal:** `src/lib/tasks/tasks.schema.ts`, `src/lib/tasks/tasks.server.ts`, `src/routes/tasks/`
+

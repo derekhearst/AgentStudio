@@ -198,8 +198,19 @@ Advanced users can override slot budgets, enable/disable slots, and change compa
 | View `compactionEvents` for all users   | Admin only             |
 | Disable memory write-back globally      | Admin only             |
 
-## References
+## Rewrite Authority
 
+The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
+
+## UI Contract
+
+This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
+
+- Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
+- Blocking user decisions must use the shared action-card and inbox patterns where applicable.
+
+## References
 - [../memory/spec.md](../memory/spec.md) — memory palace and recall
 - [../skills/spec.md](../skills/spec.md) — skill loading and summaries
 - [../agents/spec.md](../agents/spec.md) — agent identity and system prompts
@@ -207,3 +218,4 @@ Advanced users can override slot budgets, enable/disable slots, and change compa
 - [../chat/spec.md](../chat/spec.md) — conversation UI and context indicator
 - [Anthropic Model Context Protocol](https://www.anthropic.com/news/model-context-protocol) — structured context design
 - [Managing Claude's context window — Anthropic docs](https://docs.anthropic.com/en/docs/build-with-claude/context-windows)
+

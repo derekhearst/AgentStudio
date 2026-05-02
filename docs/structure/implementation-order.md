@@ -10,12 +10,13 @@ This is the execution-order backlog for all planned domain work. It is optimized
 - Within a wave, run independent lanes in parallel.
 - Every lane must ship tests and docs updates before marking done.
 - Favor thin vertical slices over broad partially-done refactors.
+- Existing implementation is not a constraint: domains may be rewritten, restyled, or reorganized as needed to reach the target quality bar.
 
 ## Wave Map (Critical Path)
 
 | Wave | Outcome                             | Domains                                            | Parallel Lanes |
 | ---- | ----------------------------------- | -------------------------------------------------- | -------------- |
-| 0    | Repo structure stable               | structure, llm                                     | 2              |
+| 0    | Repo structure stable               | structure, llm, ui                                 | 3              |
 | 1    | Core execution state stable         | runs, context, cost, chat, workspace               | 4              |
 | 2    | Runtime composition stable          | tools, skills, runtime, tasks                      | 3              |
 | 3    | Governance controls stable          | policies, hooks, evaluations                       | 3              |
@@ -50,6 +51,8 @@ If any closeout checkbox is not done, the TODO is not complete.
    - Source: ../llm/plan.md
    - Parallel with: #1 after target folders exist
    - Gate: all LLM callers moved; model list + chat streaming parity
+
+UX-1. [ ] UI platform and interaction system (cross-cutting) - Source: ../ui/plan.md - Starts in Wave 0 and continues through Wave 5 - Blocks: final UX acceptance for #6, #15, #18, #19, #20, #22 - Gate: desktop/mobile shell, action cards, and multi-session UX contracts implemented
 
 ### Wave 1 — Core Runtime Inputs/Outputs
 
@@ -187,6 +190,11 @@ Use these lanes for multi-agent execution. A lane can run independently once its
 - Wave 4: #15 + #16 + #17 + #18
 - Wave 5: #19 + #21
 
+### Lane E — UX Platform (Cross-Wave)
+
+- Wave 0–5: UX-1
+- Feeds: #6 + #15 + #18 + #19 + #20 + #22
+
 ---
 
 ## Mandatory Gate Checklist (Do Not Skip)
@@ -196,6 +204,7 @@ Use these lanes for multi-agent execution. A lane can run independently once its
 - [ ] App boots without import errors
 - [ ] Playwright smoke tests pass
 - [ ] No route regressions in chat, agents, settings
+- [ ] UI shell contract approved (desktop + mobile IA + action-card standards)
 
 ### Gate G1 (after Wave 1)
 
@@ -258,3 +267,4 @@ Use this when assigning a lane item to an autonomous coding agent.
 - Add explicit `parallel-subagents` plan under runtime or fold into runtime plan sections.
 - Update `projects` plan references to avoid stale `sessions` naming.
 - Add jobs handler manifest section in jobs plan to remove ambiguity across queue consumers.
+- Add "UI Contract" subsections to each domain spec/plan that renders user-facing surfaces.
