@@ -13,7 +13,11 @@ async function getActiveUserId() {
 	return user.id
 }
 
-async function insertAgent(prefix: string, _userId: string, config: Record<string, unknown> = {}) {
+async function insertAgent(
+	prefix: string,
+	_userId: string,
+	config: Parameters<ReturnType<typeof getSql>['json']>[0] = {},
+) {
 	const sql = getSql()
 	const [agent] = await sql<{ id: string }[]>`
 		insert into agents (id, name, role, system_prompt, model, status, config)

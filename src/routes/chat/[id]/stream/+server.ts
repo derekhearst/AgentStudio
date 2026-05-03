@@ -18,6 +18,7 @@ import { appendRunEvent } from '$lib/runs/events.server'
 import { toolSchemas } from '$lib/tools/tools.server'
 import { listSkillSummaries, listRelevantSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
+import { trimToolResultWithOffload } from '$lib/tools/output-offload.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
@@ -947,7 +948,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						})
 
 						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
-						const resultStr = trimToolResult(tc.name, rawResultStr)
+						// Wave 2 #8 phase 5 / #9 phase 5 — offload large tool outputs to the workspace
+						// (head + tail + handle) instead of mid-content truncation. The full payload
+						// stays recoverable via file_read('.tool-outputs/<callId>.txt') after the model
+						// enables the sandbox group.
+						const trimmed = await trimToolResultWithOffload({
+							toolName: tc.name,
+							content: rawResultStr,
+							callId: tc.id,
+							userId: user.id,
+							runId: run.id,
+							persistentKey,
+							worktree: worktreeConfig,
+						})
+						const resultStr = trimmed.visible
 
 						toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
 
@@ -957,6 +971,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							success: toolResult.success,
 							executionMs: toolResult.executionMs,
 							result: resultStr,
+							offloadedHandle: trimmed.handle,
+							fullSize: trimmed.fullSize,
 						})
 
 						allToolCalls.push({
