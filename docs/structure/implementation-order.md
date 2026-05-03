@@ -176,7 +176,10 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - `checkBudgetLimits`, `recordBudgetAlert` (per-period idempotent): [src/lib/costs/budget.server.ts](../../src/lib/costs/budget.server.ts)
      - Stream handler enforces BEFORE chat_run insert; returns HTTP 402 with `budget_exceeded`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Tests cover schema round-trip, enum rejection, cascade-on-limit-delete, live-block (402 + alert + no orphan run), live-notify_only (run proceeds + warn alert): [tests/cost.budget.spec.ts](../../tests/cost.budget.spec.ts)
-   - Phases 4-5 (dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 4 — dashboard improvements, 2026-05-03):
+     - `/cost` page gains LLM+tool combined panel, Top Runs, Top Agents, and Tool Spend table sections: [src/routes/cost/+page.svelte](../../src/routes/cost/+page.svelte)
+     - 5 budget CRUD remote functions (`listBudgetLimits`, `createBudgetLimit`, `updateBudgetLimit`, `deleteBudgetLimit`, `listBudgetAlerts`): [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
+   - Phase 5 (provider reconciliation against OpenRouter invoices) still pending — flagged as future-work in the spec, not required for Wave 1 closure.
 
 6. [ ] Chat mode system + inline approvals + HUD
    - Source: ../chat/plan.md

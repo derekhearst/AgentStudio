@@ -369,18 +369,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		agentId: conversation.agentId,
 	})
 	for (const w of budgetCheck.warnings) {
-		void recordBudgetAlert({
-			limit: w.limit,
-			triggerType: 'warn',
-			spendUsd: w.spendUsd,
-		}).catch((err) => console.warn('[budget] warn alert insert failed', err))
+		try {
+			await recordBudgetAlert({ limit: w.limit, triggerType: 'warn', spendUsd: w.spendUsd })
+		} catch (err) {
+			console.warn('[budget] warn alert insert failed', err)
+		}
 	}
 	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
-		void recordBudgetAlert({
-			limit: budgetCheck.blockedBy,
-			triggerType: 'block',
-			spendUsd: parseFloat(budgetCheck.blockedBy.limitUsd), // we know spend > limit at this point
-		}).catch((err) => console.warn('[budget] block alert insert failed', err))
+		// Await the alert write so callers querying budget_alerts immediately after the 402
+		// response see the row (no fire-and-forget race).
+		try {
+			await recordBudgetAlert({
+				limit: budgetCheck.blockedBy,
+				triggerType: 'block',
+				spendUsd: parseFloat(budgetCheck.blockedBy.limitUsd),
+			})
+		} catch (err) {
+			console.warn('[budget] block alert insert failed', err)
+		}
 		return json(
 			{
 				error: 'budget_exceeded',

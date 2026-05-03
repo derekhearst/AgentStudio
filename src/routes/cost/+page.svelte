@@ -255,6 +255,96 @@
 				</div>
 			{/if}
 		</ContentPanel>
+
+		<!-- Combined LLM + Tool spend (Wave 1 #5 Phase 4) -->
+		<ContentPanel>
+			{#snippet header()}<h2 class="font-semibold">LLM + Tool Spend (combined)</h2>{/snippet}
+			<div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+				<div class="rounded-xl border border-base-300 p-3">
+					<p class="text-xs uppercase tracking-wide text-base-content/55">Total</p>
+					<p class="mt-1 text-xl font-bold">{fmt(costData.combinedSpend)}</p>
+				</div>
+				<div class="rounded-xl border border-base-300 p-3">
+					<p class="text-xs uppercase tracking-wide text-base-content/55">LLM</p>
+					<p class="mt-1 text-xl font-bold">{fmt(costData.totalSpend)}</p>
+				</div>
+				<div class="rounded-xl border border-base-300 p-3">
+					<p class="text-xs uppercase tracking-wide text-base-content/55">Tools</p>
+					<p class="mt-1 text-xl font-bold">{fmt(costData.toolSpend)}</p>
+				</div>
+				<div class="rounded-xl border border-base-300 p-3">
+					<p class="text-xs uppercase tracking-wide text-base-content/55">Tool calls</p>
+					<p class="mt-1 text-xl font-bold">{costData.toolCallCount}</p>
+				</div>
+			</div>
+		</ContentPanel>
+
+		<!-- Top Runs by cost -->
+		{#if costData.byRun.length > 0}
+			<ContentPanel>
+				{#snippet header()}<h2 class="font-semibold">Top Runs by Cost</h2>{/snippet}
+				<div class="mt-3 space-y-2">
+					{#each costData.byRun as row (row.runId)}
+						<div class="flex items-center justify-between rounded-xl border border-base-300 p-3 text-sm">
+							<div>
+								<p class="font-medium">{row.label ?? row.runId?.slice(0, 8)}</p>
+								<p class="text-xs text-base-content/60">{row.source} · {row.state} · {row.tokensIn + row.tokensOut} tokens</p>
+							</div>
+							<span class="font-mono">{fmt(row.cost)}</span>
+						</div>
+					{/each}
+				</div>
+			</ContentPanel>
+		{/if}
+
+		<!-- Top Agents by cost -->
+		{#if costData.byAgent.length > 0}
+			<ContentPanel>
+				{#snippet header()}<h2 class="font-semibold">Top Agents by Cost</h2>{/snippet}
+				<div class="mt-3 space-y-2">
+					{#each costData.byAgent as row (row.agentId)}
+						<a href="/agents/{row.agentId}" class="flex items-center justify-between rounded-xl border border-base-300 p-3 text-sm hover:bg-base-200/50">
+							<div>
+								<p class="font-medium">{row.name ?? row.agentId?.slice(0, 8)}</p>
+								<p class="text-xs text-base-content/60">{row.role ?? ''} · {row.count} calls</p>
+							</div>
+							<span class="font-mono">{fmt(row.cost)}</span>
+						</a>
+					{/each}
+				</div>
+			</ContentPanel>
+		{/if}
+
+		<!-- Spend by Tool (non-LLM ledger) -->
+		{#if costData.byTool.length > 0}
+			<ContentPanel>
+				{#snippet header()}<h2 class="font-semibold">Tool Spend</h2>{/snippet}
+				<div class="mt-3 overflow-x-auto">
+					<table class="table table-zebra">
+						<thead>
+							<tr>
+								<th>Tool</th>
+								<th>Provider</th>
+								<th class="text-right">Units</th>
+								<th class="text-right">Calls</th>
+								<th class="text-right">Cost</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each costData.byTool as row (row.toolName + (row.provider ?? '') + row.unitType)}
+								<tr>
+									<td class="font-medium">{row.toolName}</td>
+									<td class="text-xs text-base-content/70">{row.provider ?? '—'}</td>
+									<td class="text-right font-mono text-sm">{row.units} {row.unitType}</td>
+									<td class="text-right font-mono text-sm">{row.count}</td>
+									<td class="text-right font-mono text-sm">{fmt(row.cost)}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</ContentPanel>
+		{/if}
 	{/if}
 </section>
 

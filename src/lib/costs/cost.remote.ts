@@ -1,11 +1,12 @@
-import { query } from '$app/server'
+import { command, query } from '$app/server'
 import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
-import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
+import { budgetAlerts, budgetLimits, llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 const costPeriodSchema = z.object({
 	period: z.enum(['day', 'week', 'month']).optional(),
@@ -228,4 +229,88 @@ export const getBudgetStatus = query(async () => {
 		dailySpend: dailySpend[0]?.total ?? '0',
 		monthlySpend: monthlySpend[0]?.total ?? '0',
 	}
+})
+
+const budgetScopeSchema = z.enum(['global', 'project', 'agent', 'run'])
+const budgetPeriodSchema = z.enum(['day', 'week', 'month', 'run'])
+const budgetActionSchema = z.enum(['block', 'notify_only'])
+
+const createBudgetLimitSchema = z.object({
+	scope: budgetScopeSchema,
+	scopeId: z.string().uuid().nullable().optional(),
+	period: budgetPeriodSchema,
+	limitUsd: z.coerce.number().positive(),
+	warnUsd: z.coerce.number().positive().nullable().optional(),
+	action: budgetActionSchema.default('block'),
+	enabled: z.boolean().default(true),
+})
+
+const updateBudgetLimitSchema = z.object({
+	id: z.string().uuid(),
+	limitUsd: z.coerce.number().positive().optional(),
+	warnUsd: z.coerce.number().positive().nullable().optional(),
+	action: budgetActionSchema.optional(),
+	enabled: z.boolean().optional(),
+})
+
+const deleteBudgetLimitSchema = z.object({ id: z.string().uuid() })
+
+export const listBudgetLimits = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return db
+		.select()
+		.from(budgetLimits)
+		.where(eq(budgetLimits.userId, user.id))
+		.orderBy(desc(budgetLimits.createdAt))
+})
+
+export const createBudgetLimit = command(createBudgetLimitSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const [row] = await db
+		.insert(budgetLimits)
+		.values({
+			userId: user.id,
+			scope: input.scope,
+			scopeId: input.scopeId ?? null,
+			period: input.period,
+			limitUsd: input.limitUsd.toFixed(6),
+			warnUsd: input.warnUsd != null ? input.warnUsd.toFixed(6) : null,
+			action: input.action,
+			enabled: input.enabled,
+		})
+		.returning()
+	return { success: true as const, limit: row }
+})
+
+export const updateBudgetLimit = command(updateBudgetLimitSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const updates: Record<string, unknown> = { updatedAt: new Date() }
+	if (input.limitUsd !== undefined) updates.limitUsd = input.limitUsd.toFixed(6)
+	if (input.warnUsd !== undefined) updates.warnUsd = input.warnUsd != null ? input.warnUsd.toFixed(6) : null
+	if (input.action !== undefined) updates.action = input.action
+	if (input.enabled !== undefined) updates.enabled = input.enabled
+	const [row] = await db
+		.update(budgetLimits)
+		.set(updates)
+		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
+		.returning()
+	return { success: row !== undefined, limit: row ?? null }
+})
+
+export const deleteBudgetLimit = command(deleteBudgetLimitSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	await db
+		.delete(budgetLimits)
+		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
+	return { success: true as const }
+})
+
+export const listBudgetAlerts = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return db
+		.select()
+		.from(budgetAlerts)
+		.where(eq(budgetAlerts.userId, user.id))
+		.orderBy(desc(budgetAlerts.createdAt))
+		.limit(50)
 })
