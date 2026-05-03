@@ -259,12 +259,12 @@
 				{/snippet}
 				<ul class="space-y-2 text-sm">
 					{#each detail.linkedRuns as run (run.id)}
-						<li>
-							<a href="/chat/{run.conversationId}" class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 transition-colors hover:border-base-content/30">
-								<span class="badge badge-xs badge-ghost">{run.state}</span>
-								<span class="line-clamp-1 flex-1 font-medium">{run.label ?? '(unnamed run)'}</span>
-								<span class="font-mono text-xs text-base-content/55">{fmtDate(run.startedAt)}</span>
-							</a>
+						<li class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 transition-colors hover:border-base-content/30">
+							<span class="badge badge-xs badge-ghost">{run.state}</span>
+							<span class="line-clamp-1 flex-1 font-medium">{run.label ?? '(unnamed run)'}</span>
+							<span class="font-mono text-xs text-base-content/55">{fmtDate(run.startedAt)}</span>
+							<a href="/runs/{run.id}" class="btn btn-ghost btn-xs" title="Open the run trace">Trace</a>
+							<a href="/chat/{run.conversationId}" class="btn btn-ghost btn-xs" title="Open the conversation">Chat</a>
 						</li>
 					{/each}
 				</ul>

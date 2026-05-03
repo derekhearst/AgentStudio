@@ -5,8 +5,11 @@
 	}
 
 	let {
+		// `conversationId` is no longer used inside the component — the Trace link now points at
+		// /runs/[runId]. Kept on the prop signature so existing callers don't break.
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		streaming = false,
-		conversationId,
+		conversationId: _conversationId,
 		runId = null,
 		mode = 'chat',
 		streamingBlocks = [] as StreamingBlock[],
@@ -111,7 +114,7 @@
 			{/if}
 
 			{#if runId}
-				<a class="btn btn-ghost btn-xs" href={`/chat/${conversationId}`} title={`Run ${runId.slice(0, 8)}`}>
+				<a class="btn btn-ghost btn-xs" href={`/runs/${runId}`} title={`Run ${runId.slice(0, 8)} — open the event timeline`}>
 					Trace ↗
 				</a>
 			{/if}
