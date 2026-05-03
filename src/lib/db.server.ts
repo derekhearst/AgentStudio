@@ -398,6 +398,19 @@ async function bootstrapDatabase() {
 			console.warn('[db] Hook registration failed (non-fatal):', err)
 		}
 
+		// Wave 3 #14 evaluations plan phase 1 — seed the default evaluator agent. Idempotent;
+		// user edits to the prompt/model survive re-seed via ON CONFLICT (id) DO NOTHING.
+		try {
+			const { seedDefaultEvaluator } = await import('$lib/evaluations/evaluators-seed.server')
+			const seedDb = createDatabase(client)
+			const result = await seedDefaultEvaluator(seedDb)
+			if (result.inserted > 0) {
+				console.log('[db] Seeded default evaluator agent')
+			}
+		} catch (err) {
+			console.warn('[db] Default evaluator seed failed (non-fatal):', err)
+		}
+
 		// Phase 4 of #4: backfill embeddings for any skills that don't have them yet, so the
 		// relevance filter has something to rank. Best-effort; failures are non-fatal (the
 		// fallback path lists every skill exactly like before).

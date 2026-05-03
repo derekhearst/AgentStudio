@@ -114,6 +114,8 @@ export type RunChatLoopInput = {
 	approvalRequiredTools: ReadonlySet<string>
 	/** True when this is the orchestrator (controls ask_user permission, run_subagent dispatch). */
 	isOrchestrator: boolean
+	/** Wave 3 #13 phase 4 — owning agent so per-agent hook config (`agents.config.hooks`) can dispatch. Null for unowned chat runs. */
+	agentId?: string | null
 	/** Workspace context — passed through to executeTool. */
 	persistentKey: string | null
 	worktree: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null

@@ -70,7 +70,7 @@ test.describe('evaluations/schema — run_evaluations + chat_runs.eval_*', () =>
 			`
 			const [check] = await sql<{
 				verdict: string
-				findings: Array<{ severity: string; message: string }>
+				findings: Array<{ severity: string; message: string; category?: string }>
 				confidence: number
 				cost_usd: string
 				metadata: Record<string, unknown>

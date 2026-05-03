@@ -499,7 +499,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			// agent.config.capabilityGroups). Subsequent enable_capability calls mutate this set.
 			enabledCapabilityGroups: initialEnabledGroups,
 		})
-		.returning({ id: chatRuns.id })
+		.returning({ id: chatRuns.id, evalRequired: chatRuns.evalRequired })
 
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
@@ -538,6 +538,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					maxRounds: MAX_TOOL_ROUNDS,
 					approvalRequiredTools,
 					isOrchestrator,
+					agentId: conversation.agentId ?? null,
 					persistentKey,
 					worktree: worktreeConfig,
 					computeTools: useProgressiveDisclosure
@@ -653,6 +654,39 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					void mineConversation({ conversationId: body.conversationId }).catch((err) => {
 						console.warn('[memory] mining failed', err)
 					})
+				}
+
+				// Wave 3 #14 evaluations plan phase 2 — end-of-run evaluator pass when the run is
+				// flagged `eval_required`. Fire-and-forget so the user sees `done` immediately —
+				// the verdict appears asynchronously in the run viewer (and Phase 3 will trigger
+				// re-plan based on the result). Wrapped in try/catch so an evaluator failure can
+				// never tank the original run.
+				if (run.evalRequired) {
+					void (async () => {
+						try {
+							const { runEvaluatorPass } = await import('$lib/evaluations/evaluator-runner.server')
+							const toolSummary = allToolCalls.length > 0
+								? allToolCalls.map((c) => (c as { name?: string }).name).filter(Boolean).join(', ')
+								: undefined
+							const result = await runEvaluatorPass({
+								runId: run.id,
+								userId: user.id,
+								conversationId: body.conversationId,
+								taskDescription: body.content?.trim() ?? '(no user message)',
+								generatorOutput: allTextContent,
+								toolSummary,
+							})
+							if (result) {
+								await session.emit('evaluation', {
+									verdict: result.verdict,
+									confidence: result.confidence,
+									findingCount: result.findings?.length ?? 0,
+								}).catch(() => undefined)
+							}
+						} catch (err) {
+							console.warn('[evaluations] evaluator pass failed', err)
+						}
+					})()
 				}
 
 				await session.emit('metrics', {

@@ -247,6 +247,7 @@ async function runAutomationWithAgent(args: {
 			maxRounds: 10, // automations are bounded — no human in the loop to course-correct
 			approvalRequiredTools: new Set<string>(), // no approval surface in a detached run
 			isOrchestrator: false,
+			agentId: agent.id,
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			spawnSubagent: undefined,

@@ -27,6 +27,16 @@
 	let draftCapabilityGroups = $state<CapabilityGroupName[]>([])
 	let useCapabilityBinding = $state(false)
 
+	// Wave 3 #13 phase 4 — per-agent hook bindings draft state.
+	// Map of `event → comma-separated refs string` so the UI can edit text and convert on save.
+	const HOOK_EVENTS = [
+		'before_run', 'after_run', 'before_round', 'after_round', 'before_tool', 'after_tool',
+		'on_compact', 'on_evaluator', 'on_subagent_spawn', 'on_approval_required',
+		'on_user_question', 'on_run_failed', 'on_skill_loaded', 'on_tool_output_archived',
+	] as const
+	type HookEventName = (typeof HOOK_EVENTS)[number]
+	let draftHookRefs = $state<Record<string, string>>({})
+
 	let eventSource: EventSource | null = null
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -154,12 +164,30 @@
 		)
 	}
 
+	function readAgentHooks(agent: AgentData['agent']): Record<string, string[]> {
+		const config = (agent.config ?? null) as { hooks?: unknown } | null
+		if (!config?.hooks || typeof config.hooks !== 'object') return {}
+		const out: Record<string, string[]> = {}
+		for (const [event, refs] of Object.entries(config.hooks as Record<string, unknown>)) {
+			if (Array.isArray(refs)) {
+				const cleaned = refs.filter((r): r is string => typeof r === 'string' && r.trim().length > 0)
+				if (cleaned.length > 0) out[event] = cleaned
+			}
+		}
+		return out
+	}
+
 	function syncDraftFromAgent(agent: AgentData['agent']) {
 		draftSystemPrompt = agent.systemPrompt
 		draftModel = agent.model
 		const groups = readAgentCapabilityGroups(agent)
 		draftCapabilityGroups = groups
 		useCapabilityBinding = groups.length > 0
+		// Convert `event → string[]` into `event → comma-separated string` for the textbox UI.
+		const persistedHooks = readAgentHooks(agent)
+		draftHookRefs = Object.fromEntries(
+			HOOK_EVENTS.map((event) => [event, persistedHooks[event]?.join(', ') ?? '']),
+		)
 	}
 
 	async function loadData() {
@@ -217,11 +245,19 @@
 			const capabilityGroups = useCapabilityBinding
 				? Array.from(new Set<CapabilityGroupName>(['core', ...draftCapabilityGroups]))
 				: []
+			// Convert `event → comma-separated string` back to `event → string[]`. Empty entries
+			// drop out so updateAgentRecord can clear them via its empty-array semantics.
+			const hooks: Record<string, string[]> = {}
+			for (const [event, raw] of Object.entries(draftHookRefs)) {
+				const refs = raw.split(',').map((r) => r.trim()).filter((r) => r.length > 0)
+				if (refs.length > 0) hooks[event] = refs
+			}
 			const updated = await updateAgentCommand({
 				agentId: data.agent.id,
 				systemPrompt,
 				model,
 				capabilityGroups,
+				hooks,
 			})
 			if (!updated) {
 				configError = 'Failed to save agent configuration.'
@@ -589,6 +625,49 @@
 					</div>
 				{:else}
 					<p class="text-xs italic text-base-content/40">All tools available (no restriction).</p>
+				{/if}
+			{/if}
+
+			<div class="mb-2 mt-4 border-t border-base-300/70"></div>
+
+			<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/45">Hook bindings</p>
+			<p class="mb-2 text-[11px] leading-snug text-base-content/55">
+				Bind opt-in built-in hook handlers OR (future) skill slugs to lifecycle events for this agent only. Globally-registered handlers (activity emit, etc.) fire automatically — bindings here are additive. <a href="/settings/hooks" class="link link-hover">View invocation log</a>.
+			</p>
+			{#if editingConfig}
+				<div class="space-y-1.5">
+					{#each HOOK_EVENTS as event (event)}
+						<label class="flex items-center gap-2 text-xs">
+							<span class="w-44 shrink-0 font-mono text-[11px] text-base-content/65">{event}</span>
+							<input
+								type="text"
+								class="input input-xs input-bordered flex-1 font-mono text-[11px]"
+								placeholder="hook-ref-1, hook-ref-2"
+								value={draftHookRefs[event] ?? ''}
+								oninput={(e) => {
+									draftHookRefs = { ...draftHookRefs, [event]: (e.currentTarget as HTMLInputElement).value }
+								}}
+							/>
+						</label>
+					{/each}
+				</div>
+			{:else}
+				{@const persistedHooks = readAgentHooks(data.agent)}
+				{#if Object.keys(persistedHooks).length > 0}
+					<ul class="space-y-1.5 text-xs">
+						{#each Object.entries(persistedHooks) as [event, refs] (event)}
+							<li class="flex items-start gap-2">
+								<span class="w-44 shrink-0 font-mono text-[11px] text-base-content/65">{event}</span>
+								<div class="flex flex-1 flex-wrap gap-1">
+									{#each refs as ref (ref)}
+										<span class="badge badge-xs badge-outline font-mono">{ref}</span>
+									{/each}
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{:else}
+					<p class="text-xs italic text-base-content/40">No per-agent hook bindings.</p>
 				{/if}
 			{/if}
 		</ContentPanel>

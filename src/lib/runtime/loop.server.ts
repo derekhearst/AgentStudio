@@ -66,7 +66,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		runId: session.runId,
 		conversationId: input.conversationId,
 		userId: input.userId,
-		agentId: null,
+		agentId: input.agentId ?? null,
 		source: input.isOrchestrator ? 'chat_stream' : 'agent',
 	})
 
@@ -438,7 +438,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 				runId: session.runId,
 				conversationId: input.conversationId,
 				userId: input.userId,
-				agentId: null,
+				agentId: input.agentId ?? null,
 				toolName: tc.name,
 				args: parsedArgs,
 			})
@@ -453,7 +453,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 				runId: session.runId,
 				conversationId: input.conversationId,
 				userId: input.userId,
-				agentId: null,
+				agentId: input.agentId ?? null,
 				toolName: tc.name,
 				args: parsedArgs,
 				result: toolResult.success ? toolResult.result : { error: toolResult.error },
@@ -538,7 +538,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		runId: session.runId,
 		conversationId: input.conversationId,
 		userId: input.userId,
-		agentId: null,
+		agentId: input.agentId ?? null,
 		costUsd: null,
 		durationMs: Date.now() - startedAt,
 		success: true,

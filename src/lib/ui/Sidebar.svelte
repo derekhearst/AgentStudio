@@ -159,9 +159,20 @@
 				</svg>
 				Audit
 			</a>
+			<a href="/settings/hooks"
+				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/settings/hooks')} class:font-medium={isActive('/settings/hooks')} class:text-primary={isActive('/settings/hooks')}
+				onclick={onNavigate}>
+				<!-- arrow-trending-down / hooks -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M4 4v6c0 4 4 8 8 8h8"/>
+					<polyline points="16 14 20 18 16 22"/>
+				</svg>
+				Hooks
+			</a>
 			<a href="/settings"
 				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/settings')} class:font-medium={isActive('/settings')} class:text-primary={isActive('/settings')}
+				class:bg-base-200={activePath === '/settings'} class:font-medium={activePath === '/settings'} class:text-primary={activePath === '/settings'}
 				onclick={onNavigate}>
 				<!-- cog-6-tooth -->
 				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

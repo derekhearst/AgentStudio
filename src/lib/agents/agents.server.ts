@@ -147,6 +147,10 @@ export async function updateAgentRecord(
 		// Optional fine-grained override: a fixed allow-list of tool names (no progressive
 		// disclosure). Empty/undefined means use capabilityGroups (or fall back to legacy).
 		allowedTools?: string[]
+		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Refs are either
+		// registered built-in hook names OR future skill slugs (Phase 3). Empty array clears the
+		// override for that event; an empty object clears all.
+		hooks?: Record<string, string[]>
 	},
 ) {
 	const updates: Partial<typeof agents.$inferInsert> = {}
@@ -155,7 +159,8 @@ export async function updateAgentRecord(
 	if (patch.systemPrompt !== undefined) updates.systemPrompt = patch.systemPrompt
 	if (patch.model !== undefined) updates.model = patch.model
 
-	const configChanged = patch.capabilityGroups !== undefined || patch.allowedTools !== undefined
+	const configChanged =
+		patch.capabilityGroups !== undefined || patch.allowedTools !== undefined || patch.hooks !== undefined
 	if (configChanged) {
 		// Read existing config so we don't clobber unrelated keys (workspace, etc.).
 		const [current] = await db.select({ config: agents.config }).from(agents).where(eq(agents.id, agentId))
@@ -173,6 +178,18 @@ export async function updateAgentRecord(
 				delete nextConfig.allowedTools
 			} else {
 				nextConfig.allowedTools = patch.allowedTools
+			}
+		}
+		if (patch.hooks !== undefined) {
+			const cleaned: Record<string, string[]> = {}
+			for (const [event, refs] of Object.entries(patch.hooks)) {
+				const trimmed = refs.map((r) => r.trim()).filter((r) => r.length > 0)
+				if (trimmed.length > 0) cleaned[event] = trimmed
+			}
+			if (Object.keys(cleaned).length === 0) {
+				delete nextConfig.hooks
+			} else {
+				nextConfig.hooks = cleaned
 			}
 		}
 		updates.config = nextConfig

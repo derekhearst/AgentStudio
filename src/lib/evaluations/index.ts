@@ -13,3 +13,5 @@ export {
 	summarizeFindingsForRun,
 	type RecordEvaluationInput,
 } from './evaluations.server'
+export { runEvaluatorPass, type RunEvaluatorPassInput } from './evaluator-runner.server'
+export { seedDefaultEvaluator, DEFAULT_EVALUATOR_AGENT_ID } from './evaluators-seed.server'

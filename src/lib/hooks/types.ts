@@ -72,4 +72,11 @@ export type RegisteredHook = {
 	name: string // for the invocation log
 	handler: HookHandler
 	timeoutMs?: number
+	/**
+	 * Wave 3 #13 phase 4 — when true, the hook does NOT fire on every emit. It only runs when an
+	 * agent explicitly binds it via `agents.config.hooks[event] = [name]`. Use for "available but
+	 * off-by-default" handlers (e.g. expensive telemetry, evaluator triggers, custom feedback
+	 * loops). Default false (built-ins fire on every emit, like activity-emit).
+	 */
+	optInOnly?: boolean
 }

@@ -151,6 +151,7 @@ export async function executeTaskOnce(
 			maxRounds: opts.maxRounds ?? 10,
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
+			agentId: agent.id,
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			spawnSubagent: undefined,

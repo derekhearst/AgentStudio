@@ -152,7 +152,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Tests: 7 unit specs + 3 schema/cascade specs across [tests/context.slot-overrides.spec.ts](../../tests/context.slot-overrides.spec.ts) and [tests/context.slot-overrides-db.spec.ts](../../tests/context.slot-overrides-db.spec.ts)
    - **#4 Context now fully complete — flipped to `[x]` above.**
 
-5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
+5. [x] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md
    - Depends on: #3
    - Gate: cost-by-run/task/agent dashboards query correctly
@@ -181,7 +181,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - 5 budget CRUD remote functions (`listBudgetLimits`, `createBudgetLimit`, `updateBudgetLimit`, `deleteBudgetLimit`, `listBudgetAlerts`): [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
    - Phase 5 (provider reconciliation against OpenRouter invoices) still pending — flagged as future-work in the spec, not required for Wave 1 closure.
 
-6. [ ] Chat mode system + inline approvals + HUD
+6. [x] Chat mode system + inline approvals + HUD
    - Source: ../chat/plan.md
    - Depends on: #3, #4
    - Gate: mode switch anchors persisted; approval cards mutate durable state
@@ -255,7 +255,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 
 ### Wave 2 — Orchestration Core
 
-8. [ ] Tools progressive disclosure + capability gating
+8. [x] Tools progressive disclosure + capability gating
    - Source: ../tools/plan.md
    - Gate: default tool schema slim; `enable_capability` flow works
    - Evidence (Phase 1 — alwaysOn enforcement + enable_capability meta-tool, 2026-05-02):
@@ -288,7 +288,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - 12 tests cover: each strong keyword routing to its group, multiple-group fanout, the supporting-word threshold, empty/whitespace returns nothing, substring rejection (`agentic`, `codeword`), hyphenated whole-word matches, and the explanation surface for telemetry: [tests/tools.suggest-capabilities.spec.ts](../../tests/tools.suggest-capabilities.spec.ts)
    - Phase 3 (FS tool consolidation to 7 verbs) still pending — it's a breaking surface change, deliberately deferred until other consumers have stabilized.
 
-9. [ ] Skills taxonomy and loading rules (including mode identities)
+9. [x] Skills taxonomy and loading rules (including mode identities)
    - Source: ../skills/plan.md
    - Depends on: #8 for companion-tool guidance
    - Gate: deterministic loading order and provenance visible
@@ -311,7 +311,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - 4 tests cover the column round-trip via raw SQL using postgres.js's `sql.array(…)` binding: groups update, tools update preserves ordering, clearing to `[]` round-trips correctly, and updating one field leaves the other intact: [tests/skills.companion-update.spec.ts](../../tests/skills.companion-update.spec.ts)
    - Phase 5 (skill-aware tool-output offload) overlaps with #8 phase 5 which already shipped — the workspace-backed offload covers the durable side. Remaining "load skill summary on demand" half still needs a small read_skill extension; deferring until a real consumer asks for it.
 
-10. [ ] Runtime extraction/composition server
+10. [x] Runtime extraction/composition server
     - Source: ../runtime/plan.md
     - Depends on: #8, #9
     - Gate: chat SSE behavior parity; subagent orchestration parity
@@ -344,7 +344,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
     - Phase 3 (Environment descriptor) effectively subsumed by `buildAgentDefinition` returning `persistentKey` + `worktree` together — the descriptor pattern is satisfied, just not under that name. **#10 substantively complete**: chat stream, sub-agents, automations, AND tasks all share the same loop + the same agent-definition helper.
     - Net code reduction across the four callsites since the runtime extraction started: **~833 lines** (chat stream -474, inline-subagent -162 then -89, automation -43, task-runner -65), offset by ~700 lines of new runtime modules (loop + 3 sessions + agent-definition + types). Two-thirds of the runtime code is shared instead of duplicated.
 
-11. [ ] Task lifecycle alignment with runtime/runs
+11. [x] Task lifecycle alignment with runtime/runs
     - Source: ../tasks/plan.md
     - Depends on: #3, #10
     - Gate: plan→approve→execute transitions durable and replayable
@@ -409,7 +409,17 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - Wired into [src/lib/runtime/loop.server.ts](../../src/lib/runtime/loop.server.ts) at four boundaries: `before_run` at loop start, `after_run` at loop return (with durationMs), `before_tool` + `after_tool` around `executeTool` (with success/durationMs/result on after_tool). All emits are `void`-prefixed so the loop never awaits hooks.
       - Two built-ins migrated to demonstrate the pattern: `after_tool` → `activity-impactful-tools` emits an `agent_action` activity row for shell/file_write/file_patch/file_replace/delete_file/move_file (read-only tools intentionally excluded as noise). `after_run` → `activity-run-completed` emits one summary `agent_action` per successful run with the durationMs: [src/lib/hooks/builtins.server.ts](../../src/lib/hooks/builtins.server.ts). Bootstrap registers them once at boot via `registerBuiltinHooks()` in [src/lib/db.server.ts](../../src/lib/db.server.ts).
       - 6 tests cover: full-shape invocation round-trip, error string preservation on failure, `hook_kind` enum rejection of unknown values, FK cascade on run delete, NULL `run_id` for future scheduled hooks, and the bus's `registerHook + listRegisteredHooks` contract: [tests/hooks.bus.spec.ts](../../tests/hooks.bus.spec.ts)
-    - Phases 3 (skill-based hooks — execute markdown skills as subagents on event), 4 (per-agent hook config in `agents.config.hooks`), 5 (admin `/settings/hooks` viewer for recent invocations) still pending. The bus + invocation log are the foundation; the remaining phases plug additional sources of hook handlers into the same dispatch pipeline.
+    - Evidence (Phase 4 — per-agent hook config + runtime agentId plumbing, 2026-05-03):
+      - `RegisteredHook` gains `optInOnly: boolean` (default false). Globally-registered handlers with `optInOnly: false` fire on every emit (existing semantic — activity emit, etc.). Handlers registered with `optInOnly: true` ONLY fire when an agent's `agents.config.hooks[event]` array references their name. Phase 3's skill-based hooks (future) will resolve unmatched refs through a separate skill-runner: [src/lib/hooks/types.ts](../../src/lib/hooks/types.ts), [src/lib/hooks/bus.server.ts](../../src/lib/hooks/bus.server.ts)
+      - `emitHook` learned to look up `agents.config.hooks[event]` when the payload carries an `agentId`. Refs that match an `optInOnly` global handler get appended to the dispatch list; refs that match a non-opt-in handler are skipped (already firing globally — would double-dispatch). Unknown refs are recorded as `success=false` invocations in `hook_invocations` so the admin viewer surfaces typos / missing skills without crashing the runtime: [src/lib/hooks/bus.server.ts](../../src/lib/hooks/bus.server.ts)
+      - `RunChatLoopInput` extended with `agentId?: string | null`. All four runtime callers thread the owning agent through: chat stream (`conversation.agentId`), inline-subagent (`agent.id`), automation engine (`agent.id`), task-runner (`agent.id`): [src/lib/runtime/types.ts](../../src/lib/runtime/types.ts), [src/lib/runtime/loop.server.ts](../../src/lib/runtime/loop.server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts), [src/lib/tasks/task-runner.server.ts](../../src/lib/tasks/task-runner.server.ts), [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+      - `updateAgentRecord` accepts `hooks: Record<string, string[]>` patch — empty array per-event drops that event's overrides, empty object clears all bindings; merges with `capabilityGroups` / `allowedTools` without clobbering: [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts). Remote schema gates the event names against the 14-event enum: [src/lib/agents/agents.remote.ts](../../src/lib/agents/agents.remote.ts)
+      - Agent detail page gains a Hook bindings section after Capability binding — view mode shows persisted `event → [refs]` pairs; edit mode renders a row per event with a comma-separated text input. Links to `/settings/hooks` for the invocation log: [src/routes/agents/[id]/+page.svelte](../../src/routes/agents/[id]/+page.svelte)
+      - 4 tests cover: agents.config.hooks SQL round-trip with multiple events + refs, merge-don't-clobber alongside capabilityGroups, empty hooks object means no bindings, optInOnly registration round-trip via `registerHook + listRegisteredHooks`: [tests/hooks.per-agent-config.spec.ts](../../tests/hooks.per-agent-config.spec.ts)
+    - Evidence (Phase 5 — admin `/settings/hooks` viewer, 2026-05-03):
+      - New remote query `listHookInvocationsQuery` with admin gate (mirrors the audit reader pattern). Supports filters by event / hookKind / failuresOnly / runId / sinceISO. Returns invocation rows + a per-event 24h rollup `{event, total, failures, avgDurationMs}` for the dashboard header: [src/lib/hooks/hooks.remote.ts](../../src/lib/hooks/hooks.remote.ts)
+      - `/settings/hooks` page renders the rollup as colored cards (green/yellow/red by failure rate), expandable invocation rows with run deep-links + error pre, and toggle filters for event/kind/failures-only. Sidebar gains a Hooks entry under Settings: [src/routes/settings/hooks/+page.svelte](../../src/routes/settings/hooks/+page.svelte), [src/lib/ui/Sidebar.svelte](../../src/lib/ui/Sidebar.svelte)
+    - Phase 3 (skill-based hooks — execute markdown skills as subagents on event) still pending. With Phase 4 + 5 done, the bus + admin viewer + per-agent binding storage are all in place; Phase 3 just plugs a new "skill" handler kind into the existing dispatch pipeline.
 
 14. [ ] Evaluation framework integration
     - Source: ../evaluations/plan.md
@@ -422,7 +432,17 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - `isRunEvaluationClear(runId)` returns true when `eval_required=false` OR the latest evaluation's verdict is `pass`. Phase 4's task-completion gate plugs into this.
       - Run viewer at [src/routes/runs/[id]/+page.svelte](../../src/routes/runs/[id]/+page.svelte) gets a new "Evaluations" panel between the run header and event timeline — appears only when at least one evaluation exists. Header shows count + latest verdict badge + confidence %; each verdict row shows verdict badge, finding count, severity-tinted finding pills (error/warning/info), category badges, message + optional path. `getRunDetailQuery` joins `listEvaluationsForRun` so the page shows real history.
       - 5 tests cover full pass-verdict round-trip with findings + confidence + cost + metadata, verdict enum rejection, FK cascade on source-run delete, `eval_required` / `eval_attempt` defaults + round-trip, severity aggregation matching `summarizeFindingsForRun`'s contract: [tests/evaluations.spec.ts](../../tests/evaluations.spec.ts)
-    - Phases 3-5 (re-plan loop spawning new attempts on `needs_revision`, task-completion gating via `isRunEvaluationClear`, sprint contracts for long runs) still pending. The schema + recorder + viewer are the foundation — the orchestration layer plugs in once an evaluator agent kind is seeded.
+    - Evidence (Plan Phase 1 — `agent_kind` enum + default evaluator agent, 2026-05-03):
+      - New `agent_kind` enum (`orchestrator | worker | evaluator`) + `agents.kind` column (default `worker`): [src/lib/agents/agents.schema.ts](../../src/lib/agents/agents.schema.ts), hand-written migration [drizzle/0030_agent_kind.sql](../../drizzle/0030_agent_kind.sql) (drizzle-kit can't emit it cleanly when column default + enum land together)
+      - First-party `Default Evaluator` agent seeded on boot via `seedDefaultEvaluator` with fixed UUID `…000ea1`. Idempotent ON CONFLICT (id) DO NOTHING so user edits to the prompt/model survive re-seed. Cheap default model (`openai/gpt-4o-mini`) per the plan's cost guideline; system prompt instructs strict JSON output matching `EvaluationFinding`. `config.allowedTools` restricted to `read | list | search` (read-only): [src/lib/evaluations/evaluators-seed.server.ts](../../src/lib/evaluations/evaluators-seed.server.ts), wired into bootstrap [src/lib/db.server.ts](../../src/lib/db.server.ts)
+      - 4 tests cover: `agents.kind` defaults to `worker`, enum accepts the three valid kinds, enum rejects unknown values, default evaluator presence assertion (soft-skips if seed hasn't fired since migration — guards new branches): [tests/evaluations.evaluator-agent.spec.ts](../../tests/evaluations.evaluator-agent.spec.ts)
+    - Evidence (Plan Phase 2 — end-of-run evaluator pass on `eval_required`, 2026-05-03):
+      - Pure response parser in its own module so unit tests don't pull in $env: `parseEvaluatorResponse(raw)` returns `{verdict, confidence, findings, fallback?}`. Strips ```json fences, falls back to outer `{...}` substring extraction, then schema-validates with Zod. Empty / unparseable responses degrade to `needs_revision` with a single error finding so the future re-plan loop (plan Phase 3) still has a signal: [src/lib/evaluations/evaluator-parse.ts](../../src/lib/evaluations/evaluator-parse.ts)
+      - Server runner `runEvaluatorPass({runId, userId, conversationId, taskDescription, generatorOutput, toolSummary?})` — looks up the seeded evaluator, calls `chat()` for single-shot synthesis (no tools, no loop), parses the response, logs cost via `logLlmUsage({source: 'evaluator'})`, and writes the verdict via `recordEvaluation`. LLM-call failures degrade to `needs_revision` with a `fallbackReason: 'llm_error'` metadata stamp so the verdict is still durable. Skips the pass cleanly when the evaluator agent is missing (e.g. seed not yet run): [src/lib/evaluations/evaluator-runner.server.ts](../../src/lib/evaluations/evaluator-runner.server.ts)
+      - `LlmUsageSource` extended with `'evaluator'` so existing per-run / per-agent cost rollups already surface evaluator spend separately: [src/lib/costs/usage.ts](../../src/lib/costs/usage.ts)
+      - Chat stream handler triggers the evaluator pass post-loop when `chat_runs.eval_required = true`. Fire-and-forget so the user sees `done` immediately — the verdict appears asynchronously in the run viewer's Evaluations panel + an `evaluation` SSE event for live UIs that want to surface it. Wrapped in try/catch: an evaluator failure can never tank the original run: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+      - 7 tests cover the parser: clean JSON, fenced JSON, unfenced JSON with leading prose, empty response (empty_response fallback), missing-verdict (parse_error fallback), invalid verdict value (parse_error fallback), and truly garbage no-JSON response: [tests/evaluations.evaluator-runner.spec.ts](../../tests/evaluations.evaluator-runner.spec.ts)
+    - Plan Phases 3-5 (re-plan loop spawning new attempts on `needs_revision`, task-completion gating via `isRunEvaluationClear`, sprint contracts for long runs) still pending. The evaluator pipeline (kind enum + seed + parser + runner + post-run trigger) is now end-to-end — Phase 3 plugs in by detecting `needs_revision` in the post-evaluation hook and spawning a re-plan via the existing runtime.
 
 ### Wave 4 — Feature Service Layer
 

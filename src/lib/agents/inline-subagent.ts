@@ -122,6 +122,7 @@ export async function runInlineSubagent(
 			// approved scope. Adding approval here would deadlock (no UI surface to approve in).
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
+			agentId: agent.id,
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			// Sub-agents don't spawn their own sub-agents in this flow.

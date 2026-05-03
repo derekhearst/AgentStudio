@@ -9,6 +9,22 @@ import { auditAgentConfigUpdated } from '$lib/governance'
 
 const agentIdSchema = z.string().uuid()
 const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media'] as const
+const HOOK_EVENT_NAMES = [
+	'before_run',
+	'after_run',
+	'before_round',
+	'after_round',
+	'before_tool',
+	'after_tool',
+	'on_compact',
+	'on_evaluator',
+	'on_subagent_spawn',
+	'on_approval_required',
+	'on_user_question',
+	'on_run_failed',
+	'on_skill_loaded',
+	'on_tool_output_archived',
+] as const
 const updateAgentSchema = z
 	.object({
 		agentId: agentIdSchema,
@@ -18,13 +34,17 @@ const updateAgentSchema = z
 		// fall back to the legacy "all tools" default for back-compat.
 		capabilityGroups: z.array(z.enum(CAPABILITY_GROUP_NAMES)).optional(),
 		allowedTools: z.array(z.string().trim().min(1)).optional(),
+		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Empty object
+		// clears all bindings; empty array per-event drops that event's overrides.
+		hooks: z.record(z.enum(HOOK_EVENT_NAMES), z.array(z.string().trim().min(1))).optional(),
 	})
 	.refine(
 		(input) =>
 			input.systemPrompt !== undefined ||
 			input.model !== undefined ||
 			input.capabilityGroups !== undefined ||
-			input.allowedTools !== undefined,
+			input.allowedTools !== undefined ||
+			input.hooks !== undefined,
 		{ message: 'Provide at least one field to update' },
 	)
 
@@ -56,6 +76,7 @@ export const updateAgentCommand = command(updateAgentSchema, async (input) => {
 		model: input.model,
 		capabilityGroups: input.capabilityGroups,
 		allowedTools: input.allowedTools,
+		hooks: input.hooks,
 	})
 	if (updated && before) {
 		void auditAgentConfigUpdated({

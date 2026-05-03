@@ -8,6 +8,7 @@ export type LlmUsageSource =
 	| 'agent_synthesis'
 	| 'subagent'
 	| 'automation'
+	| 'evaluator'
 	| 'titlegen'
 	| 'image_gen'
 	| 'memory_embed'
