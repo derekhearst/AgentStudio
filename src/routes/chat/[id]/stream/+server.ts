@@ -403,8 +403,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	//      "all tools" surface so existing agents don't suddenly lose their toolkit.
 	const { expandGroupsToToolNames, getEnabledGroups } = await import('$lib/tools/capabilities.server')
 	const useProgressiveDisclosure = !scopedAgentTools && (isOrchestrator || agentCapabilityGroups !== null)
+	// Wave 2 #8 phase 2 — pre-enable suggested capability groups on round 0 based on keyword
+	// matches in the user message, so the model doesn't have to spend a round calling
+	// enable_capability before getting useful tools. Conservative: requires either a single
+	// strong keyword or two supporting keywords. Falls back to ['core'] when nothing matches.
+	const { suggestCapabilityGroups } = await import('$lib/tools/suggest-capabilities')
+	const suggested = isOrchestrator && body.content ? suggestCapabilityGroups(body.content) : []
+	const orchestratorBaseGroups = Array.from(new Set<string>(['core', ...suggested]))
 	const initialEnabledGroups: string[] = isOrchestrator
-		? ['core']
+		? orchestratorBaseGroups
 		: (agentCapabilityGroups ?? ['core'])
 	function computeTools(enabledGroupNames: string[]) {
 		const all = getToolDefinitions()
