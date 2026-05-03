@@ -315,6 +315,31 @@
 			</ContentPanel>
 		{/if}
 
+		<!-- Top Tasks by cost (Wave 2 #11 follow-up — surfaces task-attributed spend now that
+		     the tasks domain joins on llm_usage.task_id) -->
+		{#if costData.byTask.length > 0}
+			<ContentPanel>
+				{#snippet header()}<h2 class="font-semibold">Top Tasks by Cost</h2>{/snippet}
+				<div class="mt-3 space-y-2">
+					{#each costData.byTask as row (row.taskId)}
+						<a href="/tasks/{row.taskId}" class="flex items-center justify-between gap-2 rounded-xl border border-base-300 p-3 text-sm hover:bg-base-200/50">
+							<div class="min-w-0 flex-1">
+								<p class="line-clamp-1 font-medium">{row.title ?? `(deleted task ${row.taskId?.slice(0, 8)})`}</p>
+								<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content/60">
+									{#if row.status}
+										<span class="badge badge-xs badge-outline">{row.status}</span>
+									{/if}
+									<span>{row.count} call{row.count === 1 ? '' : 's'}</span>
+									<span>· {row.tokensIn + row.tokensOut} tokens</span>
+								</div>
+							</div>
+							<span class="shrink-0 font-mono">{fmt(row.cost)}</span>
+						</a>
+					{/each}
+				</div>
+			</ContentPanel>
+		{/if}
+
 		<!-- Spend by Tool (non-LLM ledger) -->
 		{#if costData.byTool.length > 0}
 			<ContentPanel>
