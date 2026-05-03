@@ -4,15 +4,18 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { getTaskByIdQuery, setTaskStatusCommand, cancelTaskCommand, retryTaskCommand } from '$lib/tasks/tasks.remote';
+	import { getTaskByIdQuery, getTaskSubtreeQuery, setTaskStatusCommand, cancelTaskCommand, retryTaskCommand } from '$lib/tasks/tasks.remote';
+	import TaskTree from '$lib/tasks/TaskTree.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const taskId = $derived(page.params.id ?? '');
 
 	type TaskDetail = NonNullable<Awaited<ReturnType<typeof getTaskByIdQuery>>>;
 	type Status = TaskDetail['task']['status'];
+	type Subtree = NonNullable<Awaited<ReturnType<typeof getTaskSubtreeQuery>>>;
 
 	let detail = $state<TaskDetail | null>(null);
+	let subtree = $state<Subtree | null>(null);
 	let loading = $state(true);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -25,8 +28,15 @@
 		loading = true;
 		error = null;
 		try {
-			detail = await getTaskByIdQuery(taskId);
-			if (!detail) error = 'Task not found';
+			const [d, s] = await Promise.all([
+				getTaskByIdQuery(taskId),
+				// Walk one level deeper than the simple children list so we can show grandchildren
+				// when the propose_plan tree has nested steps. Bounded inside the query.
+				getTaskSubtreeQuery({ rootTaskId: taskId, maxDepth: 4 }).catch(() => null),
+			]);
+			detail = d;
+			subtree = s;
+			if (!d) error = 'Task not found';
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load';
 		} finally {
@@ -187,24 +197,32 @@
 		</ContentPanel>
 
 		{#if detail.children.length > 0}
+			{@const subtreeNodes = subtree?.flat ?? []}
+			{@const hasGrandchildren = subtreeNodes.some((n) => n.depth > 1)}
 			<ContentPanel>
 				{#snippet header()}
 					<div class="flex items-center gap-2">
-						<h2 class="font-semibold">Steps</h2>
-						<span class="badge badge-sm badge-ghost">{detail?.children.length ?? 0}</span>
+						<h2 class="font-semibold">{hasGrandchildren ? 'Subtree' : 'Steps'}</h2>
+						<span class="badge badge-sm badge-ghost">
+							{hasGrandchildren ? subtreeNodes.length - 1 : (detail?.children.length ?? 0)}
+						</span>
 					</div>
 				{/snippet}
-				<ol class="space-y-2 text-sm">
-					{#each detail.children as child (child.id)}
-						<li>
-							<a href="/tasks/{child.id}" class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 transition-colors hover:border-base-content/30">
-								<span class="font-mono text-xs text-base-content/55 tabular-nums">{child.priority + 1}.</span>
-								<span class="line-clamp-1 flex-1 font-medium">{child.title}</span>
-								<span class="badge badge-xs {statusTone(child.status as Status)}">{child.status}</span>
-							</a>
-						</li>
-					{/each}
-				</ol>
+				{#if hasGrandchildren && subtreeNodes.length > 1}
+					<TaskTree nodes={subtreeNodes.slice(1)} highlightTaskId={detail.task.id} />
+				{:else}
+					<ol class="space-y-2 text-sm">
+						{#each detail.children as child (child.id)}
+							<li>
+								<a href="/tasks/{child.id}" class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 transition-colors hover:border-base-content/30">
+									<span class="font-mono text-xs text-base-content/55 tabular-nums">{child.priority + 1}.</span>
+									<span class="line-clamp-1 flex-1 font-medium">{child.title}</span>
+									<span class="badge badge-xs {statusTone(child.status as Status)}">{child.status}</span>
+								</a>
+							</li>
+						{/each}
+					</ol>
+				{/if}
 			</ContentPanel>
 		{/if}
 

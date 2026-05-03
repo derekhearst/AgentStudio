@@ -22,5 +22,6 @@ export {
 	cancelTaskCommand,
 	retryTaskCommand,
 	getActiveTaskForConversationQuery,
+	getTaskSubtreeQuery,
 } from './tasks.remote'
 export { executeTaskOnce } from './task-runner.server'

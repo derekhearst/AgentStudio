@@ -109,6 +109,54 @@ export const setTaskStatusCommand = command(setStatusSchema, async ({ taskId, st
 	return setTaskStatus(taskId, status)
 })
 
+/**
+ * Wave 2 #11 phase 5 — recursive subtree fetch for the DAG view.
+ *
+ * Walks the parent → child tree starting at `rootTaskId`, returning a flat list with each row
+ * tagged by `depth` (0 = root, 1 = direct child, …). The UI renders a single component that
+ * iterates the list and indents by depth — simpler than a nested-tree shape and lets the UI
+ * stay flat for keyboard navigation.
+ *
+ * Bounded by `maxDepth` (default 5) to prevent runaway expansion if a future feature accidentally
+ * creates cycles. Each level's children are sorted by priority then created_at.
+ */
+const subtreeSchema = z.object({
+	rootTaskId: taskIdSchema,
+	maxDepth: z.number().int().min(1).max(8).optional(),
+})
+
+export const getTaskSubtreeQuery = query(subtreeSchema, async ({ rootTaskId, maxDepth }) => {
+	const root = await getTaskById(rootTaskId)
+	if (!root) return null
+
+	const limit = maxDepth ?? 5
+	const flat: Array<TaskRow & { depth: number }> = [{ ...root, depth: 0 }]
+	const queue: Array<{ id: string; depth: number }> = [{ id: rootTaskId, depth: 0 }]
+	const seen = new Set<string>([rootTaskId])
+
+	while (queue.length > 0) {
+		const next = queue.shift()!
+		if (next.depth >= limit) continue
+		const children = await db
+			.select()
+			.from(tasks)
+			.where(eq(tasks.parentTaskId, next.id))
+		// Stable order: priority asc, then createdAt asc (matches the kanban + detail page).
+		children.sort((a: TaskRow, b: TaskRow) => {
+			if (a.priority !== b.priority) return a.priority - b.priority
+			return a.createdAt.getTime() - b.createdAt.getTime()
+		})
+		for (const c of children) {
+			if (seen.has(c.id)) continue // forward-compat: defend against cycles
+			seen.add(c.id)
+			flat.push({ ...c, depth: next.depth + 1 })
+			queue.push({ id: c.id, depth: next.depth + 1 })
+		}
+	}
+
+	return { root, flat }
+})
+
 const cancelTaskSchema = z.object({ taskId: taskIdSchema })
 
 /**
