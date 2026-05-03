@@ -2,6 +2,7 @@
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import SubagentBlockCard from './SubagentBlockCard.svelte';
+	import PlanProposalCard from './PlanProposalCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
 	type MessageRow = {
@@ -103,7 +104,13 @@
 		return Array.isArray(blocks) ? (blocks as SavedBlock[]) : null;
 	});
 
-	const normalizedToolCalls = $derived.by(() => asArray(message.toolCalls));
+	type NormalizedToolCall = {
+		name?: string | null;
+		arguments?: unknown;
+		result?: unknown;
+		success?: boolean | null;
+	};
+	const normalizedToolCalls = $derived.by(() => asArray(message.toolCalls) as NormalizedToolCall[]);
 
 	function getAskUserQuestions(argumentsValue: unknown, resultValue: unknown): Array<{ header: string; question?: string }> {
 		const args = asRecord(argumentsValue);
@@ -130,6 +137,51 @@
 		if (typeof value !== 'string') return null;
 		const trimmed = value.trim();
 		return trimmed.length > 0 ? trimmed : null;
+	}
+
+	type PlanStep = {
+		title: string;
+		detail?: string;
+		estimatedDurationMin?: number;
+		estimatedCostUsd?: number;
+		blastRadius?: 'local' | 'shared' | 'production';
+		reversible?: boolean;
+	};
+	type PlanProposal = {
+		summary: string;
+		steps: PlanStep[];
+		risks?: string[];
+		rollback?: string;
+		totalEstimatedCostUsd?: number;
+		totalEstimatedDurationMin?: number;
+	};
+
+	function getPlanProposal(argumentsValue: unknown): PlanProposal | null {
+		const args = asRecord(argumentsValue);
+		if (!args) return null;
+		if (typeof args.summary !== 'string' || !Array.isArray(args.steps)) return null;
+		const steps: PlanStep[] = (args.steps as Array<unknown>)
+			.map((raw) => {
+				const s = asRecord(raw);
+				if (!s || typeof s.title !== 'string') return null;
+				const step: PlanStep = { title: s.title };
+				if (typeof s.detail === 'string') step.detail = s.detail;
+				if (typeof s.estimatedDurationMin === 'number') step.estimatedDurationMin = s.estimatedDurationMin;
+				if (typeof s.estimatedCostUsd === 'number') step.estimatedCostUsd = s.estimatedCostUsd;
+				if (s.blastRadius === 'local' || s.blastRadius === 'shared' || s.blastRadius === 'production') {
+					step.blastRadius = s.blastRadius;
+				}
+				if (typeof s.reversible === 'boolean') step.reversible = s.reversible;
+				return step;
+			})
+			.filter((s): s is PlanStep => s !== null);
+		if (steps.length === 0) return null;
+		const plan: PlanProposal = { summary: args.summary, steps };
+		if (Array.isArray(args.risks)) plan.risks = args.risks.filter((r): r is string => typeof r === 'string');
+		if (typeof args.rollback === 'string') plan.rollback = args.rollback;
+		if (typeof args.totalEstimatedCostUsd === 'number') plan.totalEstimatedCostUsd = args.totalEstimatedCostUsd;
+		if (typeof args.totalEstimatedDurationMin === 'number') plan.totalEstimatedDurationMin = args.totalEstimatedDurationMin;
+		return plan;
 	}
 
 	function normalizeText(value: string): string {
@@ -285,6 +337,22 @@
 						{/if}
 					{/each}
 				{/if}
+			{:else if block.kind === 'tool' && block.name === 'propose_plan'}
+				{@const plan = getPlanProposal(block.arguments)}
+				{#if plan}
+					<div class="mb-1.5 w-full">
+						<PlanProposalCard {plan} status={block.success === false ? 'denied' : 'completed'} />
+					</div>
+				{:else}
+					<div class="mb-1.5 w-full">
+						<ToolCallCard
+							name={String(block.name)}
+							argumentsText={JSON.stringify(block.arguments ?? {}, null, 2)}
+							result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
+							status={block.success === false ? 'failed' : 'completed'}
+						/>
+					</div>
+				{/if}
 			{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 				<div class="mb-1.5 w-full">
 					<ToolCallCard
@@ -339,6 +407,17 @@
 								</div>
 							{/if}
 						{/each}
+					{/if}
+				{:else if call.name === 'propose_plan'}
+					{@const plan = getPlanProposal(call.arguments)}
+					{#if plan}
+						<PlanProposalCard {plan} status="completed" />
+					{:else}
+						<ToolCallCard
+							name="propose_plan"
+							argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
+							result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
+						/>
 					{/if}
 				{:else}
 					<ToolCallCard

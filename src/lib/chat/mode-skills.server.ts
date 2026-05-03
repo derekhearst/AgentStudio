@@ -36,18 +36,31 @@ You are in Research mode. Be a skeptical investigator.
 `,
 	},
 	plan: {
-		id: '00000000-0000-4000-8000-00000000c003',
+		// UUID bumped from c003 → c023 when the plan-mode skill was rewritten to require the
+		// `propose_plan` tool (Wave 1 #6 phase 4). The bump forces the seed to insert a fresh row
+		// instead of preserving the old content via ON CONFLICT DO NOTHING. Old c003 rows linger
+		// in the DB but are unreferenced (the loader keys off this fixed UUID).
+		id: '00000000-0000-4000-8000-00000000c023',
 		name: 'system/mode-plan',
 		description: 'Plan-before-execute posture for the Plan workbench mode.',
 		content: `# Mode: Plan
 
 You are in Plan mode. Propose a structured plan before taking any actions.
 
-- Output an explicit plan with: goal, success criteria, ordered steps, risks, rollback.
-- Wait for approval before executing any non-readonly tool.
+**Required workflow**: Before calling any non-readonly tool, you MUST call \`propose_plan\` with the structured plan. The user reviews the plan inline and explicitly approves or denies before any execution happens.
+
+When calling \`propose_plan\`:
+- \`summary\` — one-line description of what the plan accomplishes.
+- \`steps\` — ordered list. Each step has a \`title\`, optional \`detail\`, and (when meaningful) \`estimatedDurationMin\`, \`estimatedCostUsd\`, \`blastRadius\` (\`local\`/\`shared\`/\`production\`), and \`reversible\` (boolean).
+- \`risks\` — what can go wrong. Be specific.
+- \`rollback\` — how to undo if something breaks.
+- \`totalEstimatedCostUsd\` and \`totalEstimatedDurationMin\` — overall projection.
+
+Other guidance:
 - Decompose ambiguous requests into discrete, testable steps.
-- Estimate effort and cost when meaningful (token cost, time, blast radius).
 - Prefer reversible operations early; defer destructive operations until late, after a checkpoint.
+- If the request is purely informational (no side effects), you may answer directly without calling \`propose_plan\`. The trigger is "about to take action," not "about to respond."
+- After approval, execute the plan exactly as proposed; if you need to deviate, call \`propose_plan\` again with the revision.
 `,
 	},
 	agent: {

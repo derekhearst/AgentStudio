@@ -811,6 +811,26 @@ export const toolSchemas = {
 		paths: z.array(z.string().min(1)).optional(),
 		staged: z.boolean().default(false),
 	}),
+	propose_plan: z.object({
+		summary: z.string().min(1).max(500),
+		steps: z
+			.array(
+				z.object({
+					title: z.string().min(1).max(200),
+					detail: z.string().max(1000).optional(),
+					estimatedDurationMin: z.number().int().positive().max(10_000).optional(),
+					estimatedCostUsd: z.number().nonnegative().max(1000).optional(),
+					blastRadius: z.enum(['local', 'shared', 'production']).optional(),
+					reversible: z.boolean().optional(),
+				}),
+			)
+			.min(1)
+			.max(20),
+		risks: z.array(z.string().min(1).max(280)).max(10).optional(),
+		rollback: z.string().max(1000).optional(),
+		totalEstimatedCostUsd: z.number().nonnegative().max(1000).optional(),
+		totalEstimatedDurationMin: z.number().int().positive().max(10_000).optional(),
+	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
@@ -863,6 +883,8 @@ const toolDescriptions: Record<ToolName, string> = {
 		'Show recent commits with subject, author, and date (read-only). Optional `paths` filter scopes the log to specific files. Only available in worktree mode.',
 	git_diff:
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
+	propose_plan:
+		'Propose a structured execution plan to the user with ordered steps, estimated cost/time, risks, and rollback. The user explicitly approves or denies before you call any non-readonly tool. Required in plan mode; should be called before taking any destructive or expensive action.',
 }
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -1467,6 +1489,26 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result: { deleted: input.fileName, fromSkill: input.skillName },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'propose_plan') {
+				const input = toolSchemas.propose_plan.parse(call.arguments)
+				// The plan-approval flow runs through the standard tool approval pipeline (the
+				// stream handler emits tool_pending, blocks on user decision, then calls executeTool
+				// only on approve). By the time we get here, the user has already approved — so the
+				// plan is "accepted" and the orchestrator can proceed. The structured input is echoed
+				// back so the plan content is part of the durable tool_result for later inspection.
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: {
+						approved: true,
+						summary: input.summary,
+						stepCount: input.steps.length,
+					},
 					executionMs: Date.now() - startedAt,
 				}
 			}

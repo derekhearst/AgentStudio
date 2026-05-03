@@ -72,6 +72,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	git_status: 'Show git working-tree status (read-only). Worktree mode only.',
 	git_log: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
 	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
+	propose_plan: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
 }
 
 function schemaToJsonSchema(name: ToolName) {
