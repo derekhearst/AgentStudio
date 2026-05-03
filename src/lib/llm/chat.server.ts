@@ -8,7 +8,7 @@ type ImageContent = { type: 'image_url'; image_url: { url: string } }
 type MessageContent = string | Array<TextContent | ImageContent>
 type ReasoningDetail = Record<string, unknown>
 
-type ReasoningConfig = {
+export type ReasoningConfig = {
 	enabled?: boolean
 	exclude?: boolean
 	effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'

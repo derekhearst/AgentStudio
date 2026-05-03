@@ -2,29 +2,25 @@ import { json, type RequestHandler } from '@sveltejs/kit'
 import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
-import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
-import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
+import { chatRuns } from '$lib/runs/runs.schema'
+import { type LlmMessage } from '$lib/llm/chat.server'
 import { generateTitle, shouldCompact, compactMessages, estimateMessageTokens } from '$lib/chat/chat.server'
 import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
-import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
+import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
-import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
-import { persistRunBlocks, setRunRound } from '$lib/runs/blocks.server'
-import { appendRunEvent } from '$lib/runs/events.server'
-import { toolSchemas } from '$lib/tools/tools.server'
 import { listSkillSummaries, listRelevantSkillSummaries } from '$lib/skills/skills.server'
-import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
-import { trimToolResultWithOffload } from '$lib/tools/output-offload.server'
+import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { getModePostureContent } from '$lib/chat/mode.server'
+import { runChatLoop, createSseSession } from '$lib/runtime'
 
 const encoder = new TextEncoder()
 
@@ -418,10 +414,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const trimmedMessages = trimHistoricalToolResults(llmMessages)
 
 	const startedAt = Date.now()
-	let firstTokenAt: number | null = null
-	let assistantContent = ''
-	let promptTokens = 0
-	let completionTokens = 0
 
 	// --- Context Engineering: Tool Loading (Wave 2 #8 phases 1 + 4 — progressive disclosure) ---
 	// Resolution order:
@@ -438,7 +430,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const initialEnabledGroups: string[] = isOrchestrator
 		? orchestratorBaseGroups
 		: (agentCapabilityGroups ?? ['core'])
-	function computeTools(enabledGroupNames: string[]) {
+	function computeToolsFor(enabledGroupNames: string[]) {
 		const all = getToolDefinitions()
 		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
 		if (scopedAgentTools) {
@@ -452,7 +444,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 			.filter((tool) => activeNames.has(tool.function.name))
 	}
-	let tools = computeTools(initialEnabledGroups)
+	const initialTools = computeToolsFor(initialEnabledGroups)
 	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
 
@@ -511,83 +503,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
-			let clientConnected = true
-			let lastHeartbeatWriteAt = 0
-
-			const safeController = {
-				enqueue(chunk: Uint8Array) {
-					if (!clientConnected) return
-					try {
-						controller.enqueue(chunk)
-					} catch {
-						clientConnected = false
-					}
-				},
-			} as ReadableStreamDefaultController<Uint8Array>
-
-			const NON_PERSISTED_EVENTS = new Set(['delta', 'reasoning'])
-			const emit = async (eventName: string, payload: unknown) => {
-				let seq: number | undefined
-				if (!NON_PERSISTED_EVENTS.has(eventName)) {
-					try {
-						seq = await appendRunEvent(run.id, eventName, payload)
-					} catch (err) {
-						console.error('[chat/stream] failed to log run event', {
-							runId: run.id,
-							eventName,
-							error: err instanceof Error ? err.message : String(err),
-						})
-					}
-				}
-				safeController.enqueue(sse(eventName, payload, seq))
-			}
-
-			const updateRun = async (patch: {
-				state?: ChatRunState
-				label?: string | null
-				lastDelta?: string | null
-				error?: string | null
-				heartbeat?: boolean
-				finished?: boolean
-			}) => {
-				const now = Date.now()
-				if (
-					patch.heartbeat &&
-					!patch.state &&
-					patch.label === undefined &&
-					patch.lastDelta === undefined &&
-					patch.error === undefined &&
-					now - lastHeartbeatWriteAt < 1000
-				) {
-					return
-				}
-
-				const values: Partial<typeof chatRuns.$inferInsert> = {
-					updatedAt: new Date(now),
-				}
-				if (patch.state) values.state = patch.state
-				if (patch.label !== undefined) values.label = patch.label
-				if (patch.lastDelta !== undefined) values.lastDelta = patch.lastDelta
-				if (patch.error !== undefined) values.error = patch.error
-				if (patch.heartbeat || patch.state === 'running') values.lastHeartbeatAt = new Date(now)
-				if (patch.finished) values.finishedAt = new Date(now)
-
-				await db.update(chatRuns).set(values).where(eq(chatRuns.id, run.id))
-				if (patch.heartbeat || patch.state === 'running') {
-					lastHeartbeatWriteAt = now
-				}
-			}
+			// Wave 2 #10 phase 1 — runtime extraction. The session wraps the controller +
+			// run_events + chat_runs writes; the loop is now in $lib/runtime/loop.server.ts.
+			const session = createSseSession({ runId: run.id, controller })
 
 			try {
 				// Notify client if compaction occurred
 				if (didCompact) {
-					await emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
+					await session.emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
 				}
 
 				// Phase 7 of #4: emit a context_stats snapshot so the chat workbench can show
 				// the real prompt-assembly footprint (tokenizer-accurate) rather than estimating
 				// client-side. Sent once at the top of the stream; cheap to compute.
-				await emit('context_stats', {
+				await session.emit('context_stats', {
 					runId: run.id,
 					tokenEstimate: estimateMessageTokens(trimmedMessages, routedModel),
 					contextWindow: getContextWindowSize(routedModel),
@@ -598,456 +527,53 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					systemPromptTokens: assembled.estimatedTokens,
 				})
 
-				let currentMessages: LoopMessage[] = [...trimmedMessages]
-				const allToolCalls: Array<Record<string, unknown>> = []
-				// Ordered blocks for interleaved rendering in the UI; mirrored to chat_runs.streamBlocks per push.
-				const streamBlocks: StreamBlock[] = []
-				const pushBlock = async (block: StreamBlock) => {
-					streamBlocks.push(block)
-					await persistRunBlocks(run.id, streamBlocks)
-				}
-				let allTextContent = ''
-
-				let reasoningTokens: number | null = null
-
-				for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-					await setRunRound(run.id, round)
-					// Refresh the active tool surface from the run's enabled capability groups so
-					// `enable_capability` calls in the previous round take effect this round.
-					if (useProgressiveDisclosure) {
-						const enabled = await getEnabledGroups(run.id)
-						tools = computeTools(enabled)
-					}
-					const stream = await streamChat(currentMessages, routedModel, tools, reasoningConfig)
-
-					// Accumulated tool calls for this round (streamed piecewise)
-					const pendingToolCalls: Array<{
-						id: string
-						name: string
-						arguments: string
-					}> = []
-
-					assistantContent = ''
-					let assistantReasoning = ''
-					const assistantReasoningDetails: ReasoningDetail[] = []
-
-					for await (const chunk of stream) {
-						const delta = chunk.choices?.[0]?.delta as
-							| {
-									content?: string
-									reasoning?: string | null
-									reasoningDetails?: ReasoningDetail[]
-									toolCalls?: Array<{
-										index?: number
-										id?: string
-										function?: { name?: string; arguments?: string }
-									}>
-							  }
-							| undefined
-						const reasoningDelta = delta?.reasoning
-						const reasoningDetailDelta = delta?.reasoningDetails
-						if (typeof reasoningDelta === 'string' && reasoningDelta.length > 0) {
-							assistantReasoning += reasoningDelta
-							await emit('reasoning', { content: reasoningDelta })
-						} else if (reasoningDetailDelta?.length) {
-							assistantReasoningDetails.push(...reasoningDetailDelta)
-							const fragment = extractReasoningFragment(reasoningDetailDelta)
-							if (fragment) {
-								assistantReasoning += fragment
-								await emit('reasoning', { content: fragment })
+				const loopResult = await runChatLoop({
+					session,
+					userId: user.id,
+					conversationId: body.conversationId,
+					model: routedModel,
+					initialMessages: trimmedMessages,
+					initialTools,
+					reasoningConfig,
+					maxRounds: MAX_TOOL_ROUNDS,
+					approvalRequiredTools,
+					isOrchestrator,
+					persistentKey,
+					worktree: worktreeConfig,
+					computeTools: useProgressiveDisclosure
+						? async () => {
+								const enabled = await getEnabledGroups(run.id)
+								return computeToolsFor(enabled)
 							}
-						}
-						const content = delta?.content
-						if (content) {
-							if (firstTokenAt === null) {
-								firstTokenAt = Date.now()
-							}
-							assistantContent += content
-							await emit('delta', { content })
-							await updateRun({
-								state: 'running',
-								label: 'Generating response',
-								lastDelta: assistantContent.slice(-500),
-								heartbeat: true,
-							})
-						}
+						: async () => initialTools,
+					spawnSubagent: async (req) => {
+						const fullTask = req.context ? `${req.context}\n\n${req.task}` : req.task
+						const result = await runInlineSubagent(
+							{ agentId: req.agentId, agentName: req.agentId.slice(0, 8), task: fullTask },
+							user.id,
+							body.conversationId,
+							session.safeController,
+						)
+						return { conversationId: result.conversationId, result: result.result }
+					},
+				})
 
-						// Accumulate streamed tool calls
-						const deltaToolCalls = delta?.toolCalls
-						if (deltaToolCalls) {
-							for (const tc of deltaToolCalls) {
-								const idx = tc.index ?? 0
-								if (!pendingToolCalls[idx]) {
-									pendingToolCalls[idx] = { id: tc.id ?? '', name: '', arguments: '' }
-								}
-								if (tc.id) pendingToolCalls[idx].id = tc.id
-								if (tc.function?.name) pendingToolCalls[idx].name += tc.function.name
-								if (tc.function?.arguments) pendingToolCalls[idx].arguments += tc.function.arguments
-							}
-						}
-
-						if (chunk.usage) {
-							promptTokens += chunk.usage.promptTokens ?? 0
-							completionTokens += chunk.usage.completionTokens ?? 0
-							if ('completionTokensDetails' in chunk.usage) {
-								reasoningTokens = chunk.usage.completionTokensDetails?.reasoningTokens ?? reasoningTokens
-							}
-						}
-
-						await updateRun({ state: 'running', heartbeat: true })
-					}
-
-					// Check for finish_reason tool_calls or pending tool calls
-					const validToolCalls = pendingToolCalls.filter((tc) => tc.name)
-					const plannedToolCalls = validToolCalls.map((tc) => {
-						let parsedArgs: unknown = {}
-						try {
-							parsedArgs = JSON.parse(tc.arguments)
-						} catch {
-							parsedArgs = {}
-						}
-						return {
-							id: tc.id,
-							name: tc.name,
-							arguments: tc.arguments,
-							parsedArgs,
-						}
-					})
-
-					// Capture assistant text for this round into ordered blocks
-					if (assistantReasoning.trim()) {
-						await pushBlock({ kind: 'thinking', content: assistantReasoning.trim() })
-					}
-					if (assistantContent) {
-						await pushBlock({ kind: 'text', content: assistantContent })
-						allTextContent += (allTextContent ? '\n' : '') + assistantContent
-					}
-
-					if (validToolCalls.length === 0) {
-						// No tool calls ΓÇö we're done
-						break
-					}
-
-					// Execute each tool call
-					const toolResults: Array<{ call_id: string; name: string; result: string }> = []
-					for (const tc of plannedToolCalls) {
-						const parsedArgs = tc.parsedArgs
-
-						const requiresApproval = approvalRequiredTools.has('*') || approvalRequiredTools.has(tc.name)
-
-						if (requiresApproval) {
-							const approvalToken = crypto.randomUUID()
-							await enqueuePendingApproval(run.id, {
-								token: approvalToken,
-								toolName: tc.name,
-								args: parsedArgs,
-								requestedAt: new Date().toISOString(),
-							})
-							await updateRun({ state: 'waiting_tool_approval', label: `Waiting for approval: ${tc.name}` })
-							await emit('tool_pending', {
-								token: approvalToken,
-								id: tc.id,
-								name: tc.name,
-								arguments: tc.arguments,
-							})
-							const approved = await awaitApprovalDecision(run.id, approvalToken)
-							await updateRun({
-								state: 'running',
-								label: approved ? `Executing ${tc.name}` : `Denied ${tc.name}`,
-								heartbeat: true,
-							})
-							if (!approved) {
-								await emit('tool_denied', {
-									id: tc.id,
-									name: tc.name,
-								})
-								allToolCalls.push({
-									name: tc.name,
-									arguments: parsedArgs,
-									result: { denied: true },
-									executionMs: 0,
-								})
-								toolResults.push({ call_id: tc.id, name: tc.name, result: 'Tool execution was denied by user.' })
-								continue
-							}
-						}
-
-						if (tc.name === 'ask_user') {
-							if (!isOrchestrator) {
-								const resultStr = trimToolResult(
-									tc.name,
-									JSON.stringify({
-										error:
-											'Agents cannot ask users directly. Return this question to the orchestrator to gather user input, then resume the agent with those answers.',
-									}),
-								)
-								await emit('tool_result', {
-									id: tc.id,
-									name: tc.name,
-									success: false,
-									executionMs: 0,
-									result: resultStr,
-								})
-								toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-								allToolCalls.push({
-									name: tc.name,
-									arguments: parsedArgs,
-									result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-									executionMs: 0,
-								})
-								await pushBlock({
-									kind: 'tool',
-									name: tc.name,
-									arguments: parsedArgs,
-									result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-									success: false,
-									executionMs: 0,
-								})
-								continue
-							}
-
-							let input: {
-								questions: Array<{
-									header: string
-									question: string
-									options: Array<{ label: string; description?: string; recommended?: boolean }>
-									allowFreeformInput: boolean
-								}>
-							}
-							try {
-								input = toolSchemas.ask_user.parse(parsedArgs)
-							} catch {
-								const errorMessage = 'ask_user received invalid arguments.'
-								await emit('tool_result', {
-									name: tc.name,
-									success: false,
-									executionMs: 0,
-									result: errorMessage,
-								})
-								allToolCalls.push({
-									name: tc.name,
-									arguments: parsedArgs,
-									result: { error: errorMessage },
-									executionMs: 0,
-								})
-								toolResults.push({ call_id: tc.id, name: tc.name, result: errorMessage })
-								continue
-							}
-
-							const questionToken = crypto.randomUUID()
-							await enqueuePendingQuestion(run.id, {
-								token: questionToken,
-								questions: input.questions,
-								requestedAt: new Date().toISOString(),
-							})
-							await updateRun({ state: 'waiting_user_input', label: 'Waiting for user input' })
-							await emit('ask_user', {
-								token: questionToken,
-								id: tc.id,
-								name: tc.name,
-								questions: input.questions,
-							})
-
-							const answers = await awaitQuestionAnswers(run.id, questionToken)
-							await updateRun({ state: 'running', label: 'User input received', heartbeat: true })
-
-							const questionResult = {
-								questions: input.questions,
-								answers,
-								timedOut: answers === null,
-							}
-							const resultStr = trimToolResult(tc.name, JSON.stringify(questionResult))
-
-							await emit('tool_result', {
-								id: tc.id,
-								name: tc.name,
-								success: answers !== null,
-								executionMs: 0,
-								result: resultStr,
-							})
-
-							toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-							allToolCalls.push({
-								name: tc.name,
-								arguments: parsedArgs,
-								result: questionResult,
-								executionMs: 0,
-							})
-							await pushBlock({
-								kind: 'tool',
-								name: tc.name,
-								arguments: parsedArgs,
-								result: questionResult,
-								success: answers !== null,
-								executionMs: 0,
-							})
-							continue
-						}
-
-						await updateRun({ state: 'running', label: `Executing ${tc.name}`, heartbeat: true })
-						await emit('tool_call', {
-							id: tc.id,
-							name: tc.name,
-							arguments: tc.arguments,
-						})
-
-						// Intercept run_subagent with agentId for inline sub-agent streaming
-						if (tc.name === 'run_subagent' && isOrchestrator) {
-							const subagentArgs = parsedArgs as { task?: string; context?: string; agentId?: string }
-							if (subagentArgs.agentId && subagentArgs.task) {
-								try {
-									const subResult = await runInlineSubagent(
-										{
-											agentId: subagentArgs.agentId,
-											agentName: subagentArgs.agentId.slice(0, 8),
-											task: subagentArgs.context
-												? `${subagentArgs.context}\n\n${subagentArgs.task}`
-												: subagentArgs.task,
-										},
-										user.id,
-										body.conversationId,
-										safeController,
-									)
-									const resultStr = trimToolResult(
-										tc.name,
-										JSON.stringify({
-											success: true,
-											agentConversationId: subResult.conversationId,
-											result: subResult.result.slice(0, 4000),
-										}),
-									)
-									toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-									await emit('tool_result', {
-										id: tc.id,
-										name: tc.name,
-										success: true,
-										executionMs: 0,
-										result: resultStr,
-									})
-									allToolCalls.push({
-										name: tc.name,
-										arguments: parsedArgs,
-										result: { agentConversationId: subResult.conversationId, result: subResult.result.slice(0, 4000) },
-										executionMs: 0,
-									})
-									await pushBlock({
-										kind: 'tool',
-										name: tc.name,
-										arguments: parsedArgs,
-										result: { agentConversationId: subResult.conversationId, result: subResult.result.slice(0, 4000) },
-										success: true,
-										executionMs: 0,
-									})
-								} catch (error) {
-									const errorStr = error instanceof Error ? error.message : 'Sub-agent execution failed'
-									toolResults.push({ call_id: tc.id, name: tc.name, result: `Error: ${errorStr}` })
-									await emit('tool_result', {
-										id: tc.id,
-										name: tc.name,
-										success: false,
-										executionMs: 0,
-										result: errorStr,
-									})
-									allToolCalls.push({
-										name: tc.name,
-										arguments: parsedArgs,
-										result: { error: errorStr },
-										executionMs: 0,
-									})
-									await pushBlock({
-										kind: 'tool',
-										name: tc.name,
-										arguments: parsedArgs,
-										result: { error: errorStr },
-										success: false,
-										executionMs: 0,
-									})
-								}
-								continue
-							}
-						}
-
-						const toolCall: ToolCallWithContext = {
-							name: tc.name as ToolName,
-							arguments: parsedArgs,
-							conversationId: body.conversationId,
-							messageId: null,
-						}
-
-						const toolResult = await executeTool(toolCall, user.id, run.id, {
-							persistentKey,
-							worktree: worktreeConfig,
-						})
-
-						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
-						// Wave 2 #8 phase 5 / #9 phase 5 — offload large tool outputs to the workspace
-						// (head + tail + handle) instead of mid-content truncation. The full payload
-						// stays recoverable via file_read('.tool-outputs/<callId>.txt') after the model
-						// enables the sandbox group.
-						const trimmed = await trimToolResultWithOffload({
-							toolName: tc.name,
-							content: rawResultStr,
-							callId: tc.id,
-							userId: user.id,
-							runId: run.id,
-							persistentKey,
-							worktree: worktreeConfig,
-						})
-						const resultStr = trimmed.visible
-
-						toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-
-						await emit('tool_result', {
-							id: tc.id,
-							name: tc.name,
-							success: toolResult.success,
-							executionMs: toolResult.executionMs,
-							result: resultStr,
-							offloadedHandle: trimmed.handle,
-							fullSize: trimmed.fullSize,
-						})
-
-						allToolCalls.push({
-							name: tc.name,
-							arguments: parsedArgs,
-							result: toolResult.success ? toolResult.result : { error: toolResult.error },
-							executionMs: toolResult.executionMs,
-						})
-						await pushBlock({
-							kind: 'tool',
-							name: tc.name,
-							arguments: parsedArgs,
-							result: toolResult.success ? toolResult.result : { error: toolResult.error },
-							success: toolResult.success,
-							executionMs: toolResult.executionMs,
-						})
-					}
-
-					// Append assistant message with tool_calls + tool results to conversation for next round
-					currentMessages.push({
-						role: 'assistant',
-						content: assistantContent || '',
-						reasoning: assistantReasoning || undefined,
-						reasoningDetails: assistantReasoningDetails.length ? assistantReasoningDetails : undefined,
-						toolCalls: validToolCalls.map((tc) => ({
-							id: tc.id,
-							type: 'function' as const,
-							function: { name: tc.name, arguments: tc.arguments },
-						})),
-					})
-
-					for (const tr of toolResults) {
-						currentMessages.push({
-							role: 'tool',
-							content: tr.result,
-							toolCallId: tr.call_id,
-						})
-					}
-				}
+				const {
+					promptTokens,
+					completionTokens,
+					reasoningTokens,
+					finalText: allTextContent,
+					toolCalls: allToolCalls,
+					streamBlocks,
+				} = loopResult
+				const firstTokenAt = loopResult.firstTokenAt
 
 				const totalMs = Date.now() - startedAt
-				const ttftMs = firstTokenAt ? firstTokenAt - startedAt : null
+				const ttftMs = firstTokenAt
 				const tokensPerSec = totalMs > 0 ? Math.round((completionTokens / (totalMs / 1000)) * 100) / 100 : null
+				// Backfill the most recent thinking block with its final reasoning-token count.
+				// The loop only learns the count from the LAST chunk; updating the block in-place
+				// keeps the persisted metadata accurate after the message is saved.
 				for (let i = streamBlocks.length - 1; i >= 0; i--) {
 					const block = streamBlocks[i]
 					if (block.kind === 'thinking') {
@@ -1073,7 +599,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.values({
 						conversationId: body.conversationId,
 						role: 'assistant',
-						content: allTextContent || assistantContent || '(no output)',
+						content: allTextContent || '(no output)',
 						model: routedModel,
 						parentMessageId,
 						tokensIn: promptTokens,
@@ -1105,18 +631,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (isFirstExchange && body.content) {
 					void generateTitle([
 						{ role: 'user', content: body.content.trim() },
-						{ role: 'assistant', content: allTextContent || assistantContent || '' },
+						{ role: 'assistant', content: allTextContent },
 					])
 						.then((title) => db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId)))
 						.catch(() => {
-							// Non-critical ΓÇö title stays as default
+							// Non-critical — title stays as default
 						})
 				}
 
-				await updateRun({
+				await session.updateRun({
 					state: 'completed',
 					label: 'Completed',
-					lastDelta: (allTextContent || assistantContent || '').slice(-500),
+					lastDelta: allTextContent.slice(-500),
 					heartbeat: true,
 					finished: true,
 				})
@@ -1129,7 +655,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					})
 				}
 
-				await emit('metrics', {
+				await session.emit('metrics', {
 					model: routedModel,
 					tokensIn: promptTokens,
 					tokensOut: completionTokens,
@@ -1140,22 +666,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					cost: parseFloat(messageCost),
 					modelSelection,
 				})
-				await emit('done', { messageId: assistantMessage.id })
-				if (clientConnected) {
+				await session.emit('done', { messageId: assistantMessage.id })
+				if (session.isClientConnected()) {
 					controller.close()
 				}
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
-				await updateRun({
+				await session.updateRun({
 					state: 'failed',
 					label: 'Failed',
 					error: errorMessage,
 					finished: true,
 				})
-				await emit('done', {
+				await session.emit('done', {
 					error: errorMessage,
 				})
-				if (clientConnected) {
+				if (session.isClientConnected()) {
 					controller.close()
 				}
 			}

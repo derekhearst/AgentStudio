@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listTasksQuery } from '$lib/tasks';
+	import { listTasksQuery } from '$lib/tasks/tasks.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type TaskRow = Awaited<ReturnType<typeof listTasksQuery>>[number];

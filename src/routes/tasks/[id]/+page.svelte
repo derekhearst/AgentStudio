@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { getTaskByIdQuery, setTaskStatusCommand, cancelTaskCommand } from '$lib/tasks';
+	import { getTaskByIdQuery, setTaskStatusCommand, cancelTaskCommand } from '$lib/tasks/tasks.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const taskId = $derived(page.params.id ?? '');

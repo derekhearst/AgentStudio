@@ -11,7 +11,7 @@
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant, setConversationMode } from '$lib/chat/chat.remote';
-	import { getActiveTaskForConversationQuery } from '$lib/tasks';
+	import { getActiveTaskForConversationQuery } from '$lib/tasks/tasks.remote';
 
 	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 	import { getAvailableModels } from '$lib/llm';
