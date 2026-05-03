@@ -11,3 +11,4 @@ export type {
 } from './types'
 export { runChatLoop } from './loop.server'
 export { createSseSession } from './session/sse.server'
+export { createForwardedSession } from './session/forwarded.server'

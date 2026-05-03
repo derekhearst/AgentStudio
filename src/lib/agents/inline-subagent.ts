@@ -3,20 +3,14 @@ import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
-import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
-import {
-	executeTool,
-	getToolDefinitions,
-	toolSchemas,
-	type ToolCallWithContext,
-	type ToolName,
-} from '$lib/tools/tools.server'
+import type { LlmMessage } from '$lib/llm/chat.server'
+import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
-import { trimToolResult } from '$lib/chat/chat'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import { createForwardedSession, runChatLoop } from '$lib/runtime'
 
 const encoder = new TextEncoder()
 
@@ -32,8 +26,18 @@ export type SubagentStep = {
 
 /**
  * Run a sub-agent inline within the orchestrator's stream.
- * Creates a new conversation for the sub-agent, streams its work,
- * and returns the final result text.
+ *
+ * Wave 2 #10 phase 5 — refactored to route through `runChatLoop` with a forwarded Session
+ * (events get a `subagent_` prefix on their way to the parent's controller). The shed ~250
+ * lines of for-round duplication.
+ *
+ * Contract preserved from before extraction:
+ *   - Creates a fresh sub-conversation under the agent
+ *   - Inserts a `chat_runs` row with source='agent_subagent'
+ *   - Emits `subagent_start` → loop events (translated by the forwarded Session) → `subagent_done`
+ *   - Returns `{ result, conversationId, cost }` to the orchestrator's `run_subagent` tool result
+ *   - Sub-agents that try to call `ask_user` get an error tool_result inside the loop (handled by
+ *     runChatLoop when `isOrchestrator: false`); they don't reach the actual user
  */
 export async function runInlineSubagent(
 	step: SubagentStep,
@@ -45,6 +49,7 @@ export async function runInlineSubagent(
 	if (!agent) {
 		throw new Error(`Agent not found: ${step.agentId}`)
 	}
+
 	// Phase 2 of #7: opt-in persistent workspace per agent.
 	// Phase 4 of #7: opt-in git-worktree workspace per agent.
 	const agentConfigForWs = agent.config as
@@ -75,7 +80,7 @@ export async function runInlineSubagent(
 				}
 			: null
 
-	// Create a conversation for this sub-agent run
+	// Create a conversation for this sub-agent run + its chat_runs row.
 	const [subConversation] = await db
 		.insert(conversations)
 		.values({
@@ -100,43 +105,7 @@ export async function runInlineSubagent(
 		})
 		.returning({ id: chatRuns.id })
 
-	let lastHeartbeatWriteAt = 0
-	async function updateRun(patch: {
-		state?: (typeof chatRuns.$inferInsert)['state']
-		label?: string | null
-		lastDelta?: string | null
-		error?: string | null
-		finished?: boolean
-		heartbeat?: boolean
-	}) {
-		const now = Date.now()
-		if (
-			patch.heartbeat &&
-			!patch.state &&
-			patch.label === undefined &&
-			patch.lastDelta === undefined &&
-			patch.error === undefined &&
-			now - lastHeartbeatWriteAt < 1000
-		) {
-			return
-		}
-
-		const values: Partial<typeof chatRuns.$inferInsert> = {
-			updatedAt: new Date(now),
-		}
-		if (patch.state) values.state = patch.state
-		if (patch.label !== undefined) values.label = patch.label
-		if (patch.lastDelta !== undefined) values.lastDelta = patch.lastDelta
-		if (patch.error !== undefined) values.error = patch.error
-		if (patch.heartbeat || patch.state === 'running') values.lastHeartbeatAt = new Date(now)
-		if (patch.finished) values.finishedAt = new Date(now)
-
-		await db.update(chatRuns).set(values).where(eq(chatRuns.id, run.id))
-		if (patch.heartbeat || patch.state === 'running') {
-			lastHeartbeatWriteAt = now
-		}
-	}
-
+	// Subagent-specific lifecycle event: announce the start to the parent UI.
 	controller.enqueue(
 		sse('subagent_start', {
 			agentId: agent.id,
@@ -146,7 +115,7 @@ export async function runInlineSubagent(
 		}),
 	)
 
-	// Save the task as the user message in sub-agent conversation
+	// Save the task as the user message in the sub-agent conversation.
 	await db.insert(messages).values({
 		conversationId: subConversation.id,
 		role: 'user',
@@ -154,7 +123,7 @@ export async function runInlineSubagent(
 		metadata: { source: 'orchestrator', parentConversationId },
 	})
 
-	// Build sub-agent context using the slot system + memory recall on the task description.
+	// Build sub-agent context using the slot system + skill summaries + memory recall.
 	const slots: ContextSlot[] = [
 		{ name: 'identity', priority: 100, content: agent.systemPrompt },
 		{ name: 'role', priority: 95, content: `Your role: ${agent.role}` },
@@ -186,9 +155,8 @@ export async function runInlineSubagent(
 		})
 	}
 
-	// --- Sub-agent context enrichment: memory recall on the task description ---
-	// Phase 6 of #4: bring relevant memory into the sub-agent's context so it can pick up
-	// where prior conversations left off, not start from a blank slate.
+	// Phase 6 of #4: bring relevant memory into the sub-agent's context so it can pick up where
+	// prior conversations left off, not start from a blank slate. Best-effort.
 	try {
 		const settings = await getOrCreateSettings(userId)
 		const memoryConfig = (settings.memoryConfig ?? null) as {
@@ -223,196 +191,66 @@ export async function runInlineSubagent(
 		{ role: 'user', content: step.task },
 	]
 
+	// Sub-agents always get the full tool surface minus ask_user (they can't reach the user).
+	// Progressive disclosure isn't applied here; the sub-agent has a focused single-shot task.
 	const tools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
-	const MAX_ROUNDS = 20
-	let totalContent = ''
-	let promptTokens = 0
-	let completionTokens = 0
+
+	const session = createForwardedSession({ runId: run.id, parentController: controller })
 
 	try {
-		for (let round = 0; round <= MAX_ROUNDS; round++) {
-			const stream = await streamChat(subMessages, agent.model, tools)
+		const loopResult = await runChatLoop({
+			session,
+			userId,
+			conversationId: subConversation.id,
+			model: agent.model,
+			initialMessages: subMessages,
+			initialTools: tools,
+			computeTools: async () => tools,
+			maxRounds: 20,
+			// Sub-agents bypass tool approval — they're already running under the orchestrator's
+			// approved scope. Adding approval here would deadlock (no UI surface to approve in).
+			approvalRequiredTools: new Set<string>(),
+			isOrchestrator: false,
+			persistentKey,
+			worktree: worktreeConfig,
+			// Sub-agents don't spawn their own sub-agents in this flow.
+			spawnSubagent: undefined,
+		})
 
-			let roundContent = ''
-			const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
-
-			for await (const chunk of stream) {
-				const delta = chunk.choices?.[0]?.delta as
-					| {
-							content?: string
-							toolCalls?: Array<{
-								index?: number
-								id?: string
-								function?: { name?: string; arguments?: string }
-							}>
-					  }
-					| undefined
-
-				if (delta?.content) {
-					roundContent += delta.content
-					await updateRun({
-						state: 'running',
-						label: `Subagent ${agent.name} generating`,
-						lastDelta: roundContent.slice(-500),
-						heartbeat: true,
-					})
-					controller.enqueue(
-						sse('subagent_delta', {
-							agentId: agent.id,
-							conversationId: subConversation.id,
-							content: delta.content,
-						}),
-					)
-				}
-
-				const deltaToolCalls = delta?.toolCalls
-				if (deltaToolCalls) {
-					for (const tc of deltaToolCalls) {
-						const idx = tc.index ?? 0
-						if (!pendingToolCalls[idx]) {
-							pendingToolCalls[idx] = { id: tc.id ?? '', name: '', arguments: '' }
-						}
-						if (tc.id) pendingToolCalls[idx].id = tc.id
-						if (tc.function?.name) pendingToolCalls[idx].name += tc.function.name
-						if (tc.function?.arguments) pendingToolCalls[idx].arguments += tc.function.arguments
-					}
-				}
-
-				if (chunk.usage) {
-					promptTokens += chunk.usage.promptTokens ?? 0
-					completionTokens += chunk.usage.completionTokens ?? 0
-				}
-				await updateRun({ heartbeat: true })
-			}
-
-			totalContent += roundContent
-
-			const validToolCalls = pendingToolCalls.filter((tc) => tc.name)
-			if (validToolCalls.length === 0) break
-
-			// Execute tool calls
-			const toolResults: Array<{ call_id: string; name: string; result: string }> = []
-
-			for (const tc of validToolCalls) {
-				let parsedArgs: unknown = {}
-				try {
-					parsedArgs = JSON.parse(tc.arguments)
-				} catch {
-					parsedArgs = {}
-				}
-
-				if (tc.name === 'ask_user') {
-					const parsed = toolSchemas.ask_user.safeParse(parsedArgs)
-					const handoff = {
-						requiresOrchestratorInput: true,
-						reason: 'Subagents cannot call ask_user directly.',
-						questions: parsed.success ? parsed.data.questions : [],
-					}
-					const resultStr = trimToolResult(tc.name, JSON.stringify(handoff))
-					toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-
-					controller.enqueue(
-						sse('subagent_tool_result', {
-							agentId: agent.id,
-							conversationId: subConversation.id,
-							name: tc.name,
-							success: false,
-							executionMs: 0,
-						}),
-					)
-					continue
-				}
-
-				await updateRun({ state: 'running', label: `Subagent ${agent.name} executing ${tc.name}`, heartbeat: true })
-				controller.enqueue(
-					sse('subagent_tool_call', {
-						agentId: agent.id,
-						conversationId: subConversation.id,
-						name: tc.name,
-						arguments: tc.arguments,
-					}),
-				)
-
-				const toolCall: ToolCallWithContext = {
-					name: tc.name as ToolName,
-					arguments: parsedArgs,
-					conversationId: subConversation.id,
-					messageId: null,
-				}
-				const toolResult = await executeTool(toolCall, userId, run.id, { persistentKey, worktree: worktreeConfig })
-				const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
-				const resultStr = trimToolResult(tc.name, rawResultStr)
-
-				toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-
-				controller.enqueue(
-					sse('subagent_tool_result', {
-						agentId: agent.id,
-						conversationId: subConversation.id,
-						name: tc.name,
-						success: toolResult.success,
-						executionMs: toolResult.executionMs,
-					}),
-				)
-			}
-
-			// Append for next round
-			subMessages.push({
-				role: 'assistant',
-				content: roundContent || '',
-				toolCalls: validToolCalls.map((tc) => ({
-					id: tc.id,
-					type: 'function' as const,
-					function: { name: tc.name, arguments: tc.arguments },
-				})),
-			})
-			for (const tr of toolResults) {
-				subMessages.push({
-					role: 'tool',
-					content: tr.result,
-					toolCallId: tr.call_id,
-				})
-			}
-		}
-
-		// Save the sub-agent's response
 		const cost = await logLlmUsage({
 			source: 'subagent',
 			model: agent.model,
-			tokensIn: promptTokens,
-			tokensOut: completionTokens,
+			tokensIn: loopResult.promptTokens,
+			tokensOut: loopResult.completionTokens,
 			userId,
 			runId: run.id,
 			agentId: agent.id,
-			metadata: {
-				conversationId: subConversation.id,
-				parentConversationId,
-			},
+			metadata: { conversationId: subConversation.id, parentConversationId },
 		}).catch(() => '0')
 
 		await db.insert(messages).values({
 			conversationId: subConversation.id,
 			role: 'assistant',
-			content: totalContent || '(no output)',
+			content: loopResult.finalText || '(no output)',
 			model: agent.model,
-			tokensIn: promptTokens,
-			tokensOut: completionTokens,
+			tokensIn: loopResult.promptTokens,
+			tokensOut: loopResult.completionTokens,
 			cost,
 		})
 
 		await db
 			.update(conversations)
 			.set({
-				totalTokens: promptTokens + completionTokens,
+				totalTokens: loopResult.promptTokens + loopResult.completionTokens,
 				totalCost: cost,
 				updatedAt: new Date(),
 			})
 			.where(eq(conversations.id, subConversation.id))
 
-		await updateRun({
+		await session.updateRun({
 			state: 'completed',
 			label: `Subagent ${agent.name} completed`,
-			lastDelta: totalContent.slice(-500),
+			lastDelta: loopResult.finalText.slice(-500),
 			heartbeat: true,
 			finished: true,
 		})
@@ -422,17 +260,17 @@ export async function runInlineSubagent(
 				agentId: agent.id,
 				agentName: agent.name,
 				conversationId: subConversation.id,
-				resultPreview: totalContent.slice(0, 500),
+				resultPreview: loopResult.finalText.slice(0, 500),
 			}),
 		)
 
 		return {
-			result: totalContent,
+			result: loopResult.finalText,
 			conversationId: subConversation.id,
 			cost,
 		}
 	} catch (error) {
-		await updateRun({
+		await session.updateRun({
 			state: 'failed',
 			label: `Subagent ${agent.name} failed`,
 			error: error instanceof Error ? error.message : 'Subagent execution failed',
