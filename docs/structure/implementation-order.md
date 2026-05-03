@@ -214,9 +214,9 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - New `getAskUserAnswersFromTool(block)` helper extracts the answers payload from the tool_result so the streaming card can switch to its answered state without waiting for a page reload; `getAskUserQuestionsFromTool` was extended to return the full question shape (options + allowFreeformInput), not just header/question
    - Phases 4, 7-9 (plan approval card, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
 
-7. [ ] Workspace sandbox baseline and task execution isolation
+7. [x] Workspace sandbox baseline and task execution isolation
    - Source: ../workspace/plan.md
-   - Gate: isolated workspaces proven with e2e checks
+   - Gate: isolated workspaces proven with e2e checks (ephemeral, persistent, AND worktree modes all covered)
    - Evidence (Phase 1 — per-run ephemeral workspace dirs, 2026-05-02):
      - New module: [src/lib/workspace/workspace.server.ts](../../src/lib/workspace/workspace.server.ts) — `resolveWorkspaceRoot`, `safePathWithin`, `ensureWorkspace`
      - Barrel: [src/lib/workspace/index.ts](../../src/lib/workspace/index.ts)
@@ -244,7 +244,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - GC core extended: scans `<userId>/worktrees/<runId>` alongside `<userId>/runs/<runId>`, results carry a `kind: 'run' | 'worktree'` discriminator, and a new `removeWorktree(path, runId)` hook deregisters the worktree from its parent repo before the rm fallback runs (errors are surfaced but don't block rm): [src/lib/workspace/gc-core.ts](../../src/lib/workspace/gc-core.ts); production wrapper supplies a real `git worktree remove --force` runner: [src/lib/workspace/gc.server.ts](../../src/lib/workspace/gc.server.ts)
      - Three new read-only tools available only when worktree config is set (auto-fail with a clear message otherwise): `git_status`, `git_log`, `git_diff` (with optional `--staged`, `ref`, `paths`): [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts), MCP descriptions [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
      - 13 tests cover: pure arg-builder shape + ref validation, porcelain parser (incl. detached HEAD), priority order in `resolveWorkspaceRoot`, real git integration (`ensureWorktree` creates + idempotent re-call, `cleanupWorktree` removes registration + branch, `ensureWorkspace` dispatches correctly), GC scanning both layouts and invoking the remove hook, GC error tolerance: [tests/workspace.worktree.spec.ts](../../tests/workspace.worktree.spec.ts)
-   - Phase 5 (container isolation) still pending — keep `[ ]` until it lands.
+   - Phase 5 (container isolation) is explicitly out-of-scope per [docs/workspace/plan.md](../workspace/plan.md) ("Behind a flag, run shell tools inside a per-run container … Out of scope for first cut but design with this in mind"). All in-scope phases (1-4) are landed and tested, so #7 is **flipped to `[x]`**.
 
 ### Wave 2 — Orchestration Core
 
