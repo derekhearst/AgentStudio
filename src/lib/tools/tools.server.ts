@@ -22,6 +22,7 @@ import { requireAdminRequestUser, normalizeUsername } from '$lib/auth/auth.serve
 import { users } from '$lib/auth/auth.schema'
 import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
 import { resolveWorkspaceRoot, safePathWithin, ensureWorkspace } from '$lib/workspace/workspace.server'
+import { logToolUsage } from '$lib/costs/usage'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -894,11 +895,27 @@ export async function executeTool(call: ToolCall, userId: string, runId?: string
 		try {
 			if (call.name === 'web_search') {
 				const input = toolSchemas.web_search.parse(call.arguments)
+				const ctx = toolUserContext.getStore()
+				const result = await webSearch(input.query)
+				// Phase 2 ledger: log every web_search as 1 call. SEARCH_COST_PER_CALL_USD lets
+				// operators set a per-call cost (e.g. for paid backends like Serper); SearXNG is
+				// self-hosted so cost defaults to 0 but the call count is still tracked.
+				const costPerCall = Number.parseFloat(env.SEARCH_COST_PER_CALL_USD ?? '0') || 0
+				void logToolUsage({
+					toolName: 'web_search',
+					provider: env.SEARXNG_URL ? 'searxng' : null,
+					unitType: 'call',
+					units: 1,
+					cost: costPerCall,
+					userId: ctx?.userId ?? null,
+					runId: ctx?.runId ?? null,
+					metadata: { query: input.query.slice(0, 240), resultCount: result.length },
+				}).catch((err) => console.warn('[tool-usage] web_search log failed', err))
 				return {
 					success: true,
 					tool: call.name,
 					input,
-					result: await webSearch(input.query),
+					result,
 					executionMs: Date.now() - startedAt,
 				}
 			}

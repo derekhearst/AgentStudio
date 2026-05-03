@@ -143,6 +143,8 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - `logToolUsage` helper (cost or units×costPerUnit): [src/lib/costs/usage.ts](../../src/lib/costs/usage.ts)
      - `getCostSummary` adds `toolSpend`, `toolCallCount`, `byTool`, `combinedSpend`: [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
      - Tests: [tests/cost.tool-usage.spec.ts](../../tests/cost.tool-usage.spec.ts)
+     - `web_search` instrumented in [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts) — writes a `tool_usage` row per call (provider=searxng, cost from `SEARCH_COST_PER_CALL_USD` env)
+     - Live test proving the chat → web_search → tool_usage row chain: [tests/cost.tool-usage-live.spec.ts](../../tests/cost.tool-usage-live.spec.ts)
    - Phases 3-5 (budget limits, dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
 
 6. [ ] Chat mode system + inline approvals + HUD
