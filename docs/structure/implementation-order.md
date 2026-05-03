@@ -273,6 +273,14 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
    - Source: ../skills/plan.md
    - Depends on: #8 for companion-tool guidance
    - Gate: deterministic loading order and provenance visible
+   - Evidence (Phase 1 + Phase 4 — companion skill mapping + first-party seeds, 2026-05-03):
+     - Schema: `companion_groups text[]` + `companion_tools text[]` on `skills` (default `{}`): [src/lib/skills/skills.schema.ts](../../src/lib/skills/skills.schema.ts), migration [drizzle/0024_happy_lady_bullseye.sql](../../drizzle/0024_happy_lady_bullseye.sql)
+     - Helpers: `getCompanionSkillsForGroups(groups)` + `getCompanionSkillsForTools(toolNames)` use Postgres `&&` array overlap to fetch enabled skills whose companion arrays intersect the request: [src/lib/skills/skills.server.ts](../../src/lib/skills/skills.server.ts)
+     - First-party companion seeds for `sandbox` / `skills` / `agents` / `media` (fixed UUIDs `…d001` … `…d004`) authored under `tools/sandbox-fs`, `tools/skills-management`, `tools/agents-delegation`, `tools/media-generation` — bootstrap inserts on first boot, idempotent across boots: [src/lib/skills/companion-skills.server.ts](../../src/lib/skills/companion-skills.server.ts), wired in [src/lib/db.server.ts](../../src/lib/db.server.ts)
+     - `enable_capability` executor surfaces matching companion summaries inline in the tool result so the model gets the usage guidance for free when it expands its tool surface (no separate prompt-slot recompute per round needed): [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts). The result also carries a human-readable `note` string telling the model to call `read_skill` for full bodies on demand.
+     - Both seed functions converted to no-target `ON CONFLICT DO NOTHING` so renamed/orphaned rows from an older boot (e.g. the bumped `system/mode-plan` UUID c003 → c023 from #6 phase 4) no longer fail the seed with a unique-name violation. Caller-side `try/catch` already kept it non-fatal, but the warning was noisy.
+     - 5 tests cover the bootstrap seed, single + multi-group `&&` overlap, user-authored companion skills surfacing, and the empty-array column default for forward-compat: [tests/skills.companion.spec.ts](../../tests/skills.companion.spec.ts)
+   - Phases 2 (skills browser/authoring UI), 3 (intent-based auto-suggest), 5 (skill-aware tool-output offload) still pending — keep `[ ]` until they land.
 
 10. [ ] Runtime extraction/composition server
     - Source: ../runtime/plan.md

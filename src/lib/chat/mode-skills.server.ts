@@ -107,10 +107,14 @@ export async function seedModeIdentitySkills(dbInstance: DbLike): Promise<{ inse
 		createdAt: now,
 		updatedAt: now,
 	}))
+	// No-target ON CONFLICT DO NOTHING so we tolerate either an id PK collision (preserves user
+	// edits across boots) OR a name uniqueness collision (handles a renamed/orphaned row from an
+	// older boot — e.g. when the plan-mode UUID was bumped c003 → c023, the old row's
+	// `system/mode-plan` name still occupies the unique index).
 	const inserted = await dbInstance
 		.insert(skills)
 		.values(values)
-		.onConflictDoNothing({ target: skills.id })
+		.onConflictDoNothing()
 		.returning({ id: skills.id })
 	return { inserted: inserted.length }
 }

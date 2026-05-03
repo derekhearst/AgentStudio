@@ -117,6 +117,8 @@ function buildSystemSkill() {
 		lastAccessed: null as Date | null,
 		descriptionEmbedding: null as number[] | null,
 		descriptionEmbeddedAt: null as Date | null,
+		companionGroups: [] as string[],
+		companionTools: [] as string[],
 		createdAt: SYSTEM_SKILL_CREATED_AT,
 		updatedAt: SYSTEM_SKILL_CREATED_AT,
 		isSystem: true,
@@ -531,4 +533,59 @@ function buildSystemSkillSummary(): SkillSummary {
 		description: systemSkill.description,
 		files: systemSkill.files.map((f) => ({ name: f.name, description: f.description })),
 	}
+}
+
+/**
+ * Wave 2 #9 Phase 1 — companion-skill lookup. Returns enabled skills whose `companionGroups`
+ * array overlaps with any of the given group names (Postgres `&&` array overlap operator).
+ *
+ * Used by the chat stream handler: when a run enables a capability group via `enable_capability`,
+ * the companion skills' summaries (NOT full bodies) get auto-injected as a context slot so the
+ * model knows when/how to use the new tools without bloating the prompt.
+ */
+export async function getCompanionSkillsForGroups(groups: string[]): Promise<SkillSummary[]> {
+	if (groups.length === 0) return []
+	const rows = await db
+		.select({ id: skills.id, name: skills.name, description: skills.description })
+		.from(skills)
+		.where(
+			and(
+				eq(skills.enabled, true),
+				drizzleSql`${skills.companionGroups} && ${groups}::text[]`,
+			),
+		)
+		.orderBy(asc(skills.name))
+	if (rows.length === 0) return []
+	const fileRows = await db
+		.select({ skillId: skillFiles.skillId, name: skillFiles.name, description: skillFiles.description })
+		.from(skillFiles)
+		.innerJoin(skills, eq(skillFiles.skillId, skills.id))
+		.where(eq(skills.enabled, true))
+		.orderBy(asc(skillFiles.sortOrder), asc(skillFiles.name))
+	const fileMap = new Map<string, Array<{ name: string; description: string }>>()
+	for (const f of fileRows) {
+		const arr = fileMap.get(f.skillId) ?? []
+		arr.push({ name: f.name, description: f.description })
+		fileMap.set(f.skillId, arr)
+	}
+	return rows.map((r) => ({ ...r, files: fileMap.get(r.id) ?? [] }))
+}
+
+/**
+ * Companion-skill lookup keyed by tool name (rather than capability group). Useful when a single
+ * tool has bespoke usage guidance separate from its group. Pure DB lookup; no embedding ranking.
+ */
+export async function getCompanionSkillsForTools(toolNames: string[]): Promise<SkillSummary[]> {
+	if (toolNames.length === 0) return []
+	const rows = await db
+		.select({ id: skills.id, name: skills.name, description: skills.description })
+		.from(skills)
+		.where(
+			and(
+				eq(skills.enabled, true),
+				drizzleSql`${skills.companionTools} && ${toolNames}::text[]`,
+			),
+		)
+		.orderBy(asc(skills.name))
+	return rows.map((r) => ({ ...r, files: [] }))
 }

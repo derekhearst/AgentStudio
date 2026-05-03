@@ -1511,6 +1511,19 @@ export async function executeTool(
 				}
 				const { enableGroupForRun } = await import('$lib/tools/capabilities.server')
 				const enableResult = await enableGroupForRun(ctx.runId, input.group)
+				// Wave 2 #9 Phase 1 — surface companion skill summaries inline with the
+				// enable result so the model learns when/how to use the new tools without
+				// us having to recompute context slots for every round.
+				let companionSummaries: Array<{ name: string; description: string }> = []
+				if (enableResult.added) {
+					try {
+						const { getCompanionSkillsForGroups } = await import('$lib/skills/skills.server')
+						const skills = await getCompanionSkillsForGroups([input.group])
+						companionSummaries = skills.map((s) => ({ name: s.name, description: s.description }))
+					} catch (err) {
+						console.warn('[enable_capability] companion skill lookup failed', err)
+					}
+				}
 				return {
 					success: true,
 					tool: call.name,
@@ -1519,8 +1532,13 @@ export async function executeTool(
 						added: enableResult.added,
 						enabledGroups: enableResult.enabledGroups,
 						addedTools: enableResult.addedTools,
+						companionSkills: companionSummaries,
 						note: enableResult.added
-							? `Enabled '${input.group}'. ${enableResult.addedTools.length} new tools available next round: ${enableResult.addedTools.join(', ')}.`
+							? `Enabled '${input.group}'. ${enableResult.addedTools.length} new tools available next round: ${enableResult.addedTools.join(', ')}.${
+									companionSummaries.length > 0
+										? ` Use \`read_skill\` to load any of these companion skills for usage guidance: ${companionSummaries.map((s) => s.name).join(', ')}.`
+										: ''
+								}`
 							: `'${input.group}' was already enabled.`,
 					},
 					executionMs: Date.now() - startedAt,

@@ -369,6 +369,19 @@ async function bootstrapDatabase() {
 			console.warn('[db] Mode-identity skill seed failed (non-fatal):', err)
 		}
 
+		// Wave 2 #9 Phase 1 — seed first-party companion skills (one per capability group). Same
+		// idempotent pattern as mode skills.
+		try {
+			const { seedCompanionSkills } = await import('$lib/skills/companion-skills.server')
+			const seedDb = createDatabase(client)
+			const result = await seedCompanionSkills(seedDb)
+			if (result.inserted > 0) {
+				console.log(`[db] Seeded ${result.inserted} companion skill(s)`)
+			}
+		} catch (err) {
+			console.warn('[db] Companion skill seed failed (non-fatal):', err)
+		}
+
 		// Phase 4 of #4: backfill embeddings for any skills that don't have them yet, so the
 		// relevance filter has something to rank. Best-effort; failures are non-fatal (the
 		// fallback path lists every skill exactly like before).
