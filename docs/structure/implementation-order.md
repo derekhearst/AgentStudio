@@ -203,7 +203,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Stream handler reads live posture content: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Mode helper exposes loader: [src/lib/chat/mode.server.ts](../../src/lib/chat/mode.server.ts) (`getModePostureContent`)
      - Tests cover seed, ON CONFLICT preservation of user edits, and disabled-skill fallback through a live LLM stream: [tests/chat.mode-skills.spec.ts](../../tests/chat.mode-skills.spec.ts)
-   - Phases 4-9 (plan approval card, run HUD, inline approval cards, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
+   - Evidence (Phase 5 — live run HUD above the composer, 2026-05-02):
+     - New component: [src/lib/chat/RunHud.svelte](../../src/lib/chat/RunHud.svelte) — visible only when `streaming || pendingQuestion || pendingApprovalCount > 0`; renders status badge, mode badge, tool/sub-agent counts, compaction marker, token-window % (with raw counts in `title`), trace link, Cancel + Answer buttons
+     - Status precedence: Waiting for your answer → Waiting for N approvals → Running &lt;tool&gt; → Generating → Idle (driven by props, derived inside the component)
+     - Wired into chat page above ChatInput; consumes `liveContextStats` (now carrying `runId`) for the trace deep-link, derives pending-approval count from `streamingBlocks.kind === 'tool' && status === 'pending'`, and resets `liveContextStats` when a new stream starts so the HUD never shows stale runId or compacted flag from the previous turn: [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
+     - Stream emits `runId` on the `context_stats` SSE event so the HUD can deep-link the run: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+   - Phases 4, 6-9 (plan approval card, inline approval cards, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
 
 7. [ ] Workspace sandbox baseline and task execution isolation
    - Source: ../workspace/plan.md

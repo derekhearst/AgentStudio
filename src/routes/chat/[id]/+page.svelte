@@ -22,6 +22,7 @@
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
+	import RunHud from '$lib/chat/RunHud.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
 	type ChatAttachment = {
@@ -109,6 +110,7 @@
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 	type LiveContextStats = {
+		runId: string | null;
 		tokenEstimate: number | null;
 		contextWindow: number | null;
 		didCompact: boolean;
@@ -979,6 +981,7 @@
 		waitingForFirstToken = true;
 		streamAbortController = abortController;
 		stoppedByUser = false;
+		liveContextStats = null;
 		let streamHandshakeSucceeded = false;
 		try {
 			logChatUi('info', 'Opening stream', {
@@ -1289,6 +1292,7 @@
 
 					if (eventName === 'context_stats') {
 						liveContextStats = {
+							runId: typeof payload.runId === 'string' ? payload.runId : null,
 							tokenEstimate: typeof payload.tokenEstimate === 'number' ? payload.tokenEstimate : null,
 							contextWindow: typeof payload.contextWindow === 'number' ? payload.contextWindow : null,
 							didCompact: Boolean(payload.didCompact),
@@ -1610,6 +1614,21 @@
 				onSubmit={resolveAskUser}
 				onClose={closeAskUserModal}
 				onSkipToChat={skipAskUserToChat}
+			/>
+
+			<RunHud
+				{streaming}
+				{conversationId}
+				runId={liveContextStats?.runId ?? null}
+				mode={conversationMode}
+				streamingBlocks={streamingBlocks}
+				pendingQuestion={!!pendingAskUser}
+				pendingApprovalCount={streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length}
+				tokenEstimate={liveContextStats?.tokenEstimate ?? 0}
+				contextWindow={liveContextStats?.contextWindow ?? 0}
+				didCompact={liveContextStats?.didCompact ?? false}
+				onCancel={stopStreaming}
+				onAnswerQuestion={() => { askUserModalOpen = true; }}
 			/>
 
 			<ChatInput

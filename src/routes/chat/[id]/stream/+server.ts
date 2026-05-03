@@ -490,6 +490,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// the real prompt-assembly footprint (tokenizer-accurate) rather than estimating
 				// client-side. Sent once at the top of the stream; cheap to compute.
 				await emit('context_stats', {
+					runId: run.id,
 					tokenEstimate: estimateMessageTokens(trimmedMessages, routedModel),
 					contextWindow: getContextWindowSize(routedModel),
 					didCompact,
