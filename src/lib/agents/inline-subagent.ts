@@ -14,6 +14,9 @@ import {
 import { logLlmUsage } from '$lib/costs/usage'
 import { trimToolResult } from '$lib/chat/chat'
 import { listSkillSummaries } from '$lib/skills/skills.server'
+import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
+import { getOrCreateSettings } from '$lib/settings/settings.server'
+import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
 
 const encoder = new TextEncoder()
 
@@ -122,16 +125,21 @@ export async function runInlineSubagent(
 		metadata: { source: 'orchestrator', parentConversationId },
 	})
 
-	// Build sub-agent context
-	const systemSections = [agent.systemPrompt, `Your role: ${agent.role}`]
-	systemSections.push(
-		[
-			'Agent collaboration policy:',
-			'- You cannot ask the user directly with ask_user.',
-			'- If you need user input, return a concise handoff for orchestrator with missing information and proposed options.',
-			'- Once orchestrator returns answers in context, continue execution immediately.',
-		].join('\n'),
-	)
+	// Build sub-agent context using the slot system + memory recall on the task description.
+	const slots: ContextSlot[] = [
+		{ name: 'identity', priority: 100, content: agent.systemPrompt },
+		{ name: 'role', priority: 95, content: `Your role: ${agent.role}` },
+		{
+			name: 'tool_policy',
+			priority: 90,
+			content: [
+				'Agent collaboration policy:',
+				'- You cannot ask the user directly with ask_user.',
+				'- If you need user input, return a concise handoff for orchestrator with missing information and proposed options.',
+				'- Once orchestrator returns answers in context, continue execution immediately.',
+			].join('\n'),
+		},
+	]
 
 	const skillSummaries = await listSkillSummaries()
 	if (skillSummaries.length > 0) {
@@ -141,11 +149,48 @@ export async function runInlineSubagent(
 				return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
 			})
 			.join('\n')
-		systemSections.push(`Available skills (use read_skill to load):\n${text}`)
+		slots.push({
+			name: 'skills',
+			priority: 70,
+			content: `Available skills (use read_skill to load):\n${text}`,
+			truncationStrategy: 'truncate-end',
+		})
+	}
+
+	// --- Sub-agent context enrichment: memory recall on the task description ---
+	// Phase 6 of #4: bring relevant memory into the sub-agent's context so it can pick up
+	// where prior conversations left off, not start from a blank slate.
+	try {
+		const settings = await getOrCreateSettings(userId)
+		const memoryConfig = (settings.memoryConfig ?? null) as {
+			enabled?: boolean
+			topK?: number
+			useRerank?: boolean
+			rerankModel?: string
+		} | null
+		const memoryEnabled = memoryConfig?.enabled !== false
+		if (memoryEnabled && step.task && step.task.trim().length > 0) {
+			const recalled = await recallForUser(userId, step.task.trim(), {
+				topK: memoryConfig?.topK ?? 5,
+				useRerank: memoryConfig?.useRerank ?? false,
+				rerankModel: memoryConfig?.rerankModel,
+			})
+			const memoryBlock = renderMemoryContext(recalled)
+			if (memoryBlock) {
+				slots.push({
+					name: 'memory',
+					priority: 60,
+					content: memoryBlock,
+					truncationStrategy: 'truncate-end',
+				})
+			}
+		}
+	} catch (err) {
+		console.warn('[subagent] memory recall failed', err)
 	}
 
 	const subMessages: LlmMessage[] = [
-		{ role: 'system', content: systemSections.join('\n\n') },
+		{ role: 'system', content: assembleSystemPrompt(slots).systemPrompt },
 		{ role: 'user', content: step.task },
 	]
 

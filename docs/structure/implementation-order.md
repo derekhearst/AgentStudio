@@ -124,7 +124,11 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - New pure module: [src/lib/chat/compaction.ts](../../src/lib/chat/compaction.ts) — `findSafeSplitPoint`
      - `compactMessages` uses safe split, structured summary prompt, KEEP_RECENT_MESSAGES raised 6→8: [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts)
      - Unit tests: [tests/context.compaction.spec.ts](../../tests/context.compaction.spec.ts)
-   - Phases 2 (tokenizer upgrade), 4-8 (relevance-filtered skills, memory write-back, sub-agent context, UI utilization indicator, per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 5 — memory write-back, already in place on this branch):
+     - `mineConversation` runs after every completed run, gated by `memoryConfig.autoMine`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) line ~927
+   - Evidence (Phase 6 — sub-agent context enrichment, 2026-05-02):
+     - `runInlineSubagent` migrated to slot-based assembly + memory recall on task description: [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)
+   - Phases 2 (tokenizer upgrade), 4 (relevance-filtered skills), 7 (UI utilization indicator), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md
