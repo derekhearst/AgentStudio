@@ -134,6 +134,13 @@
       "when": 1777753204163,
       "tag": "0018_foamy_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1777766466809,
+      "tag": "0019_bitter_chamber",
+      "breakpoints": true
     }
   ]
 }

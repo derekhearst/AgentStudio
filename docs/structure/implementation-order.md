@@ -137,7 +137,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Call-site updates pass full context: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts), [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts)
      - `getCostSummary` adds `byRun` / `byAgent` / `byTask` rollups: [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
      - Integration tests including a live chat that asserts the populated row: [tests/cost.linkage.spec.ts](../../tests/cost.linkage.spec.ts)
-   - Phases 2-5 (tool-usage ledger, budget limits, dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 2 — tool-usage ledger, 2026-05-02):
+     - New `tool_usage` table with same context FKs as `llm_usage`: [src/lib/costs/usage.schema.ts](../../src/lib/costs/usage.schema.ts)
+     - Drizzle migration: [drizzle/0019_bitter_chamber.sql](../../drizzle/0019_bitter_chamber.sql)
+     - `logToolUsage` helper (cost or units×costPerUnit): [src/lib/costs/usage.ts](../../src/lib/costs/usage.ts)
+     - `getCostSummary` adds `toolSpend`, `toolCallCount`, `byTool`, `combinedSpend`: [src/lib/costs/cost.remote.ts](../../src/lib/costs/cost.remote.ts)
+     - Tests: [tests/cost.tool-usage.spec.ts](../../tests/cost.tool-usage.spec.ts)
+   - Phases 3-5 (budget limits, dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
 
 6. [ ] Chat mode system + inline approvals + HUD
    - Source: ../chat/plan.md

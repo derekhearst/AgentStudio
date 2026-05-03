@@ -3,7 +3,7 @@ import { and, desc, eq, gte, isNotNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
-import { llmUsage } from '$lib/costs/usage.schema'
+import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 
@@ -27,7 +27,18 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 	const p = period ?? 'month'
 	const since = periodStart(p)
 
-	const [totalSpend, byModel, bySource, byConversation, dailyBreakdown, byRun, byAgent, byTask] = await Promise.all([
+	const [
+		totalSpend,
+		byModel,
+		bySource,
+		byConversation,
+		dailyBreakdown,
+		byRun,
+		byAgent,
+		byTask,
+		toolSpend,
+		byTool,
+	] = await Promise.all([
 		// Total spend in period (from llm_usage — all LLM calls)
 		db
 			.select({
@@ -144,7 +155,35 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 			.groupBy(llmUsage.taskId)
 			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
 			.limit(10),
+
+		// Total non-LLM tool spend (web search credits, browser sessions, etc.)
+		db
+			.select({
+				total: sql<string>`coalesce(sum(${toolUsage.cost}::numeric), 0)::text`,
+				callCount: sql<number>`count(*)::int`,
+			})
+			.from(toolUsage)
+			.where(gte(toolUsage.createdAt, since)),
+
+		// Spend by tool name (mirrors byModel for the LLM side)
+		db
+			.select({
+				toolName: toolUsage.toolName,
+				provider: toolUsage.provider,
+				unitType: toolUsage.unitType,
+				units: sql<string>`coalesce(sum(${toolUsage.units}::numeric), 0)::text`,
+				cost: sql<string>`coalesce(sum(${toolUsage.cost}::numeric), 0)::text`,
+				count: sql<number>`count(*)::int`,
+			})
+			.from(toolUsage)
+			.where(gte(toolUsage.createdAt, since))
+			.groupBy(toolUsage.toolName, toolUsage.provider, toolUsage.unitType)
+			.orderBy(sql`sum(${toolUsage.cost}::numeric) desc`)
+			.limit(10),
 	])
+
+	const llmTotal = parseFloat(totalSpend[0]?.total ?? '0')
+	const toolTotal = parseFloat(toolSpend[0]?.total ?? '0')
 
 	return {
 		period: p,
@@ -160,6 +199,12 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		byRun,
 		byAgent,
 		byTask,
+		// Non-LLM tool spend (Phase 2 of #5)
+		toolSpend: toolSpend[0]?.total ?? '0',
+		toolCallCount: toolSpend[0]?.callCount ?? 0,
+		byTool,
+		// Combined ledger total (LLM + tool) so the dashboard can show one true number.
+		combinedSpend: (llmTotal + toolTotal).toPrecision(15),
 	}
 })
 

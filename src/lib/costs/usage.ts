@@ -1,5 +1,5 @@
 import { db } from '$lib/db.server'
-import { llmUsage } from '$lib/costs/usage.schema'
+import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { listModels, type ModelInfo } from '$lib/llm/models.server'
 
 export type LlmUsageSource =
@@ -91,5 +91,44 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 		})
 		.returning({ id: llmUsage.id, cost: llmUsage.cost })
 
+	return row.cost
+}
+
+export type ToolUnitType = 'credit' | 'second' | 'call' | 'mb'
+
+export type LogToolUsageInput = {
+	toolName: string
+	provider?: string | null
+	unitType: ToolUnitType
+	units: number
+	/** Direct cost in USD. If omitted, computed as `units * costPerUnit`. */
+	cost?: number
+	/** Cost per unit in USD; ignored if `cost` is supplied. */
+	costPerUnit?: number
+	userId?: string | null
+	runId?: string | null
+	taskId?: string | null
+	agentId?: string | null
+	metadata?: Record<string, unknown>
+}
+
+export async function logToolUsage(input: LogToolUsageInput): Promise<string> {
+	const computedCost = input.cost ?? Math.max(0, input.units * (input.costPerUnit ?? 0))
+	const costStr = computedCost.toPrecision(15)
+	const [row] = await db
+		.insert(toolUsage)
+		.values({
+			toolName: input.toolName,
+			provider: input.provider ?? null,
+			unitType: input.unitType,
+			units: input.units.toPrecision(15),
+			cost: costStr,
+			userId: input.userId ?? null,
+			runId: input.runId ?? null,
+			taskId: input.taskId ?? null,
+			agentId: input.agentId ?? null,
+			metadata: input.metadata ?? {},
+		})
+		.returning({ id: toolUsage.id, cost: toolUsage.cost })
 	return row.cost
 }
