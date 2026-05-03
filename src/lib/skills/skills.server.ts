@@ -164,7 +164,16 @@ export async function createSkill(name: string, description: string, content: st
 
 export async function updateSkill(
 	id: string,
-	fields: { name?: string; description?: string; content?: string; tags?: string[]; enabled?: boolean },
+	fields: {
+		name?: string
+		description?: string
+		content?: string
+		tags?: string[]
+		enabled?: boolean
+		// Wave 2 #9 phase 2 — companion mapping editable through the skills UI.
+		companionGroups?: string[]
+		companionTools?: string[]
+	},
 ) {
 	if (isSystemSkillId(id)) {
 		throw new Error('System skill is read-only')

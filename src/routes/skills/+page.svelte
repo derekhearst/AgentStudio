@@ -10,6 +10,10 @@
 	let search = $state('');
 	let skills = $state<SkillRow[]>([]);
 	let allSkills = $state<SkillRow[]>([]);
+	// Wave 2 #9 phase 2 — filter chip for "show only companions to <group>".
+	const ALL_GROUPS = ['sandbox', 'skills', 'agents', 'media'] as const;
+	type GroupName = (typeof ALL_GROUPS)[number];
+	let companionGroupFilter = $state<GroupName | null>(null);
 
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -28,6 +32,12 @@
 		let filtered = allSkills;
 		filtered = filtered.filter((s) => !s.name.startsWith('capability:'));
 
+		if (companionGroupFilter) {
+			filtered = filtered.filter((s) =>
+				Array.isArray(s.companionGroups) && s.companionGroups.includes(companionGroupFilter as string)
+			);
+		}
+
 		// Filter by search text
 		if (q) {
 			filtered = filtered.filter(
@@ -44,6 +54,11 @@
 	function handleSearchInput() {
 		clearTimeout(filterTimer);
 		filterTimer = setTimeout(filterLocally, 150);
+	}
+
+	function selectCompanionFilter(group: GroupName | null) {
+		companionGroupFilter = group;
+		filterLocally();
 	}
 </script>
 
@@ -67,6 +82,23 @@
 			oninput={handleSearchInput}
 			placeholder="Search skills..."
 		/>
+	</div>
+
+	<!-- Companion-group filter chips -->
+	<div class="flex shrink-0 flex-wrap items-center gap-1.5 text-xs">
+		<span class="text-base-content/55">Companion to:</span>
+		<button
+			type="button"
+			class="badge badge-sm cursor-pointer {companionGroupFilter === null ? 'badge-primary' : 'badge-ghost'}"
+			onclick={() => selectCompanionFilter(null)}
+		>any</button>
+		{#each ALL_GROUPS as group (group)}
+			<button
+				type="button"
+				class="badge badge-sm cursor-pointer font-mono {companionGroupFilter === group ? 'badge-primary' : 'badge-ghost'}"
+				onclick={() => selectCompanionFilter(group)}
+			>{group}</button>
+		{/each}
 	</div>
 
 	<!-- Skill list (scrollable) -->
@@ -97,6 +129,11 @@
 						{#if skill.tags.length > 0}
 							{#each skill.tags as tag (tag)}
 								<span class="badge badge-outline badge-xs">{tag}</span>
+							{/each}
+						{/if}
+						{#if Array.isArray(skill.companionGroups) && skill.companionGroups.length > 0}
+							{#each skill.companionGroups as group (group)}
+								<span class="badge badge-info badge-xs font-mono opacity-100" title="Companion to capability group">↳ {group}</span>
 							{/each}
 						{/if}
 						<span>{skill.fileCount} file{skill.fileCount !== 1 ? 's' : ''}</span>

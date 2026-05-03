@@ -40,6 +40,7 @@ const createSkillSchema = z.object({
 	tags: z.array(z.string().trim().min(1)).optional(),
 })
 
+const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media'] as const
 const updateSkillSchema = z.object({
 	id: z.string().uuid(),
 	name: z.string().trim().min(1).max(100).optional(),
@@ -47,6 +48,10 @@ const updateSkillSchema = z.object({
 	content: z.string().trim().min(1).optional(),
 	tags: z.array(z.string().trim().min(1)).optional(),
 	enabled: z.boolean().optional(),
+	// Wave 2 #9 phase 2 — companion mappings, exposed in the skills detail UI. Empty array
+	// clears the mapping; absent leaves it unchanged.
+	companionGroups: z.array(z.enum(CAPABILITY_GROUP_NAMES)).optional(),
+	companionTools: z.array(z.string().trim().min(1).max(100)).optional(),
 })
 
 const addSkillFileSchema = z.object({
