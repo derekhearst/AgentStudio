@@ -108,6 +108,16 @@
 	let stoppedByUser = $state(false);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
+	type LiveContextStats = {
+		tokenEstimate: number | null;
+		contextWindow: number | null;
+		didCompact: boolean;
+		includedSlots: string[];
+		droppedSlots: string[];
+		truncatedSlots: string[];
+		systemPromptTokens: number | null;
+	};
+	let liveContextStats = $state<LiveContextStats | null>(null);
 	let availableModels = $derived(await getAvailableModels());
 	let appSettings = $derived(await getSettings());
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
@@ -669,9 +679,15 @@
 		const toolDefinitionTokens = 900;
 		const otherTokens = 0;
 
+		// Live SSE-supplied tokenizer-accurate count from the stream handler takes precedence
+		// when available (Phase 7 of #4). Falls back to the chars/4-derived estimate above
+		// for the very first prompt before the stream has reported.
+		const live = liveContextStats?.tokenEstimate;
 		const used = Math.min(
 			totalBudget,
-			systemTokens + toolDefinitionTokens + messageTokens + toolResultTokens + otherTokens
+			typeof live === 'number' && live > 0
+				? live
+				: systemTokens + toolDefinitionTokens + messageTokens + toolResultTokens + otherTokens,
 		);
 
 		const toPct = (value: number) =>
@@ -1269,6 +1285,19 @@
 
 					if (eventName === 'metrics') {
 						updateLatestReasoningTokens(payload.reasoningTokens ?? null);
+					}
+
+					if (eventName === 'context_stats') {
+						liveContextStats = {
+							tokenEstimate: typeof payload.tokenEstimate === 'number' ? payload.tokenEstimate : null,
+							contextWindow: typeof payload.contextWindow === 'number' ? payload.contextWindow : null,
+							didCompact: Boolean(payload.didCompact),
+							includedSlots: Array.isArray(payload.includedSlots) ? payload.includedSlots : [],
+							droppedSlots: Array.isArray(payload.droppedSlots) ? payload.droppedSlots : [],
+							truncatedSlots: Array.isArray(payload.truncatedSlots) ? payload.truncatedSlots : [],
+							systemPromptTokens:
+								typeof payload.systemPromptTokens === 'number' ? payload.systemPromptTokens : null,
+						};
 					}
 
 					if (eventName === 'done') {

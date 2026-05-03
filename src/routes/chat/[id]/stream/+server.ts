@@ -4,7 +4,8 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
 import { streamChat, type LlmMessage } from '$lib/llm/chat.server'
-import { generateTitle, shouldCompact, compactMessages } from '$lib/chat/chat.server'
+import { generateTitle, shouldCompact, compactMessages, estimateMessageTokens } from '$lib/chat/chat.server'
+import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
@@ -432,6 +433,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (didCompact) {
 					await emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
 				}
+
+				// Phase 7 of #4: emit a context_stats snapshot so the chat workbench can show
+				// the real prompt-assembly footprint (tokenizer-accurate) rather than estimating
+				// client-side. Sent once at the top of the stream; cheap to compute.
+				await emit('context_stats', {
+					tokenEstimate: estimateMessageTokens(trimmedMessages, routedModel),
+					contextWindow: getContextWindowSize(routedModel),
+					didCompact,
+					includedSlots: assembled.includedSlots,
+					droppedSlots: assembled.droppedSlots,
+					truncatedSlots: assembled.truncatedSlots,
+					systemPromptTokens: assembled.estimatedTokens,
+				})
 
 				let currentMessages: LoopMessage[] = [...trimmedMessages]
 				const allToolCalls: Array<Record<string, unknown>> = []

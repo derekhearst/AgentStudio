@@ -134,7 +134,11 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - `estimateMessageTokens(messages, model?)` adds per-message + per-tool-call overhead: [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts)
      - `shouldCompact` and `compactMessages` thread the routedModel through; stream handler passes it: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - 8 unit tests covering fallback, model routing, known token counts, encoder caching: [tests/context.tokens.spec.ts](../../tests/context.tokens.spec.ts)
-   - Phases 4 (relevance-filtered skills), 7 (UI utilization indicator), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 7 — context utilization indicator, 2026-05-02):
+     - Stream handler emits a `context_stats` SSE event after slot assembly (tokenEstimate, contextWindow, didCompact, included/dropped/truncated slots, systemPromptTokens): [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Chat client captures it into reactive state and the existing `ContextWindow` component reflects the tokenizer-accurate count: [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
+     - Live test verifying the event arrives with all fields: [tests/context.utilization.spec.ts](../../tests/context.utilization.spec.ts)
+   - Phases 4 (relevance-filtered skills), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md
