@@ -21,6 +21,7 @@
 	import LiveToolCallCard from '$lib/chat/LiveToolCallCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
+	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import RunHud from '$lib/chat/RunHud.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
@@ -430,7 +431,7 @@
 		}
 	}
 
-	function getAskUserQuestionsFromTool(block: ToolBlock): Array<{ header: string; question: string }> {
+	function getAskUserQuestionsFromTool(block: ToolBlock): AskUserQuestion[] {
 		const args = parseJsonFallback(block.arguments) as Record<string, unknown>;
 		const result = block.result ? (parseJsonFallback(block.result) as Record<string, unknown>) : {};
 		const fromArgs = Array.isArray(args.questions) ? args.questions : [];
@@ -442,9 +443,33 @@
 				const row = (entry ?? {}) as Record<string, unknown>;
 				const header = typeof row.header === 'string' ? row.header : '';
 				const question = typeof row.question === 'string' ? row.question : header;
-				return { header, question };
+				const options = Array.isArray(row.options)
+					? (row.options as Array<Record<string, unknown>>)
+							.map((opt) => ({
+								label: typeof opt.label === 'string' ? opt.label : '',
+								description: typeof opt.description === 'string' ? opt.description : undefined,
+								recommended: typeof opt.recommended === 'boolean' ? opt.recommended : undefined,
+							}))
+							.filter((opt) => opt.label.length > 0)
+					: [];
+				const allowFreeformInput =
+					typeof row.allowFreeformInput === 'boolean' ? row.allowFreeformInput : true;
+				return { header, question, options, allowFreeformInput };
 			})
 			.filter((row) => row.question.trim().length > 0);
+	}
+
+	function getAskUserAnswersFromTool(block: ToolBlock): Record<string, string> | null {
+		if (!block.result) return null;
+		const result = parseJsonFallback(block.result) as Record<string, unknown>;
+		if (!result || typeof result !== 'object') return null;
+		const answers = result.answers;
+		if (!answers || typeof answers !== 'object') return null;
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
+			if (typeof v === 'string') out[k] = v;
+		}
+		return Object.keys(out).length > 0 ? out : null;
 	}
 
 	function getPartialTextFromBlocks() {
@@ -1166,7 +1191,11 @@
 							token: payload.token,
 							questions: payload.questions ?? []
 						};
-						askUserModalOpen = true;
+						// Phase 6 of #6: keep the modal CLOSED by default — the inline AskUserCard in
+						// the chat stream is now the primary surface. The modal stays as an escape
+						// hatch the user can open via the HUD's "Answer" button if they want the
+						// stepper for multi-question flows.
+						askUserModalOpen = false;
 					}
 
 					if (eventName === 'tool_call') {
@@ -1530,12 +1559,14 @@
 					{#each streamingBlocks as block (block.id)}
 						{#if block.kind === 'tool' && block.name === 'ask_user'}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
+							{@const askAnswers = getAskUserAnswersFromTool(block)}
 							{#if askQuestions.length > 0}
-								{#each askQuestions as row (`${block.id}-${row.header}`)}
-									<article class="chat chat-start">
-										<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3"><div class="markdown-body">{@html renderMarkdown(row.question)}</div></div>
-									</article>
-								{/each}
+								<AskUserCard
+									questions={askQuestions}
+									status={block.status}
+									answers={askAnswers}
+									onSubmit={resolveAskUser}
+								/>
 							{/if}
 						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<LiveToolCallCard
