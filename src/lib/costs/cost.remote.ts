@@ -7,6 +7,7 @@ import { budgetAlerts, budgetLimits, llmUsage, toolUsage } from '$lib/costs/usag
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { tasks } from '$lib/tasks/tasks.schema'
+import { auditBudgetLimitChange } from '$lib/governance'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 const costPeriodSchema = z.object({
@@ -284,11 +285,24 @@ export const createBudgetLimit = command(createBudgetLimitSchema, async (input) 
 			enabled: input.enabled,
 		})
 		.returning()
+	void auditBudgetLimitChange({
+		actorUserId: user.id,
+		limitId: row.id,
+		action: 'budget_limit.created',
+		afterState: row as unknown as Record<string, unknown>,
+		summary: `Created ${input.action} ${input.scope}/${input.period} limit @ $${input.limitUsd}`,
+	})
 	return { success: true as const, limit: row }
 })
 
 export const updateBudgetLimit = command(updateBudgetLimitSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	// Snapshot before for the audit trail.
+	const [before] = await db
+		.select()
+		.from(budgetLimits)
+		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
+		.limit(1)
 	const updates: Record<string, unknown> = { updatedAt: new Date() }
 	if (input.limitUsd !== undefined) updates.limitUsd = input.limitUsd.toFixed(6)
 	if (input.warnUsd !== undefined) updates.warnUsd = input.warnUsd != null ? input.warnUsd.toFixed(6) : null
@@ -299,14 +313,37 @@ export const updateBudgetLimit = command(updateBudgetLimitSchema, async (input) 
 		.set(updates)
 		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
 		.returning()
+	if (row && before) {
+		void auditBudgetLimitChange({
+			actorUserId: user.id,
+			limitId: row.id,
+			action: 'budget_limit.updated',
+			beforeState: before as unknown as Record<string, unknown>,
+			afterState: row as unknown as Record<string, unknown>,
+		})
+	}
 	return { success: row !== undefined, limit: row ?? null }
 })
 
 export const deleteBudgetLimit = command(deleteBudgetLimitSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	const [before] = await db
+		.select()
+		.from(budgetLimits)
+		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
+		.limit(1)
 	await db
 		.delete(budgetLimits)
 		.where(and(eq(budgetLimits.id, input.id), eq(budgetLimits.userId, user.id)))
+	if (before) {
+		void auditBudgetLimitChange({
+			actorUserId: user.id,
+			limitId: before.id,
+			action: 'budget_limit.deleted',
+			beforeState: before as unknown as Record<string, unknown>,
+			summary: `Deleted ${before.action} ${before.scope}/${before.period} limit @ $${before.limitUsd}`,
+		})
+	}
 	return { success: true as const }
 })
 

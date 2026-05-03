@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { getAgentDetail, listAgentsWithCounts, updateAgentRecord } from '$lib/agents/agents.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { auditAgentConfigUpdated } from '$lib/governance'
 
 const agentIdSchema = z.string().uuid()
 const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media'] as const
@@ -42,10 +44,26 @@ export const getAgentChoices = query(async () => {
 })
 
 export const updateAgentCommand = command(updateAgentSchema, async (input) => {
-	return updateAgentRecord(input.agentId, {
+	const user = requireAuthenticatedRequestUser()
+	// Snapshot the audit-relevant fields BEFORE the update so the diff is meaningful.
+	const [before] = await db
+		.select({ systemPrompt: agents.systemPrompt, model: agents.model, config: agents.config })
+		.from(agents)
+		.where(eq(agents.id, input.agentId))
+		.limit(1)
+	const updated = await updateAgentRecord(input.agentId, {
 		systemPrompt: input.systemPrompt,
 		model: input.model,
 		capabilityGroups: input.capabilityGroups,
 		allowedTools: input.allowedTools,
 	})
+	if (updated && before) {
+		void auditAgentConfigUpdated({
+			actorUserId: user.id,
+			agentId: input.agentId,
+			beforeState: { systemPrompt: before.systemPrompt, model: before.model, config: before.config },
+			afterState: { systemPrompt: updated.systemPrompt, model: updated.model, config: updated.config },
+		})
+	}
+	return updated
 })

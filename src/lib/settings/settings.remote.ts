@@ -5,6 +5,7 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { capabilityGroups, estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
+import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
 
 const settingsUpdateSchema = z.object({
 	defaultModel: z.string().trim().min(1).max(120).optional(),
@@ -72,20 +73,45 @@ export const getSettings = query(async () => {
 
 export const updateAppSettings = command(settingsUpdateSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
-	return updateSettings({ ...input, userId: user.id })
+	const before = await getOrCreateSettings(user.id)
+	const after = await updateSettings({ ...input, userId: user.id })
+	void auditSettingsUpdated({
+		actorUserId: user.id,
+		beforeState: before as Record<string, unknown>,
+		afterState: after as Record<string, unknown>,
+	})
+	return after
 })
 
 export const updateApprovalRequiredToolsCommand = command(
 	approvalRequiredToolsSchema,
 	async ({ approvalRequiredTools }) => {
 		const user = requireAuthenticatedRequestUser()
-		return updateSettings({ userId: user.id, toolConfig: { approvalRequiredTools } })
+		const before = await getOrCreateSettings(user.id)
+		const after = await updateSettings({ userId: user.id, toolConfig: { approvalRequiredTools } })
+		void auditSettingsUpdated({
+			actorUserId: user.id,
+			beforeState: before as Record<string, unknown>,
+			afterState: after as Record<string, unknown>,
+		})
+		return after
 	},
 )
 
 export const resetAppSettings = command(async () => {
 	const user = requireAuthenticatedRequestUser()
-	return resetSettings(user.id)
+	const before = await getOrCreateSettings(user.id)
+	const after = await resetSettings(user.id)
+	void recordAuditEvent({
+		actorUserId: user.id,
+		action: 'settings.reset',
+		targetType: 'settings',
+		targetId: user.id,
+		beforeState: before as Record<string, unknown>,
+		afterState: after as Record<string, unknown>,
+		summary: 'Settings reset to defaults',
+	})
+	return after
 })
 
 export const getFullPromptPreview = query(async () => {
