@@ -12,3 +12,4 @@ export type {
 export { runChatLoop } from './loop.server'
 export { createSseSession } from './session/sse.server'
 export { createForwardedSession } from './session/forwarded.server'
+export { createDetachedSession } from './session/detached.server'

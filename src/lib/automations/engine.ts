@@ -6,6 +6,12 @@ import { agents } from '$lib/agents/agents.schema'
 import { chat, type LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
+import { chatRuns } from '$lib/runs/runs.schema'
+import { getToolDefinitions } from '$lib/tools/tools.server'
+import { listSkillSummaries } from '$lib/skills/skills.server'
+import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
+import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import { createDetachedSession, runChatLoop } from '$lib/runtime'
 
 function parseField(field: string, min: number, max: number) {
 	if (field === '*') {
@@ -109,6 +115,12 @@ async function getOrCreateAutomationConversation(automation: typeof automations.
 	return created
 }
 
+/**
+ * Wave 2 #10 phase 6 — when an agent is attached, the automation tick runs the FULL agent loop
+ * (tool calls, multi-round, capability disclosure, durable run state) via the runtime + a
+ * detached Session. Without an agent, we keep the legacy single-shot `chat()` synthesis path —
+ * lighter, no wasted infra, no need for a chat_run row.
+ */
 async function runAutomation(automation: typeof automations.$inferSelect, now: Date) {
 	const conversation = await getOrCreateAutomationConversation(automation)
 	const [agent] = automation.agentId
@@ -132,10 +144,23 @@ async function runAutomation(automation: typeof automations.$inferSelect, now: D
 		model,
 	})
 
-	const llmMessages: LlmMessage[] = []
-	if (agent?.systemPrompt?.trim()) {
-		llmMessages.push({ role: 'system', content: agent.systemPrompt })
+	if (agent) {
+		return runAutomationWithAgent({ automation, conversation, agent, history, prompt, model, now })
 	}
+	return runAutomationSynthesis({ automation, conversation, history, prompt, model, now })
+}
+
+async function runAutomationSynthesis(args: {
+	automation: typeof automations.$inferSelect
+	conversation: typeof conversations.$inferSelect
+	history: Array<{ role: string; content: string }>
+	prompt: string
+	model: string
+	now: Date
+}) {
+	const { automation, conversation, history, prompt, model, now } = args
+
+	const llmMessages: LlmMessage[] = []
 	for (const item of history) {
 		if (item.role === 'system' || item.role === 'user' || item.role === 'assistant') {
 			llmMessages.push({ role: item.role, content: item.content })
@@ -165,6 +190,191 @@ async function runAutomation(automation: typeof automations.$inferSelect, now: D
 	}).catch(() => {})
 
 	return { conversationId: conversation.id }
+}
+
+async function runAutomationWithAgent(args: {
+	automation: typeof automations.$inferSelect
+	conversation: typeof conversations.$inferSelect
+	agent: typeof agents.$inferSelect
+	history: Array<{ role: string; content: string }>
+	prompt: string
+	model: string
+	now: Date
+}) {
+	const { automation, conversation, agent, history, prompt, model, now } = args
+
+	// Resolve workspace context the same way the chat stream does.
+	const agentConfigForWs = agent.config as
+		| {
+				allowedTools?: string[]
+				capabilityGroups?: string[]
+				workspace?: {
+					mode?: string
+					key?: string
+					repoPath?: string
+					baseBranch?: string
+					deleteBranchOnCleanup?: boolean
+				}
+		  }
+		| null
+	const persistentKey =
+		agentConfigForWs?.workspace?.mode === 'persistent' &&
+		typeof agentConfigForWs.workspace.key === 'string' &&
+		agentConfigForWs.workspace.key.length > 0
+			? agentConfigForWs.workspace.key
+			: null
+	const worktreeConfig =
+		agentConfigForWs?.workspace?.mode === 'worktree' &&
+		typeof agentConfigForWs.workspace.repoPath === 'string' &&
+		agentConfigForWs.workspace.repoPath.length > 0
+			? {
+					repoPath: agentConfigForWs.workspace.repoPath,
+					baseBranch: agentConfigForWs.workspace.baseBranch,
+					deleteBranchOnCleanup: agentConfigForWs.workspace.deleteBranchOnCleanup,
+				}
+			: null
+	const scopedAgentTools = Array.isArray(agentConfigForWs?.allowedTools) && agentConfigForWs.allowedTools.length > 0
+		? agentConfigForWs.allowedTools
+		: null
+
+	// Build the agent's slot-based system prompt — identity + role + tool policy + skills + memory.
+	const slots: ContextSlot[] = [
+		{ name: 'identity', priority: 100, content: agent.systemPrompt },
+		{ name: 'role', priority: 95, content: `Your role: ${agent.role}` },
+		{
+			name: 'tool_policy',
+			priority: 90,
+			content: [
+				'Automation policy:',
+				'- This is a scheduled automation tick — there is no user to ask in real time.',
+				'- Complete the work, then summarize what you did. If you need user input, leave a clear note for the next manual review.',
+			].join('\n'),
+		},
+	]
+
+	const skillSummaries = await listSkillSummaries()
+	if (skillSummaries.length > 0) {
+		const text = skillSummaries
+			.map((s) => `- ${s.name}: ${s.description}`)
+			.join('\n')
+		slots.push({
+			name: 'skills',
+			priority: 70,
+			content: `Available skills (use read_skill to load):\n${text}`,
+			truncationStrategy: 'truncate-end',
+		})
+	}
+
+	try {
+		const recalled = await recallForUser(automation.userId, prompt, { topK: 5 })
+		const memoryBlock = renderMemoryContext(recalled)
+		if (memoryBlock) {
+			slots.push({ name: 'memory', priority: 60, content: memoryBlock, truncationStrategy: 'truncate-end' })
+		}
+	} catch (err) {
+		console.warn('[automation] memory recall failed', err)
+	}
+
+	const llmMessages: LlmMessage[] = [
+		{ role: 'system', content: assembleSystemPrompt(slots).systemPrompt },
+	]
+	for (const item of history) {
+		if (item.role === 'user' || item.role === 'assistant') {
+			llmMessages.push({ role: item.role, content: item.content })
+		}
+	}
+	llmMessages.push({ role: 'user', content: prompt })
+
+	// Tool surface mirrors the agent path in the chat stream: scoped allow-list if set, else
+	// "all tools minus ask_user" since automations have no user-facing approval surface.
+	const allTools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
+	const tools = scopedAgentTools
+		? allTools.filter((t) => scopedAgentTools.includes(t.function.name))
+		: allTools
+
+	const [run] = await db
+		.insert(chatRuns)
+		.values({
+			conversationId: conversation.id,
+			userId: automation.userId,
+			agentId: agent.id,
+			state: 'running',
+			source: 'automation',
+			label: `Automation tick: ${automation.description.slice(0, 80)}`,
+			startedAt: now,
+			lastHeartbeatAt: now,
+		})
+		.returning({ id: chatRuns.id })
+
+	const session = createDetachedSession({ runId: run.id })
+
+	try {
+		const loopResult = await runChatLoop({
+			session,
+			userId: automation.userId,
+			conversationId: conversation.id,
+			model,
+			initialMessages: llmMessages,
+			initialTools: tools,
+			computeTools: async () => tools,
+			maxRounds: 10, // automations are bounded — no human in the loop to course-correct
+			approvalRequiredTools: new Set<string>(), // no approval surface in a detached run
+			isOrchestrator: false,
+			persistentKey,
+			worktree: worktreeConfig,
+			spawnSubagent: undefined,
+		})
+
+		const cost = await logLlmUsage({
+			source: 'automation',
+			model,
+			tokensIn: loopResult.promptTokens,
+			tokensOut: loopResult.completionTokens,
+			userId: automation.userId,
+			runId: run.id,
+			agentId: agent.id,
+			metadata: { conversationId: conversation.id, automationId: automation.id },
+		}).catch(() => '0')
+
+		await db.insert(messages).values({
+			conversationId: conversation.id,
+			role: 'assistant',
+			content: loopResult.finalText || '(no output)',
+			model,
+			tokensIn: loopResult.promptTokens,
+			tokensOut: loopResult.completionTokens,
+			cost,
+			toolCalls: loopResult.toolCalls,
+			metadata: {
+				blocks: loopResult.streamBlocks.length > 0 ? loopResult.streamBlocks : undefined,
+				automationId: automation.id,
+				runId: run.id,
+			},
+		})
+
+		await db
+			.update(conversations)
+			.set({ updatedAt: now })
+			.where(eq(conversations.id, conversation.id))
+
+		await session.updateRun({
+			state: 'completed',
+			label: 'Automation completed',
+			lastDelta: loopResult.finalText.slice(-500),
+			heartbeat: true,
+			finished: true,
+		})
+
+		return { conversationId: conversation.id, runId: run.id }
+	} catch (error) {
+		await session.updateRun({
+			state: 'failed',
+			label: 'Automation failed',
+			error: error instanceof Error ? error.message : 'Automation run failed',
+			finished: true,
+		})
+		throw error
+	}
 }
 
 export async function checkAndRunAutomations(now = new Date()) {

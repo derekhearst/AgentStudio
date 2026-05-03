@@ -7,6 +7,7 @@ export type LlmUsageSource =
 	| 'agent_planner'
 	| 'agent_synthesis'
 	| 'subagent'
+	| 'automation'
 	| 'titlegen'
 	| 'image_gen'
 	| 'memory_embed'
