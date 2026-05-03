@@ -112,7 +112,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
    - Evidence (Phase 6 — drop in-memory state, 2026-05-02):
      - Deleted orphaned in-memory streaming registry: `src/lib/agents/streaming-state.server.ts` (no remaining consumers; runs domain is now fully durable in Postgres)
 
-4. [ ] Context slot assembly + compaction invariants
+4. [x] Context slot assembly + compaction invariants
    - Source: ../context/plan.md
    - Gate: token budget respected; tool call/result pair integrity preserved
    - Evidence (Phase 1 — slot-based system-prompt assembly, 2026-05-02):
@@ -144,7 +144,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Stream handler uses relevance + skillTopK setting (default 8): [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Bootstrap + cron tick run backfill: [src/lib/db.server.ts](../../src/lib/db.server.ts), [src/routes/api/cron/+server.ts](../../src/routes/api/cron/+server.ts)
      - Tests: cron-driven backfill, cosine ranking, unembedded skills surface: [tests/context.skill-relevance.spec.ts](../../tests/context.skill-relevance.spec.ts)
-   - Phase 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 8 — per-agent slot config, 2026-05-02):
+     - New `context_slot_configs` table: [src/lib/context/context.schema.ts](../../src/lib/context/context.schema.ts), migration [drizzle/0021_pale_hiroim.sql](../../drizzle/0021_pale_hiroim.sql)
+     - `loadSlotOverrides`, `upsertSlotOverride`, `deleteSlotOverride`: [src/lib/context/overrides.server.ts](../../src/lib/context/overrides.server.ts)
+     - `applySlotOverrides` merges defaults with user/agent overrides: [src/lib/context/slots.server.ts](../../src/lib/context/slots.server.ts)
+     - Stream handler applies overrides before assembly: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Tests: 7 unit specs + 3 schema/cascade specs across [tests/context.slot-overrides.spec.ts](../../tests/context.slot-overrides.spec.ts) and [tests/context.slot-overrides-db.spec.ts](../../tests/context.slot-overrides-db.spec.ts)
+   - **#4 Context now fully complete — flipped to `[x]` above.**
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md

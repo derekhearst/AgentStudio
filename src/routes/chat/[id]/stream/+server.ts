@@ -20,7 +20,8 @@ import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
-import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
+import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { getModePostureContent } from '$lib/chat/mode.server'
 
 const encoder = new TextEncoder()
@@ -315,7 +316,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 	}
 
-	const assembled = assembleSystemPrompt(contextSlots)
+	// Phase 8 of #4: per-(user, agent) slot overrides. Lets users disable slots, raise/lower
+	// priority, or set per-slot token caps from /agents/[id]/settings (UI follow-up).
+	const slotOverrides = await loadSlotOverrides(user.id, conversation.agentId)
+	const overriddenSlots = applySlotOverrides(contextSlots, slotOverrides)
+	const assembled = assembleSystemPrompt(overriddenSlots)
 	const capabilityPrompt = assembled.systemPrompt
 
 	if (capabilityPrompt) {

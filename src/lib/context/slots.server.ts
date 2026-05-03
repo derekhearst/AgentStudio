@@ -10,6 +10,37 @@ export type ContextSlot = {
 	truncationStrategy?: SlotTruncationStrategy
 }
 
+/**
+ * Per-slot overrides loaded from `context_slot_configs`. Any field set to undefined or null
+ * means "use the slot's default". `enabled: false` removes the slot entirely.
+ */
+export type SlotOverride = {
+	tokenBudget?: number | null
+	priority?: number | null
+	enabled?: boolean
+}
+
+/** Apply per-slot overrides to a list of slots. Slots disabled via override are dropped. */
+export function applySlotOverrides(
+	slots: ContextSlot[],
+	overrides: Record<string, SlotOverride | undefined>,
+): ContextSlot[] {
+	const out: ContextSlot[] = []
+	for (const slot of slots) {
+		const o = overrides[slot.name]
+		if (!o) {
+			out.push(slot)
+			continue
+		}
+		if (o.enabled === false) continue // disabled by user
+		const merged: ContextSlot = { ...slot }
+		if (typeof o.priority === 'number') merged.priority = o.priority
+		if (typeof o.tokenBudget === 'number' && o.tokenBudget > 0) merged.tokenBudget = o.tokenBudget
+		out.push(merged)
+	}
+	return out
+}
+
 export type AssembleResult = {
 	systemPrompt: string
 	includedSlots: string[]
