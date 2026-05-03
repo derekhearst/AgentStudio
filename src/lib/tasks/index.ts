@@ -20,4 +20,5 @@ export {
 	getTaskByIdQuery,
 	setTaskStatusCommand,
 	cancelTaskCommand,
+	getActiveTaskForConversationQuery,
 } from './tasks.remote'

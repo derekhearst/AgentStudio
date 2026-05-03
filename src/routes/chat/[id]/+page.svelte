@@ -11,6 +11,7 @@
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant, setConversationMode } from '$lib/chat/chat.remote';
+	import { getActiveTaskForConversationQuery } from '$lib/tasks';
 
 	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 	import { getAvailableModels } from '$lib/llm';
@@ -122,6 +123,8 @@
 		systemPromptTokens: number | null;
 	};
 	let liveContextStats = $state<LiveContextStats | null>(null);
+	type ActiveTaskBadge = { id: string; title: string; status: string };
+	let activeTask = $state<ActiveTaskBadge | null>(null);
 	let availableModels = $derived(await getAvailableModels());
 	let appSettings = $derived(await getSettings());
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
@@ -886,15 +889,19 @@
 		if (!conversationId) {
 			conversationData = null;
 			stats = [];
+			activeTask = null;
 			return;
 		}
 
-		const [conversationResult, statsResult] = await Promise.all([
+		const [conversationResult, statsResult, taskResult] = await Promise.all([
 			getConversation(conversationId),
-			getMessageStats(conversationId)
+			getMessageStats(conversationId),
+			// Wave 2 #11 phase 4 follow-up — surface the linked task as a badge near the title.
+			getActiveTaskForConversationQuery(conversationId).catch(() => null),
 		]);
 		conversationData = conversationResult;
 		stats = statsResult;
+		activeTask = taskResult ?? null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
 	}
 
@@ -1586,6 +1593,23 @@
 				<div class="alert alert-info mt-1 mb-1 py-2 text-sm">
 					<span>{modelSwitchNotice}</span>
 				</div>
+			{/if}
+
+			{#if activeTask}
+				<a
+					href="/tasks/{activeTask.id}"
+					class="mb-1 mt-1 flex items-center gap-2 rounded-xl border border-info/40 bg-info/10 px-3 py-1.5 text-xs leading-snug transition-colors hover:border-info/60 hover:bg-info/15"
+					title="Open the linked task"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<rect x="8" y="2" width="8" height="4" rx="1"/>
+						<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+						<path d="m9 14 2 2 4-4"/>
+					</svg>
+					<span class="font-semibold uppercase tracking-wide opacity-70">Task</span>
+					<span class="line-clamp-1 flex-1 font-medium">{activeTask.title}</span>
+					<span class="badge badge-xs badge-outline">{activeTask.status}</span>
+				</a>
 			{/if}
 
 			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">

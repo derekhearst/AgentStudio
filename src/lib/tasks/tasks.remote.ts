@@ -1,5 +1,5 @@
 import { command, query } from '$app/server'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { chatRuns } from '$lib/runs/runs.schema'
@@ -32,6 +32,28 @@ const setStatusSchema = z.object({
 		'failed',
 		'canceled',
 	]),
+})
+
+/**
+ * Wave 2 #11 phase 4 follow-up — return the most recent parent task linked to any chat_run in
+ * the given conversation, so the chat page can show a "→ Task: <title>" badge that deep-links
+ * the user to the task they're materializing. Returns null when no run in this conversation
+ * has a `task_id` set.
+ */
+const conversationIdSchema = z.string().uuid()
+export const getActiveTaskForConversationQuery = query(conversationIdSchema, async (conversationId) => {
+	const [row] = await db
+		.select({
+			id: tasks.id,
+			title: tasks.title,
+			status: tasks.status,
+		})
+		.from(chatRuns)
+		.innerJoin(tasks, eq(tasks.id, chatRuns.taskId))
+		.where(eq(chatRuns.conversationId, conversationId))
+		.orderBy(desc(chatRuns.createdAt))
+		.limit(1)
+	return row ?? null
 })
 
 export const listTasksQuery = query(listTasksSchema, async (input) => {
