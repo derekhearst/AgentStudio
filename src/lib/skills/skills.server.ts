@@ -545,13 +545,16 @@ function buildSystemSkillSummary(): SkillSummary {
  */
 export async function getCompanionSkillsForGroups(groups: string[]): Promise<SkillSummary[]> {
 	if (groups.length === 0) return []
+	// Build a Postgres array literal `'{sandbox,skills}'` and cast to text[]. drizzle-orm doesn't
+	// auto-bind JS arrays to pg arrays in raw `sql` template literals — manually format instead.
+	const arrayLiteral = formatPgArrayLiteral(groups)
 	const rows = await db
 		.select({ id: skills.id, name: skills.name, description: skills.description })
 		.from(skills)
 		.where(
 			and(
 				eq(skills.enabled, true),
-				drizzleSql`${skills.companionGroups} && ${groups}::text[]`,
+				drizzleSql`${skills.companionGroups} && ${arrayLiteral}::text[]`,
 			),
 		)
 		.orderBy(asc(skills.name))
@@ -577,15 +580,24 @@ export async function getCompanionSkillsForGroups(groups: string[]): Promise<Ski
  */
 export async function getCompanionSkillsForTools(toolNames: string[]): Promise<SkillSummary[]> {
 	if (toolNames.length === 0) return []
+	const arrayLiteral = formatPgArrayLiteral(toolNames)
 	const rows = await db
 		.select({ id: skills.id, name: skills.name, description: skills.description })
 		.from(skills)
 		.where(
 			and(
 				eq(skills.enabled, true),
-				drizzleSql`${skills.companionTools} && ${toolNames}::text[]`,
+				drizzleSql`${skills.companionTools} && ${arrayLiteral}::text[]`,
 			),
 		)
 		.orderBy(asc(skills.name))
 	return rows.map((r) => ({ ...r, files: [] }))
+}
+
+function formatPgArrayLiteral(values: string[]): string {
+	// Postgres array literal with quoted elements + escaped quotes/backslashes. We control the
+	// callers (capability group names, tool names — alphanumeric + underscore + slash), but we
+	// still escape defensively to avoid future surprises.
+	const escaped = values.map((v) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`)
+	return `{${escaped.join(',')}}`
 }

@@ -223,6 +223,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// surface). When unset, the legacy back-compat path is preserved.
 	let agentCapabilityGroups: string[] | null = null
 
+	// Wave 2 #8 phase 2 — pre-suggest capability groups from the user message so the model gets
+	// the right tools on round 0 without spending a round calling enable_capability. Computed
+	// here (before slot assembly) so the matching companion-skill summaries (Wave 2 #9 phase 3)
+	// can be added as a context slot in the same pass.
+	const isOrchestrator = !conversation.agentId
+	const { suggestCapabilityGroups } = await import('$lib/tools/suggest-capabilities')
+	const suggestedGroups = isOrchestrator && body.content ? suggestCapabilityGroups(body.content) : []
+
 	// --- Context Engineering: Mode Posture (chat workbench mode) ---
 	if (conversation.mode && conversation.mode !== 'chat') {
 		contextSlots.push({
@@ -233,7 +241,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	// --- Context Engineering: Orchestrator / Agent Identity ---
-	const isOrchestrator = !conversation.agentId
 	if (isOrchestrator) {
 		const orchestratorPrompt = await buildOrchestratorPrompt()
 		contextSlots.push({ name: 'identity', priority: 100, content: orchestratorPrompt })
@@ -330,6 +337,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
+	// Wave 2 #9 phase 3 — when capability groups are auto-suggested (or pre-bound on the agent),
+	// surface their companion skill summaries in the context so the model knows when/how to use
+	// the tools without waiting for an explicit enable_capability round-trip. Only the summaries
+	// (not full bodies) — bodies still require read_skill.
+	if (suggestedGroups.length > 0) {
+		try {
+			const { getCompanionSkillsForGroups } = await import('$lib/skills/skills.server')
+			const companions = await getCompanionSkillsForGroups(suggestedGroups)
+			if (companions.length > 0) {
+				const lines = companions.map((s) => `- ${s.name}: ${s.description}`).join('\n')
+				contextSlots.push({
+					name: 'companion_skills',
+					priority: 75,
+					content: `Companion skills for the active capability groups (${suggestedGroups.join(', ')}). Call read_skill('<name>') to load full guidance:\n${lines}`,
+					truncationStrategy: 'truncate-end',
+				})
+			}
+		} catch (err) {
+			console.warn('[skills] companion lookup for suggested groups failed', err)
+		}
+	}
+
 	// --- Context Engineering: Memory Palace Recall ---
 	const memoryConfig = (currentSettings.memoryConfig ?? null) as {
 		enabled?: boolean
@@ -403,13 +432,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	//      "all tools" surface so existing agents don't suddenly lose their toolkit.
 	const { expandGroupsToToolNames, getEnabledGroups } = await import('$lib/tools/capabilities.server')
 	const useProgressiveDisclosure = !scopedAgentTools && (isOrchestrator || agentCapabilityGroups !== null)
-	// Wave 2 #8 phase 2 — pre-enable suggested capability groups on round 0 based on keyword
-	// matches in the user message, so the model doesn't have to spend a round calling
-	// enable_capability before getting useful tools. Conservative: requires either a single
-	// strong keyword or two supporting keywords. Falls back to ['core'] when nothing matches.
-	const { suggestCapabilityGroups } = await import('$lib/tools/suggest-capabilities')
-	const suggested = isOrchestrator && body.content ? suggestCapabilityGroups(body.content) : []
-	const orchestratorBaseGroups = Array.from(new Set<string>(['core', ...suggested]))
+	// Pre-suggested groups (computed earlier so the slot pass could reference them) get merged
+	// into the orchestrator's initial enabled set.
+	const orchestratorBaseGroups = Array.from(new Set<string>(['core', ...suggestedGroups]))
 	const initialEnabledGroups: string[] = isOrchestrator
 		? orchestratorBaseGroups
 		: (agentCapabilityGroups ?? ['core'])
