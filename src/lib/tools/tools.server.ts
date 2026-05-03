@@ -897,6 +897,41 @@ function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 /**
+ * Wave 2 #11 phase 2 helper — render a propose_plan input as markdown for the parent task's
+ * `spec` column. This is the durable, human-readable description of what the orchestrator
+ * committed to; the structured fields stay on the task's metadata for programmatic use.
+ */
+type ProposePlanInput = z.infer<typeof toolSchemas.propose_plan>
+function stringifyPlanForSpec(plan: ProposePlanInput): string {
+	const lines: string[] = []
+	lines.push(`# ${plan.summary}`, '')
+	lines.push('## Steps', '')
+	plan.steps.forEach((step, idx) => {
+		lines.push(`${idx + 1}. **${step.title}**`)
+		if (step.detail) lines.push(`   ${step.detail}`)
+		const meta: string[] = []
+		if (step.estimatedDurationMin !== undefined) meta.push(`~${step.estimatedDurationMin}m`)
+		if (step.estimatedCostUsd !== undefined) meta.push(`$${step.estimatedCostUsd.toFixed(2)}`)
+		if (step.blastRadius) meta.push(step.blastRadius)
+		if (step.reversible === false) meta.push('irreversible')
+		if (meta.length > 0) lines.push(`   _(${meta.join(' · ')})_`)
+	})
+	if (plan.risks?.length) {
+		lines.push('', '## Risks', ...plan.risks.map((r) => `- ${r}`))
+	}
+	if (plan.rollback) {
+		lines.push('', '## Rollback', plan.rollback)
+	}
+	if (plan.totalEstimatedCostUsd !== undefined || plan.totalEstimatedDurationMin !== undefined) {
+		const totals: string[] = []
+		if (plan.totalEstimatedDurationMin !== undefined) totals.push(`~${plan.totalEstimatedDurationMin}m`)
+		if (plan.totalEstimatedCostUsd !== undefined) totals.push(`$${plan.totalEstimatedCostUsd.toFixed(2)}`)
+		lines.push('', `_Total: ${totals.join(' · ')}_`)
+	}
+	return lines.join('\n')
+}
+
+/**
  * Returns tool definitions for the LLM.
  * When `onlyTools` is provided, only those tools are included (capability filtering).
  * When omitted, all tools are returned (backwards compatible).
@@ -1549,9 +1584,80 @@ export async function executeTool(
 				const input = toolSchemas.propose_plan.parse(call.arguments)
 				// The plan-approval flow runs through the standard tool approval pipeline (the
 				// stream handler emits tool_pending, blocks on user decision, then calls executeTool
-				// only on approve). By the time we get here, the user has already approved — so the
-				// plan is "accepted" and the orchestrator can proceed. The structured input is echoed
-				// back so the plan content is part of the durable tool_result for later inspection.
+				// only on approve). By the time we get here, the user has already approved.
+				//
+				// Wave 2 #11 phase 2 — persist the approved plan as a durable parent task plus one
+				// child task per step. The current chat_run is linked to the parent so future runs
+				// can show "this run materialized task <X>" in the UI. Best-effort: a failure in
+				// task persistence does NOT fail the tool call (the orchestrator can still execute
+				// the plan); we just lose the task linkage and log a warning.
+				const ctx = toolUserContext.getStore()
+				let parentTaskId: string | null = null
+				const childTaskIds: string[] = []
+				if (ctx?.userId && ctx?.runId) {
+					try {
+						const { chatRuns } = await import('$lib/runs/runs.schema')
+						const { createTask } = await import('$lib/tasks/tasks.server')
+						const { eq } = await import('drizzle-orm')
+						const { db } = await import('$lib/db.server')
+						const [run] = await db
+							.select({ conversationId: chatRuns.conversationId, agentId: chatRuns.agentId })
+							.from(chatRuns)
+							.where(eq(chatRuns.id, ctx.runId))
+							.limit(1)
+
+						const parent = await createTask({
+							title: input.summary,
+							spec: stringifyPlanForSpec(input),
+							status: 'running',
+							ownerAgentId: run?.agentId ?? null,
+							rootConversationId: run?.conversationId ?? null,
+							createdBy: ctx.userId,
+							metadata: {
+								source: 'propose_plan',
+								originRunId: ctx.runId,
+								totalEstimatedCostUsd: input.totalEstimatedCostUsd,
+								totalEstimatedDurationMin: input.totalEstimatedDurationMin,
+								risks: input.risks,
+								rollback: input.rollback,
+							},
+						})
+						parentTaskId = parent.id
+
+						for (let i = 0; i < input.steps.length; i++) {
+							const step = input.steps[i]
+							const child = await createTask({
+								title: step.title,
+								spec: step.detail ?? step.title,
+								status: 'pending',
+								parentTaskId: parent.id,
+								ownerAgentId: run?.agentId ?? null,
+								rootConversationId: run?.conversationId ?? null,
+								priority: i,
+								createdBy: ctx.userId,
+								metadata: {
+									source: 'propose_plan',
+									originRunId: ctx.runId,
+									stepIndex: i,
+									estimatedDurationMin: step.estimatedDurationMin,
+									estimatedCostUsd: step.estimatedCostUsd,
+									blastRadius: step.blastRadius,
+									reversible: step.reversible,
+								},
+							})
+							childTaskIds.push(child.id)
+						}
+
+						// Back-link the originating run to the parent task so the UI can show the
+						// task badge / drill into the plan from the run trace.
+						await db.update(chatRuns).set({ taskId: parent.id }).where(eq(chatRuns.id, ctx.runId))
+					} catch (err) {
+						console.warn('[propose_plan] task persistence failed; orchestrator will proceed without task linkage', err)
+						parentTaskId = null
+						childTaskIds.length = 0
+					}
+				}
+
 				return {
 					success: true,
 					tool: call.name,
@@ -1560,6 +1666,8 @@ export async function executeTool(
 						approved: true,
 						summary: input.summary,
 						stepCount: input.steps.length,
+						parentTaskId,
+						childTaskIds,
 					},
 					executionMs: Date.now() - startedAt,
 				}
