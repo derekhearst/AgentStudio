@@ -2,6 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit'
 import { env } from '$env/dynamic/private'
 import { checkAndRunAutomations } from '$lib/automations/engine'
 import { runWorkspaceGc } from '$lib/workspace/gc.server'
+import { backfillSkillEmbeddings } from '$lib/skills/skills.server'
 
 function hasCronAccess(request: Request) {
 	const expected = env.CRON_SECRET?.trim()
@@ -32,5 +33,14 @@ export const POST: RequestHandler = async ({ request }) => {
 		}
 	}
 
-	return json({ automations, workspace })
+	// Skill embedding backfill (Phase 4 of #4): catches skills inserted via raw SQL or
+	// migration paths that bypassed createSkill's automatic embedding refresh.
+	let skillEmbeddings: Awaited<ReturnType<typeof backfillSkillEmbeddings>> | null = null
+	try {
+		skillEmbeddings = await backfillSkillEmbeddings(50)
+	} catch (err) {
+		console.error('[cron] skill embedding backfill failed', err)
+	}
+
+	return json({ automations, workspace, skillEmbeddings })
 }

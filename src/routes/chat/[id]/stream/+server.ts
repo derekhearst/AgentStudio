@@ -15,7 +15,7 @@ import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/question
 import { persistRunBlocks, setRunRound } from '$lib/runs/blocks.server'
 import { appendRunEvent } from '$lib/runs/events.server'
 import { toolSchemas } from '$lib/tools/tools.server'
-import { listSkillSummaries } from '$lib/skills/skills.server'
+import { listSkillSummaries, listRelevantSkillSummaries } from '$lib/skills/skills.server'
 import { trimHistoricalToolResults, trimToolResult } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
@@ -189,8 +189,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	)
 
 	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
+	// Phase 4 of #4: filter by relevance to the user's query when available, capped to skillTopK
+	// (default 8). Falls back to listing everything when no user content yet (e.g. regenerate
+	// of a system-prompted run) or when embeddings are unavailable.
+	const skillTopK = Math.max(
+		1,
+		((currentSettings.contextConfig as { skillTopK?: number } | null)?.skillTopK ?? 8),
+	)
 	let skillSummariesText: string | undefined
-	const skillSummaries = await listSkillSummaries()
+	const skillSummaries =
+		body.content && body.content.trim().length > 0
+			? await listRelevantSkillSummaries(body.content.trim(), skillTopK)
+			: await listSkillSummaries()
 	if (skillSummaries.length > 0) {
 		skillSummariesText = skillSummaries
 			.map((s) => {

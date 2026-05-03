@@ -366,6 +366,21 @@ async function bootstrapDatabase() {
 		} catch (err) {
 			console.warn('[db] Mode-identity skill seed failed (non-fatal):', err)
 		}
+
+		// Phase 4 of #4: backfill embeddings for any skills that don't have them yet, so the
+		// relevance filter has something to rank. Best-effort; failures are non-fatal (the
+		// fallback path lists every skill exactly like before).
+		void (async () => {
+			try {
+				const { backfillSkillEmbeddings } = await import('$lib/skills/skills.server')
+				const result = await backfillSkillEmbeddings(50)
+				if (result.embedded > 0) {
+					console.log(`[db] Backfilled ${result.embedded} skill embedding(s)`)
+				}
+			} catch (err) {
+				console.warn('[db] Skill embedding backfill failed (non-fatal):', err)
+			}
+		})()
 	} catch (err) {
 		console.error('[db] Bootstrap failed — database may be unavailable:', err)
 	}

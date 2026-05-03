@@ -138,7 +138,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Stream handler emits a `context_stats` SSE event after slot assembly (tokenEstimate, contextWindow, didCompact, included/dropped/truncated slots, systemPromptTokens): [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Chat client captures it into reactive state and the existing `ContextWindow` component reflects the tokenizer-accurate count: [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
      - Live test verifying the event arrives with all fields: [tests/context.utilization.spec.ts](../../tests/context.utilization.spec.ts)
-   - Phases 4 (relevance-filtered skills), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 4 — relevance-filtered skills, 2026-05-02):
+     - Schema: `description_embedding` vector + `description_embedded_at` on skills: [src/lib/skills/skills.schema.ts](../../src/lib/skills/skills.schema.ts), migration [drizzle/0020_tense_tiger_shark.sql](../../drizzle/0020_tense_tiger_shark.sql)
+     - `refreshSkillEmbedding`, `backfillSkillEmbeddings`, `listRelevantSkillSummaries`: [src/lib/skills/skills.server.ts](../../src/lib/skills/skills.server.ts)
+     - Stream handler uses relevance + skillTopK setting (default 8): [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Bootstrap + cron tick run backfill: [src/lib/db.server.ts](../../src/lib/db.server.ts), [src/routes/api/cron/+server.ts](../../src/routes/api/cron/+server.ts)
+     - Tests: cron-driven backfill, cosine ranking, unembedded skills surface: [tests/context.skill-relevance.spec.ts](../../tests/context.skill-relevance.spec.ts)
+   - Phase 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md

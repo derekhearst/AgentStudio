@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ilike, or, sql, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { skillFiles, skills } from '$lib/skills/skills.schema'
 import { emitActivity } from '$lib/activity/activity.server'
+import { embed, embedOne, toPgVector } from '$lib/memory/embeddings.server'
 
 const SYSTEM_SKILL_ID = '00000000-0000-4000-8000-000000000042'
 const SYSTEM_SKILL_NAME = 'drokbot-guide'
@@ -113,7 +114,9 @@ function buildSystemSkill() {
 		tags: ['onboarding', 'guide', 'drokbot', 'best-practices'],
 		enabled: true,
 		accessCount: 0,
-		lastAccessed: null,
+		lastAccessed: null as Date | null,
+		descriptionEmbedding: null as number[] | null,
+		descriptionEmbeddedAt: null as Date | null,
 		createdAt: SYSTEM_SKILL_CREATED_AT,
 		updatedAt: SYSTEM_SKILL_CREATED_AT,
 		isSystem: true,
@@ -153,6 +156,7 @@ export async function createSkill(name: string, description: string, content: st
 		entityId: skill.id,
 		entityType: 'skill',
 	})
+	void refreshSkillEmbedding(skill.id)
 	return skill
 }
 
@@ -169,6 +173,9 @@ export async function updateSkill(
 		.set({ ...fields, updatedAt: new Date() })
 		.where(eq(skills.id, id))
 		.returning()
+	if (fields.name !== undefined || fields.description !== undefined) {
+		void refreshSkillEmbedding(id)
+	}
 	return skill
 }
 
@@ -382,4 +389,146 @@ export async function getSkillFileByName(skillId: string, fileName: string) {
 		.where(and(eq(skillFiles.skillId, skillId), eq(skillFiles.name, fileName)))
 		.limit(1)
 	return file ?? null
+}
+
+/* ── Skill relevance (Phase 4 of #4) ────────────────────────── */
+
+const SKILL_EMBED_TEXT = (name: string, description: string) =>
+	`${name}\n${description}`.slice(0, 2000)
+
+/**
+ * Compute and persist `description_embedding` for a single skill row. Idempotent: writes the
+ * vector + timestamp; safe to call repeatedly. Failures (e.g. embedding API down) are logged
+ * and swallowed so they never block CRUD.
+ */
+export async function refreshSkillEmbedding(skillId: string): Promise<void> {
+	if (isSystemSkillId(skillId)) return // virtual system skill has no DB row to update
+	try {
+		const [row] = await db
+			.select({ name: skills.name, description: skills.description })
+			.from(skills)
+			.where(eq(skills.id, skillId))
+			.limit(1)
+		if (!row) return
+		const vector = await embedOne(SKILL_EMBED_TEXT(row.name, row.description))
+		await db
+			.update(skills)
+			.set({ descriptionEmbedding: vector, descriptionEmbeddedAt: new Date() })
+			.where(eq(skills.id, skillId))
+	} catch (err) {
+		console.warn('[skills] refreshSkillEmbedding failed', err)
+	}
+}
+
+/**
+ * Backfill embeddings for every enabled skill that doesn't have one yet. Runs in batches.
+ * Returns the count of newly-embedded rows.
+ */
+export async function backfillSkillEmbeddings(limit = 50): Promise<{ embedded: number }> {
+	try {
+		const pending = await db
+			.select({ id: skills.id, name: skills.name, description: skills.description })
+			.from(skills)
+			.where(and(eq(skills.enabled, true), drizzleSql`${skills.descriptionEmbedding} is null`))
+			.limit(limit)
+		if (pending.length === 0) return { embedded: 0 }
+
+		const texts = pending.map((s) => SKILL_EMBED_TEXT(s.name, s.description))
+		const vectors = await embed(texts)
+		const now = new Date()
+		for (let i = 0; i < pending.length; i++) {
+			const v = vectors[i]
+			if (!v) continue
+			await db
+				.update(skills)
+				.set({ descriptionEmbedding: v, descriptionEmbeddedAt: now })
+				.where(eq(skills.id, pending[i].id))
+		}
+		return { embedded: vectors.filter(Boolean).length }
+	} catch (err) {
+		console.warn('[skills] backfillSkillEmbeddings failed', err)
+		return { embedded: 0 }
+	}
+}
+
+export type SkillSummary = Awaited<ReturnType<typeof listSkillSummaries>>[number]
+
+/**
+ * Return the top-K most relevant skill summaries for the given query text by cosine similarity
+ * over the persisted `description_embedding` vectors.
+ *
+ * Skills without an embedding (newly added, not yet backfilled, or embedding API was down when
+ * they were saved) are appended after the relevance-ranked set so they're never invisible.
+ *
+ * The built-in `drokbot-guide` system skill is always included.
+ *
+ * Falls back to `listSkillSummaries()` when the query embedding fails or no skills have
+ * embeddings yet — the system stays usable even if OPENROUTER_API_KEY is unset.
+ */
+export async function listRelevantSkillSummaries(query: string, topK = 8): Promise<SkillSummary[]> {
+	const trimmed = (query ?? '').trim()
+	if (!trimmed) return listSkillSummaries()
+
+	let queryVector: number[]
+	try {
+		queryVector = await embedOne(trimmed)
+	} catch (err) {
+		console.warn('[skills] listRelevantSkillSummaries embedding failed; falling back to all', err)
+		return listSkillSummaries()
+	}
+
+	const ranked = await db
+		.select({
+			id: skills.id,
+			name: skills.name,
+			description: skills.description,
+			distance: drizzleSql<number>`${skills.descriptionEmbedding} <=> ${toPgVector(queryVector)}::vector`,
+		})
+		.from(skills)
+		.where(and(eq(skills.enabled, true), drizzleSql`${skills.descriptionEmbedding} is not null`))
+		.orderBy(drizzleSql`${skills.descriptionEmbedding} <=> ${toPgVector(queryVector)}::vector asc`)
+		.limit(Math.max(1, topK))
+
+	const rankedIds = new Set(ranked.map((r) => r.id))
+	// Surface skills that haven't been embedded yet so they're never silently dropped.
+	const unembedded = await db
+		.select({ id: skills.id, name: skills.name, description: skills.description })
+		.from(skills)
+		.where(and(eq(skills.enabled, true), drizzleSql`${skills.descriptionEmbedding} is null`))
+
+	const allIds = [...ranked.map((r) => r.id), ...unembedded.map((u) => u.id).filter((id) => !rankedIds.has(id))]
+
+	if (allIds.length === 0) return [buildSystemSkillSummary()]
+
+	const files = await db
+		.select({ skillId: skillFiles.skillId, name: skillFiles.name, description: skillFiles.description })
+		.from(skillFiles)
+		.innerJoin(skills, eq(skillFiles.skillId, skills.id))
+		.where(eq(skills.enabled, true))
+		.orderBy(asc(skillFiles.sortOrder), asc(skillFiles.name))
+
+	const fileMap = new Map<string, Array<{ name: string; description: string }>>()
+	for (const f of files) {
+		const arr = fileMap.get(f.skillId) ?? []
+		arr.push({ name: f.name, description: f.description })
+		fileMap.set(f.skillId, arr)
+	}
+
+	const summaries = [
+		...ranked.map((r) => ({ id: r.id, name: r.name, description: r.description, files: fileMap.get(r.id) ?? [] })),
+		...unembedded
+			.filter((u) => !rankedIds.has(u.id))
+			.map((u) => ({ id: u.id, name: u.name, description: u.description, files: fileMap.get(u.id) ?? [] })),
+	]
+	return [...summaries, buildSystemSkillSummary()]
+}
+
+function buildSystemSkillSummary(): SkillSummary {
+	const systemSkill = buildSystemSkill()
+	return {
+		id: systemSkill.id,
+		name: systemSkill.name,
+		description: systemSkill.description,
+		files: systemSkill.files.map((f) => ({ name: f.name, description: f.description })),
+	}
 }
