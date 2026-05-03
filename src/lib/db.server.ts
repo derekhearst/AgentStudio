@@ -352,6 +352,20 @@ async function bootstrapDatabase() {
 		} else {
 			console.log('[db] Database ready')
 		}
+
+		// Seed mode-identity skills (idempotent: ON CONFLICT DO NOTHING preserves user edits).
+		// Lazy-imported to avoid a require cycle and pass a fresh db handle, since the top-level
+		// `db` export of this file is evaluated AFTER `await databaseReadyPromise`.
+		try {
+			const { seedModeIdentitySkills } = await import('$lib/chat/mode-skills.server')
+			const seedDb = createDatabase(client)
+			const result = await seedModeIdentitySkills(seedDb)
+			if (result.inserted > 0) {
+				console.log(`[db] Seeded ${result.inserted} mode-identity skill(s)`)
+			}
+		} catch (err) {
+			console.warn('[db] Mode-identity skill seed failed (non-fatal):', err)
+		}
 	} catch (err) {
 		console.error('[db] Bootstrap failed — database may be unavailable:', err)
 	}

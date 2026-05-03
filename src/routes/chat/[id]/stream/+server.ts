@@ -20,7 +20,7 @@ import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
-import { getModeAnchorPrompt } from '$lib/chat/mode.server'
+import { getModePostureContent } from '$lib/chat/mode.server'
 
 const encoder = new TextEncoder()
 
@@ -207,7 +207,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		contextSlots.push({
 			name: `mode_${conversation.mode}`,
 			priority: 95,
-			content: getModeAnchorPrompt(conversation.mode),
+			content: await getModePostureContent(conversation.mode),
 		})
 	}
 

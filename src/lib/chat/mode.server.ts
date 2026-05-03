@@ -3,7 +3,10 @@ import { db } from '$lib/db.server'
 import { conversations, type ChatMode } from '$lib/sessions/sessions.schema'
 import { messages } from '$lib/sessions/sessions.schema'
 import { chatWorkbenchPreferences, type WorkbenchPanelLayout } from '$lib/chat/chat.workbench.schema'
+import { loadModeIdentitySkill } from '$lib/chat/mode-skills.server'
 
+// Short anchor sentences inserted into the conversation history when the mode flips.
+// Full posture guidance lives in the seeded mode-identity skills (loadModeIdentitySkill).
 const ANCHOR_PROMPTS: Record<ChatMode, string> = {
 	chat: '[Mode changed to Chat] You are now in Chat mode. Be conversational and collaborative. Keep responses concise; ask clarifying questions when intent is ambiguous.',
 	research:
@@ -117,6 +120,12 @@ export async function setConversationMode(
 	return { conversationId, previousMode, mode, anchorMessageId: result }
 }
 
+/** Short one-liner used as the persisted anchor message text on mode flip. */
 export function getModeAnchorPrompt(mode: ChatMode): string {
 	return ANCHOR_PROMPTS[mode]
+}
+
+/** Full posture guidance for the active mode — pulls live from the seeded mode-identity skill. */
+export async function getModePostureContent(mode: ChatMode): Promise<string> {
+	return loadModeIdentitySkill(mode)
 }

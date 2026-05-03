@@ -161,7 +161,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - New component: [src/lib/chat/ModeSelector.svelte](../../src/lib/chat/ModeSelector.svelte)
      - Wired through composer + input + page: [src/lib/chat/ChatComposer.svelte](../../src/lib/chat/ChatComposer.svelte), [src/lib/chat/ChatInput.svelte](../../src/lib/chat/ChatInput.svelte), [src/routes/chat/[id]/+page.svelte](../../src/routes/chat/[id]/+page.svelte)
      - UI test verifies switch persists to DB + writes anchor message; same-mode pick is a no-op: [tests/chat.mode-selector.spec.ts](../../tests/chat.mode-selector.spec.ts)
-   - Phases 3-9 (mode identity skills, plan approval card, run HUD, inline approval cards, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
+   - Evidence (Phase 3 — mode identity skills seeded on boot, 2026-05-02):
+     - New module: [src/lib/chat/mode-skills.server.ts](../../src/lib/chat/mode-skills.server.ts) (fixed UUIDs, `seedModeIdentitySkills(dbInstance)`, `loadModeIdentitySkill(mode)`)
+     - Bootstrap seeds on first boot: [src/lib/db.server.ts](../../src/lib/db.server.ts)
+     - Stream handler reads live posture content: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Mode helper exposes loader: [src/lib/chat/mode.server.ts](../../src/lib/chat/mode.server.ts) (`getModePostureContent`)
+     - Tests cover seed, ON CONFLICT preservation of user edits, and disabled-skill fallback through a live LLM stream: [tests/chat.mode-skills.spec.ts](../../tests/chat.mode-skills.spec.ts)
+   - Phases 4-9 (plan approval card, run HUD, inline approval cards, mode-aware right panel, diff/artifact preview, research report view) still pending — keep `[ ]` until full plan lands.
 
 7. [ ] Workspace sandbox baseline and task execution isolation
    - Source: ../workspace/plan.md
