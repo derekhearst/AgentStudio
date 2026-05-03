@@ -98,10 +98,97 @@ export function getContextWindowSize(model: string): number {
 }
 
 /**
- * Rough token estimate: ~4 chars per token.
+ * Token estimation. Uses js-tiktoken for known model families; falls back to chars/4 for unknown
+ * models (and when the WASM-free encoder hasn't been initialized yet — first call is sync).
+ *
+ * Model family heuristic (based on the leading provider/model slug):
+ *   - openai/* and o-series        → cl100k_base / o200k_base
+ *   - anthropic/* (claude)         → cl100k_base (close-enough proxy until tiktoken ships claude)
+ *   - google/* (gemini)            → cl100k_base proxy
+ *   - everything else              → chars / 4 fallback
+ *
+ * Each encoder is lazily constructed and cached at module scope.
+ */
+import { encodingForModel, getEncoding, type Tiktoken, type TiktokenEncoding, type TiktokenModel } from 'js-tiktoken'
+
+const FALLBACK_FACTOR = 4
+
+const ENCODER_CACHE = new Map<TiktokenEncoding, Tiktoken>()
+const MODEL_CACHE = new Map<TiktokenModel, Tiktoken>()
+const FALLBACK_LOGGED = new Set<string>()
+
+function getEncoder(name: TiktokenEncoding): Tiktoken | null {
+	const cached = ENCODER_CACHE.get(name)
+	if (cached) return cached
+	try {
+		const enc = getEncoding(name)
+		ENCODER_CACHE.set(name, enc)
+		return enc
+	} catch {
+		return null
+	}
+}
+
+function getModelEncoder(name: TiktokenModel): Tiktoken | null {
+	const cached = MODEL_CACHE.get(name)
+	if (cached) return cached
+	try {
+		const enc = encodingForModel(name)
+		MODEL_CACHE.set(name, enc)
+		return enc
+	} catch {
+		return null
+	}
+}
+
+/**
+ * Pick an appropriate tiktoken encoder for a model slug. Returns null when no good match exists,
+ * which causes `estimateTokensForModel` to fall back to chars/4.
+ */
+function encoderForModel(model: string): Tiktoken | null {
+	const lower = model.toLowerCase()
+	if (lower.startsWith('openai/') || lower.startsWith('o1') || lower.startsWith('gpt-')) {
+		const slug = lower.replace(/^openai\//, '') as TiktokenModel
+		const direct = getModelEncoder(slug)
+		if (direct) return direct
+		// gpt-4o family uses o200k_base
+		if (slug.includes('4o') || slug.startsWith('o1') || slug.startsWith('o3')) return getEncoder('o200k_base')
+		return getEncoder('cl100k_base')
+	}
+	// Anthropic, Google, Mistral, etc. don't have tiktoken encoders shipped — cl100k_base is a
+	// reasonable proxy that's typically within ~10% of the real tokenizer for English text.
+	return getEncoder('cl100k_base')
+}
+
+/**
+ * Rough token estimate: chars / 4 fallback. Kept as a synchronous, model-agnostic helper for
+ * places that don't know which model the text is destined for.
  */
 export function estimateTokens(text: string): number {
-	return Math.ceil((text?.length ?? 0) / 4)
+	return Math.ceil((text?.length ?? 0) / FALLBACK_FACTOR)
+}
+
+/**
+ * Model-aware token estimator. Uses tiktoken for known models, falls back to chars/4 otherwise.
+ * Logs the fallback once per model so we know what's missing without spamming.
+ */
+export function estimateTokensForModel(text: string, model: string): number {
+	if (!text) return 0
+	const enc = encoderForModel(model)
+	if (!enc) {
+		if (!FALLBACK_LOGGED.has(model)) {
+			FALLBACK_LOGGED.add(model)
+			if (typeof console !== 'undefined') {
+				console.warn(`[tokens] no tiktoken encoder for model "${model}"; using chars/4 fallback`)
+			}
+		}
+		return estimateTokens(text)
+	}
+	try {
+		return enc.encode(text).length
+	} catch {
+		return estimateTokens(text)
+	}
 }
 
 /**

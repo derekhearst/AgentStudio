@@ -318,7 +318,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const compactionCheck = await shouldCompact(llmMessages, routedModel, user.id)
 	let didCompact = false
 	if (compactionCheck.needed) {
-		const result = await compactMessages(llmMessages, user.id)
+		const result = await compactMessages(llmMessages, user.id, routedModel)
 		if (result.summary) {
 			llmMessages.length = 0
 			llmMessages.push(...result.compacted)

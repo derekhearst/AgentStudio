@@ -1,5 +1,5 @@
 import { chat, type LlmMessage } from '$lib/llm/chat.server'
-import { estimateTokens, getContextWindowSize } from '$lib/tools/tools'
+import { estimateTokens, estimateTokensForModel, getContextWindowSize } from '$lib/tools/tools'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { findSafeSplitPoint as findSafeSplitPointPure } from '$lib/chat/compaction'
@@ -93,20 +93,41 @@ async function getCompactionModel(userId: string): Promise<string> {
 	return contextConfig?.compactionModel || DEFAULT_COMPACTION_MODEL
 }
 
-export function estimateMessageTokens(messages: LlmMessage[]): number {
+/**
+ * Per-message overhead the API adds on top of content tokens. Approximate; mirrors what
+ * OpenAI/Anthropic clients commonly add for role + name + structural framing.
+ */
+const PER_MESSAGE_OVERHEAD = 4
+/** Per tool_call structural overhead (id, type, function name, json wrapper). */
+const PER_TOOL_CALL_OVERHEAD = 20
+
+export function estimateMessageTokens(messages: LlmMessage[], model?: string): number {
+	const tok = (text: string) => (model ? estimateTokensForModel(text, model) : estimateTokens(text))
 	let total = 0
 	for (const msg of messages) {
+		total += PER_MESSAGE_OVERHEAD
 		if (typeof msg.content === 'string') {
-			total += estimateTokens(msg.content) + 4
+			total += tok(msg.content)
 		} else if (Array.isArray(msg.content)) {
 			for (const block of msg.content) {
 				if (block.type === 'text') {
-					total += estimateTokens(block.text)
+					total += tok(block.text)
 				} else {
-					total += 200
+					total += 200 // image/multimodal placeholder
 				}
 			}
-			total += 4
+		}
+		// Tool messages and assistant tool_calls add structural overhead the model encodes.
+		if (msg.role === 'tool') {
+			total += PER_TOOL_CALL_OVERHEAD
+			if (typeof msg.toolCallId === 'string') total += tok(msg.toolCallId)
+		}
+		if (Array.isArray(msg.toolCalls)) {
+			for (const call of msg.toolCalls) {
+				total += PER_TOOL_CALL_OVERHEAD
+				if (call.function?.name) total += tok(call.function.name)
+				if (call.function?.arguments) total += tok(call.function.arguments)
+			}
 		}
 	}
 	return total
@@ -130,7 +151,7 @@ export async function shouldCompact(
 	const usableTokens = Math.floor(contextWindow * (1 - reservedPct))
 	const threshold = Math.floor(usableTokens * compactPct)
 
-	const tokenEstimate = estimateMessageTokens(messages)
+	const tokenEstimate = estimateMessageTokens(messages, model)
 
 	return {
 		needed: tokenEstimate > threshold && messages.length >= MIN_MESSAGES_FOR_COMPACTION,
@@ -142,13 +163,14 @@ export async function shouldCompact(
 export async function compactMessages(
 	messages: LlmMessage[],
 	userId: string,
+	model?: string,
 ): Promise<{
 	compacted: LlmMessage[]
 	summary: string
 	originalTokens: number
 	compactedTokens: number
 }> {
-	const originalTokens = estimateMessageTokens(messages)
+	const originalTokens = estimateMessageTokens(messages, model)
 
 	const systemMessages = messages.filter((m) => m.role === 'system')
 	const conversationMessages = messages.filter((m) => m.role !== 'system')
@@ -218,7 +240,7 @@ Be concise but don't lose critical details. Keep under 800 words total.`,
 		...recentMessages,
 	]
 
-	const compactedTokens = estimateMessageTokens(compacted)
+	const compactedTokens = estimateMessageTokens(compacted, model)
 
 	return { compacted, summary, originalTokens, compactedTokens }
 }

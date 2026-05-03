@@ -128,7 +128,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - `mineConversation` runs after every completed run, gated by `memoryConfig.autoMine`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts) line ~927
    - Evidence (Phase 6 — sub-agent context enrichment, 2026-05-02):
      - `runInlineSubagent` migrated to slot-based assembly + memory recall on task description: [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)
-   - Phases 2 (tokenizer upgrade), 4 (relevance-filtered skills), 7 (UI utilization indicator), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 2 — tokenizer accuracy, 2026-05-02):
+     - js-tiktoken installed (`package.json` dependency)
+     - `estimateTokensForModel(text, model)` with cached per-family encoders + fallback: [src/lib/tools/tools.ts](../../src/lib/tools/tools.ts)
+     - `estimateMessageTokens(messages, model?)` adds per-message + per-tool-call overhead: [src/lib/chat/chat.server.ts](../../src/lib/chat/chat.server.ts)
+     - `shouldCompact` and `compactMessages` thread the routedModel through; stream handler passes it: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - 8 unit tests covering fallback, model routing, known token counts, encoder caching: [tests/context.tokens.spec.ts](../../tests/context.tokens.spec.ts)
+   - Phases 4 (relevance-filtered skills), 7 (UI utilization indicator), 8 (per-agent slot config) still pending — keep `[ ]` until all phases land.
 
 5. [ ] Cost linkage (`runId/taskId/agentId`) + budget enforcement
    - Source: ../cost/plan.md
