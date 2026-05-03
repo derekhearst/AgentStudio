@@ -258,6 +258,16 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 8. [ ] Tools progressive disclosure + capability gating
    - Source: ../tools/plan.md
    - Gate: default tool schema slim; `enable_capability` flow works
+   - Evidence (Phase 1 — alwaysOn enforcement + enable_capability meta-tool, 2026-05-02):
+     - New `enabled_capability_groups` jsonb column on `chat_runs` (default `["core"]`): [src/lib/runs/runs.schema.ts](../../src/lib/runs/runs.schema.ts), migration [drizzle/0023_lonely_captain_america.sql](../../drizzle/0023_lonely_captain_america.sql)
+     - Pure helpers (no DB / SvelteKit deps): `expandGroupsToToolNames(groups)`, `mergeAlwaysOn(stored)`, `ALWAYS_ON_GROUPS`: [src/lib/tools/capabilities-core.ts](../../src/lib/tools/capabilities-core.ts)
+     - Server wrapper with row-locked enable + DB read: `getEnabledGroups(runId)`, `enableGroupForRun(runId, group)`: [src/lib/tools/capabilities.server.ts](../../src/lib/tools/capabilities.server.ts)
+     - New `enable_capability` meta-tool with strict enum validation: [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts); MCP description added: [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
+     - `core` group expanded to include `propose_plan` + `enable_capability` so they're always-on; `sandbox` group expanded to include `git_status`/`git_log`/`git_diff` from #7 phase 4: [src/lib/tools/tools.ts](../../src/lib/tools/tools.ts)
+     - Stream handler enforces progressive disclosure for orchestrator conversations only — agents with explicit `allowedTools` keep their fixed surface, and agents without allowedTools keep the legacy "all tools" surface (back-compat). Tool surface is recomputed at the top of every loop round so `enable_capability` from the previous round takes effect: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Tool-policy slot updated with progressive-disclosure guidance for both orchestrator and agent paths: same file
+     - 8 tests cover: pure expansion + dedup + unknown-group dropping, mergeAlwaysOn ordering and forced-`core` invariant, DB column default, persisted round-trip, and the empty-column safety net: [tests/tools.capabilities.spec.ts](../../tests/tools.capabilities.spec.ts)
+   - Phases 2-5 (auto-suggest classifier, FS tool consolidation, per-agent capability binding, output offloading) still pending — keep `[ ]` until they land.
 
 9. [ ] Skills taxonomy and loading rules (including mode identities)
    - Source: ../skills/plan.md

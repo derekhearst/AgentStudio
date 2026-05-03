@@ -75,6 +75,10 @@ export const chatRuns = pgTable(
 		streamBlocks: jsonb('stream_blocks').$type<StreamBlock[]>().notNull().default([]),
 		currentRound: integer('current_round').notNull().default(0),
 		nextEventSeq: integer('next_event_seq').notNull().default(0),
+		// Wave 2 #8 phase 1 — progressive tool disclosure. Defaults to ['core'] (the alwaysOn group).
+		// Additional groups are added when the model calls the `enable_capability` meta-tool.
+		// Persisted on the run so a resume picks up the same active surface.
+		enabledCapabilityGroups: jsonb('enabled_capability_groups').$type<string[]>().notNull().default(['core']),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		startedAt: timestamp('started_at', { withTimezone: true }),
 		lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),

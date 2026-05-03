@@ -1,0 +1,1 @@
+ALTER TABLE "chat_runs" ADD COLUMN "enabled_capability_groups" jsonb DEFAULT '["core"]'::jsonb NOT NULL;

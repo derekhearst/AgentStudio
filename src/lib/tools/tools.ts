@@ -8,13 +8,19 @@ type ToolName = string
 export const capabilityGroups = {
 	core: {
 		label: 'Core',
-		description: 'Web search and orchestration essentials',
-		tools: ['web_search', 'ask_user', 'list_automations'] as ToolName[],
+		description: 'Always-on essentials: web search, ask_user, list_automations, propose_plan, enable_capability meta-tool',
+		tools: [
+			'web_search',
+			'ask_user',
+			'list_automations',
+			'propose_plan',
+			'enable_capability',
+		] as ToolName[],
 		alwaysOn: true,
 	},
 	sandbox: {
 		label: 'Coding Sandbox',
-		description: 'Run shell commands and perform rich filesystem operations, plus browser screenshots',
+		description: 'Run shell commands, perform rich filesystem operations, browser screenshots, and read-only git introspection (worktree mode)',
 		tools: [
 			'shell',
 			'file_read',
@@ -27,6 +33,9 @@ export const capabilityGroups = {
 			'search_files',
 			'file_info',
 			'browser_screenshot',
+			'git_status',
+			'git_log',
+			'git_diff',
 		] as ToolName[],
 		alwaysOn: false,
 	},
@@ -265,6 +274,31 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 		group: 'sandbox',
 	},
 	{ name: 'browser_screenshot', description: 'Take a screenshot of a web page.', group: 'sandbox' },
+	{
+		name: 'git_status',
+		description: 'Show git working-tree status (read-only). Worktree mode only.',
+		group: 'sandbox',
+	},
+	{
+		name: 'git_log',
+		description: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
+		group: 'sandbox',
+	},
+	{
+		name: 'git_diff',
+		description: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
+		group: 'sandbox',
+	},
+	{
+		name: 'propose_plan',
+		description: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
+		group: 'core',
+	},
+	{
+		name: 'enable_capability',
+		description: 'Enable a capability group so its tools become available on the next round.',
+		group: 'core',
+	},
 	{
 		name: 'list_skills',
 		description:

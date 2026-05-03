@@ -290,6 +290,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
 				'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
 				'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
+				'',
+				'Tool surface (progressive disclosure):',
+				'- Only `core` capability tools are loaded by default. Other groups (`sandbox`, `skills`, `agents`, `media`) are gated behind the `enable_capability` meta-tool.',
+				"- Call `enable_capability(group: '<name>')` once when the task clearly needs that group; the new tools become available on the NEXT round (not the same turn). Available groups: `sandbox` (file/shell/git tools), `skills` (manage reusable knowledge bundles), `agents` (delegate, schedule, manage), `media` (image generation).",
+				"- Don't enable groups speculatively. Match what the user actually asked for.",
 			].join('\n'),
 		})
 	} else {
@@ -300,6 +305,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				'Tool usage policy:',
 				'- You cannot call ask_user directly in agent conversations.',
 				'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
+				'',
+				'Tool surface (progressive disclosure):',
+				'- Only `core` capability tools are loaded by default. If you need filesystem/shell/git, skill management, sub-agent delegation, or image generation, call `enable_capability(group: \'sandbox\' | \'skills\' | \'agents\' | \'media\')` first; the tools become available on the NEXT round.',
 			].join('\n'),
 		})
 	}
@@ -376,13 +384,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let promptTokens = 0
 	let completionTokens = 0
 
-	// --- Context Engineering: Tool Loading ---
-	let tools = getToolDefinitions()
-		.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
-		.filter((tool) =>
-			scopedAgentTools ? scopedAgentTools.includes(tool.function.name) : !DREAMING_ONLY_TOOLS.has(tool.function.name),
-		)
-	// No hard limit ΓÇö loop exits when the model stops calling tools
+	// --- Context Engineering: Tool Loading (Wave 2 #8 phase 1 — progressive disclosure) ---
+	// Resolution order:
+	//   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface, no PD.
+	//   2. Orchestrator conversations — progressive disclosure starting at `core`.
+	//   3. Agent conversations without allowedTools — keep the legacy "all tools" surface so
+	//      existing agents don't suddenly lose their toolkit. Ops can opt them into PD by setting
+	//      allowedTools to a slim list explicitly.
+	const { expandGroupsToToolNames, getEnabledGroups } = await import('$lib/tools/capabilities.server')
+	const useProgressiveDisclosure = !scopedAgentTools && isOrchestrator
+	function computeTools(enabledGroupNames: string[]) {
+		const all = getToolDefinitions()
+		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
+		if (scopedAgentTools) {
+			return askUserFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
+		}
+		if (!useProgressiveDisclosure) {
+			return askUserFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
+		}
+		const activeNames = new Set(expandGroupsToToolNames(enabledGroupNames))
+		return askUserFiltered
+			.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
+			.filter((tool) => activeNames.has(tool.function.name))
+	}
+	let tools = computeTools(['core'])
+	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
 
 	// Phase 3 of #5: budget enforcement BEFORE creating the run row, so a `block` cap
@@ -538,6 +564,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
 					await setRunRound(run.id, round)
+					// Refresh the active tool surface from the run's enabled capability groups so
+					// `enable_capability` calls in the previous round take effect this round.
+					if (useProgressiveDisclosure) {
+						const enabled = await getEnabledGroups(run.id)
+						tools = computeTools(enabled)
+					}
 					const stream = await streamChat(currentMessages, routedModel, tools, reasoningConfig)
 
 					// Accumulated tool calls for this round (streamed piecewise)

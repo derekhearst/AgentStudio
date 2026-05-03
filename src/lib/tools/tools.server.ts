@@ -811,6 +811,9 @@ export const toolSchemas = {
 		paths: z.array(z.string().min(1)).optional(),
 		staged: z.boolean().default(false),
 	}),
+	enable_capability: z.object({
+		group: z.enum(['core', 'sandbox', 'skills', 'agents', 'media']),
+	}),
 	propose_plan: z.object({
 		summary: z.string().min(1).max(500),
 		steps: z
@@ -885,6 +888,8 @@ const toolDescriptions: Record<ToolName, string> = {
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
 	propose_plan:
 		'Propose a structured execution plan to the user with ordered steps, estimated cost/time, risks, and rollback. The user explicitly approves or denies before you call any non-readonly tool. Required in plan mode; should be called before taking any destructive or expensive action.',
+	enable_capability:
+		'Enable a capability group (sandbox / skills / agents / media) so its tools become available on the next round. Use this when the task clearly needs filesystem operations, skill management, agent delegation, or image generation. The active surface starts with only the `core` group; expand on demand to keep the prompt slim.',
 }
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -1489,6 +1494,35 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result: { deleted: input.fileName, fromSkill: input.skillName },
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'enable_capability') {
+				const input = toolSchemas.enable_capability.parse(call.arguments)
+				const ctx = toolUserContext.getStore()
+				if (!ctx?.runId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'enable_capability requires a runId in the tool execution context.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				const { enableGroupForRun } = await import('$lib/tools/capabilities.server')
+				const enableResult = await enableGroupForRun(ctx.runId, input.group)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: {
+						added: enableResult.added,
+						enabledGroups: enableResult.enabledGroups,
+						addedTools: enableResult.addedTools,
+						note: enableResult.added
+							? `Enabled '${input.group}'. ${enableResult.addedTools.length} new tools available next round: ${enableResult.addedTools.join(', ')}.`
+							: `'${input.group}' was already enabled.`,
+					},
 					executionMs: Date.now() - startedAt,
 				}
 			}
