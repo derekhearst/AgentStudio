@@ -4,13 +4,8 @@ import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import type { LlmMessage } from '$lib/llm/chat.server'
-import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
-import { listSkillSummaries } from '$lib/skills/skills.server'
-import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
-import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
-import { createForwardedSession, runChatLoop } from '$lib/runtime'
+import { buildAgentDefinition, createForwardedSession, runChatLoop } from '$lib/runtime'
 
 const encoder = new TextEncoder()
 
@@ -50,35 +45,18 @@ export async function runInlineSubagent(
 		throw new Error(`Agent not found: ${step.agentId}`)
 	}
 
-	// Phase 2 of #7: opt-in persistent workspace per agent.
-	// Phase 4 of #7: opt-in git-worktree workspace per agent.
-	const agentConfigForWs = agent.config as
-		| {
-				workspace?: {
-					mode?: string
-					key?: string
-					repoPath?: string
-					baseBranch?: string
-					deleteBranchOnCleanup?: boolean
-				}
-		  }
-		| null
-	const persistentKey =
-		agentConfigForWs?.workspace?.mode === 'persistent' &&
-		typeof agentConfigForWs.workspace.key === 'string' &&
-		agentConfigForWs.workspace.key.length > 0
-			? agentConfigForWs.workspace.key
-			: null
-	const worktreeConfig =
-		agentConfigForWs?.workspace?.mode === 'worktree' &&
-		typeof agentConfigForWs.workspace.repoPath === 'string' &&
-		agentConfigForWs.workspace.repoPath.length > 0
-			? {
-					repoPath: agentConfigForWs.workspace.repoPath,
-					baseBranch: agentConfigForWs.workspace.baseBranch,
-					deleteBranchOnCleanup: agentConfigForWs.workspace.deleteBranchOnCleanup,
-				}
-			: null
+	// Wave 2 #10 phase 2 — slot assembly + workspace context resolved by the runtime.
+	const definition = await buildAgentDefinition({
+		agent,
+		userId,
+		intent: step.task,
+		toolPolicy: [
+			'Agent collaboration policy:',
+			'- You cannot ask the user directly with ask_user.',
+			'- If you need user input, return a concise handoff for orchestrator with missing information and proposed options.',
+			'- Once orchestrator returns answers in context, continue execution immediately.',
+		].join('\n'),
+	})
 
 	// Create a conversation for this sub-agent run + its chat_runs row.
 	const [subConversation] = await db
@@ -123,77 +101,10 @@ export async function runInlineSubagent(
 		metadata: { source: 'orchestrator', parentConversationId },
 	})
 
-	// Build sub-agent context using the slot system + skill summaries + memory recall.
-	const slots: ContextSlot[] = [
-		{ name: 'identity', priority: 100, content: agent.systemPrompt },
-		{ name: 'role', priority: 95, content: `Your role: ${agent.role}` },
-		{
-			name: 'tool_policy',
-			priority: 90,
-			content: [
-				'Agent collaboration policy:',
-				'- You cannot ask the user directly with ask_user.',
-				'- If you need user input, return a concise handoff for orchestrator with missing information and proposed options.',
-				'- Once orchestrator returns answers in context, continue execution immediately.',
-			].join('\n'),
-		},
-	]
-
-	const skillSummaries = await listSkillSummaries()
-	if (skillSummaries.length > 0) {
-		const text = skillSummaries
-			.map((s) => {
-				const fileNames = s.files.map((f) => f.name).join(', ')
-				return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
-			})
-			.join('\n')
-		slots.push({
-			name: 'skills',
-			priority: 70,
-			content: `Available skills (use read_skill to load):\n${text}`,
-			truncationStrategy: 'truncate-end',
-		})
-	}
-
-	// Phase 6 of #4: bring relevant memory into the sub-agent's context so it can pick up where
-	// prior conversations left off, not start from a blank slate. Best-effort.
-	try {
-		const settings = await getOrCreateSettings(userId)
-		const memoryConfig = (settings.memoryConfig ?? null) as {
-			enabled?: boolean
-			topK?: number
-			useRerank?: boolean
-			rerankModel?: string
-		} | null
-		const memoryEnabled = memoryConfig?.enabled !== false
-		if (memoryEnabled && step.task && step.task.trim().length > 0) {
-			const recalled = await recallForUser(userId, step.task.trim(), {
-				topK: memoryConfig?.topK ?? 5,
-				useRerank: memoryConfig?.useRerank ?? false,
-				rerankModel: memoryConfig?.rerankModel,
-			})
-			const memoryBlock = renderMemoryContext(recalled)
-			if (memoryBlock) {
-				slots.push({
-					name: 'memory',
-					priority: 60,
-					content: memoryBlock,
-					truncationStrategy: 'truncate-end',
-				})
-			}
-		}
-	} catch (err) {
-		console.warn('[subagent] memory recall failed', err)
-	}
-
 	const subMessages: LlmMessage[] = [
-		{ role: 'system', content: assembleSystemPrompt(slots).systemPrompt },
+		{ role: 'system', content: definition.systemPrompt },
 		{ role: 'user', content: step.task },
 	]
-
-	// Sub-agents always get the full tool surface minus ask_user (they can't reach the user).
-	// Progressive disclosure isn't applied here; the sub-agent has a focused single-shot task.
-	const tools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
 
 	const session = createForwardedSession({ runId: run.id, parentController: controller })
 
@@ -204,15 +115,15 @@ export async function runInlineSubagent(
 			conversationId: subConversation.id,
 			model: agent.model,
 			initialMessages: subMessages,
-			initialTools: tools,
-			computeTools: async () => tools,
+			initialTools: definition.tools,
+			computeTools: async () => definition.tools,
 			maxRounds: 20,
 			// Sub-agents bypass tool approval — they're already running under the orchestrator's
 			// approved scope. Adding approval here would deadlock (no UI surface to approve in).
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
-			persistentKey,
-			worktree: worktreeConfig,
+			persistentKey: definition.persistentKey,
+			worktree: definition.worktree,
 			// Sub-agents don't spawn their own sub-agents in this flow.
 			spawnSubagent: undefined,
 		})

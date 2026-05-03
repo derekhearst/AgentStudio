@@ -4,13 +4,8 @@ import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import type { LlmMessage } from '$lib/llm/chat.server'
-import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
-import { listSkillSummaries } from '$lib/skills/skills.server'
-import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
-import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
-import { createDetachedSession, runChatLoop } from '$lib/runtime'
+import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/runtime'
 import { getTaskById, recordAttempt, setTaskStatus, updateAttempt } from './tasks.server'
 
 /**
@@ -67,38 +62,18 @@ export async function executeTaskOnce(
 	const [agent] = await db.select().from(agents).where(eq(agents.id, task.ownerAgentId)).limit(1)
 	if (!agent) throw new Error(`executeTaskOnce: owner agent ${task.ownerAgentId} not found`)
 
-	// Resolve workspace context the same way the chat stream + automation engine do.
-	const agentConfigForWs = agent.config as
-		| {
-				allowedTools?: string[]
-				workspace?: {
-					mode?: string
-					key?: string
-					repoPath?: string
-					baseBranch?: string
-					deleteBranchOnCleanup?: boolean
-				}
-		  }
-		| null
-	const persistentKey =
-		agentConfigForWs?.workspace?.mode === 'persistent' &&
-		typeof agentConfigForWs.workspace.key === 'string' &&
-		agentConfigForWs.workspace.key.length > 0
-			? agentConfigForWs.workspace.key
-			: null
-	const worktreeConfig =
-		agentConfigForWs?.workspace?.mode === 'worktree' &&
-		typeof agentConfigForWs.workspace.repoPath === 'string' &&
-		agentConfigForWs.workspace.repoPath.length > 0
-			? {
-					repoPath: agentConfigForWs.workspace.repoPath,
-					baseBranch: agentConfigForWs.workspace.baseBranch,
-					deleteBranchOnCleanup: agentConfigForWs.workspace.deleteBranchOnCleanup,
-				}
-			: null
-	const scopedAgentTools = Array.isArray(agentConfigForWs?.allowedTools) && agentConfigForWs.allowedTools.length > 0
-		? agentConfigForWs.allowedTools
-		: null
+	// Wave 2 #10 phase 2 — slot assembly + workspace context resolved by the runtime.
+	const definition = await buildAgentDefinition({
+		agent,
+		userId,
+		intent: task.spec,
+		toolPolicy: [
+			'Task execution policy:',
+			'- This is a scheduled task — there is no user to ask in real time.',
+			'- Complete the work described in the user message, then summarize what you did.',
+			'- If you cannot complete the task, leave a clear note about what is blocking you for the next manual review.',
+		].join('\n'),
+	})
 
 	// Pick a conversation: explicit override → task root → fresh one.
 	let conversationId: string
@@ -154,59 +129,13 @@ export async function executeTaskOnce(
 	})
 	await db.update(chatRuns).set({ taskAttemptId: attempt.id }).where(eq(chatRuns.id, run.id))
 
-	// Build the agent's slot-based system prompt — same shape as automations.
-	const slots: ContextSlot[] = [
-		{ name: 'identity', priority: 100, content: agent.systemPrompt },
-		{ name: 'role', priority: 95, content: `Your role: ${agent.role}` },
-		{
-			name: 'tool_policy',
-			priority: 90,
-			content: [
-				'Task execution policy:',
-				'- This is a scheduled task — there is no user to ask in real time.',
-				'- Complete the work described in the user message, then summarize what you did.',
-				'- If you cannot complete the task, leave a clear note about what is blocking you for the next manual review.',
-			].join('\n'),
-		},
-	]
-
-	const skillSummaries = await listSkillSummaries()
-	if (skillSummaries.length > 0) {
-		const text = skillSummaries.map((s) => `- ${s.name}: ${s.description}`).join('\n')
-		slots.push({
-			name: 'skills',
-			priority: 70,
-			content: `Available skills (use read_skill to load):\n${text}`,
-			truncationStrategy: 'truncate-end',
-		})
-	}
-
-	try {
-		const settings = await getOrCreateSettings(userId)
-		const memoryConfig = (settings.memoryConfig ?? null) as { enabled?: boolean; topK?: number } | null
-		if (memoryConfig?.enabled !== false) {
-			const recalled = await recallForUser(userId, task.spec, { topK: memoryConfig?.topK ?? 5 })
-			const memoryBlock = renderMemoryContext(recalled)
-			if (memoryBlock) {
-				slots.push({ name: 'memory', priority: 60, content: memoryBlock, truncationStrategy: 'truncate-end' })
-			}
-		}
-	} catch (err) {
-		console.warn('[task-runner] memory recall failed', err)
-	}
-
 	const llmMessages: LlmMessage[] = [
-		{ role: 'system', content: assembleSystemPrompt(slots).systemPrompt },
+		{ role: 'system', content: definition.systemPrompt },
 		{
 			role: 'user',
 			content: `Task: ${task.title}\n\n${task.spec}\n\nExecute this task. When you're done, summarize what you accomplished.`,
 		},
 	]
-
-	const allTools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
-	const tools = scopedAgentTools
-		? allTools.filter((t) => scopedAgentTools.includes(t.function.name))
-		: allTools
 
 	const session = createDetachedSession({ runId: run.id })
 
@@ -217,13 +146,13 @@ export async function executeTaskOnce(
 			conversationId,
 			model: agent.model,
 			initialMessages: llmMessages,
-			initialTools: tools,
-			computeTools: async () => tools,
+			initialTools: definition.tools,
+			computeTools: async () => definition.tools,
 			maxRounds: opts.maxRounds ?? 10,
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
-			persistentKey,
-			worktree: worktreeConfig,
+			persistentKey: definition.persistentKey,
+			worktree: definition.worktree,
 			spawnSubagent: undefined,
 		})
 

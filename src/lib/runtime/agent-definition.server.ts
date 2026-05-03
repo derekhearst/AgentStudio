@@ -1,0 +1,169 @@
+import type { agents } from '$lib/agents/agents.schema'
+import { getToolDefinitions } from '$lib/tools/tools.server'
+import { listSkillSummaries } from '$lib/skills/skills.server'
+import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
+import { getOrCreateSettings } from '$lib/settings/settings.server'
+import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import type { ToolDefinition } from './types'
+
+/**
+ * Wave 2 #10 phase 2 — formal AgentDefinition builder for non-chat callers.
+ *
+ * The chat stream's prompt assembly is too conversation-specific (mode posture, conversation
+ * mode anchor, per-conversation slot overrides, in-flight context_stats event) to share. But
+ * sub-agents, automations, and the task runner all build the SAME shape: agent identity +
+ * role + a generic tool policy + skill summaries + (optional) memory recall. This module
+ * pulls that pattern into one place so they stop drifting.
+ *
+ * Returns a fully-resolved object the caller hands directly to `runChatLoop`:
+ *   - `systemPrompt` (already slot-assembled — caller doesn't need to know about slots)
+ *   - `tools` (filtered for the non-chat surface: never ask_user; respects allowedTools)
+ *   - `persistentKey` / `worktree` (from agent.config.workspace)
+ *
+ * The chat stream stays inline because its slot pipeline is fundamentally different.
+ */
+
+export type AgentRecord = typeof agents.$inferSelect
+
+export type BuildAgentDefinitionInput = {
+	agent: AgentRecord
+	userId: string
+	/**
+	 * Free-form text describing what the run is for — used for memory recall scoring. Pass the
+	 * task description, automation prompt, or sub-agent task. Skip recall when empty.
+	 */
+	intent?: string
+	/**
+	 * The agent collaboration policy text — varies by caller. Sub-agents say "you cannot
+	 * ask_user, return a handoff"; automations say "no human in the loop, summarize what you
+	 * did"; tasks say similar. Caller picks the right one.
+	 */
+	toolPolicy: string
+	/** Override the per-call memory topK (defaults to settings.memoryConfig.topK ?? 5). */
+	memoryTopK?: number
+}
+
+export type AgentDefinition = {
+	systemPrompt: string
+	tools: ToolDefinition[]
+	persistentKey: string | null
+	worktree: {
+		repoPath: string
+		baseBranch?: string
+		deleteBranchOnCleanup?: boolean
+	} | null
+	/** Convenience: which slots actually got included after assembly. */
+	includedSlots: string[]
+}
+
+/**
+ * Build the agent's system prompt + tool surface + workspace context for a non-chat run.
+ *
+ * Slot priorities mirror the chat stream:
+ *   - identity (100): agent's systemPrompt
+ *   - role (95): "Your role: …"
+ *   - tool_policy (90): the caller-supplied policy text
+ *   - skills (70, truncate-end): summary list of all enabled skills
+ *   - memory (60, truncate-end): recalled memory matching `intent` (if provided)
+ */
+export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Promise<AgentDefinition> {
+	const config = (input.agent.config ?? null) as
+		| {
+				allowedTools?: string[]
+				workspace?: {
+					mode?: string
+					key?: string
+					repoPath?: string
+					baseBranch?: string
+					deleteBranchOnCleanup?: boolean
+				}
+		  }
+		| null
+
+	const persistentKey =
+		config?.workspace?.mode === 'persistent' &&
+		typeof config.workspace.key === 'string' &&
+		config.workspace.key.length > 0
+			? config.workspace.key
+			: null
+	const worktree =
+		config?.workspace?.mode === 'worktree' &&
+		typeof config.workspace.repoPath === 'string' &&
+		config.workspace.repoPath.length > 0
+			? {
+					repoPath: config.workspace.repoPath,
+					baseBranch: config.workspace.baseBranch,
+					deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
+				}
+			: null
+
+	const slots: ContextSlot[] = [
+		{ name: 'identity', priority: 100, content: input.agent.systemPrompt },
+		{ name: 'role', priority: 95, content: `Your role: ${input.agent.role}` },
+		{ name: 'tool_policy', priority: 90, content: input.toolPolicy },
+	]
+
+	const skillSummaries = await listSkillSummaries()
+	if (skillSummaries.length > 0) {
+		const text = skillSummaries
+			.map((s) => {
+				const fileNames = s.files.map((f) => f.name).join(', ')
+				return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
+			})
+			.join('\n')
+		slots.push({
+			name: 'skills',
+			priority: 70,
+			content: `Available skills (use read_skill to load):\n${text}`,
+			truncationStrategy: 'truncate-end',
+		})
+	}
+
+	if (input.intent && input.intent.trim().length > 0) {
+		try {
+			const settings = await getOrCreateSettings(input.userId)
+			const memoryConfig = (settings.memoryConfig ?? null) as {
+				enabled?: boolean
+				topK?: number
+				useRerank?: boolean
+				rerankModel?: string
+			} | null
+			if (memoryConfig?.enabled !== false) {
+				const recalled = await recallForUser(input.userId, input.intent.trim(), {
+					topK: input.memoryTopK ?? memoryConfig?.topK ?? 5,
+					useRerank: memoryConfig?.useRerank ?? false,
+					rerankModel: memoryConfig?.rerankModel,
+				})
+				const memoryBlock = renderMemoryContext(recalled)
+				if (memoryBlock) {
+					slots.push({
+						name: 'memory',
+						priority: 60,
+						content: memoryBlock,
+						truncationStrategy: 'truncate-end',
+					})
+				}
+			}
+		} catch (err) {
+			console.warn('[runtime/agent-definition] memory recall failed', err)
+		}
+	}
+
+	const assembled = assembleSystemPrompt(slots)
+
+	// Tool surface: never expose ask_user (the loop's `isOrchestrator: false` would refuse it
+	// anyway, but trimming up front keeps the prompt slim). Respect allowedTools when set.
+	const allTools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
+	const tools =
+		Array.isArray(config?.allowedTools) && config.allowedTools.length > 0
+			? allTools.filter((t) => config.allowedTools!.includes(t.function.name))
+			: allTools
+
+	return {
+		systemPrompt: assembled.systemPrompt,
+		tools,
+		persistentKey,
+		worktree,
+		includedSlots: assembled.includedSlots,
+	}
+}
