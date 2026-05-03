@@ -1,7 +1,12 @@
-import { index, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
+
+export const budgetScopeEnum = pgEnum('budget_scope', ['global', 'project', 'agent', 'run'])
+export const budgetPeriodEnum = pgEnum('budget_period', ['day', 'week', 'month', 'run'])
+export const budgetActionEnum = pgEnum('budget_action', ['block', 'notify_only'])
+export const budgetTriggerTypeEnum = pgEnum('budget_trigger_type', ['warn', 'block'])
 
 export const llmUsage = pgTable(
 	'llm_usage',
@@ -53,5 +58,55 @@ export const toolUsage = pgTable(
 		agentIdx: index('tool_usage_agent_idx').on(table.agentId),
 		toolIdx: index('tool_usage_tool_idx').on(table.toolName),
 		createdIdx: index('tool_usage_created_idx').on(table.createdAt),
+	}),
+)
+
+export const budgetLimits = pgTable(
+	'budget_limits',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		scope: budgetScopeEnum('scope').notNull(),
+		// FK is intentionally absent because scopeId can target multiple entity types
+		// (project, agent, run). Application logic enforces the right kind per `scope`.
+		scopeId: uuid('scope_id'),
+		period: budgetPeriodEnum('period').notNull(),
+		limitUsd: numeric('limit_usd', { precision: 18, scale: 6 }).notNull(),
+		warnUsd: numeric('warn_usd', { precision: 18, scale: 6 }),
+		action: budgetActionEnum('action').notNull().default('block'),
+		enabled: boolean('enabled').notNull().default(true),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => ({
+		userIdx: index('budget_limits_user_idx').on(table.userId),
+		scopeIdx: index('budget_limits_scope_idx').on(table.scope, table.scopeId),
+	}),
+)
+
+export const budgetAlerts = pgTable(
+	'budget_alerts',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		budgetLimitId: uuid('budget_limit_id')
+			.notNull()
+			.references(() => budgetLimits.id, { onDelete: 'cascade' }),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		triggerType: budgetTriggerTypeEnum('trigger_type').notNull(),
+		spendAtTrigger: numeric('spend_at_trigger', { precision: 18, scale: 6 }).notNull(),
+		limitUsd: numeric('limit_usd', { precision: 18, scale: 6 }).notNull(),
+		period: budgetPeriodEnum('period').notNull(),
+		runId: uuid('run_id').references(() => chatRuns.id, { onDelete: 'set null' }),
+		resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => ({
+		userIdx: index('budget_alerts_user_idx').on(table.userId),
+		limitIdx: index('budget_alerts_limit_idx').on(table.budgetLimitId),
+		createdIdx: index('budget_alerts_created_idx').on(table.createdAt),
 	}),
 )

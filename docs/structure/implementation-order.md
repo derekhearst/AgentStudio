@@ -171,7 +171,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Tests: [tests/cost.tool-usage.spec.ts](../../tests/cost.tool-usage.spec.ts)
      - `web_search` instrumented in [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts) — writes a `tool_usage` row per call (provider=searxng, cost from `SEARCH_COST_PER_CALL_USD` env)
      - Live test proving the chat → web_search → tool_usage row chain: [tests/cost.tool-usage-live.spec.ts](../../tests/cost.tool-usage-live.spec.ts)
-   - Phases 3-5 (budget limits, dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 3 — budget limits + alerts, 2026-05-03):
+     - New `budget_limits` and `budget_alerts` tables + 4 enums: [src/lib/costs/usage.schema.ts](../../src/lib/costs/usage.schema.ts), migration [drizzle/0022_polite_human_fly.sql](../../drizzle/0022_polite_human_fly.sql)
+     - `checkBudgetLimits`, `recordBudgetAlert` (per-period idempotent): [src/lib/costs/budget.server.ts](../../src/lib/costs/budget.server.ts)
+     - Stream handler enforces BEFORE chat_run insert; returns HTTP 402 with `budget_exceeded`: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Tests cover schema round-trip, enum rejection, cascade-on-limit-delete, live-block (402 + alert + no orphan run), live-notify_only (run proceeds + warn alert): [tests/cost.budget.spec.ts](../../tests/cost.budget.spec.ts)
+   - Phases 4-5 (dashboard UI, provider reconciliation) still pending — keep `[ ]` until all phases land.
 
 6. [ ] Chat mode system + inline approvals + HUD
    - Source: ../chat/plan.md

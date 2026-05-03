@@ -9,6 +9,7 @@ import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
 import { executeTool, getToolDefinitions, type ToolName, type ToolCallWithContext } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
+import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
@@ -359,6 +360,36 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		)
 	// No hard limit ΓÇö loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
+
+	// Phase 3 of #5: budget enforcement BEFORE creating the run row, so a `block` cap
+	// short-circuits without leaving an orphan run. Warnings are non-blocking and just
+	// fire alert rows.
+	const budgetCheck = await checkBudgetLimits({
+		userId: user.id,
+		agentId: conversation.agentId,
+	})
+	for (const w of budgetCheck.warnings) {
+		void recordBudgetAlert({
+			limit: w.limit,
+			triggerType: 'warn',
+			spendUsd: w.spendUsd,
+		}).catch((err) => console.warn('[budget] warn alert insert failed', err))
+	}
+	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
+		void recordBudgetAlert({
+			limit: budgetCheck.blockedBy,
+			triggerType: 'block',
+			spendUsd: parseFloat(budgetCheck.blockedBy.limitUsd), // we know spend > limit at this point
+		}).catch((err) => console.warn('[budget] block alert insert failed', err))
+		return json(
+			{
+				error: 'budget_exceeded',
+				message: `Budget cap exceeded: ${budgetCheck.blockedBy.scope} ${budgetCheck.blockedBy.period} limit of $${budgetCheck.blockedBy.limitUsd}`,
+				limitId: budgetCheck.blockedBy.id,
+			},
+			{ status: 402 },
+		)
+	}
 
 	const [run] = await db
 		.insert(chatRuns)
