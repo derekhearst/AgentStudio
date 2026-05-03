@@ -79,6 +79,12 @@ export const chatRuns = pgTable(
 		// Additional groups are added when the model calls the `enable_capability` meta-tool.
 		// Persisted on the run so a resume picks up the same active surface.
 		enabledCapabilityGroups: jsonb('enabled_capability_groups').$type<string[]>().notNull().default(['core']),
+		// Wave 2 #11 phase 1 — optional task linkage. Set when a run is the materialization of a
+		// planned task (post-orchestrator-emits-tasks integration in phase 2). Foreign keys point
+		// at tasks/task_attempts; declared by-name to avoid a circular import (tasks.schema also
+		// references runs).
+		taskId: uuid('task_id'),
+		taskAttemptId: uuid('task_attempt_id'),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		startedAt: timestamp('started_at', { withTimezone: true }),
 		lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
@@ -91,6 +97,8 @@ export const chatRuns = pgTable(
 		agentIdx: index('chat_runs_agent_idx').on(table.agentId),
 		stateIdx: index('chat_runs_state_idx').on(table.state),
 		updatedIdx: index('chat_runs_updated_idx').on(table.updatedAt),
+		taskIdx: index('chat_runs_task_idx').on(table.taskId),
+		taskAttemptIdx: index('chat_runs_task_attempt_idx').on(table.taskAttemptId),
 	}),
 )
 

@@ -320,6 +320,15 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
     - Source: ../tasks/plan.md
     - Depends on: #3, #10
     - Gate: plan→approve→execute transitions durable and replayable
+    - Evidence (Phase 1 — schema + barrels, 2026-05-03):
+      - New domain: [src/lib/tasks/tasks.schema.ts](../../src/lib/tasks/tasks.schema.ts), [src/lib/tasks/tasks.server.ts](../../src/lib/tasks/tasks.server.ts), [src/lib/tasks/index.ts](../../src/lib/tasks/index.ts)
+      - `tasks` table: id, title, spec (markdown), `task_status` enum (`pending` / `planning` / `awaiting_approval` / `running` / `blocked` / `completed` / `failed` / `canceled`), `parent_task_id` (self-FK, cascade delete trims subtree), `owner_agent_id` (FK → agents, set-null), `root_conversation_id` (FK → conversations, set-null), priority, `budget_usd` numeric, metadata jsonb, `created_by` (FK → users, set-null), timestamps. Indexes on status / parent / owner / created_by / root_conversation
+      - `task_attempts` table: links `task_id` (FK cascade) + optional `run_id`, `attempt_number` (auto-incremented in `recordAttempt` helper), `task_attempt_status` enum (`queued` / `running` / `completed` / `failed` / `canceled`), error, cost_usd, started/finished timestamps
+      - `chat_runs` gains nullable `task_id` + `task_attempt_id` columns with their own indexes; cross-domain FKs use `ON DELETE SET NULL` so deleting a task preserves the historical run rows for forensic visibility
+      - Helpers: `createTask`, `getTaskById`, `listTasks` (filters by user / parent / terminal-state-exclusion), `setTaskStatus` (rejects transitions out of terminal states), `recordAttempt` (auto-increments attempt_number), `listAttemptsForTask`, `updateAttempt`
+      - Migrations: [drizzle/0025_strong_big_bertha.sql](../../drizzle/0025_strong_big_bertha.sql) (drizzle-kit-generated tables + most FKs) and [drizzle/0026_tasks_cross_domain_fks.sql](../../drizzle/0026_tasks_cross_domain_fks.sql) (hand-written follow-up for the 3 cross-domain / self-FKs that drizzle-kit can't emit because the source columns are declared without `references()` to dodge circular imports)
+      - 6 tests cover: full-field round-trip, enum rejection, parent→child→grandchild cascade delete, attempt ordering by attempt_number, task delete cascading to attempts, and the cross-domain `chat_runs.task_id`/`task_attempt_id` link with SET-NULL behavior on task delete + chat_run row survival: [tests/tasks.schema.spec.ts](../../tests/tasks.schema.spec.ts)
+    - Phases 2 (orchestrator emits tasks via propose_plan), 3 (task runner worker), 4 (kanban UI), 5 (retries + DAG) still pending — the `propose_plan` tool from Wave 1 #6 phase 4 is the natural integration point for Phase 2 here.
 
 ### Wave 3 — Governance and Safety
 
