@@ -215,6 +215,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const contextSlots: ContextSlot[] = []
 	let scopedAgentTools: string[] | null = null
 	let persistentKey: string | null = null
+	let worktreeConfig: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null = null
 
 	// --- Context Engineering: Mode Posture (chat workbench mode) ---
 	if (conversation.mode && conversation.mode !== 'chat') {
@@ -237,7 +238,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		if (agent) {
 			contextSlots.push({ name: 'identity', priority: 100, content: agent.systemPrompt })
 			const config = agent.config as
-				| { allowedTools?: string[]; workspace?: { mode?: string; key?: string } }
+				| {
+						allowedTools?: string[]
+						workspace?: {
+							mode?: string
+							key?: string
+							repoPath?: string
+							baseBranch?: string
+							deleteBranchOnCleanup?: boolean
+						}
+				  }
 				| null
 			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
 				scopedAgentTools = config.allowedTools
@@ -249,6 +259,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				config.workspace.key.length > 0
 			) {
 				persistentKey = config.workspace.key
+			}
+			// Phase 4 of #7: opt-in git-worktree workspace per agent. The agent config supplies
+			// the source repoPath; the worktree itself is created lazily on first tool use via
+			// ensureWorkspace, off a `run/<runId>` branch from `baseBranch` (default: repo HEAD).
+			if (
+				config?.workspace?.mode === 'worktree' &&
+				typeof config.workspace.repoPath === 'string' &&
+				config.workspace.repoPath.length > 0
+			) {
+				worktreeConfig = {
+					repoPath: config.workspace.repoPath,
+					baseBranch: config.workspace.baseBranch,
+					deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
+				}
 			}
 		}
 	}
@@ -870,7 +894,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							messageId: null,
 						}
 
-						const toolResult = await executeTool(toolCall, user.id, run.id, { persistentKey })
+						const toolResult = await executeTool(toolCall, user.id, run.id, {
+							persistentKey,
+							worktree: worktreeConfig,
+						})
 
 						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 						const resultStr = trimToolResult(tc.name, rawResultStr)

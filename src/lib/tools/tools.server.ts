@@ -72,10 +72,17 @@ const execFileAsync = promisify(execFile)
 let browser: Browser | null = null
 let page: Page | null = null
 
+type WorktreeStoreConfig = {
+	repoPath: string
+	baseBranch?: string
+	deleteBranchOnCleanup?: boolean
+}
+
 const toolUserContext = new AsyncLocalStorage<{
 	userId: string
 	runId?: string | null
 	persistentKey?: string | null
+	worktree?: WorktreeStoreConfig | null
 }>()
 
 function getWorkspace() {
@@ -87,6 +94,7 @@ function getWorkspace() {
 		userId: ctx.userId,
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
+		worktree: ctx.worktree ?? null,
 		sandboxRoot: env.SANDBOX_WORKSPACE,
 	})
 }
@@ -110,6 +118,7 @@ async function ensureWorkspaceDir() {
 		userId: ctx.userId,
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
+		worktree: ctx.worktree ?? null,
 		sandboxRoot: env.SANDBOX_WORKSPACE,
 	})
 }
@@ -792,6 +801,16 @@ export const toolSchemas = {
 	}),
 	delete_skill: z.object({ name: z.string().min(1) }),
 	delete_skill_file: z.object({ skillName: z.string().min(1), fileName: z.string().min(1) }),
+	git_status: z.object({}),
+	git_log: z.object({
+		max: z.number().int().min(1).max(200).default(20),
+		paths: z.array(z.string().min(1)).optional(),
+	}),
+	git_diff: z.object({
+		ref: z.string().min(1).optional(),
+		paths: z.array(z.string().min(1)).optional(),
+		staged: z.boolean().default(false),
+	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
@@ -838,6 +857,12 @@ const toolDescriptions: Record<ToolName, string> = {
 	update_skill_file: 'Update a nested file within a skill by skill name and file name.',
 	delete_skill: 'Delete a skill and all its nested files by name.',
 	delete_skill_file: 'Delete a specific nested file from a skill.',
+	git_status:
+		'Show the working tree status (`git status --porcelain=v1`). Read-only; only available when the workspace is a git worktree (Phase 4 of #7). Returns the list of changed/untracked files.',
+	git_log:
+		'Show recent commits with subject, author, and date (read-only). Optional `paths` filter scopes the log to specific files. Only available in worktree mode.',
+	git_diff:
+		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
 }
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
@@ -884,6 +909,7 @@ function normalizeToolName(name: string): ToolName | null {
 
 export type WorkspaceOptions = {
 	persistentKey?: string | null
+	worktree?: WorktreeStoreConfig | null
 }
 
 export async function executeTool(
@@ -893,7 +919,12 @@ export async function executeTool(
 	workspace?: WorkspaceOptions,
 ) {
 	return toolUserContext.run(
-		{ userId, runId: runId ?? null, persistentKey: workspace?.persistentKey ?? null },
+		{
+			userId,
+			runId: runId ?? null,
+			persistentKey: workspace?.persistentKey ?? null,
+			worktree: workspace?.worktree ?? null,
+		},
 		async () => {
 		const startedAt = Date.now()
 		const normalizedName = normalizeToolName(call.name)
@@ -1437,6 +1468,89 @@ export async function executeTool(
 					input,
 					result: { deleted: input.fileName, fromSkill: input.skillName },
 					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'git_status' || call.name === 'git_log' || call.name === 'git_diff') {
+				const ctx = toolUserContext.getStore()
+				if (!ctx?.worktree) {
+					return {
+						success: false,
+						tool: call.name,
+						error: `${call.name} is only available in a git-worktree workspace (configure agent.config.workspace.mode='worktree' with a repoPath).`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				await ensureWorkspaceDir()
+				const workspace = getWorkspace()
+				try {
+					if (call.name === 'git_status') {
+						const result = await execFileAsync('git', ['-C', workspace, 'status', '--porcelain=v1', '-b'], {
+							maxBuffer: 4 * 1024 * 1024,
+							timeout: 30_000,
+						})
+						return {
+							success: true,
+							tool: call.name,
+							input: {},
+							result: { stdout: result.stdout, stderr: result.stderr },
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					if (call.name === 'git_log') {
+						const input = toolSchemas.git_log.parse(call.arguments)
+						const args = [
+							'-C',
+							workspace,
+							'log',
+							`--max-count=${input.max}`,
+							'--pretty=format:%h%x09%an%x09%ad%x09%s',
+							'--date=short',
+						]
+						if (input.paths?.length) {
+							args.push('--')
+							for (const p of input.paths) args.push(safePath(p))
+						}
+						const result = await execFileAsync('git', args, {
+							maxBuffer: 4 * 1024 * 1024,
+							timeout: 30_000,
+						})
+						return {
+							success: true,
+							tool: call.name,
+							input,
+							result: { stdout: result.stdout, stderr: result.stderr },
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					// git_diff
+					const input = toolSchemas.git_diff.parse(call.arguments)
+					const args = ['-C', workspace, 'diff']
+					if (input.staged) args.push('--cached')
+					if (input.ref) args.push(input.ref)
+					if (input.paths?.length) {
+						args.push('--')
+						for (const p of input.paths) args.push(safePath(p))
+					}
+					const result = await execFileAsync('git', args, {
+						maxBuffer: 8 * 1024 * 1024,
+						timeout: 60_000,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: { stdout: result.stdout, stderr: result.stderr },
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err: unknown) {
+					const e = err as { code?: number | string; stdout?: string; stderr?: string; message?: string }
+					return {
+						success: false,
+						tool: call.name,
+						error: e.stderr ?? e.message ?? `${call.name} failed`,
+						executionMs: Date.now() - startedAt,
+					}
 				}
 			}
 

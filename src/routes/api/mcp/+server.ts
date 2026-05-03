@@ -69,6 +69,9 @@ const toolDescriptions: Record<ToolName, string> = {
 	list_automations: 'List scheduled automations.',
 	update_automation: 'Update an automation.',
 	delete_automation: 'Delete an automation.',
+	git_status: 'Show git working-tree status (read-only). Worktree mode only.',
+	git_log: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
+	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
 }
 
 function schemaToJsonSchema(name: ToolName) {

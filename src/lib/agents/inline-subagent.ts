@@ -46,12 +46,33 @@ export async function runInlineSubagent(
 		throw new Error(`Agent not found: ${step.agentId}`)
 	}
 	// Phase 2 of #7: opt-in persistent workspace per agent.
-	const agentConfigForWs = agent.config as { workspace?: { mode?: string; key?: string } } | null
+	// Phase 4 of #7: opt-in git-worktree workspace per agent.
+	const agentConfigForWs = agent.config as
+		| {
+				workspace?: {
+					mode?: string
+					key?: string
+					repoPath?: string
+					baseBranch?: string
+					deleteBranchOnCleanup?: boolean
+				}
+		  }
+		| null
 	const persistentKey =
 		agentConfigForWs?.workspace?.mode === 'persistent' &&
 		typeof agentConfigForWs.workspace.key === 'string' &&
 		agentConfigForWs.workspace.key.length > 0
 			? agentConfigForWs.workspace.key
+			: null
+	const worktreeConfig =
+		agentConfigForWs?.workspace?.mode === 'worktree' &&
+		typeof agentConfigForWs.workspace.repoPath === 'string' &&
+		agentConfigForWs.workspace.repoPath.length > 0
+			? {
+					repoPath: agentConfigForWs.workspace.repoPath,
+					baseBranch: agentConfigForWs.workspace.baseBranch,
+					deleteBranchOnCleanup: agentConfigForWs.workspace.deleteBranchOnCleanup,
+				}
 			: null
 
 	// Create a conversation for this sub-agent run
@@ -318,7 +339,7 @@ export async function runInlineSubagent(
 					conversationId: subConversation.id,
 					messageId: null,
 				}
-				const toolResult = await executeTool(toolCall, userId, run.id, { persistentKey })
+				const toolResult = await executeTool(toolCall, userId, run.id, { persistentKey, worktree: worktreeConfig })
 				const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 				const resultStr = trimToolResult(tc.name, rawResultStr)
 

@@ -11,6 +11,14 @@ export type RunStatusForGc = {
 
 export type LookupRuns = (candidateRunIds: string[]) => Promise<RunStatusForGc[]>
 
+/**
+ * Hook invoked before removing a directory under `<userId>/worktrees/<runId>`. The implementation
+ * should run `git worktree remove --force` against the path so the parent repo deregisters it
+ * before the bare `rm -rf` runs. Defaults to a no-op (the rm fallback still cleans up the dir,
+ * but the parent repo's `worktree list` will accumulate stale entries until `git worktree prune`).
+ */
+export type RemoveWorktreeFn = (worktreePath: string, runId: string) => Promise<void>
+
 export type GcOptions = {
 	sandboxRoot: string
 	lookupRuns: LookupRuns
@@ -20,11 +28,14 @@ export type GcOptions = {
 	dryRun?: boolean
 	/** Now() override for testing. */
 	now?: Date
+	/** Phase 4 of #7: optional hook to deregister a git worktree from its parent repo before rm. */
+	removeWorktree?: RemoveWorktreeFn
 }
 
 export type GcRunSummary = {
 	runId: string
 	path: string
+	kind: 'run' | 'worktree'
 	deleted: boolean
 	skipped: 'pinned' | 'still-active' | 'no-record' | 'too-recent' | null
 	error: string | null
@@ -87,13 +98,26 @@ export async function runWorkspaceGcCore(opts: GcOptions): Promise<GcSummary> {
 		return summary(startedAt, results, dryRun)
 	}
 
-	// Collect (userId, runId, path) for every run-scoped workspace dir on disk.
-	const candidatePaths: Array<{ runId: string; path: string }> = []
+	// Collect (userId, runId, path, kind) for every run-scoped workspace dir on disk.
+	// Both `runs/` (Phase 1) and `worktrees/` (Phase 4) layouts are scanned; lifecycle is
+	// identical (delete after TTL once the run is terminal), only the cleanup hook differs.
+	const candidatePaths: Array<{ runId: string; path: string; kind: 'run' | 'worktree' }> = []
 	for (const userIdEntry of await safeReaddir(sandboxRoot)) {
 		const userRunsDir = resolve(sandboxRoot, userIdEntry, 'runs')
-		if (!(await exists(userRunsDir))) continue
-		for (const runIdEntry of await safeReaddir(userRunsDir)) {
-			candidatePaths.push({ runId: runIdEntry, path: resolve(userRunsDir, runIdEntry) })
+		if (await exists(userRunsDir)) {
+			for (const runIdEntry of await safeReaddir(userRunsDir)) {
+				candidatePaths.push({ runId: runIdEntry, path: resolve(userRunsDir, runIdEntry), kind: 'run' })
+			}
+		}
+		const userWorktreesDir = resolve(sandboxRoot, userIdEntry, 'worktrees')
+		if (await exists(userWorktreesDir)) {
+			for (const runIdEntry of await safeReaddir(userWorktreesDir)) {
+				candidatePaths.push({
+					runId: runIdEntry,
+					path: resolve(userWorktreesDir, runIdEntry),
+					kind: 'worktree',
+				})
+			}
 		}
 	}
 
@@ -109,6 +133,7 @@ export async function runWorkspaceGcCore(opts: GcOptions): Promise<GcSummary> {
 		const item: GcRunSummary = {
 			runId: candidate.runId,
 			path: candidate.path,
+			kind: candidate.kind,
 			deleted: false,
 			skipped: null,
 			error: null,
@@ -136,6 +161,14 @@ export async function runWorkspaceGcCore(opts: GcOptions): Promise<GcSummary> {
 		}
 
 		try {
+			if (candidate.kind === 'worktree' && opts.removeWorktree) {
+				try {
+					await opts.removeWorktree(candidate.path, candidate.runId)
+				} catch (err) {
+					// Best-effort: log to the result and still attempt rm so the dir doesn't leak.
+					item.error = `worktree deregister failed: ${err instanceof Error ? err.message : String(err)}`
+				}
+			}
 			await rm(candidate.path, { recursive: true, force: true })
 			item.deleted = true
 		} catch (err) {
