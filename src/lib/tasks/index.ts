@@ -20,5 +20,7 @@ export {
 	getTaskByIdQuery,
 	setTaskStatusCommand,
 	cancelTaskCommand,
+	retryTaskCommand,
 	getActiveTaskForConversationQuery,
 } from './tasks.remote'
+export { executeTaskOnce } from './task-runner.server'

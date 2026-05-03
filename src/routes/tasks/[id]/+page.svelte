@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { getTaskByIdQuery, setTaskStatusCommand, cancelTaskCommand } from '$lib/tasks/tasks.remote';
+	import { getTaskByIdQuery, setTaskStatusCommand, cancelTaskCommand, retryTaskCommand } from '$lib/tasks/tasks.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	const taskId = $derived(page.params.id ?? '');
@@ -83,6 +83,25 @@
 		}
 	}
 
+	async function handleRetry() {
+		if (!detail) return;
+		if (!detail.task.ownerAgentId) {
+			error = 'Task has no owner agent — assign one before retrying.';
+			return;
+		}
+		if (!confirm('Retry this task? A new attempt + run will be created.')) return;
+		busy = true;
+		error = null;
+		try {
+			await retryTaskCommand({ taskId: detail.task.id });
+			await load();
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Retry failed';
+		} finally {
+			busy = false;
+		}
+	}
+
 	function fmtCost(usd: string | null | undefined) {
 		if (usd === null || usd === undefined) return '—';
 		const n = parseFloat(usd);
@@ -123,6 +142,11 @@
 						</p>
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
+						{#if (t.status === 'failed' || t.status === 'blocked' || t.status === 'completed') && t.ownerAgentId}
+							<button class="btn btn-info btn-xs" type="button" onclick={handleRetry} disabled={busy} title="Run this task again with a new attempt">
+								{busy ? 'Retrying…' : 'Retry'}
+							</button>
+						{/if}
 						{#if t.status === 'pending' || t.status === 'planning' || t.status === 'awaiting_approval'}
 							<button class="btn btn-primary btn-xs" type="button" onclick={() => transition('running')} disabled={busy}>Mark running</button>
 						{/if}

@@ -11,6 +11,7 @@ import {
 	setTaskStatus,
 	type TaskRow,
 } from './tasks.server'
+import { executeTaskOnce } from './task-runner.server'
 
 const taskIdSchema = z.string().uuid()
 
@@ -109,6 +110,17 @@ export const setTaskStatusCommand = command(setStatusSchema, async ({ taskId, st
 })
 
 const cancelTaskSchema = z.object({ taskId: taskIdSchema })
+
+/**
+ * Wave 2 #11 phase 5 — manual retry. Creates a NEW task_attempt + chat_run linked to the task
+ * and runs it through the runtime. Allowed even from terminal states (failed / blocked /
+ * completed / canceled) — the run-task-once flow handles the transition. Returns the new
+ * attempt's outcome so the UI can show feedback.
+ */
+export const retryTaskCommand = command(cancelTaskSchema, async ({ taskId }) => {
+	const result = await executeTaskOnce(taskId)
+	return result
+})
 
 /**
  * Cancel a task and any non-terminal direct children (one level — matches the propose_plan tree
