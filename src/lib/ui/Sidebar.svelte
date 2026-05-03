@@ -79,6 +79,18 @@
 				</svg>
 				Automations
 			</a>
+			<a href="/tasks"
+				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/tasks')} class:font-medium={isActive('/tasks')} class:text-primary={isActive('/tasks')}
+				onclick={onNavigate}>
+				<!-- clipboard with check / tasks -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<rect x="8" y="2" width="8" height="4" rx="1"/>
+					<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+					<path d="m9 14 2 2 4-4"/>
+				</svg>
+				Tasks
+			</a>
 		</div>
 
 		<!-- Insights group -->

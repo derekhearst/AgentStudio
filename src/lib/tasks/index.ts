@@ -15,3 +15,9 @@ export {
 	listAttemptsForTask,
 	updateAttempt,
 } from './tasks.server'
+export {
+	listTasksQuery,
+	getTaskByIdQuery,
+	setTaskStatusCommand,
+	cancelTaskCommand,
+} from './tasks.remote'
