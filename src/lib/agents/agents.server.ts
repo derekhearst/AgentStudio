@@ -135,13 +135,48 @@ export async function getAgentDetail(agentId: string) {
 
 export async function updateAgentRecord(
 	agentId: string,
-	patch: { name?: string; role?: string; systemPrompt?: string; model?: string },
+	patch: {
+		name?: string
+		role?: string
+		systemPrompt?: string
+		model?: string
+		// Wave 2 #8 phase 4 — let operators bind which capability groups an agent gets by
+		// default (instead of the legacy "all tools" surface for agents without allowedTools).
+		// Lives in agent.config.capabilityGroups; the stream handler reads it on run start.
+		capabilityGroups?: string[]
+		// Optional fine-grained override: a fixed allow-list of tool names (no progressive
+		// disclosure). Empty/undefined means use capabilityGroups (or fall back to legacy).
+		allowedTools?: string[]
+	},
 ) {
 	const updates: Partial<typeof agents.$inferInsert> = {}
 	if (patch.name !== undefined) updates.name = patch.name
 	if (patch.role !== undefined) updates.role = patch.role
 	if (patch.systemPrompt !== undefined) updates.systemPrompt = patch.systemPrompt
 	if (patch.model !== undefined) updates.model = patch.model
+
+	const configChanged = patch.capabilityGroups !== undefined || patch.allowedTools !== undefined
+	if (configChanged) {
+		// Read existing config so we don't clobber unrelated keys (workspace, etc.).
+		const [current] = await db.select({ config: agents.config }).from(agents).where(eq(agents.id, agentId))
+		const existing = (current?.config ?? {}) as Record<string, unknown>
+		const nextConfig: Record<string, unknown> = { ...existing }
+		if (patch.capabilityGroups !== undefined) {
+			if (patch.capabilityGroups.length === 0) {
+				delete nextConfig.capabilityGroups
+			} else {
+				nextConfig.capabilityGroups = patch.capabilityGroups
+			}
+		}
+		if (patch.allowedTools !== undefined) {
+			if (patch.allowedTools.length === 0) {
+				delete nextConfig.allowedTools
+			} else {
+				nextConfig.allowedTools = patch.allowedTools
+			}
+		}
+		updates.config = nextConfig
+	}
 
 	if (Object.keys(updates).length === 0) return null
 

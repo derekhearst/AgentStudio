@@ -21,6 +21,11 @@
 	let configSaved = $state(false)
 	let draftSystemPrompt = $state('')
 	let draftModel = $state('')
+	// Wave 2 #8 phase 4 — capability binding draft state.
+	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media'] as const
+	type CapabilityGroupName = (typeof ALL_CAPABILITY_GROUPS)[number]
+	let draftCapabilityGroups = $state<CapabilityGroupName[]>([])
+	let useCapabilityBinding = $state(false)
 
 	let eventSource: EventSource | null = null
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -141,21 +146,33 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	function readAgentCapabilityGroups(agent: AgentData['agent']): CapabilityGroupName[] {
+		const config = (agent.config ?? null) as { capabilityGroups?: unknown } | null
+		if (!Array.isArray(config?.capabilityGroups)) return []
+		return config.capabilityGroups.filter(
+			(g): g is CapabilityGroupName => typeof g === 'string' && (ALL_CAPABILITY_GROUPS as readonly string[]).includes(g),
+		)
+	}
+
+	function syncDraftFromAgent(agent: AgentData['agent']) {
+		draftSystemPrompt = agent.systemPrompt
+		draftModel = agent.model
+		const groups = readAgentCapabilityGroups(agent)
+		draftCapabilityGroups = groups
+		useCapabilityBinding = groups.length > 0
+	}
+
 	async function loadData() {
 		loading = true
 		const result = await getAgent(agentId)
 		data = result ?? null
-		if (data) {
-			draftSystemPrompt = data.agent.systemPrompt
-			draftModel = data.agent.model
-		}
+		if (data) syncDraftFromAgent(data.agent)
 		loading = false
 	}
 
 	function startEditConfig() {
 		if (!data) return
-		draftSystemPrompt = data.agent.systemPrompt
-		draftModel = data.agent.model
+		syncDraftFromAgent(data.agent)
 		configError = null
 		configSaved = false
 		editingConfig = true
@@ -166,8 +183,17 @@
 		configError = null
 		configSaved = false
 		if (!data) return
-		draftSystemPrompt = data.agent.systemPrompt
-		draftModel = data.agent.model
+		syncDraftFromAgent(data.agent)
+	}
+
+	function toggleCapabilityGroup(group: CapabilityGroupName) {
+		// `core` is always-on; toggling it is a no-op.
+		if (group === 'core') return
+		if (draftCapabilityGroups.includes(group)) {
+			draftCapabilityGroups = draftCapabilityGroups.filter((g) => g !== group)
+		} else {
+			draftCapabilityGroups = [...draftCapabilityGroups, group]
+		}
 	}
 
 	async function saveConfig() {
@@ -187,10 +213,15 @@
 		configError = null
 		configSaved = false
 		try {
+			// Empty array clears the override (back-compat: legacy "all tools" surface).
+			const capabilityGroups = useCapabilityBinding
+				? Array.from(new Set<CapabilityGroupName>(['core', ...draftCapabilityGroups]))
+				: []
 			const updated = await updateAgentCommand({
 				agentId: data.agent.id,
 				systemPrompt,
 				model,
+				capabilityGroups,
 			})
 			if (!updated) {
 				configError = 'Failed to save agent configuration.'
@@ -502,6 +533,63 @@
 				<p class="mt-1 text-right text-[11px] text-base-content/45">{draftSystemPrompt.length} chars</p>
 			{:else}
 				<pre class="whitespace-pre-wrap text-xs leading-relaxed text-base-content/70">{data.agent.systemPrompt}</pre>
+			{/if}
+
+			<div class="mb-2 mt-4 border-t border-base-300/70"></div>
+
+			<div class="mb-1 flex items-center justify-between gap-2">
+				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Capability binding</p>
+				{#if editingConfig}
+					<label class="flex cursor-pointer items-center gap-2 text-xs">
+						<input
+							type="checkbox"
+							class="toggle toggle-xs"
+							checked={useCapabilityBinding}
+							onchange={(e) => (useCapabilityBinding = (e.currentTarget as HTMLInputElement).checked)}
+						/>
+						<span>Restrict tools to selected groups</span>
+					</label>
+				{/if}
+			</div>
+			<p class="mb-2 text-[11px] leading-snug text-base-content/55">
+				When enabled, this agent's chat starts with only the selected capability groups; the model can call <code class="font-mono text-[10px]">enable_capability</code> to expand. When disabled, the agent gets the legacy "all tools" surface (back-compat).
+			</p>
+			{#if editingConfig}
+				{#if useCapabilityBinding}
+					<div class="flex flex-wrap gap-2">
+						{#each ALL_CAPABILITY_GROUPS as group (group)}
+							{@const checked = group === 'core' || draftCapabilityGroups.includes(group)}
+							<label
+								class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors {checked ? 'border-primary/55 bg-primary/10' : 'border-base-300/60 bg-base-200/30 hover:bg-base-200/55'}"
+							>
+								<input
+									type="checkbox"
+									class="checkbox checkbox-xs"
+									{checked}
+									disabled={group === 'core'}
+									onchange={() => toggleCapabilityGroup(group)}
+								/>
+								<span class="font-mono">{group}</span>
+								{#if group === 'core'}
+									<span class="badge badge-xs badge-ghost">always-on</span>
+								{/if}
+							</label>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-xs italic text-base-content/40">All tools available (no restriction).</p>
+				{/if}
+			{:else}
+				{@const persistedGroups = readAgentCapabilityGroups(data.agent)}
+				{#if persistedGroups.length > 0}
+					<div class="flex flex-wrap gap-1.5">
+						{#each persistedGroups as group (group)}
+							<span class="badge badge-sm badge-outline font-mono">{group}</span>
+						{/each}
+					</div>
+				{:else}
+					<p class="text-xs italic text-base-content/40">All tools available (no restriction).</p>
+				{/if}
 			{/if}
 		</ContentPanel>
 

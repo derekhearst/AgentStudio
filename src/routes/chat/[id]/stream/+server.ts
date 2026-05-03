@@ -216,6 +216,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let scopedAgentTools: string[] | null = null
 	let persistentKey: string | null = null
 	let worktreeConfig: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null = null
+	// Wave 2 #8 phase 4 — agent.config.capabilityGroups overrides the legacy "all tools" default
+	// for non-orchestrator agents without an explicit allowedTools list. When set, the agent gets
+	// progressive disclosure starting from these groups (instead of jumping straight to the full
+	// surface). When unset, the legacy back-compat path is preserved.
+	let agentCapabilityGroups: string[] | null = null
 
 	// --- Context Engineering: Mode Posture (chat workbench mode) ---
 	if (conversation.mode && conversation.mode !== 'chat') {
@@ -240,6 +245,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			const config = agent.config as
 				| {
 						allowedTools?: string[]
+						capabilityGroups?: string[]
 						workspace?: {
 							mode?: string
 							key?: string
@@ -251,6 +257,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				| null
 			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
 				scopedAgentTools = config.allowedTools
+			}
+			if (Array.isArray(config?.capabilityGroups) && config.capabilityGroups.length > 0) {
+				agentCapabilityGroups = config.capabilityGroups
 			}
 			// Phase 2 of #7: opt-in persistent workspace per agent.
 			if (
@@ -384,15 +393,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let promptTokens = 0
 	let completionTokens = 0
 
-	// --- Context Engineering: Tool Loading (Wave 2 #8 phase 1 — progressive disclosure) ---
+	// --- Context Engineering: Tool Loading (Wave 2 #8 phases 1 + 4 — progressive disclosure) ---
 	// Resolution order:
 	//   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface, no PD.
-	//   2. Orchestrator conversations — progressive disclosure starting at `core`.
-	//   3. Agent conversations without allowedTools — keep the legacy "all tools" surface so
-	//      existing agents don't suddenly lose their toolkit. Ops can opt them into PD by setting
-	//      allowedTools to a slim list explicitly.
+	//   2. Orchestrator conversations OR agent conversations with agent.config.capabilityGroups —
+	//      progressive disclosure starting at `core` (orchestrator) or the configured groups (agent).
+	//   3. Agent conversations without allowedTools and without capabilityGroups — keep the legacy
+	//      "all tools" surface so existing agents don't suddenly lose their toolkit.
 	const { expandGroupsToToolNames, getEnabledGroups } = await import('$lib/tools/capabilities.server')
-	const useProgressiveDisclosure = !scopedAgentTools && isOrchestrator
+	const useProgressiveDisclosure = !scopedAgentTools && (isOrchestrator || agentCapabilityGroups !== null)
+	const initialEnabledGroups: string[] = isOrchestrator
+		? ['core']
+		: (agentCapabilityGroups ?? ['core'])
 	function computeTools(enabledGroupNames: string[]) {
 		const all = getToolDefinitions()
 		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
@@ -407,7 +419,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 			.filter((tool) => activeNames.has(tool.function.name))
 	}
-	let tools = computeTools(['core'])
+	let tools = computeTools(initialEnabledGroups)
 	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
 
@@ -458,6 +470,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			label: body.regenerate ? 'Regenerating response' : 'Generating response',
 			startedAt: new Date(),
 			lastHeartbeatAt: new Date(),
+			// Seed the run with the initial capability groups (orchestrator → ['core'], agent →
+			// agent.config.capabilityGroups). Subsequent enable_capability calls mutate this set.
+			enabledCapabilityGroups: initialEnabledGroups,
 		})
 		.returning({ id: chatRuns.id })
 

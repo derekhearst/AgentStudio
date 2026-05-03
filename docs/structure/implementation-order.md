@@ -267,7 +267,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Stream handler enforces progressive disclosure for orchestrator conversations only — agents with explicit `allowedTools` keep their fixed surface, and agents without allowedTools keep the legacy "all tools" surface (back-compat). Tool surface is recomputed at the top of every loop round so `enable_capability` from the previous round takes effect: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
      - Tool-policy slot updated with progressive-disclosure guidance for both orchestrator and agent paths: same file
      - 8 tests cover: pure expansion + dedup + unknown-group dropping, mergeAlwaysOn ordering and forced-`core` invariant, DB column default, persisted round-trip, and the empty-column safety net: [tests/tools.capabilities.spec.ts](../../tests/tools.capabilities.spec.ts)
-   - Phases 2-5 (auto-suggest classifier, FS tool consolidation, per-agent capability binding, output offloading) still pending — keep `[ ]` until they land.
+   - Evidence (Phase 4 — per-agent capability binding, 2026-05-03):
+     - `updateAgentRecord` accepts `capabilityGroups` and `allowedTools` and merges them into `agent.config` instead of clobbering siblings (workspace, etc.): [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts)
+     - Remote command + zod schema extended with the same fields and a strict enum on group names; empty array clears the override (back-compat): [src/lib/agents/agents.remote.ts](../../src/lib/agents/agents.remote.ts)
+     - Stream handler reads `agent.config.capabilityGroups`. When set, the agent goes through progressive disclosure starting from those groups (instead of the legacy "all tools" surface). When unset, legacy behavior is preserved. Initial chat_run row is seeded with the resolved groups so resume/replay see the same surface: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+     - Agent detail page gains a Capability Binding section: a single toggle for "restrict tools to selected groups", a checkbox grid for the four non-`core` groups (`core` is shown as always-on and disabled), and read-only badges in view mode showing the persisted set: [src/routes/agents/[id]/+page.svelte](../../src/routes/agents/[id]/+page.svelte)
+     - 4 tests cover: capabilityGroups round-trip storage, "no override" back-compat default, run rows seeded with the configured groups, and the merge-don't-clobber invariant for `agent.config` when capabilityGroups changes alongside an existing `workspace` config: [tests/agents.capability-binding.spec.ts](../../tests/agents.capability-binding.spec.ts)
+   - Phases 2 (auto-suggest classifier), 3 (FS tool consolidation), 5 (output offloading) still pending — keep `[ ]` until they land.
 
 9. [ ] Skills taxonomy and loading rules (including mode identities)
    - Source: ../skills/plan.md
