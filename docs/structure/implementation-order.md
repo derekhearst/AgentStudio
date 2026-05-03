@@ -191,7 +191,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
      - Cron tick runs GC after automations: [src/routes/api/cron/+server.ts](../../src/routes/api/cron/+server.ts)
      - Manual CLI: [scripts/gc-workspaces.ts](../../scripts/gc-workspaces.ts) (`--dry-run`, `--ttl-days N`)
      - Tests cover: TTL eviction, active-run skip, recent-finish skip, orphan-keep, legacy-untouched, dry-run, missing-root: [tests/workspace.gc.spec.ts](../../tests/workspace.gc.spec.ts)
-   - Phases 2 (persistent mode), 4 (git worktree), 5 (container isolation) still pending — keep `[ ]` until all phases land.
+   - Evidence (Phase 2 — persistent workspace mode, 2026-05-02):
+     - `WorkspaceContext` gains `persistentKey`; `resolveWorkspaceRoot` picks `persistent/<key>/` when set: [src/lib/workspace/workspace.server.ts](../../src/lib/workspace/workspace.server.ts)
+     - `executeTool(call, userId, runId?, { persistentKey? })` threads it through AsyncLocalStorage: [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts)
+     - Chat stream + sub-agent read `agent.config.workspace` and pass through: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts), [src/lib/agents/inline-subagent.ts](../../src/lib/agents/inline-subagent.ts)
+     - Tests for path layout, precedence (persistent > runId), shared-dir-across-runs, traversal rejection: [tests/workspace.isolation.spec.ts](../../tests/workspace.isolation.spec.ts)
+   - Phases 4 (git worktree), 5 (container isolation) still pending — keep `[ ]` until all phases land.
 
 ### Wave 2 — Orchestration Core
 

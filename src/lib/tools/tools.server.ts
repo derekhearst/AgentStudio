@@ -72,7 +72,11 @@ const execFileAsync = promisify(execFile)
 let browser: Browser | null = null
 let page: Page | null = null
 
-const toolUserContext = new AsyncLocalStorage<{ userId: string; runId?: string | null }>()
+const toolUserContext = new AsyncLocalStorage<{
+	userId: string
+	runId?: string | null
+	persistentKey?: string | null
+}>()
 
 function getWorkspace() {
 	const ctx = toolUserContext.getStore()
@@ -82,6 +86,7 @@ function getWorkspace() {
 	return resolveWorkspaceRoot({
 		userId: ctx.userId,
 		runId: ctx.runId ?? null,
+		persistentKey: ctx.persistentKey ?? null,
 		sandboxRoot: env.SANDBOX_WORKSPACE,
 	})
 }
@@ -104,6 +109,7 @@ async function ensureWorkspaceDir() {
 	await ensureWorkspace({
 		userId: ctx.userId,
 		runId: ctx.runId ?? null,
+		persistentKey: ctx.persistentKey ?? null,
 		sandboxRoot: env.SANDBOX_WORKSPACE,
 	})
 }
@@ -876,8 +882,19 @@ function normalizeToolName(name: string): ToolName | null {
 	return null
 }
 
-export async function executeTool(call: ToolCall, userId: string, runId?: string | null) {
-	return toolUserContext.run({ userId, runId: runId ?? null }, async () => {
+export type WorkspaceOptions = {
+	persistentKey?: string | null
+}
+
+export async function executeTool(
+	call: ToolCall,
+	userId: string,
+	runId?: string | null,
+	workspace?: WorkspaceOptions,
+) {
+	return toolUserContext.run(
+		{ userId, runId: runId ?? null, persistentKey: workspace?.persistentKey ?? null },
+		async () => {
 		const startedAt = Date.now()
 		const normalizedName = normalizeToolName(call.name)
 		if (!normalizedName) {
@@ -1460,7 +1477,8 @@ export async function executeTool(call: ToolCall, userId: string, runId?: string
 				executionMs: Date.now() - startedAt,
 			}
 		}
-	})
+		},
+	)
 }
 
 export type AskUserQuestion = z.infer<typeof toolSchemas.ask_user>['questions'][number]

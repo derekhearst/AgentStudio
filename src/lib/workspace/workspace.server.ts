@@ -13,8 +13,16 @@ function sanitize(id: string, kind: string): string {
 
 export type WorkspaceContext = {
 	userId: string
-	/** Run ID — when present, the workspace is run-scoped (ephemeral); otherwise it's user-scoped (legacy/persistent). */
+	/** Run ID — when present and no persistentKey, the workspace is run-scoped (ephemeral). */
 	runId?: string | null
+	/**
+	 * Stable opt-in workspace key (Phase 2). When set, the workspace resolves to
+	 * `${sandboxRoot}/<userId>/persistent/<key>/` and survives across runs. Use for
+	 * long-running coding agents that want a stable repo checkout.
+	 *
+	 * Takes precedence over `runId` — if both are passed, the persistent path wins.
+	 */
+	persistentKey?: string | null
 	/**
 	 * Absolute or relative path to the sandbox root directory. Pass the value of
 	 * `$env/dynamic/private`'s `SANDBOX_WORKSPACE` here (the workspace module is
@@ -26,16 +34,21 @@ export type WorkspaceContext = {
 /**
  * Resolve the absolute root directory for a tool execution context.
  *
- * - With `runId`: ${sandboxRoot}/<userId>/runs/<runId>  (Phase 1 — per-run isolation)
- * - Without `runId`: ${sandboxRoot}/<userId>            (legacy path; back-compat for callers
- *   that haven't been migrated yet, e.g. ad-hoc/admin tool invocations outside a run loop)
+ * - With `persistentKey`: ${sandboxRoot}/<userId>/persistent/<key>  (Phase 2 — opt-in stable)
+ * - Else with `runId`:    ${sandboxRoot}/<userId>/runs/<runId>      (Phase 1 — per-run isolation)
+ * - Else:                  ${sandboxRoot}/<userId>                   (legacy path; back-compat for
+ *   callers that haven't been migrated yet, e.g. ad-hoc/admin tool invocations outside a run loop)
  *
- * The two roots share a parent directory tree per user, so legacy persistent files at the
- * user root remain accessible to admin tooling but are invisible to ephemeral runs.
+ * All three roots share a parent tree per user, so legacy persistent files at the user root
+ * remain accessible to admin tooling but are invisible to ephemeral runs.
  */
 export function resolveWorkspaceRoot(ctx: WorkspaceContext): string {
 	const userId = sanitize(ctx.userId, 'userId')
 	const root = ctx.sandboxRoot || DEFAULT_SANDBOX_ROOT
+	if (ctx.persistentKey) {
+		const key = sanitize(ctx.persistentKey, 'persistentKey')
+		return resolve(root, userId, 'persistent', key)
+	}
 	if (ctx.runId) {
 		const runId = sanitize(ctx.runId, 'runId')
 		return resolve(root, userId, 'runs', runId)

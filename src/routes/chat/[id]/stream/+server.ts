@@ -201,6 +201,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const contextSlots: ContextSlot[] = []
 	let scopedAgentTools: string[] | null = null
+	let persistentKey: string | null = null
 
 	// --- Context Engineering: Mode Posture (chat workbench mode) ---
 	if (conversation.mode && conversation.mode !== 'chat') {
@@ -222,9 +223,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, conversation.agentId!)).limit(1)
 		if (agent) {
 			contextSlots.push({ name: 'identity', priority: 100, content: agent.systemPrompt })
-			const config = agent.config as { allowedTools?: string[] } | null
+			const config = agent.config as
+				| { allowedTools?: string[]; workspace?: { mode?: string; key?: string } }
+				| null
 			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
 				scopedAgentTools = config.allowedTools
+			}
+			// Phase 2 of #7: opt-in persistent workspace per agent.
+			if (
+				config?.workspace?.mode === 'persistent' &&
+				typeof config.workspace.key === 'string' &&
+				config.workspace.key.length > 0
+			) {
+				persistentKey = config.workspace.key
 			}
 		}
 	}
@@ -792,7 +803,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							messageId: null,
 						}
 
-						const toolResult = await executeTool(toolCall, user.id, run.id)
+						const toolResult = await executeTool(toolCall, user.id, run.id, { persistentKey })
 
 						const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 						const resultStr = trimToolResult(tc.name, rawResultStr)

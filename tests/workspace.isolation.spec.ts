@@ -59,4 +59,29 @@ test.describe('workspace/isolation — per-run workspace resolution', () => {
 		const r = resolveWorkspaceRoot({ userId: 'u', runId: 'r' })
 		expect(r.endsWith(resolve('/workspace/users', 'u', 'runs', 'r'))).toBe(true)
 	})
+
+	test('persistentKey resolves to <root>/<userId>/persistent/<key> (Phase 2)', () => {
+		const r = resolveWorkspaceRoot({ userId: 'u1', persistentKey: 'main-repo', sandboxRoot: ROOT })
+		expect(r).toBe(resolve(ROOT, 'u1', 'persistent', 'main-repo'))
+	})
+
+	test('persistentKey takes precedence over runId when both are set', () => {
+		const r = resolveWorkspaceRoot({ userId: 'u1', runId: 'r1', persistentKey: 'pinned', sandboxRoot: ROOT })
+		expect(r).toBe(resolve(ROOT, 'u1', 'persistent', 'pinned'))
+	})
+
+	test('two runs sharing a persistentKey resolve to the SAME directory (data survives)', () => {
+		const a = resolveWorkspaceRoot({ userId: 'u1', runId: 'r-a', persistentKey: 'main', sandboxRoot: ROOT })
+		const b = resolveWorkspaceRoot({ userId: 'u1', runId: 'r-b', persistentKey: 'main', sandboxRoot: ROOT })
+		expect(a).toBe(b)
+	})
+
+	test('rejects persistentKey with traversal characters', () => {
+		expect(() => resolveWorkspaceRoot({ userId: 'u1', persistentKey: '../escape', sandboxRoot: ROOT })).toThrow(
+			/Invalid persistentKey/,
+		)
+		expect(() => resolveWorkspaceRoot({ userId: 'u1', persistentKey: 'a/b', sandboxRoot: ROOT })).toThrow(
+			/Invalid persistentKey/,
+		)
+	})
 })

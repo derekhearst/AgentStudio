@@ -45,6 +45,14 @@ export async function runInlineSubagent(
 	if (!agent) {
 		throw new Error(`Agent not found: ${step.agentId}`)
 	}
+	// Phase 2 of #7: opt-in persistent workspace per agent.
+	const agentConfigForWs = agent.config as { workspace?: { mode?: string; key?: string } } | null
+	const persistentKey =
+		agentConfigForWs?.workspace?.mode === 'persistent' &&
+		typeof agentConfigForWs.workspace.key === 'string' &&
+		agentConfigForWs.workspace.key.length > 0
+			? agentConfigForWs.workspace.key
+			: null
 
 	// Create a conversation for this sub-agent run
 	const [subConversation] = await db
@@ -310,7 +318,7 @@ export async function runInlineSubagent(
 					conversationId: subConversation.id,
 					messageId: null,
 				}
-				const toolResult = await executeTool(toolCall, userId, run.id)
+				const toolResult = await executeTool(toolCall, userId, run.id, { persistentKey })
 				const rawResultStr = toolResult.success ? JSON.stringify(toolResult.result) : `Error: ${toolResult.error}`
 				const resultStr = trimToolResult(tc.name, rawResultStr)
 
