@@ -5,6 +5,7 @@ import { trimToolResultWithOffload } from '$lib/tools/output-offload.server'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import { setRunRound } from '$lib/runs/blocks.server'
+import { emitHook } from '$lib/hooks'
 import type {
 	LoopMessage,
 	RunChatLoopInput,
@@ -59,6 +60,15 @@ function extractReasoningFragment(details: ReasoningDetail[] | undefined): strin
 export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopResult> {
 	const { session } = input
 	const startedAt = Date.now()
+
+	// Wave 3 #13 phase 1 — fire `before_run` hook. Fail-isolated, fire-and-forget.
+	void emitHook('before_run', {
+		runId: session.runId,
+		conversationId: input.conversationId,
+		userId: input.userId,
+		agentId: null,
+		source: input.isOrchestrator ? 'chat_stream' : 'agent',
+	})
 
 	let currentMessages: LoopMessage[] = [...input.initialMessages]
 	const allToolCalls: Array<Record<string, unknown>> = []
@@ -423,9 +433,32 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 				messageId: null,
 			}
 
+			// Wave 3 #13 phase 1 — `before_tool` hook. Fail-isolated.
+			void emitHook('before_tool', {
+				runId: session.runId,
+				conversationId: input.conversationId,
+				userId: input.userId,
+				agentId: null,
+				toolName: tc.name,
+				args: parsedArgs,
+			})
+
 			const toolResult = await executeTool(toolCall, input.userId, session.runId, {
 				persistentKey: input.persistentKey,
 				worktree: input.worktree,
+			})
+
+			// Wave 3 #13 phase 1 — `after_tool` hook. Fail-isolated.
+			void emitHook('after_tool', {
+				runId: session.runId,
+				conversationId: input.conversationId,
+				userId: input.userId,
+				agentId: null,
+				toolName: tc.name,
+				args: parsedArgs,
+				result: toolResult.success ? toolResult.result : { error: toolResult.error },
+				success: toolResult.success,
+				durationMs: toolResult.executionMs,
 			})
 
 			const rawResultStr = toolResult.success
@@ -497,6 +530,19 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	// them off the session for the persisted message metadata.
 	const sessionWithBlocks = session as { streamBlocks?: import('$lib/runs/runs.schema').StreamBlock[] }
 	const streamBlocks = sessionWithBlocks.streamBlocks ?? []
+
+	// Wave 3 #13 phase 1 — `after_run` hook. Fail-isolated. Cost is null here because the
+	// runtime doesn't compute cost; the caller (chat stream / inline-subagent / automation /
+	// task-runner) does that AFTER the loop returns and feeds it into its own logLlmUsage.
+	void emitHook('after_run', {
+		runId: session.runId,
+		conversationId: input.conversationId,
+		userId: input.userId,
+		agentId: null,
+		costUsd: null,
+		durationMs: Date.now() - startedAt,
+		success: true,
+	})
 
 	return {
 		finalText: allTextContent || assistantContent,

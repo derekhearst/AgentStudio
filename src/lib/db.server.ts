@@ -20,6 +20,7 @@ import * as chatWorkbenchSchema from '$lib/chat/chat.workbench.schema'
 import * as contextSchema from '$lib/context/context.schema'
 import * as tasksSchema from '$lib/tasks/tasks.schema'
 import * as governanceSchema from '$lib/governance/governance.schema'
+import * as hooksSchema from '$lib/hooks/hooks.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 const databaseUrl = env.DATABASE_URL
@@ -41,6 +42,7 @@ const schema = {
 	...contextSchema,
 	...tasksSchema,
 	...governanceSchema,
+	...hooksSchema,
 }
 
 const MIGRATIONS_SCHEMA = 'drizzle'
@@ -384,6 +386,14 @@ async function bootstrapDatabase() {
 			}
 		} catch (err) {
 			console.warn('[db] Companion skill seed failed (non-fatal):', err)
+		}
+
+		// Wave 3 #13 phase 1 — register the built-in hook handlers exactly once at boot.
+		try {
+			const { registerBuiltinHooks } = await import('$lib/hooks')
+			registerBuiltinHooks()
+		} catch (err) {
+			console.warn('[db] Hook registration failed (non-fatal):', err)
 		}
 
 		// Phase 4 of #4: backfill embeddings for any skills that don't have them yet, so the
