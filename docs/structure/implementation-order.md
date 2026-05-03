@@ -415,6 +415,14 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
     - Source: ../evaluations/plan.md
     - Depends on: #3, #10
     - Gate: evaluation runs attach findings to durable records
+    - Evidence (Phase 1+2 — schema + recorder + run-viewer surface, 2026-05-03):
+      - New domain: [src/lib/evaluations/](../../src/lib/evaluations/) — `evaluations.schema.ts` (`run_evaluations` table + `evaluation_verdict` enum `pass` / `fail` / `needs_revision` + typed `EvaluationFinding` shape with severity/category/message/path/suggestion), `evaluations.server.ts` (`recordEvaluation` / `listEvaluationsForRun` / `getLatestEvaluationForRun` / `isRunEvaluationClear` / `summarizeFindingsForRun`), `index.ts` barrel
+      - `chat_runs` extended with `eval_required` boolean (default false — no behavior change for existing chats) + `eval_attempt` integer (default 0 — incremented when re-plan retries are spawned in Phase 3)
+      - `run_evaluations`: `run_id` (FK CASCADE), `evaluator_run_id` (SET NULL — verdict survives evaluator GC), `evaluator_agent_id` (SET NULL), `verdict` enum, `findings` jsonb (typed `EvaluationFinding[]`), `confidence` real (0..1), `cost_usd` numeric(12,4), `metadata` jsonb. Indexes on run/evaluator_agent/verdict/created_at: [drizzle/0029_evaluations.sql](../../drizzle/0029_evaluations.sql)
+      - `isRunEvaluationClear(runId)` returns true when `eval_required=false` OR the latest evaluation's verdict is `pass`. Phase 4's task-completion gate plugs into this.
+      - Run viewer at [src/routes/runs/[id]/+page.svelte](../../src/routes/runs/[id]/+page.svelte) gets a new "Evaluations" panel between the run header and event timeline — appears only when at least one evaluation exists. Header shows count + latest verdict badge + confidence %; each verdict row shows verdict badge, finding count, severity-tinted finding pills (error/warning/info), category badges, message + optional path. `getRunDetailQuery` joins `listEvaluationsForRun` so the page shows real history.
+      - 5 tests cover full pass-verdict round-trip with findings + confidence + cost + metadata, verdict enum rejection, FK cascade on source-run delete, `eval_required` / `eval_attempt` defaults + round-trip, severity aggregation matching `summarizeFindingsForRun`'s contract: [tests/evaluations.spec.ts](../../tests/evaluations.spec.ts)
+    - Phases 3-5 (re-plan loop spawning new attempts on `needs_revision`, task-completion gating via `isRunEvaluationClear`, sprint contracts for long runs) still pending. The schema + recorder + viewer are the foundation — the orchestration layer plugs in once an evaluator agent kind is seeded.
 
 ### Wave 4 — Feature Service Layer
 

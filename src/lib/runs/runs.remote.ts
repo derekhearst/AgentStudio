@@ -6,6 +6,7 @@ import { chatRuns, runEvents } from '$lib/runs/runs.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { tasks } from '$lib/tasks/tasks.schema'
+import { listEvaluationsForRun } from '$lib/evaluations/evaluations.server'
 
 /**
  * Wave 2 #11 follow-up — single-run detail viewer.
@@ -77,12 +78,17 @@ export const getRunDetailQuery = query(detailSchema, async ({ runId, includeNois
 		? eventRows
 		: eventRows.filter((e) => !NOISY_EVENT_TYPES.has(e.type))
 
+	// Wave 3 #14 — surface evaluator verdicts alongside the event timeline. Empty list when no
+	// evaluation has fired (most runs today; the framework is opt-in via chat_runs.eval_required).
+	const evaluations = await listEvaluationsForRun(runId)
+
 	return {
 		run,
 		conversation: conversation ?? null,
 		agent,
 		task,
 		events,
+		evaluations,
 		eventCount: eventRows.length,
 		filteredOutCount: includeNoisyEvents ? 0 : eventRows.length - events.length,
 	}

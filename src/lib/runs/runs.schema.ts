@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
@@ -85,6 +85,14 @@ export const chatRuns = pgTable(
 		// references runs).
 		taskId: uuid('task_id'),
 		taskAttemptId: uuid('task_attempt_id'),
+		// Wave 3 #14 phase 2 — when true, the runtime spawns an evaluator child run after the
+		// generator finishes. Evaluator's verdict gates whether the originating task can complete
+		// (Phase 4) or whether to spawn a re-plan retry (Phase 3). Default false so existing chats
+		// have no behavior change.
+		evalRequired: boolean('eval_required').notNull().default(false),
+		// How many evaluator attempts have already happened for this run — incremented when a
+		// retry is spawned to prevent infinite re-plan loops.
+		evalAttempt: integer('eval_attempt').notNull().default(0),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		startedAt: timestamp('started_at', { withTimezone: true }),
 		lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),

@@ -21,6 +21,7 @@ import * as contextSchema from '$lib/context/context.schema'
 import * as tasksSchema from '$lib/tasks/tasks.schema'
 import * as governanceSchema from '$lib/governance/governance.schema'
 import * as hooksSchema from '$lib/hooks/hooks.schema'
+import * as evaluationsSchema from '$lib/evaluations/evaluations.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 const databaseUrl = env.DATABASE_URL
@@ -43,6 +44,7 @@ const schema = {
 	...tasksSchema,
 	...governanceSchema,
 	...hooksSchema,
+	...evaluationsSchema,
 }
 
 const MIGRATIONS_SCHEMA = 'drizzle'

@@ -204,6 +204,13 @@
       "when": 1777850500000,
       "tag": "0028_hook_invocations",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1777851000000,
+      "tag": "0029_evaluations",
+      "breakpoints": true
     }
   ]
 }

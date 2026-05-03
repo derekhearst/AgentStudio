@@ -149,6 +149,53 @@
 			{/if}
 		</ContentPanel>
 
+		{#if detail.evaluations.length > 0}
+			{@const latest = detail.evaluations[detail.evaluations.length - 1]}
+			{@const verdictTone = latest.verdict === 'pass' ? 'badge-success' : latest.verdict === 'fail' ? 'badge-error' : 'badge-warning'}
+			<ContentPanel>
+				{#snippet header()}
+					<div class="flex flex-1 items-center justify-between gap-2">
+						<div class="flex items-center gap-2">
+							<h2 class="font-semibold">Evaluations</h2>
+							<span class="badge badge-sm badge-ghost">{detail?.evaluations.length ?? 0}</span>
+							<span class="badge badge-sm {verdictTone}">latest: {latest.verdict}</span>
+						</div>
+						{#if latest.confidence !== null}
+							<span class="font-mono text-xs text-base-content/55">confidence {Math.round((latest.confidence ?? 0) * 100)}%</span>
+						{/if}
+					</div>
+				{/snippet}
+				<ul class="space-y-2 text-sm">
+					{#each detail.evaluations as evl, idx (evl.id)}
+						{@const tone = evl.verdict === 'pass' ? 'badge-success' : evl.verdict === 'fail' ? 'badge-error' : 'badge-warning'}
+						<li class="rounded-xl border border-base-300/60 bg-base-100 p-3">
+							<div class="flex items-center gap-2">
+								<span class="font-mono text-xs text-base-content/55">#{idx + 1}</span>
+								<span class="badge badge-sm {tone}">{evl.verdict}</span>
+								{#if evl.findings.length > 0}
+									<span class="text-xs text-base-content/55">{evl.findings.length} finding{evl.findings.length === 1 ? '' : 's'}</span>
+								{/if}
+								<span class="ml-auto font-mono text-xs text-base-content/40">{fmtDate(evl.createdAt)}</span>
+							</div>
+							{#if evl.findings.length > 0}
+								<ul class="mt-2 space-y-1 text-xs">
+									{#each evl.findings as f, fIdx (fIdx)}
+										{@const sev = f.severity === 'error' ? 'badge-error' : f.severity === 'warning' ? 'badge-warning' : 'badge-info'}
+										<li class="flex items-start gap-2 rounded-lg bg-base-200/50 px-2 py-1.5">
+											<span class="badge badge-xs {sev}">{f.severity}</span>
+											{#if f.category}<span class="badge badge-xs badge-outline">{f.category}</span>{/if}
+											<span class="flex-1 leading-snug">{f.message}</span>
+											{#if f.path}<code class="font-mono text-[10px] opacity-60">{f.path}</code>{/if}
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</ContentPanel>
+		{/if}
+
 		<ContentPanel>
 			{#snippet header()}
 				<div class="flex flex-1 items-center justify-between gap-2">
