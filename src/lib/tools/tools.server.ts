@@ -644,6 +644,47 @@ export async function browserScreenshot(url?: string) {
 	}
 }
 
+/**
+ * Wave 4 #18 phase 1 — `web_fetch` tool implementation.
+ *
+ * Reuses the existing Playwright browser singleton (same one `browser_screenshot` uses) so we
+ * don't fight over chromium processes. Returns the page's text content trimmed to maxChars.
+ *
+ * SAFETY: URL goes through `validateFetchUrl` BEFORE the network call so private/loopback
+ * addresses are blocked at the boundary (SSRF defense). Also wraps the navigate in a 30s
+ * timeout — sites that hang past that fail rather than tying up the worker indefinitely.
+ *
+ * Boilerplate strip + paragraph-boundary truncation are pure helpers in `$lib/research/web-fetch`
+ * so the URL safety contract is testable without booting Playwright.
+ */
+export async function webFetch(rawUrl: string, maxChars = 50_000) {
+	const { validateFetchUrl, cleanupExtractedText, truncateAtParagraph } = await import('$lib/research/web-fetch')
+	const validation = validateFetchUrl(rawUrl)
+	if (!validation.ok) {
+		throw new Error(validation.error)
+	}
+	const targetUrl = validation.url.toString()
+	const p = await getPage()
+	await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+	// Best-effort: also wait for network to settle briefly so SPA pages have time to render.
+	await p.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined)
+
+	const title = await p.title().catch(() => '')
+	const finalUrl = p.url()
+	const rawText = (await p.textContent('body').catch(() => '')) ?? ''
+	const cleaned = cleanupExtractedText(rawText)
+	const text = truncateAtParagraph(cleaned, maxChars)
+
+	return {
+		title,
+		url: finalUrl,
+		text,
+		fetchedAt: new Date().toISOString(),
+		fullCharCount: cleaned.length,
+		truncated: cleaned.length > maxChars,
+	}
+}
+
 export async function getSandboxStatus() {
 	const workspace = env.SANDBOX_WORKSPACE || '/workspace'
 	try {
@@ -702,6 +743,10 @@ export const toolSchemas = {
 	}),
 	file_info: z.object({ path: z.string().min(1) }),
 	browser_screenshot: z.object({ url: z.string().url().optional() }),
+	web_fetch: z.object({
+		url: z.string().min(1).max(2048),
+		maxChars: z.number().int().min(1000).max(100_000).default(50_000).optional(),
+	}),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -854,6 +899,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	search_files: 'Search file contents in the workspace (ripgrep-style) with optional regex and ignore controls.',
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
+	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
@@ -1158,6 +1204,18 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result: await browserScreenshot(input.url),
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'web_fetch') {
+				const input = toolSchemas.web_fetch.parse(call.arguments)
+				const result = await webFetch(input.url, input.maxChars)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result,
 					executionMs: Date.now() - startedAt,
 				}
 			}

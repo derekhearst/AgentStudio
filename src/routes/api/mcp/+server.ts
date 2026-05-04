@@ -49,6 +49,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	search_files: 'Search file contents with ripgrep-style matching and options',
 	file_info: 'Return metadata for a file or directory',
 	browser_screenshot: 'Take a screenshot of a web page',
+	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt }. Blocks private/loopback addresses for SSRF safety.',
 	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
 	image_generate: 'Generate an image from a text prompt',
 	list_skills: 'List all available skills with their names and descriptions.',
@@ -146,6 +147,11 @@ function schemaToJsonSchema(name: ToolName) {
 			required: ['path'],
 		},
 		browser_screenshot: { type: 'object', properties: { url: { type: 'string' } } },
+		web_fetch: {
+			type: 'object',
+			properties: { url: { type: 'string' }, maxChars: { type: 'integer' } },
+			required: ['url'],
+		},
 		run_subagent: {
 			type: 'object',
 			properties: { task: { type: 'string' }, context: { type: 'string' } },

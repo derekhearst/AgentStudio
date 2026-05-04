@@ -8,7 +8,7 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditAgentConfigUpdated } from '$lib/governance'
 
 const agentIdSchema = z.string().uuid()
-const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media'] as const
+const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media', 'research'] as const
 const HOOK_EVENT_NAMES = [
 	'before_run',
 	'after_run',

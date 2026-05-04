@@ -106,6 +106,24 @@ const HEURISTICS: GroupHeuristic[] = [
 		],
 		supporting: ['visual', 'graphic', 'art'],
 	},
+	{
+		group: 'research',
+		strong: [
+			'research',
+			'investigate',
+			'sources',
+			'citations',
+			'literature',
+			'whitepaper',
+			'paper',
+			'study',
+			'analysis',
+			'compare',
+			'comparison',
+			'review',
+		],
+		supporting: ['report', 'evidence', 'data', 'cite', 'background', 'overview'],
+	},
 ]
 
 const STRONG_THRESHOLD = 1

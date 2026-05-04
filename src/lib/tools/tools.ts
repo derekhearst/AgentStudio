@@ -77,6 +77,12 @@ export const capabilityGroups = {
 		tools: ['image_generate'] as ToolName[],
 		alwaysOn: false,
 	},
+	research: {
+		label: 'Research',
+		description: 'Read full web page content (web_fetch) for deeper investigation than web_search snippets allow',
+		tools: ['web_fetch'] as ToolName[],
+		alwaysOn: false,
+	},
 } as const satisfies Record<string, { label: string; description: string; tools: ToolName[]; alwaysOn: boolean }>
 
 export type CapabilityGroup = keyof typeof capabilityGroups

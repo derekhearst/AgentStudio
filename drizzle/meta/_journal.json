@@ -239,6 +239,13 @@
       "when": 1777878000000,
       "tag": "0033_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1777881000000,
+      "tag": "0034_research",
+      "breakpoints": true
     }
   ]
 }
