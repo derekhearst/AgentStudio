@@ -7,6 +7,7 @@
 		getResearchDetailQuery,
 		cancelResearchCommand,
 	} from '$lib/research/research.remote';
+	import { splitReportIntoParts } from '$lib/research/report-render';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getResearchDetailQuery>>>;
@@ -89,6 +90,17 @@
 		if (!d) return '—';
 		return new Date(d).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 	}
+
+	// Wave 4 #18 phase 5 — split the report into text + citation parts so [N] tokens render
+	// as clickable anchor links to the source URLs instead of plain text inside <pre>.
+	const reportParts = $derived(
+		detail?.research.report
+			? splitReportIntoParts(
+					detail.research.report,
+					detail.sources.map((s) => ({ id: s.id, url: s.url, title: s.title })),
+				)
+			: [],
+	);
 </script>
 
 {#if loading}
@@ -154,7 +166,25 @@
 					<h2 class="font-semibold">Report</h2>
 				{/snippet}
 				{#if r.report}
-					<pre class="max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg bg-base-200/30 p-3 text-sm leading-relaxed">{r.report}</pre>
+					<!-- Wave 4 #18 phase 5 — render text + citation parts. Citations resolve to
+					     anchor links pointing at the corresponding source URL; out-of-range cites
+					     (model hallucinated [42] when only 5 sources) render as warning-tinted
+					     broken-link badges so the user can spot them. -->
+					<div class="max-h-[70vh] overflow-auto whitespace-pre-wrap rounded-lg bg-base-200/30 p-3 font-mono text-sm leading-relaxed">
+						{#each reportParts as part, i (i)}
+							{#if part.type === 'text'}{part.value}{:else if part.url}<a
+								href={part.url}
+								target="_blank"
+								rel="noreferrer noopener"
+								class="link link-secondary link-hover font-semibold text-secondary"
+								title={part.title ?? part.url}>[{part.n}]</a
+							>{:else}<span
+								class="badge badge-xs badge-warning"
+								title="Citation [{part.n}] — out of range (only {detail?.sources.length ?? 0} sources fetched)"
+								>[{part.n}]</span
+							>{/if}
+						{/each}
+					</div>
 				{:else if inFlight}
 					<p class="py-6 text-center text-sm italic text-base-content/45">
 						Synthesizing… this page auto-refreshes every 3 seconds.

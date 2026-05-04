@@ -40,6 +40,12 @@ export {
 	extractCitedSourceIds,
 	type SearchHit,
 } from './research-loop-helpers'
+export {
+	splitReportIntoParts,
+	citedSourcesInOrder,
+	type ReportPart,
+	type SourceForRender,
+} from './report-render'
 export { runResearchLoop, type ResearchRunOutcome } from './research-runner.server'
 export { registerResearchJobHandlers } from './research-handler.server'
 export {
