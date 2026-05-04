@@ -91,6 +91,17 @@
 				</svg>
 				Tasks
 			</a>
+			<a href="/projects"
+				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/projects')} class:font-medium={isActive('/projects')} class:text-primary={isActive('/projects')}
+				onclick={onNavigate}>
+				<!-- folder open / projects -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/>
+					<path d="m3 9 1.6 9.2A2 2 0 0 0 6.6 20h10.8a2 2 0 0 0 2-1.8L21 9z"/>
+				</svg>
+				Projects
+			</a>
 		</div>
 
 		<!-- Insights group -->

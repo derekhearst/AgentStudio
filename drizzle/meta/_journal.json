@@ -225,6 +225,13 @@
       "when": 1777871000000,
       "tag": "0031_tasks_eval",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1777875000000,
+      "tag": "0032_projects",
+      "breakpoints": true
     }
   ]
 }
