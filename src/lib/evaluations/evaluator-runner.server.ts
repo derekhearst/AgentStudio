@@ -89,7 +89,7 @@ export async function runEvaluatorPass(input: RunEvaluatorPassInput): Promise<Ru
 		metadata: { conversationId: input.conversationId, evaluatedRunId: input.runId },
 	}).catch(() => '0')
 
-	return recordEvaluation({
+	const evaluationRow = await recordEvaluation({
 		runId: input.runId,
 		verdict: parsed.verdict,
 		confidence: parsed.confidence,
@@ -102,6 +102,35 @@ export async function runEvaluatorPass(input: RunEvaluatorPassInput): Promise<Ru
 			rawResponse: parsed.fallback ? raw.slice(0, 1000) : undefined,
 		},
 	})
+
+	// Wave 5 #20 phase 1 — open a review item when the verdict isn't `pass` so the user
+	// has one inbox to triage non-clean evaluator outcomes. Best-effort: failure to open
+	// the review item never blocks the evaluation row from being persisted.
+	if (parsed.verdict !== 'pass') {
+		void (async () => {
+			try {
+				const { openReviewItem } = await import('$lib/observability/review.server')
+				await openReviewItem({
+					type: 'evaluation_failure',
+					severity: parsed.verdict === 'fail' ? 'critical' : 'warning',
+					summary: `Evaluator returned ${parsed.verdict}${parsed.findings[0]?.message ? ` — ${parsed.findings[0].message.slice(0, 120)}` : ''}`,
+					payload: {
+						verdict: parsed.verdict,
+						confidence: parsed.confidence,
+						findingCount: parsed.findings.length,
+						topFindings: parsed.findings.slice(0, 3),
+					},
+					runId: input.runId,
+					sessionId: input.conversationId,
+					dedupeKey: `eval:${input.runId}`,
+				})
+			} catch (err) {
+				console.warn('[evaluations] review item open failed (non-fatal)', err)
+			}
+		})()
+	}
+
+	return evaluationRow
 }
 
 function stringifyEvaluationContext(input: {

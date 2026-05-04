@@ -1,39 +1,57 @@
 import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
+import { skills } from '$lib/skills/skills.schema'
+import {
+	ORCHESTRATOR_IDENTITY_DEFAULT,
+	ORCHESTRATOR_IDENTITY_SKILL_ID,
+} from '$lib/agents/identity-seed.server'
 
 /**
  * Orchestrator identity — injected as system message for conversations
  * where agentId IS NULL (direct user↔orchestrator chat).
+ *
+ * Wave 5 #22 phase 1 — content lives in the `system/orchestrator-identity` skill (boot-
+ * seeded with a fixed UUID). buildOrchestratorPrompt reads from the skill at runtime so
+ * operators can edit the prompt via /skills without a deploy. The TS default is a fallback
+ * when the skill is missing or disabled — defense in depth so a misconfigured skill row
+ * can never break orchestrator chat.
  */
 
-const ORCHESTRATOR_IDENTITY = `You are the Orchestrator — the user's primary AI assistant in AgentStudio.
-
-Your responsibilities:
-- Answer questions directly when you can (simple path)
-- For complex, multi-step work, propose a plan with specific agents before executing
-- Delegate sub-tasks to specialized agents when their expertise is needed
-- Synthesize sub-agent results into coherent responses
-
-Behavior:
-- Be concise and helpful. Don't over-explain.
-- When a task is simple (lookup, chat, brainstorming), handle it yourself — no plan needed.
-- When a task is complex (multi-step, needs tools, specialized knowledge), propose a plan first.
-- Plans list the steps and which agent handles each. Wait for user approval before executing.
-- After sub-agents complete, synthesize their results and present a unified response.
-`
+/**
+ * Load the orchestrator identity content from the seeded skill, falling back to the TS
+ * default when the skill is missing/disabled. Always returns a non-empty string.
+ */
+async function loadOrchestratorIdentity(): Promise<string> {
+	try {
+		const [skill] = await db
+			.select({ content: skills.content, enabled: skills.enabled })
+			.from(skills)
+			.where(eq(skills.id, ORCHESTRATOR_IDENTITY_SKILL_ID))
+			.limit(1)
+		if (skill && skill.enabled && skill.content.trim().length > 0) {
+			return skill.content
+		}
+	} catch (err) {
+		console.warn('[orchestrator] failed to load identity skill, using TS fallback', err)
+	}
+	return ORCHESTRATOR_IDENTITY_DEFAULT
+}
 
 /**
  * Build the orchestrator system prompt with the current agent roster.
  */
 export async function buildOrchestratorPrompt(): Promise<string> {
-	const roster = await db
-		.select({ id: agents.id, name: agents.name, role: agents.role, status: agents.status })
-		.from(agents)
-		.where(eq(agents.status, 'active'))
-		.orderBy(asc(agents.name))
+	const [identity, roster] = await Promise.all([
+		loadOrchestratorIdentity(),
+		db
+			.select({ id: agents.id, name: agents.name, role: agents.role, status: agents.status })
+			.from(agents)
+			.where(eq(agents.status, 'active'))
+			.orderBy(asc(agents.name)),
+	])
 
-	const sections = [ORCHESTRATOR_IDENTITY]
+	const sections = [identity]
 
 	if (roster.length > 0) {
 		const rosterLines = roster.map((a) => `- **${a.name}** (${a.id.slice(0, 8)}): ${a.role}`)

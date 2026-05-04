@@ -260,6 +260,20 @@
       "when": 1777887000000,
       "tag": "0036_memory_artifact_link",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1777890000000,
+      "tag": "0037_observability",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1777893000000,
+      "tag": "0038_source_control",
+      "breakpoints": true
     }
   ]
 }

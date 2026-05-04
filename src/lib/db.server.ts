@@ -25,6 +25,8 @@ import * as evaluationsSchema from '$lib/evaluations/evaluations.schema'
 import * as projectsSchema from '$lib/projects/projects.schema'
 import * as jobsSchema from '$lib/jobs/jobs.schema'
 import * as researchSchema from '$lib/research/research.schema'
+import * as observabilitySchema from '$lib/observability/observability.schema'
+import * as sourceControlSchema from '$lib/source-control/source-control.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
 const databaseUrl = env.DATABASE_URL
@@ -51,6 +53,8 @@ const schema = {
 	...projectsSchema,
 	...jobsSchema,
 	...researchSchema,
+	...observabilitySchema,
+	...sourceControlSchema,
 }
 
 const MIGRATIONS_SCHEMA = 'drizzle'
@@ -415,6 +419,19 @@ async function bootstrapDatabase() {
 			}
 		} catch (err) {
 			console.warn('[db] Default evaluator seed failed (non-fatal):', err)
+		}
+
+		// Wave 5 #22 phase 1 — seed the orchestrator-identity skill so operators can edit the
+		// orchestrator system prompt via /skills without a deploy. Idempotent ON CONFLICT.
+		try {
+			const { seedOrchestratorIdentity } = await import('$lib/agents/identity-seed.server')
+			const seedDb = createDatabase(client)
+			const result = await seedOrchestratorIdentity(seedDb)
+			if (result.inserted > 0) {
+				console.log('[db] Seeded orchestrator-identity skill')
+			}
+		} catch (err) {
+			console.warn('[db] Orchestrator identity seed failed (non-fatal):', err)
 		}
 
 		// Wave 4 #18 phase 3 — register the `research_run` job handler. Must happen BEFORE the

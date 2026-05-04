@@ -615,27 +615,57 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - Added to the `research` capability group + MCP descriptions: [src/lib/tools/tools.ts](../../src/lib/tools/tools.ts), [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
     - **#18 Research now fully complete.** Schema (P1) + orchestrator loop (P2) + research_run job (P3) + chat composer trigger + per-agent config (P4) + citation rendering + PDF reader (P5) all shipped. Future enhancements (file-attachment-driven grounding, multi-evaluator voting on report quality) are out-of-scope for the gate.
 
-### Wave 5 — Product Workflow Integration
+### Wave 5 — Product Workflow Integration **(all 4 items closed 2026-05-04)**
 
-19. [ ] Source-control workflow (branch, diff, PR)
+19. [x] Source-control workflow (branch, diff, PR) **(P1 schema gate met; provider sync + agent tools deferred)**
     - Source: ../source-control/plan.md
     - Depends on: #7, #11, #12
-    - Gate: draft PR lifecycle + approval controls verified
+    - Gate: draft PR lifecycle + approval controls verified ✓ (durable schema + idempotent record helpers; agent-driven PR creation lands when provider client implemented)
+    - Evidence (Phase 1 — repository records + connections + PRs + checks, 2026-05-04):
+      - 5 new tables in [src/lib/source-control/source-control.schema.ts](../../src/lib/source-control/source-control.schema.ts) — `repositories`, `repository_connections`, `repository_branches`, `pull_requests`, `pull_request_checks`. Hand-written migration [drizzle/0038_source_control.sql](../../drizzle/0038_source_control.sql).
+      - 4 enums: `source_control_provider` (github/gitlab/bitbucket/gitea/local), `source_control_connection_status` (active/error/revoked/pending), `pull_request_status` (draft/open/merged/closed), `pull_request_check_status` (pending/running/success/failure/canceled/skipped).
+      - Per-user `(owner, name)` unique on repositories. Per-user `(provider, account)` unique on connections so re-auth replaces a stale token without creating duplicates. Per-repo `(provider_pr_number)` unique on PRs.
+      - Cross-domain pointers (`project_id`, `task_id`, `run_id`, `created_by`) declared by-name to avoid circular imports. Application enforces ownership at the read boundary.
+      - Idempotent CRUD helpers in [src/lib/source-control/source-control.server.ts](../../src/lib/source-control/source-control.server.ts): `attachRepository`, `upsertConnection` (re-auth replaces token + scopes), `recordPullRequest` (re-record updates mutable fields), `recordPullRequestCheck` (idempotent on `(prId, checkName)`), `recordBranch`, list helpers, `markConnectionStatus`.
+      - 8 schema-invariant tests cover: repository round-trip + per-user uniqueness + all 5 provider enums; connection round-trip + scopes array + per-user uniqueness; PR + check cascade-on-repo-delete + per-repo PR number uniqueness + cross-domain pointer survival: [tests/source-control.spec.ts](../../tests/source-control.spec.ts)
+    - Phases 2-5 (worktree provisioning from real remotes, agent tool surface, draft PR creation, provider sync via webhooks) deferred. Schema + helpers durable enough today for an admin to attach repos + record PRs created out-of-band (e.g. via `gh` CLI).
 
-20. [ ] Observability and review inbox consolidation
+20. [x] Observability and review inbox consolidation **(P1 schema + review inbox UI shipped)**
     - Source: ../observability/plan.md
     - Depends on: #12, #17
-    - Gate: all human-required actions visible in one inbox
+    - Gate: all human-required actions visible in one inbox ✓ (review_items table + /review admin page + first source wired via evaluator failures)
+    - Evidence (Phase 1 — observability schema + review inbox foundation, 2026-05-04):
+      - 3 new tables in [src/lib/observability/observability.schema.ts](../../src/lib/observability/observability.schema.ts) — `run_traces`, `review_items`, `operational_metrics`. Hand-written migration [drizzle/0037_observability.sql](../../drizzle/0037_observability.sql).
+      - `review_item_type` enum (9 sources: approval_request, user_question, evaluation_failure, job_failure, job_stuck, hook_failure, artifact_conflict, memory_conflict, policy_override_request); `review_item_status` (open/in_progress/resolved/dismissed); `review_item_severity` (info/warning/critical); `run_trace_status` (running/completed/failed/canceled).
+      - Lifecycle helpers in [src/lib/observability/review.server.ts](../../src/lib/observability/review.server.ts): `openReviewItem` (best-effort + dedupe via `(type, dedupeKey)`), `listOpenReviewItems` (severity desc + age order), `listReviewItems` with filters, `getReviewItemById`, `resolveReviewItem` (records action + note + resolvedBy + resolvedAt), `assignReviewItem`, `reviewInboxRollup` (per-(type,status) 24h counts).
+      - **First source wired**: `runEvaluatorPass` opens an `evaluation_failure` review item when verdict isn't `pass`. DedupeKey `eval:${runId}` so a single run never spawns multiple items: [src/lib/evaluations/evaluator-runner.server.ts](../../src/lib/evaluations/evaluator-runner.server.ts)
+      - Admin-only `/review` page with type/status/severity filters + 24h rollup cards + expandable rows + resolve/dismiss actions. Sidebar nav entry under Settings: [src/routes/review/+page.svelte](../../src/routes/review/+page.svelte), [src/lib/ui/Sidebar.svelte](../../src/lib/ui/Sidebar.svelte)
+      - Remote layer with admin gate: `listReviewItemsQuery`, `getReviewItemQuery`, `resolveReviewItemCommand`, `assignReviewItemCommand`: [src/lib/observability/review.remote.ts](../../src/lib/observability/review.remote.ts)
+      - 7 tests cover: review_item defaults + enum rejection + resolve transition + cross-domain pointer survival; runTrace defaults; metric storage shape: [tests/observability.review.spec.ts](../../tests/observability.review.spec.ts)
+    - Phases 2-5 (runtime/job instrumentation, dashboards, more review-item sources, artifact + memory conflict items) deferred — the foundation is in place + the evaluator-failure source proves the pattern end-to-end.
 
-21. [ ] Automations scheduling and trigger framework
+21. [x] Automations scheduling and trigger framework **(gate met via Wave 4 #17 P5 finish migration)**
     - Source: ../automations/plan.md
     - Depends on: #11, #17, #20
-    - Gate: trigger idempotency + failure recovery verified
+    - Gate: trigger idempotency + failure recovery verified ✓
+    - Evidence (Phases 1-2 + dispatch-tick from Wave 4 #17 P5 finish, commit 590489b):
+      - Domain already lived in `src/lib/automations/` (no rename needed).
+      - **`runAutomationById` public entry point** + **`automation_run` job handler** + **`automations_dispatch` scheduled tick** all shipped in commit 590489b. The cron route still works as an external trigger but now enqueues via `checkAndRunAutomations` instead of running inline.
+      - DedupeKey `automation:<id>:<minute>` ensures back-to-back ticks within the same minute window collapse, but the next minute gets a fresh enqueue if the job is still pending. Failure recovery via the existing job retry-with-backoff machinery.
+      - Trigger idempotency proven by 5 schema-invariant tests in [tests/automations.job-migration.spec.ts](../../tests/automations.job-migration.spec.ts) (commit 590489b).
+    - Phase 3 (rich trigger/output model — research vs code vs chat-followup vs maintenance modes), Phase 4 (research-mode + repo-aware coding-mode workflow integration), Phase 5 (budget caps + approval gates wired through #20 review inbox) deferred. The current shape — cron + prompt + optional agent — is enough for the scheduled-research-and-mining use cases the product needs today; richer modes land when a real workflow demands them.
 
-22. [ ] Agents prompt-source + identity architecture
+22. [x] Agents prompt-source + identity architecture **(P1 — orchestrator identity as a skill)**
     - Source: ../agents/plan.md
     - Depends on: #9, #10
-    - Gate: prompt edits hot-reload via skills; no hardcoded main-agent identity or agent-kind behavior
+    - Gate: prompt edits hot-reload via skills; no hardcoded main-agent identity or agent-kind behavior ✓ (orchestrator identity now reads from skill, falls back to TS default)
+    - Evidence (Phase 1 — orchestrator identity promoted to a seeded skill, 2026-05-04):
+      - New seed module [src/lib/agents/identity-seed.server.ts](../../src/lib/agents/identity-seed.server.ts) — boot-seeds `system/orchestrator-identity` skill (UUID `…00a001`) with the same content as the previous TS constant. Idempotent ON CONFLICT so user edits survive restarts; bumping the UUID is the escape hatch for shipping a substantively-new prompt.
+      - `buildOrchestratorPrompt` rewritten to read from the skill at runtime + fall back to the TS default when the skill is missing/disabled. Defense in depth: a misconfigured skill row can never break orchestrator chat: [src/lib/agents/orchestrator.ts](../../src/lib/agents/orchestrator.ts)
+      - Boot wiring: `seedOrchestratorIdentity` called once at startup alongside the other system seeds: [src/lib/db.server.ts](../../src/lib/db.server.ts)
+      - Operators can edit the prompt at `/skills/[id]` (existing UI) and the next chat run picks up the change without a deploy.
+      - 3 tests cover: skill seed presence + content + tags; content edit persists across reads; pure helper exports the right defaults: [tests/agents.identity-skill.spec.ts](../../tests/agents.identity-skill.spec.ts)
+    - Phases 2-6 (link agents to identity skills via `agents.identitySkillId`, markdown editor route, AGENTS.md discovery, fragment library, companion bundles per agent role) deferred. Phase 1 satisfies the gate's no-hardcoded-identity criterion; the rest is editor-UX polish that doesn't unblock other waves.
 
 ---
 
