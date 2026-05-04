@@ -160,6 +160,57 @@ test.describe('observability/metrics — job lifecycle metric shape', () => {
 	})
 })
 
+test.describe('observability/metrics — run lifecycle metric shape', () => {
+	test('runs.duration_ms carries {source, status} dimensions and ms value', async () => {
+		const prefix = uniquePrefix('runlife-duration')
+		const sql = getSql()
+		try {
+			const [row] = await sql<{ metric: string; dimension: Record<string, unknown>; value: string }[]>`
+				insert into operational_metrics (metric, dimension, value)
+				values (
+					${`${prefix}.runs.duration_ms`},
+					${sql.json({ source: 'chat_stream', status: 'completed' })},
+					'12450'
+				)
+				returning metric, dimension, value::text as value
+			`
+			expect(row.metric).toBe(`${prefix}.runs.duration_ms`)
+			expect(row.dimension).toEqual({ source: 'chat_stream', status: 'completed' })
+			expect(row.value).toBe('12450.000000')
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+
+	test('runs.lifecycle counters split by source (chat_stream vs agent_subagent)', async () => {
+		const prefix = uniquePrefix('runlife-source-split')
+		const sql = getSql()
+		try {
+			await sql`
+				insert into operational_metrics (metric, dimension, value, measured_at) values
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '20 minutes'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '15 minutes'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'agent_subagent' })}, '1', now() - interval '10 minutes'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'agent_subagent' })}, '1', now() - interval '5 minutes'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'automation' })}, '1', now() - interval '1 minute')
+			`
+			const rows = await sql<{ count: number; source: string }[]>`
+				select count(*)::int as count, dimension->>'source' as source
+				from operational_metrics
+				where metric = ${`${prefix}.runs.lifecycle.completed`}
+				group by dimension->>'source'
+				order by source
+			`
+			expect(rows.length).toBe(3)
+			expect(rows.find((r) => r.source === 'chat_stream')?.count).toBe(2)
+			expect(rows.find((r) => r.source === 'agent_subagent')?.count).toBe(2)
+			expect(rows.find((r) => r.source === 'automation')?.count).toBe(1)
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+})
+
 test.describe('observability/metrics — sampler queries compose against schema', () => {
 	test('queue depth aggregate query runs against production jobs table', async () => {
 		const sql = getSql()

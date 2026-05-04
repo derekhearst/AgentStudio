@@ -126,9 +126,43 @@ export function createForwardedSession(opts: ForwardedSessionOptions): Session &
 			if (patch.heartbeat || patch.state === 'running') values.lastHeartbeatAt = new Date(now)
 			if (patch.finished) values.finishedAt = new Date(now)
 
-			await db.update(chatRuns).set(values).where(eq(chatRuns.id, opts.runId))
+			const [updated] = await db
+				.update(chatRuns)
+				.set(values)
+				.where(eq(chatRuns.id, opts.runId))
+				.returning({
+					state: chatRuns.state,
+					source: chatRuns.source,
+					startedAt: chatRuns.startedAt,
+					finishedAt: chatRuns.finishedAt,
+				})
 			if (patch.heartbeat || patch.state === 'running') {
 				lastHeartbeatWriteAt = now
+			}
+
+			// Wave 5 #20 phase 4 — emit lifecycle metrics on terminal transitions for the sub-agent
+			// run. Source dimension naturally splits sub-agent vs orchestrator runs in the dashboard.
+			if (patch.finished && updated && (updated.state === 'completed' || updated.state === 'failed' || updated.state === 'canceled')) {
+				void (async () => {
+					try {
+						const { recordMetric } = await import('$lib/observability/metrics.server')
+						const startedAt = updated.startedAt ? new Date(updated.startedAt).getTime() : null
+						const finishedAt = updated.finishedAt ? new Date(updated.finishedAt).getTime() : now
+						const durationMs = startedAt != null ? Math.max(0, finishedAt - startedAt) : 0
+						await recordMetric({
+							metric: 'runs.duration_ms',
+							dimension: { source: updated.source ?? 'unknown', status: updated.state },
+							value: durationMs,
+						})
+						await recordMetric({
+							metric: `runs.lifecycle.${updated.state}`,
+							dimension: { source: updated.source ?? 'unknown' },
+							value: 1,
+						})
+					} catch (err) {
+						console.warn('[runtime/forwarded] run lifecycle metric failed (non-fatal)', err)
+					}
+				})()
 			}
 		},
 		async pushBlock(block) {
