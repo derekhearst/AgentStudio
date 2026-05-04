@@ -56,6 +56,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	read_artifact: 'Read an artifact\'s current version content.',
 	create_artifact: 'Create a new artifact in a project (saves initial content as v1).',
 	edit_artifact: 'Append a new version to an existing artifact (append-only).',
+	set_project_context: 'Bind a project to the current conversation so subsequent edits target it by default. projectId=null unbinds.',
 	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
 	image_generate: 'Generate an image from a text prompt',
 	list_skills: 'List all available skills with their names and descriptions.',
@@ -197,6 +198,10 @@ function schemaToJsonSchema(name: ToolName) {
 				changeNote: { type: 'string' },
 			},
 			required: ['artifactId', 'content'],
+		},
+		set_project_context: {
+			type: 'object',
+			properties: { projectId: { type: ['string', 'null'] } },
 		},
 		run_subagent: {
 			type: 'object',

@@ -236,6 +236,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
+	// Wave 4 #15 phase 2 — project context slot. When the conversation is bound to a
+	// project (via set_project_context), inject the project's name + slug + description so
+	// the agent has continuous awareness of which project is "in scope" without needing to
+	// call list_projects every turn. Priority 80 (between identity at 100 and skills at 70)
+	// so it's high-signal but not above the agent's own role.
+	if (conversation.projectId) {
+		try {
+			const { getProjectById } = await import('$lib/projects/projects.server')
+			const project = await getProjectById(conversation.projectId)
+			if (project && project.userId === user.id) {
+				const description = project.description ? `\nDescription: ${project.description}` : ''
+				contextSlots.push({
+					name: 'project_context',
+					priority: 80,
+					content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWhen using create_artifact, prefer this project's id unless the user specifies otherwise. Use list_artifacts({projectId: "${project.id}"}) to see existing work in this project, and read_artifact before edit_artifact.`,
+				})
+			}
+		} catch (err) {
+			console.warn('[chat] project context slot lookup failed', err)
+		}
+	}
+
 	// --- Context Engineering: Orchestrator / Agent Identity ---
 	if (isOrchestrator) {
 		const orchestratorPrompt = await buildOrchestratorPrompt()

@@ -85,6 +85,29 @@ const toolUserContext = new AsyncLocalStorage<{
 	worktree?: WorktreeStoreConfig | null
 }>()
 
+/**
+ * Wave 4 #15 phase 2 finish — resolve the conversation that a tool call belongs to via
+ * the runId in the AsyncLocalStorage context. Used by set_project_context to know which
+ * `conversations` row to update. Returns null when there's no run-context (e.g. a tool
+ * call from a one-shot synthesis path that bypasses chat_runs).
+ */
+async function resolveConversationFromRunId(runId: string | null): Promise<string | null> {
+	if (!runId) return null
+	try {
+		const { chatRuns } = await import('$lib/runs/runs.schema')
+		const { eq } = await import('drizzle-orm')
+		const [row] = await db
+			.select({ conversationId: chatRuns.conversationId })
+			.from(chatRuns)
+			.where(eq(chatRuns.id, runId))
+			.limit(1)
+		return row?.conversationId ?? null
+	} catch (err) {
+		console.warn('[tools] resolveConversationFromRunId failed', err)
+		return null
+	}
+}
+
 function getWorkspace() {
 	const ctx = toolUserContext.getStore()
 	if (!ctx?.userId) {
@@ -773,6 +796,11 @@ export const toolSchemas = {
 		content: z.string(),
 		changeNote: z.string().trim().max(500).optional(),
 	}),
+	// Wave 4 #15 phase 2 finish — bind a project to the current conversation so subsequent
+	// edits target the right project by default. Pass projectId=null (or omit) to unbind.
+	set_project_context: z.object({
+		projectId: z.string().uuid().nullable().optional(),
+	}),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -932,6 +960,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s project info. Use to load an artifact before editing.',
 	create_artifact: 'Create a new artifact in a project (saves the initial content as v1). Slug auto-generated from name. Optional changeNote describes what this initial version contains.',
 	edit_artifact: 'Append a new version to an existing artifact (append-only, preserves the full history). Optional changeNote describes what changed in this version. Use read_artifact first to see the current content.',
+	set_project_context: 'Bind a project to the current conversation so subsequent agent edits know which project to target by default. Pass projectId=null (or omit) to unbind. The bound project shows up in the conversation\'s system-prompt context slot so the agent has continuous awareness of which project is "in scope".',
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
@@ -1248,6 +1277,52 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			// Wave 4 #15 phase 2 finish — bind a project to the current conversation so
+			// subsequent edits target it by default. Updates conversations.project_id.
+			if (call.name === 'set_project_context') {
+				const input = toolSchemas.set_project_context.parse(call.arguments)
+				const ctxSnapshot = toolUserContext.getStore()
+				const conversationId = await resolveConversationFromRunId(ctxSnapshot?.runId ?? null)
+				if (!conversationId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'no conversation context available for this tool call',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (input.projectId) {
+					// Verify ownership before binding.
+					const projectsModule = await import('$lib/projects/projects.server')
+					const project = await projectsModule.getProjectById(input.projectId)
+					if (!project || project.userId !== userId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Project ${input.projectId} not found or not accessible`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+				}
+				const { conversations: convoTable } = await import('$lib/sessions/sessions.schema')
+				const { eq } = await import('drizzle-orm')
+				await db
+					.update(convoTable)
+					.set({ projectId: input.projectId ?? null, updatedAt: new Date() })
+					.where(eq(convoTable.id, conversationId))
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: {
+						conversationId,
+						projectId: input.projectId ?? null,
+						bound: input.projectId !== null && input.projectId !== undefined,
+					},
 					executionMs: Date.now() - startedAt,
 				}
 			}

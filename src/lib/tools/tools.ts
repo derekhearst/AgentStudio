@@ -85,7 +85,7 @@ export const capabilityGroups = {
 	},
 	projects: {
 		label: 'Projects',
-		description: 'Create and edit project artifacts (durable, version-tracked containers). Use list_projects + list_artifacts to find existing work, read_artifact + edit_artifact to revise, create_project + create_artifact to start fresh.',
+		description: 'Create and edit project artifacts (durable, version-tracked containers). Use list_projects + list_artifacts to find existing work, read_artifact + edit_artifact to revise, create_project + create_artifact to start fresh, set_project_context to bind a project to the conversation for sticky context.',
 		tools: [
 			'list_projects',
 			'create_project',
@@ -93,6 +93,7 @@ export const capabilityGroups = {
 			'read_artifact',
 			'create_artifact',
 			'edit_artifact',
+			'set_project_context',
 		] as ToolName[],
 		alwaysOn: false,
 	},
