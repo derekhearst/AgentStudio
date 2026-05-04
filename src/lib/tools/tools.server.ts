@@ -747,6 +747,32 @@ export const toolSchemas = {
 		url: z.string().min(1).max(2048),
 		maxChars: z.number().int().min(1000).max(100_000).default(50_000).optional(),
 	}),
+	// Wave 4 #15 phase 2 — Projects + Artifacts agent tools.
+	list_projects: z.object({}),
+	create_project: z.object({
+		name: z.string().trim().min(1).max(120),
+		kind: z.enum(['efoil', 'research', 'code', 'documentation', 'other']).optional(),
+		description: z.string().trim().max(1000).optional(),
+	}),
+	list_artifacts: z.object({
+		projectId: z.string().uuid(),
+		includeInactive: z.boolean().default(false).optional(),
+	}),
+	read_artifact: z.object({
+		artifactId: z.string().uuid(),
+	}),
+	create_artifact: z.object({
+		projectId: z.string().uuid(),
+		name: z.string().trim().min(1).max(160),
+		content: z.string(),
+		contentType: z.enum(['markdown', 'code', 'json', 'yaml', 'plaintext']).optional(),
+		changeNote: z.string().trim().max(500).optional(),
+	}),
+	edit_artifact: z.object({
+		artifactId: z.string().uuid(),
+		content: z.string(),
+		changeNote: z.string().trim().max(500).optional(),
+	}),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -900,6 +926,12 @@ const toolDescriptions: Record<ToolName, string> = {
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
+	list_projects: 'List the user\'s projects (durable containers for artifacts with append-only version history). Returns id, name, slug, kind, description for each project.',
+	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
+	list_artifacts: 'List artifacts in a project. Returns id, name, slug, contentType, isActive for each artifact (active by default; pass includeInactive to see soft-deleted).',
+	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s project info. Use to load an artifact before editing.',
+	create_artifact: 'Create a new artifact in a project (saves the initial content as v1). Slug auto-generated from name. Optional changeNote describes what this initial version contains.',
+	edit_artifact: 'Append a new version to an existing artifact (append-only, preserves the full history). Optional changeNote describes what changed in this version. Use read_artifact first to see the current content.',
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
@@ -1217,6 +1249,193 @@ export async function executeTool(
 					input,
 					result,
 					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			// Wave 4 #15 phase 2 — Projects + Artifacts agent tools.
+			if (
+				call.name === 'list_projects' ||
+				call.name === 'create_project' ||
+				call.name === 'list_artifacts' ||
+				call.name === 'read_artifact' ||
+				call.name === 'create_artifact' ||
+				call.name === 'edit_artifact'
+			) {
+				const projectsModule = await import('$lib/projects/projects.server')
+				if (call.name === 'list_projects') {
+					toolSchemas.list_projects.parse(call.arguments)
+					const rows = await projectsModule.listProjects(userId)
+					return {
+						success: true,
+						tool: call.name,
+						input: {},
+						result: rows.map((r) => ({
+							id: r.id,
+							name: r.name,
+							slug: r.slug,
+							kind: r.kind,
+							description: r.description,
+							updatedAt: r.updatedAt,
+						})),
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'create_project') {
+					const input = toolSchemas.create_project.parse(call.arguments)
+					const created = await projectsModule.createProject({
+						userId,
+						name: input.name,
+						kind: input.kind,
+						description: input.description ?? null,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: { id: created.id, name: created.name, slug: created.slug, kind: created.kind },
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'list_artifacts') {
+					const input = toolSchemas.list_artifacts.parse(call.arguments)
+					// Ownership check — only list artifacts in projects the user owns.
+					const project = await projectsModule.getProjectById(input.projectId)
+					if (!project || project.userId !== userId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Project ${input.projectId} not found or not accessible`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const rows = await projectsModule.listArtifactsForProject(input.projectId, {
+						includeInactive: input.includeInactive,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: rows.map((a) => ({
+							id: a.id,
+							name: a.name,
+							slug: a.slug,
+							contentType: a.contentType,
+							isActive: a.isActive,
+							updatedAt: a.updatedAt,
+						})),
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'read_artifact') {
+					const input = toolSchemas.read_artifact.parse(call.arguments)
+					const artifact = await projectsModule.getArtifactById(input.artifactId)
+					if (!artifact) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} not found`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const project = await projectsModule.getProjectById(artifact.projectId)
+					if (!project || project.userId !== userId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} not accessible`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: {
+							id: artifact.id,
+							name: artifact.name,
+							slug: artifact.slug,
+							contentType: artifact.contentType,
+							projectId: artifact.projectId,
+							projectName: project.name,
+							versionSeq: artifact.currentVersion ? 1 : 0, // currentVersion presence indicates loaded
+							currentVersionId: artifact.currentVersionId,
+							content: artifact.currentVersion?.content ?? '',
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'create_artifact') {
+					const input = toolSchemas.create_artifact.parse(call.arguments)
+					const project = await projectsModule.getProjectById(input.projectId)
+					if (!project || project.userId !== userId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Project ${input.projectId} not found or not accessible`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const created = await projectsModule.createArtifact({
+						projectId: input.projectId,
+						name: input.name,
+						content: input.content,
+						contentType: input.contentType,
+						changeNote: input.changeNote,
+						editedBy: userId,
+						sourceRunId: toolUserContext.getStore()?.runId ?? null,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input: { ...input, content: `[${input.content.length} chars]` },
+						result: {
+							id: created.id,
+							name: created.name,
+							slug: created.slug,
+							contentType: created.contentType,
+							versionSeq: 1,
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'edit_artifact') {
+					const input = toolSchemas.edit_artifact.parse(call.arguments)
+					const artifact = await projectsModule.getArtifactById(input.artifactId)
+					if (!artifact) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} not found`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const project = await projectsModule.getProjectById(artifact.projectId)
+					if (!project || project.userId !== userId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} not accessible`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const newVersion = await projectsModule.editArtifact({
+						artifactId: input.artifactId,
+						content: input.content,
+						changeNote: input.changeNote,
+						editedBy: userId,
+						sourceRunId: toolUserContext.getStore()?.runId ?? null,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input: { ...input, content: `[${input.content.length} chars]` },
+						result: {
+							versionId: newVersion?.id,
+							seq: newVersion?.seq,
+							artifactId: input.artifactId,
+						},
+						executionMs: Date.now() - startedAt,
+					}
 				}
 			}
 

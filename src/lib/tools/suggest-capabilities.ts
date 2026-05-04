@@ -124,6 +124,24 @@ const HEURISTICS: GroupHeuristic[] = [
 		],
 		supporting: ['report', 'evidence', 'data', 'cite', 'background', 'overview'],
 	},
+	{
+		group: 'projects',
+		strong: [
+			'project',
+			'projects',
+			'artifact',
+			'artifacts',
+			'document',
+			'doc',
+			'documentation',
+			'spec',
+			'rfc',
+			'proposal',
+			'draft',
+			'manuscript',
+		],
+		supporting: ['version', 'revise', 'rewrite', 'continue', 'append', 'amend'],
+	},
 ]
 
 const STRONG_THRESHOLD = 1

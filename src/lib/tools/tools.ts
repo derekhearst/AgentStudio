@@ -83,6 +83,19 @@ export const capabilityGroups = {
 		tools: ['web_fetch'] as ToolName[],
 		alwaysOn: false,
 	},
+	projects: {
+		label: 'Projects',
+		description: 'Create and edit project artifacts (durable, version-tracked containers). Use list_projects + list_artifacts to find existing work, read_artifact + edit_artifact to revise, create_project + create_artifact to start fresh.',
+		tools: [
+			'list_projects',
+			'create_project',
+			'list_artifacts',
+			'read_artifact',
+			'create_artifact',
+			'edit_artifact',
+		] as ToolName[],
+		alwaysOn: false,
+	},
 } as const satisfies Record<string, { label: string; description: string; tools: ToolName[]; alwaysOn: boolean }>
 
 export type CapabilityGroup = keyof typeof capabilityGroups

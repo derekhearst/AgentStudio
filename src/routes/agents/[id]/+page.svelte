@@ -22,7 +22,7 @@
 	let draftSystemPrompt = $state('')
 	let draftModel = $state('')
 	// Wave 2 #8 phase 4 — capability binding draft state.
-	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media', 'research'] as const
+	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects'] as const
 	type CapabilityGroupName = (typeof ALL_CAPABILITY_GROUPS)[number]
 	let draftCapabilityGroups = $state<CapabilityGroupName[]>([])
 	let useCapabilityBinding = $state(false)
