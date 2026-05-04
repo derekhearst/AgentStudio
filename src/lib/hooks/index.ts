@@ -16,3 +16,4 @@ export {
 } from './bus.server'
 export { registerBuiltinHooks } from './builtins.server'
 export { listHookInvocationsQuery } from './hooks.remote'
+export { runSkillHook, type RunSkillHookInput, type RunSkillHookResult } from './skill-hook-runner.server'

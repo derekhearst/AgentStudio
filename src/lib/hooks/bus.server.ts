@@ -63,14 +63,12 @@ export async function emitHook<E extends HookEvent>(
 	const globalHandlers = registry.get(event) ?? []
 
 	// Wave 3 #13 phase 4 — per-agent hook config dispatch. When the payload carries an `agentId`,
-	// load `agents.config.hooks[event]`. Refs are skill slugs (Phase 3 skill-runner picks them up
-	// once that lands) OR opt-in built-in names that are registered as `optInOnly: true` (so they
-	// don't fire globally — only when an agent explicitly binds them). Refs that match a global
-	// `optInOnly: false` handler are skipped here because that handler already fires for every emit
-	// — binding them per-agent would dispatch twice. Unknown refs are recorded as a failed
-	// invocation so the admin viewer surfaces the typo without crashing the runtime.
+	// load `agents.config.hooks[event]`. Refs that match a global `optInOnly: true` handler run
+	// inline alongside the globals. Refs that match a non-opt-in handler are skipped (already
+	// firing globally — would double-dispatch). Unmatched refs route to the skill-hook runner
+	// (Phase 3) where they're treated as skill names.
 	const agentHandlers: RegisteredHook[] = []
-	const unmatchedRefs: string[] = []
+	const skillRefs: string[] = []
 	const agentId = (payload as { agentId?: string | null }).agentId ?? null
 	if (agentId) {
 		try {
@@ -82,7 +80,7 @@ export async function emitHook<E extends HookEvent>(
 				if (match && match.optInOnly) {
 					agentHandlers.push(match)
 				} else if (!match) {
-					unmatchedRefs.push(ref)
+					skillRefs.push(ref)
 				}
 				// match && !optInOnly → already firing globally, skip to avoid double-dispatch.
 			}
@@ -97,43 +95,35 @@ export async function emitHook<E extends HookEvent>(
 
 	const allHandlers = [...globalHandlers, ...agentHandlers]
 
-	// Log unmatched refs as failed invocations so the admin viewer shows the typo / missing skill.
-	for (const ref of unmatchedRefs) {
-		void logUnmatchedHookRef(event, ref, agentId, (payload as { runId?: string | null }).runId ?? null)
+	// Wave 3 #13 phase 3 — dispatch skill-based hooks via dynamic import so the bus stays a
+	// pure dispatch surface and the skill runner only loads when actually needed.
+	const skillDispatches: Promise<void>[] = []
+	if (skillRefs.length > 0) {
+		const skillRunPromise = (async () => {
+			try {
+				const { runSkillHook } = await import('./skill-hook-runner.server')
+				await Promise.allSettled(
+					skillRefs.map((skillName) => runSkillHook({ event, skillName, payload })),
+				)
+			} catch (err) {
+				console.warn('[hooks/bus] failed to dispatch skill hooks', {
+					event,
+					refs: skillRefs,
+					error: err instanceof Error ? err.message : String(err),
+				})
+			}
+		})()
+		skillDispatches.push(skillRunPromise)
 	}
 
-	if (allHandlers.length === 0) return
+	if (allHandlers.length === 0 && skillDispatches.length === 0) return
 
-	const dispatches = allHandlers.map((h) => dispatchOne(event, payload, h))
+	const builtinDispatches = allHandlers.map((h) => dispatchOne(event, payload, h))
+	const allDispatches = [...builtinDispatches, ...skillDispatches]
 	if (opts.await) {
-		await Promise.allSettled(dispatches)
+		await Promise.allSettled(allDispatches)
 	}
 	// fire-and-forget: don't await; let them run in the background.
-}
-
-async function logUnmatchedHookRef(
-	event: HookEvent,
-	hookRef: string,
-	_agentId: string | null,
-	runId: string | null,
-): Promise<void> {
-	try {
-		await db.insert(hookInvocations).values({
-			runId,
-			event,
-			hookKind: 'builtin',
-			hookRef,
-			success: false,
-			durationMs: 0,
-			error: `unknown hook ref "${hookRef}" — not registered globally; if this is a skill slug, Phase 3 skill-runner will pick it up later`,
-		})
-	} catch (err) {
-		console.warn('[hooks/bus] failed to log unmatched ref', {
-			event,
-			hookRef,
-			error: err instanceof Error ? err.message : String(err),
-		})
-	}
 }
 
 async function dispatchOne<E extends HookEvent>(

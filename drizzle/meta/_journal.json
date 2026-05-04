@@ -218,6 +218,13 @@
       "when": 1777867500000,
       "tag": "0030_agent_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1777871000000,
+      "tag": "0031_tasks_eval",
+      "breakpoints": true
     }
   ]
 }

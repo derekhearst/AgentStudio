@@ -1,4 +1,5 @@
 import {
+	boolean,
 	index,
 	integer,
 	jsonb,
@@ -62,6 +63,14 @@ export const tasks = pgTable(
 		// Soft cap on cumulative cost across attempts; null = unbounded. Numeric to match
 		// llm_usage / tool_usage cost columns.
 		budgetUsd: numeric('budget_usd', { precision: 12, scale: 4 }),
+		// Wave 3 #14 evaluations plan phase 4 — when true, the task only transitions to
+		// `completed` when the evaluator pass returns `pass` (or no eval was attempted because the
+		// generator errored). Defaults false so existing tasks stay unchanged.
+		evalRequired: boolean('eval_required').notNull().default(false),
+		// Wave 3 #14 evaluations plan phase 3 — re-plan loop attempt counter (mirrors
+		// chat_runs.eval_attempt). Bumped each time the runner spawns a retry from a
+		// `needs_revision` verdict. Cap-bounded by the runner.
+		evalAttempt: integer('eval_attempt').notNull().default(0),
 		metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

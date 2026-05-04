@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
@@ -6,6 +6,8 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import type { LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/runtime'
+import { runEvaluatorPass } from '$lib/evaluations'
+import type { EvaluationVerdict, EvaluationFinding } from '$lib/evaluations/evaluations.schema'
 import { getTaskById, recordAttempt, setTaskStatus, updateAttempt } from './tasks.server'
 
 /**
@@ -33,6 +35,17 @@ export type ExecuteTaskOnceOptions = {
 	userId?: string
 	/** Optional: max tool rounds for this attempt (defaults to 10 — bounded since no human in the loop). */
 	maxRounds?: number
+	/**
+	 * Wave 3 #14 evaluations plan phase 3 — when set, the runner will spawn up to N re-plan
+	 * attempts on `needs_revision` verdicts. Caps the recursion since each retry costs another
+	 * generator + evaluator pair. Defaults to 0 (no auto-retry; just records the verdict and
+	 * blocks the task) so existing callers don't suddenly start spending more.
+	 */
+	maxRetriesOnRevision?: number
+	/** Internal counter — tracked so retries don't grow the call stack via recursion. */
+	_currentRetry?: number
+	/** Internal — append previous findings to the user message so the evaluator's signal isn't lost. */
+	_priorFindings?: EvaluationFinding[]
 }
 
 export type ExecuteTaskOnceResult = {
@@ -43,6 +56,10 @@ export type ExecuteTaskOnceResult = {
 	finalText: string
 	completed: boolean
 	error: string | null
+	/** Wave 3 #14 — verdict from the post-run evaluator, if `task.evalRequired` was true. */
+	evaluationVerdict?: EvaluationVerdict | null
+	/** Wave 3 #14 phase 3 — number of revision retries the runner spawned. 0 if no re-plan happened. */
+	retries?: number
 }
 
 export async function executeTaskOnce(
@@ -104,8 +121,11 @@ export async function executeTaskOnce(
 		await setTaskStatus(taskId, 'running')
 	}
 
-	// Open chat_run + attempt rows linked to the task.
+	// Open chat_run + attempt rows linked to the task. Wave 3 #14 phase 4 — propagate the task's
+	// `evalRequired` flag to the chat_run so the run viewer + future ad-hoc evaluator queries can
+	// rely on it (and so isRunEvaluationClear can short-circuit when the task didn't ask for one).
 	const startedAt = new Date()
+	const currentRetry = opts._currentRetry ?? 0
 	const [run] = await db
 		.insert(chatRuns)
 		.values({
@@ -114,10 +134,12 @@ export async function executeTaskOnce(
 			agentId: agent.id,
 			state: 'running',
 			source: 'automation',
-			label: `Task: ${task.title.slice(0, 80)}`,
+			label: `Task: ${task.title.slice(0, 80)}${currentRetry > 0 ? ` (retry ${currentRetry})` : ''}`,
 			startedAt,
 			lastHeartbeatAt: startedAt,
 			taskId,
+			evalRequired: task.evalRequired,
+			evalAttempt: currentRetry,
 		})
 		.returning({ id: chatRuns.id })
 
@@ -129,11 +151,18 @@ export async function executeTaskOnce(
 	})
 	await db.update(chatRuns).set({ taskAttemptId: attempt.id }).where(eq(chatRuns.id, run.id))
 
+	// Wave 3 #14 phase 3 — inject prior evaluator findings on retry so the next attempt has the
+	// guidance it needs to course-correct.
+	const priorFindingsText = opts._priorFindings && opts._priorFindings.length > 0
+		? `\n\n## Prior evaluator feedback\nYour previous attempt was marked needs_revision. Address these findings before completing:\n${opts._priorFindings
+				.map((f, i) => `${i + 1}. [${f.severity}${f.category ? `/${f.category}` : ''}] ${f.message}${f.suggestion ? ` — Suggestion: ${f.suggestion}` : ''}`)
+				.join('\n')}`
+		: ''
 	const llmMessages: LlmMessage[] = [
 		{ role: 'system', content: definition.systemPrompt },
 		{
 			role: 'user',
-			content: `Task: ${task.title}\n\n${task.spec}\n\nExecute this task. When you're done, summarize what you accomplished.`,
+			content: `Task: ${task.title}\n\n${task.spec}${priorFindingsText}\n\nExecute this task. When you're done, summarize what you accomplished.`,
 		},
 	]
 
@@ -201,13 +230,78 @@ export async function executeTaskOnce(
 			costUsd: cost,
 		})
 
-		// Final transition: completed. Use raw update because setTaskStatus refuses to leave
-		// terminal states, but `running` is fine.
+		// Wave 3 #14 phase 4 — task-completion gate. If the task asked for an evaluator pass, run
+		// it synchronously (unlike chat-stream's fire-and-forget) so the task transition can
+		// depend on the verdict.
 		const { tasks: tasksTable } = await import('./tasks.schema')
-		await db
-			.update(tasksTable)
-			.set({ status: 'completed', updatedAt: finishedAt })
-			.where(eq(tasksTable.id, taskId))
+		let evaluationVerdict: EvaluationVerdict | null = null
+		if (task.evalRequired) {
+			const toolSummary = loopResult.toolCalls.length > 0
+				? loopResult.toolCalls.map((c) => (c as { name?: string }).name).filter(Boolean).join(', ')
+				: undefined
+			const evalRow = await runEvaluatorPass({
+				runId: run.id,
+				userId,
+				conversationId,
+				taskDescription: `${task.title}\n\n${task.spec}`,
+				generatorOutput: loopResult.finalText,
+				toolSummary,
+			}).catch((err) => {
+				console.warn('[tasks] evaluator pass failed', err)
+				return null
+			})
+			evaluationVerdict = evalRow?.verdict ?? null
+
+			// Wave 3 #14 phase 3 — re-plan loop on `needs_revision`. Spawns a fresh attempt with
+			// the prior findings as context, capped by `maxRetriesOnRevision`. Recursion-free —
+			// uses `_currentRetry` + `_priorFindings` to thread state through a sequential call.
+			const maxRetries = opts.maxRetriesOnRevision ?? 0
+			if (
+				evaluationVerdict === 'needs_revision' &&
+				maxRetries > 0 &&
+				currentRetry < maxRetries
+			) {
+				// Bump the task's retry counter durably so the UI can show "attempt 2 of 3".
+				await db
+					.update(tasksTable)
+					.set({ evalAttempt: drizzleSql`${tasksTable.evalAttempt} + 1`, status: 'running', updatedAt: new Date() })
+					.where(eq(tasksTable.id, taskId))
+				const retryResult = await executeTaskOnce(taskId, {
+					conversationId,
+					userId,
+					maxRounds: opts.maxRounds,
+					maxRetriesOnRevision: maxRetries,
+					_currentRetry: currentRetry + 1,
+					_priorFindings: evalRow?.findings ?? [],
+				})
+				return {
+					...retryResult,
+					retries: (retryResult.retries ?? 0) + 1,
+				}
+			}
+
+			// Pass → completed; fail/needs_revision (no retries left) → blocked so a human can
+			// triage. The verdict is durable in `run_evaluations` either way.
+			if (evaluationVerdict === 'pass') {
+				await db.update(tasksTable).set({ status: 'completed', updatedAt: finishedAt }).where(eq(tasksTable.id, taskId))
+			} else {
+				await db.update(tasksTable).set({ status: 'blocked', updatedAt: finishedAt }).where(eq(tasksTable.id, taskId))
+				return {
+					taskId,
+					attemptId: attempt.id,
+					runId: run.id,
+					conversationId,
+					finalText: loopResult.finalText,
+					completed: false,
+					error: `evaluator verdict: ${evaluationVerdict ?? 'unknown'}`,
+					evaluationVerdict,
+					retries: currentRetry,
+				}
+			}
+		} else {
+			// No eval required → original behavior, unconditional completion.
+			await db.update(tasksTable).set({ status: 'completed', updatedAt: finishedAt }).where(eq(tasksTable.id, taskId))
+		}
 
 		return {
 			taskId,
@@ -217,6 +311,8 @@ export async function executeTaskOnce(
 			finalText: loopResult.finalText,
 			completed: true,
 			error: null,
+			evaluationVerdict,
+			retries: currentRetry,
 		}
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : 'Task execution failed'
