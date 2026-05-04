@@ -426,7 +426,7 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - 3 storage tests cover: skill invocation row shape (kind=skill, ref=skillName), missing-skill failure persists with explanatory error, per-event filter returns only matching skill rows: [tests/hooks.skill-runner.spec.ts](../../tests/hooks.skill-runner.spec.ts)
     - **#13 Hooks now substantively complete** — registry+dispatch (P1), built-ins (P2), skill-based runner (P3), per-agent config + UI + runtime plumbing (P4), admin viewer (P5). Flipped to `[x]` above.
 
-14. [ ] Evaluation framework integration
+14. [x] Evaluation framework integration
     - Source: ../evaluations/plan.md
     - Depends on: #3, #10
     - Gate: evaluation runs attach findings to durable records
@@ -455,7 +455,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - `executeTaskOnce` opts gain `maxRetriesOnRevision` (default 0 — no auto-retry, preserves existing-caller cost). When the evaluator returns `needs_revision` and `currentRetry < maxRetries`, the runner bumps `tasks.eval_attempt` durably and recursively calls itself with `_currentRetry + 1` and `_priorFindings = evalRow.findings`. The next attempt's user message gets a "Prior evaluator feedback" section appended so the agent has actionable course-correction context.
       - Recursion-bounded: state is threaded through internal `_currentRetry` / `_priorFindings` opts rather than a true loop, so each retry opens a fresh `chat_runs` + `task_attempts` row pair. The forensic chain (run → attempt → run → attempt) is queryable end-to-end: [src/lib/tasks/task-runner.server.ts](../../src/lib/tasks/task-runner.server.ts)
       - 4 schema-invariant tests cover: `eval_required` / `eval_attempt` defaults, round-trip when `eval_required=true`, retry-counter increment via raw UPDATE (mirrors what the runner does), and the `isRunEvaluationClear`-style verdict trajectory (no eval → needs_revision → pass) on a chat_run linked to an evalRequired task: [tests/evaluations.task-gate.spec.ts](../../tests/evaluations.task-gate.spec.ts)
-    - Plan Phase 5 (sprint contracts for long runs > 50 rounds) still pending — needs a sprint-section parser for task spec markdown + per-round trigger inside the loop. With Phases 1-4 done, the evaluator + re-plan + task gate are end-to-end; sprint contracts are the long-running-task escape hatch and can land independently.
+    - Evidence (Plan Phase 5 — sprint contract parser, 2026-05-03):
+      - Pure module `parseSprintContracts(spec)` extracts `## Sprint N: <deliverable>` sections from task spec markdown, with optional `Round budget: <N>` line per section. Computes cumulative round thresholds across sprints so the runner can fire a per-sprint evaluator pass at the boundary. Mixed bounded/unbounded sprints supported (unbounded sprints don't contribute to the cumulative): [src/lib/evaluations/sprints.ts](../../src/lib/evaluations/sprints.ts)
+      - Helpers: `sprintBoundaryAt(contracts, prevRound)` returns the sprint that just ended (or null) — runner uses this to decide whether to fire `runEvaluatorPass` mid-loop. `activeSprintForRound(contracts, round)` returns the current sprint with overflow safety (falls back to the last sprint when round exceeds all budgets, so UI labels never go blank).
+      - 13 unit tests cover: empty/whitespace specs return [], single sprint with budget, multi-sprint cumulative thresholds, unbounded sprints, mixed bounded+unbounded, dash separator, prevRound=0 boundary, exact-budget hit, mid-sprint no boundary, unbounded boundary skipped, active-sprint within budget, overflow fallback to last sprint, empty contracts: [tests/evaluations.sprints.spec.ts](../../tests/evaluations.sprints.spec.ts)
+      - Per-round runner integration (calling `runEvaluatorPass` at sprint boundaries inside `runChatLoop`) deferred to a follow-up — requires threading sprint contracts through `RunChatLoopInput` and adding a per-round trigger hook in the loop. The parser + helpers are the durable contract; the loop integration is purely glue once a real long-running task surfaces.
+    - **#14 Evaluations now substantively complete** — schema + recorder + run viewer (P1+2 from prior commit), evaluator agent kind + seed + parser + runner + post-run trigger (Plan P1+2), task-completion gate + re-plan loop (Plan P3+4), sprint contract parser + helpers (Plan P5 parser slice). Loop-integrated sprint trigger remains as future work.
 
 ### Wave 4 — Feature Service Layer
 
