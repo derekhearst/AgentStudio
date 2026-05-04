@@ -1034,6 +1034,26 @@
 		}
 	}
 
+	// Wave 4 #18 phase 4 — Deep Research trigger from the chat composer.
+	// Routes the textarea content through startResearchCommand instead of the chat stream
+	// so the user gets a full multi-step research run (plan → search → fetch → synthesize)
+	// linked back to the originating conversation. Navigates to /research/[id] so the user
+	// sees the live trace immediately.
+	async function handleResearchSubmit(content: string) {
+		try {
+			const { startResearchCommand } = await import('$lib/research/research.remote');
+			const result = await startResearchCommand({
+				query: content,
+				conversationId: conversationId ?? undefined,
+			});
+			await goto(`/research/${result.research.id}`);
+		} catch (error) {
+			logChatUi('error', 'Research submission failed', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
 	async function streamMessage(content: string, regenerate = false, attachments: ChatAttachment[] = []) {
 		if (!conversationId || streaming) return;
 
@@ -1754,6 +1774,7 @@
 				}}
 				onModeChange={handleModeChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
+				onResearchSubmit={(content) => handleResearchSubmit(content)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
 			/>
 		</div>

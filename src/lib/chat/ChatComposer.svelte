@@ -25,6 +25,7 @@
 		transcribing = false,
 		speechSupported = false,
 		onSubmit,
+		onResearchSubmit,
 		onModelChange,
 		onReasoningEffortChange,
 		onModeChange,
@@ -43,6 +44,10 @@
 		transcribing?: boolean
 		speechSupported?: boolean
 		onSubmit?: ((content: string) => Promise<void> | void) | undefined
+		// Wave 4 #18 phase 4 — when present, the magnifying-glass "Research" button submits the
+		// current text as a Deep Research request (creates a research row + enqueues a job)
+		// instead of streaming as a chat message.
+		onResearchSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined
 		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined
@@ -62,6 +67,16 @@
 		const trimmed = value.trim()
 		if (!trimmed || busy) return
 		await onSubmit?.(trimmed)
+	}
+
+	async function submitResearch() {
+		const trimmed = value.trim()
+		if (!trimmed || busy) return
+		// Clear the textarea optimistically — the chat page handler will show a system
+		// message bubble linking to the new research run as the visual ack.
+		const captured = trimmed
+		value = ''
+		await onResearchSubmit?.(captured)
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -185,6 +200,24 @@
 						<line x1="12" y1="17" x2="12" y2="22"></line>
 						<line x1="8" y1="22" x2="16" y2="22"></line>
 						<line x1="3" y1="3" x2="21" y2="21"></line>
+					</svg>
+				</button>
+			{/if}
+			{#if onResearchSubmit}
+				<!-- Wave 4 #18 phase 4 — Deep Research trigger. Clicks submit the textarea
+				     content as a research run instead of a chat message. Disabled when empty
+				     or busy; visually distinct from send so users don't confuse the two. -->
+				<button
+					type="button"
+					class="btn btn-sm btn-circle btn-ghost text-secondary hover:bg-secondary/15 hover:text-secondary"
+					aria-label="Start Deep Research"
+					title="Start Deep Research on this query (plan → search → fetch → synthesize)"
+					disabled={busy || value.trim().length === 0}
+					onclick={() => void submitResearch()}
+				>
+					<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="11" cy="11" r="7"></circle>
+						<path d="M21 21l-4.35-4.35"></path>
 					</svg>
 				</button>
 			{/if}

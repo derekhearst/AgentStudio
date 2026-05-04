@@ -244,6 +244,20 @@
 			busy = false;
 		}
 	}
+
+	// Wave 4 #18 phase 4 — Deep Research from the home composer. No conversation context yet
+	// (the user is starting fresh) so we route directly into research without creating a chat.
+	async function handleNewResearch(query: string) {
+		if (busy) return;
+		busy = true;
+		try {
+			const { startResearchCommand } = await import('$lib/research/research.remote');
+			const result = await startResearchCommand({ query });
+			await goto(`/research/${result.research.id}`);
+		} finally {
+			busy = false;
+		}
+	}
 </script>
 
 <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -265,6 +279,7 @@
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
 				onSubmit={(content) => handleNewChat(content)}
+				onResearchSubmit={(content) => handleNewResearch(content)}
 				onModelChange={(id) => {
 					model = id;
 				}}

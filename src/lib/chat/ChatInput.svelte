@@ -19,6 +19,7 @@
 		reasoningEffort = 'none',
 		mode = 'chat',
 		onSubmit,
+		onResearchSubmit,
 		onModelChange,
 		onReasoningEffortChange,
 		onModeChange,
@@ -30,6 +31,9 @@
 		reasoningEffort?: ReasoningEffort;
 		mode?: ChatMode;
 		onSubmit?: ((content: string, attachments: ChatAttachment[]) => Promise<void> | void) | undefined;
+		// Wave 4 #18 phase 4 — when present, the composer surfaces a Research button that
+		// routes the textarea content through this callback instead of onSubmit.
+		onResearchSubmit?: ((content: string) => Promise<void> | void) | undefined;
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined;
 		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined;
@@ -262,6 +266,7 @@
 		{speechSupported}
 		placeholder="Message AgentStudio..."
 		onSubmit={(content) => handleSubmit(content)}
+		onResearchSubmit={onResearchSubmit ? (content) => onResearchSubmit(content) : undefined}
 		onModelChange={(id) => onModelChange?.(id)}
 		onReasoningEffortChange={(effort) => onReasoningEffortChange?.(effort)}
 		onModeChange={(next) => onModeChange?.(next)}
