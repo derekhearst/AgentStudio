@@ -231,6 +231,13 @@ export async function completeJob(jobId: string, result?: Record<string, unknown
 		})
 		.where(eq(jobs.id, jobId))
 		.returning()
+
+	// Wave 5 #20 phase 4 — emit lifecycle metrics when a job finishes. Best-effort: any
+	// failure to record is swallowed. Duration is `finishedAt - startedAt` (or 0 if startedAt
+	// is missing because of an unusual lifecycle path).
+	if (row) {
+		void emitJobLifecycleMetric(row, 'completed')
+	}
 	return row ?? null
 }
 
@@ -304,8 +311,41 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 				console.warn('[jobs] review item open failed (non-fatal)', err)
 			}
 		})()
+		void emitJobLifecycleMetric(row, 'failed')
 	}
 	return row ?? null
+}
+
+/**
+ * Wave 5 #20 phase 4 — emit duration + count metrics for a finished job. Records two rows:
+ *   jobs.duration_ms with dimensions {type, queue, status} (so the dashboard can render
+ *     P50/P95 latency by job type)
+ *   jobs.lifecycle.<status> with dimensions {type, queue} (so the dashboard can render
+ *     completion / failure rate over time)
+ *
+ * Best-effort: any failure to record is swallowed and a warn is logged. The job state
+ * transition has already been committed by the time this fires, so an outage in the metrics
+ * pipeline can never roll back the lifecycle change.
+ */
+async function emitJobLifecycleMetric(row: JobRow, status: 'completed' | 'failed' | 'canceled'): Promise<void> {
+	try {
+		const { recordMetric } = await import('$lib/observability/metrics.server')
+		const startedAt = row.startedAt ? new Date(row.startedAt).getTime() : null
+		const finishedAt = row.finishedAt ? new Date(row.finishedAt).getTime() : Date.now()
+		const durationMs = startedAt != null ? Math.max(0, finishedAt - startedAt) : 0
+		await recordMetric({
+			metric: 'jobs.duration_ms',
+			dimension: { type: row.type, queue: row.queue, status },
+			value: durationMs,
+		})
+		await recordMetric({
+			metric: `jobs.lifecycle.${status}`,
+			dimension: { type: row.type, queue: row.queue },
+			value: 1,
+		})
+	} catch (err) {
+		console.warn('[jobs] emitJobLifecycleMetric failed (non-fatal)', err)
+	}
 }
 
 export async function cancelJob(jobId: string, reason?: string): Promise<JobRow | null> {
@@ -320,6 +360,10 @@ export async function cancelJob(jobId: string, reason?: string): Promise<JobRow 
 		})
 		.where(eq(jobs.id, jobId))
 		.returning()
+
+	if (row) {
+		void emitJobLifecycleMetric(row, 'canceled')
+	}
 	return row ?? null
 }
 

@@ -111,6 +111,55 @@ test.describe('observability/metrics — recordMetric + listLatest contract', ()
 	})
 })
 
+test.describe('observability/metrics — job lifecycle metric shape', () => {
+	test('jobs.duration_ms carries {type, queue, status} dimensions and ms value', async () => {
+		const prefix = uniquePrefix('joblife-duration')
+		const sql = getSql()
+		try {
+			const [row] = await sql<{ metric: string; dimension: Record<string, unknown>; value: string }[]>`
+				insert into operational_metrics (metric, dimension, value)
+				values (
+					${`${prefix}.jobs.duration_ms`},
+					${sql.json({ type: 'memory_mine', queue: 'background', status: 'completed' })},
+					'2347'
+				)
+				returning metric, dimension, value::text as value
+			`
+			expect(row.metric).toBe(`${prefix}.jobs.duration_ms`)
+			expect(row.dimension).toEqual({ type: 'memory_mine', queue: 'background', status: 'completed' })
+			expect(row.value).toBe('2347.000000')
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+
+	test('jobs.lifecycle.completed is a unit (1) counter with {type, queue} dimensions', async () => {
+		const prefix = uniquePrefix('joblife-counter')
+		const sql = getSql()
+		try {
+			// Three completions across 2 types — counter increments by inserting one row per finish.
+			await sql`
+				insert into operational_metrics (metric, dimension, value, measured_at) values
+				(${`${prefix}.jobs.lifecycle.completed`}, ${sql.json({ type: 'memory_mine', queue: 'background' })}, '1', now() - interval '20 minutes'),
+				(${`${prefix}.jobs.lifecycle.completed`}, ${sql.json({ type: 'memory_mine', queue: 'background' })}, '1', now() - interval '15 minutes'),
+				(${`${prefix}.jobs.lifecycle.completed`}, ${sql.json({ type: 'evaluation_run', queue: 'evaluations' })}, '1', now() - interval '10 minutes')
+			`
+			const rows = await sql<{ count: number; type: string }[]>`
+				select count(*)::int as count, dimension->>'type' as type
+				from operational_metrics
+				where metric = ${`${prefix}.jobs.lifecycle.completed`}
+				group by dimension->>'type'
+				order by type
+			`
+			expect(rows.length).toBe(2)
+			expect(rows.find((r) => r.type === 'memory_mine')?.count).toBe(2)
+			expect(rows.find((r) => r.type === 'evaluation_run')?.count).toBe(1)
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+})
+
 test.describe('observability/metrics — sampler queries compose against schema', () => {
 	test('queue depth aggregate query runs against production jobs table', async () => {
 		const sql = getSql()
