@@ -87,6 +87,17 @@ export async function enqueueJob(input: EnqueueJobInput): Promise<JobRow> {
 
 // ─────────── Claim / lease ───────────
 
+/**
+ * Build an `and column in ('a', 'b')` SQL fragment from app-controlled values. Returns an
+ * empty string when values is undefined/empty. Single-quotes are stripped defensively even
+ * though callers only pass alphanumeric handler names + queue names.
+ */
+function buildInClause(column: 'queue' | 'type', values: string[] | undefined): string {
+	if (!values || values.length === 0) return ''
+	const escaped = values.map((v) => `'${v.replace(/'/g, "''").replace(/[^a-zA-Z0-9_:-]/g, '')}'`)
+	return `and ${column} in (${escaped.join(', ')})`
+}
+
 export type ClaimJobOptions = {
 	workerId: string
 	/** Filter by queue name(s). Default: claim from any queue. */
@@ -109,40 +120,46 @@ export type ClaimJobOptions = {
  */
 export async function claimNextJob(opts: ClaimJobOptions): Promise<JobRow | null> {
 	const leaseTtlMs = opts.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS
-	const now = new Date()
-	const newLeaseExpiresAt = new Date(now.getTime() + leaseTtlMs)
+	const newLeaseExpiresAt = new Date(Date.now() + leaseTtlMs)
 
-	// Build the eligibility filter parts as raw SQL fragments for the FOR UPDATE SKIP LOCKED
-	// query. Drizzle doesn't expose SKIP LOCKED on the query builder so we drop to drizzle.sql.
-	const queueFilter = opts.queues && opts.queues.length > 0
-		? drizzleSql`and queue = ANY(${opts.queues})`
-		: drizzleSql``
-	const typeFilter = opts.types && opts.types.length > 0
-		? drizzleSql`and type = ANY(${opts.types})`
-		: drizzleSql``
+	// Build the optional queue/type filters as plain SQL string fragments (no parameter
+	// binding). The values are application-controlled (handler-registered names + a tiny
+	// fixed queue-name allowlist), not user input, so manual single-quote escape is safe.
+	const queueClause = buildInClause('queue', opts.queues)
+	const typeClause = buildInClause('type', opts.types)
 
-	const result = await db.execute(drizzleSql`
-		with claimed as (
+	// Two-step claim inside a transaction: SELECT FOR UPDATE SKIP LOCKED + UPDATE. Splitting
+	// avoids the postgres.js prepared-statement re-parsing issues we hit with conditional CTE
+	// fragments. The transaction is short-lived (single round-trip-ish) so lock contention
+	// stays low.
+	const claimedJob = await db.transaction(async (tx) => {
+		const candidateText = `
 			select id from jobs
 			where (
-				(status in ('pending', 'retry_wait') and scheduled_at <= ${now})
-				or (status = 'leased' and lease_expires_at < ${now})
+				(status in ('pending'::job_status, 'retry_wait'::job_status) and scheduled_at <= now())
+				or (status = 'leased'::job_status and lease_expires_at < now())
 			)
-			${queueFilter}
-			${typeFilter}
+			${queueClause}
+			${typeClause}
 			order by priority desc, scheduled_at asc
 			limit 1
 			for update skip locked
-		)
-		update jobs
-		set status = 'leased', lease_expires_at = ${newLeaseExpiresAt}, updated_at = now()
-		where id in (select id from claimed)
-		returning *
-	`)
+		`
+		const candidateResult = await tx.execute(drizzleSql.raw(candidateText))
+		const candidateRows = (candidateResult as unknown as { rows?: { id: string }[] }).rows
+			?? (candidateResult as unknown as { id: string }[])
+		const candidate = Array.isArray(candidateRows) ? candidateRows[0] : null
+		if (!candidate) return null
+		const [updated] = await tx
+			.update(jobs)
+			.set({ status: 'leased', leaseExpiresAt: newLeaseExpiresAt, updatedAt: new Date() })
+			.where(eq(jobs.id, candidate.id))
+			.returning()
+		return updated ?? null
+	})
 
-	const rows = (result as unknown as { rows?: JobRow[] }).rows ?? (result as unknown as JobRow[])
-	if (!Array.isArray(rows) || rows.length === 0) return null
-	const claimedJob = rows[0]
+	if (!claimedJob) return null
+	const now = new Date()
 
 	// Insert the lease record so the audit history shows what worker has the job.
 	await db.insert(jobLeases).values({
@@ -300,7 +317,9 @@ export async function listJobs(filters: ListJobsFilters = {}): Promise<JobRow[]>
 	const where = []
 	if (filters.status) {
 		const statuses = Array.isArray(filters.status) ? filters.status : [filters.status]
-		where.push(drizzleSql`${jobs.status} = ANY(${statuses})`)
+		where.push(
+			drizzleSql`${jobs.status} in (${drizzleSql.join(statuses.map((s) => drizzleSql`${s}`), drizzleSql`, `)})`,
+		)
 	}
 	if (filters.type) where.push(eq(jobs.type, filters.type))
 	if (filters.queue) where.push(eq(jobs.queue, filters.queue))

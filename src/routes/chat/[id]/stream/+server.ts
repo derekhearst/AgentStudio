@@ -16,7 +16,7 @@ import { persistRunBlocks } from '$lib/runs/blocks.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
-import { recallForUser, renderMemoryContext, mineConversation } from '$lib/memory/memory.server'
+import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { getModePostureContent } from '$lib/chat/mode.server'
@@ -648,12 +648,30 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					finished: true,
 				})
 
-				// --- Memory Palace: mine the latest exchange asynchronously ---
+				// --- Memory Palace: enqueue mining as a durable job ---
+				// Wave 4 #17 phase 5: was a fire-and-forget `void mineConversation(...)`. Now
+				// an enqueueJob with dedupeKey `mine:${conversationId}` so concurrent finishes
+				// for the same convo collapse to one job, the work survives a restart, and
+				// failures are visible in /settings/jobs instead of swallowed.
 				const autoMine = (currentSettings.memoryConfig as { autoMine?: boolean } | null)?.autoMine !== false
 				if (autoMine) {
-					void mineConversation({ conversationId: body.conversationId }).catch((err) => {
-						console.warn('[memory] mining failed', err)
-					})
+					void (async () => {
+						try {
+							const { enqueueJob } = await import('$lib/jobs/jobs.server')
+							await enqueueJob({
+								type: 'memory_mine',
+								queue: 'default',
+								priority: 50, // background work — outranked by user-initiated jobs
+								dedupeKey: `mine:${body.conversationId}`,
+								payload: { conversationId: body.conversationId },
+								userId: user.id,
+								runId: run.id,
+								sessionId: body.conversationId,
+							})
+						} catch (err) {
+							console.warn('[memory] enqueue mine job failed', err)
+						}
+					})()
 				}
 
 				// Wave 3 #14 evaluations plan phase 2 — end-of-run evaluator pass when the run is

@@ -146,6 +146,10 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 	}
 
 	async function loop() {
+		// Defer the first poll briefly so module-level awaits in db.server.ts (the `db` export
+		// resolves AFTER `await databaseReadyPromise`) have a chance to settle. Otherwise the
+		// first claim runs against an undefined db proxy.
+		await delay(2_000)
 		while (!stopped) {
 			try {
 				const processed = await processOne()
