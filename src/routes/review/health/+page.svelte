@@ -4,8 +4,10 @@
 	import { onMount } from 'svelte';
 	import { getOperationalSnapshotQuery } from '$lib/observability/review.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import Sparkline from '$lib/ui/Sparkline.svelte';
 
 	type Result = Awaited<ReturnType<typeof getOperationalSnapshotQuery>>;
+	type Entry = Extract<Result, { adminOnly: false }>['entries'][number];
 
 	let result = $state<Result | null>(null);
 	let loading = $state(false);
@@ -20,14 +22,6 @@
 			loading = false;
 		}
 	}
-
-	type MetricRow = {
-		id: string;
-		metric: string;
-		dimension: Record<string, unknown>;
-		value: string | number;
-		measuredAt: Date | string;
-	};
 
 	function fmtAge(d: Date | string) {
 		const now = Date.now();
@@ -50,9 +44,9 @@
 		return metric.slice(0, dot);
 	}
 
-	function groupedMetrics(metrics: MetricRow[]): Array<{ group: string; rows: MetricRow[] }> {
-		const map = new Map<string, MetricRow[]>();
-		for (const row of metrics) {
+	function groupedEntries(entries: Entry[]): Array<{ group: string; rows: Entry[] }> {
+		const map = new Map<string, Entry[]>();
+		for (const row of entries) {
 			const g = metricGroup(row.metric);
 			const list = map.get(g) ?? [];
 			list.push(row);
@@ -62,7 +56,10 @@
 			.sort(([a], [b]) => a.localeCompare(b))
 			.map(([group, rows]) => ({
 				group,
-				rows: rows.sort((a, b) => a.metric.localeCompare(b.metric)),
+				rows: rows.sort((a, b) => {
+					if (a.metric !== b.metric) return a.metric.localeCompare(b.metric);
+					return JSON.stringify(a.dimension).localeCompare(JSON.stringify(b.dimension));
+				})
 			}));
 	}
 
@@ -80,6 +77,34 @@
 				return 'badge-ghost';
 		}
 	}
+
+	function sparklineTone(metric: string): { stroke: string; fill: string } {
+		// jobs.duration_ms / runs.duration_ms — info tone (latency is a gauge, not strictly bad)
+		if (metric.endsWith('.duration_ms')) return { stroke: 'stroke-info text-info', fill: 'fill-info/10' };
+		// queue.depth.failed_recent + jobs.lifecycle.failed + runs.lifecycle.failed — error tone
+		if (metric.includes('failed')) return { stroke: 'stroke-error text-error', fill: 'fill-error/10' };
+		// review_inbox.open — warning tone (more open items = more attention needed)
+		if (metric.startsWith('review_inbox')) return { stroke: 'stroke-warning text-warning', fill: 'fill-warning/10' };
+		// jobs.lifecycle.completed + runs.lifecycle.completed — success tone
+		if (metric.includes('completed')) return { stroke: 'stroke-success text-success', fill: 'fill-success/10' };
+		// queue.depth.* (pending, leased, running, retry_wait) — primary
+		return { stroke: 'stroke-primary text-primary', fill: 'fill-primary/10' };
+	}
+
+	function fmtValue(metric: string, value: number | string): string {
+		const num = typeof value === 'number' ? value : parseFloat(String(value));
+		if (Number.isNaN(num)) return String(value);
+		if (metric.endsWith('.duration_ms')) {
+			if (num < 1000) return `${Math.round(num)}ms`;
+			const s = num / 1000;
+			if (s < 60) return `${s.toFixed(1)}s`;
+			const m = Math.floor(s / 60);
+			const rs = Math.round(s - m * 60);
+			return `${m}m ${rs}s`;
+		}
+		// Counters + depth: integer-ish display.
+		return Math.round(num).toString();
+	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
@@ -89,8 +114,8 @@
 				<div>
 					<h1 class="text-xl font-bold sm:text-3xl">Platform Health</h1>
 					<p class="text-xs text-base-content/70 sm:text-sm">
-						Most-recent operational metrics + 24h review-inbox rollup. Sampled every 5
-						minutes. Admin only.
+						Last 24 hours of operational metrics with per-row sparklines + review-inbox rollup.
+						Sampled every 5 minutes plus events from job + run finishes. Admin only.
 					</p>
 				</div>
 				<div class="flex items-center gap-2">
@@ -134,14 +159,14 @@
 			</ContentPanel>
 		{/if}
 
-		{#if result.metrics.length === 0}
+		{#if result.entries.length === 0}
 			<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
 				No metric samples yet. The 5-minute sampler runs after the first scheduled tick — wait
 				up to ~5 minutes for the first row, or trigger an enqueue manually via
 				<code>metrics_sample</code> in the jobs admin.
 			</div>
 		{:else}
-			{#each groupedMetrics(result.metrics) as group (group.group)}
+			{#each groupedEntries(result.entries) as group (group.group)}
 				<ContentPanel>
 					{#snippet header()}
 						<div class="flex flex-1 items-center justify-between gap-2">
@@ -154,20 +179,33 @@
 							<tr class="text-left text-[10px] uppercase tracking-wide text-base-content/55">
 								<th class="py-1 pr-2">Metric</th>
 								<th class="py-1 pr-2">Dimension</th>
-								<th class="py-1 pr-2 text-right">Value</th>
+								<th class="py-1 pr-2 text-right">Latest</th>
+								<th class="py-1 pr-2">Trend (24h)</th>
 								<th class="py-1 pr-2 text-right">Measured</th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each group.rows as row (row.id)}
+							{#each group.rows as entry (entry.metric + JSON.stringify(entry.dimension))}
+								{@const tone = sparklineTone(entry.metric)}
 								<tr class="border-t border-base-300/40">
-									<td class="py-1.5 pr-2 font-mono">{row.metric}</td>
+									<td class="py-1.5 pr-2 font-mono">{entry.metric}</td>
 									<td class="py-1.5 pr-2 font-mono text-[10px] text-base-content/70">
-										{dimensionString(row.dimension)}
+										{dimensionString(entry.dimension)}
 									</td>
-									<td class="py-1.5 pr-2 text-right font-mono font-semibold">{row.value}</td>
+									<td class="py-1.5 pr-2 text-right font-mono font-semibold">
+										{fmtValue(entry.metric, entry.latest.value)}
+									</td>
+									<td class="py-1.5 pr-2">
+										<Sparkline
+											points={entry.series}
+											strokeClass={tone.stroke}
+											fillClass={tone.fill}
+											width={120}
+											height={20}
+										/>
+									</td>
 									<td class="py-1.5 pr-2 text-right font-mono text-[10px] text-base-content/55">
-										{fmtAge(row.measuredAt)}
+										{fmtAge(entry.latest.measuredAt)}
 									</td>
 								</tr>
 							{/each}

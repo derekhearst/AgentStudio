@@ -47,6 +47,9 @@ export {
 	recordMetric,
 	runMetricsSample,
 	listLatestMetrics,
+	listMetricSnapshotsWithSeries,
 	listMetricTimeseries,
 	type RecordMetricInput,
+	type MetricSnapshotPoint,
+	type MetricSnapshotEntry,
 } from './metrics.server'

@@ -211,6 +211,100 @@ test.describe('observability/metrics — run lifecycle metric shape', () => {
 	})
 })
 
+test.describe('observability/metrics — snapshot-with-series timeseries grouping', () => {
+	test('rows in (metric, dimension, measured_at asc) order group correctly into per-key series', async () => {
+		const prefix = uniquePrefix('snapshot-series')
+		const sql = getSql()
+		try {
+			// Seed three (metric, dimension) pairs with different sample counts.
+			await sql`
+				insert into operational_metrics (metric, dimension, value, measured_at) values
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'mine', queue: 'background' })}, '5', now() - interval '20 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'mine', queue: 'background' })}, '7', now() - interval '15 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'mine', queue: 'background' })}, '4', now() - interval '10 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'mine', queue: 'background' })}, '3', now() - interval '5 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'eval', queue: 'evaluations' })}, '2', now() - interval '15 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'eval', queue: 'evaluations' })}, '6', now() - interval '5 minutes')
+			`
+			// Mirror the listMetricSnapshotsWithSeries shape.
+			const rows = await sql<{ metric: string; dimension: Record<string, unknown>; value: string; measured_at: Date }[]>`
+				select metric, dimension, value::text as value, measured_at
+				from operational_metrics
+				where metric = ${`${prefix}.queue.depth.pending`}
+				order by metric, dimension, measured_at asc
+			`
+			// Group by (metric, JSON dimension) — same algorithm as the production helper.
+			const groups = new Map<string, { values: number[] }>()
+			for (const r of rows) {
+				const key = `${r.metric}::${JSON.stringify(r.dimension)}`
+				const list = groups.get(key) ?? { values: [] }
+				list.values.push(parseFloat(r.value))
+				groups.set(key, list)
+			}
+			expect(groups.size).toBe(2)
+			const mineSeries = groups.get(
+				`${prefix}.queue.depth.pending::${JSON.stringify({ type: 'mine', queue: 'background' })}`,
+			)
+			const evalSeries = groups.get(
+				`${prefix}.queue.depth.pending::${JSON.stringify({ type: 'eval', queue: 'evaluations' })}`,
+			)
+			expect(mineSeries?.values).toEqual([5, 7, 4, 3])
+			expect(evalSeries?.values).toEqual([2, 6])
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+
+	test('series within the 24h window only — older samples are excluded', async () => {
+		const prefix = uniquePrefix('snapshot-window')
+		const sql = getSql()
+		try {
+			await sql`
+				insert into operational_metrics (metric, dimension, value, measured_at) values
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '36 hours'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '20 hours'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '5 hours'),
+				(${`${prefix}.runs.lifecycle.completed`}, ${sql.json({ source: 'chat_stream' })}, '1', now() - interval '1 hour')
+			`
+			const rows = await sql<{ value: string }[]>`
+				select value::text as value
+				from operational_metrics
+				where metric = ${`${prefix}.runs.lifecycle.completed`}
+				and measured_at >= now() - interval '24 hours'
+				order by measured_at asc
+			`
+			// 1 row excluded (36h ago) — 3 included.
+			expect(rows.length).toBe(3)
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+
+	test('flat-value series (all identical) preserves point count for the sparkline', async () => {
+		const prefix = uniquePrefix('snapshot-flat')
+		const sql = getSql()
+		try {
+			await sql`
+				insert into operational_metrics (metric, dimension, value, measured_at) values
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'gc' })}, '0', now() - interval '20 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'gc' })}, '0', now() - interval '15 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'gc' })}, '0', now() - interval '10 minutes'),
+				(${`${prefix}.queue.depth.pending`}, ${sql.json({ type: 'gc' })}, '0', now() - interval '5 minutes')
+			`
+			const rows = await sql<{ value: string }[]>`
+				select value::text as value
+				from operational_metrics
+				where metric = ${`${prefix}.queue.depth.pending`}
+				order by measured_at asc
+			`
+			expect(rows.length).toBe(4)
+			expect(rows.every((r) => parseFloat(r.value) === 0)).toBe(true)
+		} finally {
+			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
+		}
+	})
+})
+
 test.describe('observability/metrics — sampler queries compose against schema', () => {
 	test('queue depth aggregate query runs against production jobs table', async () => {
 		const sql = getSql()
