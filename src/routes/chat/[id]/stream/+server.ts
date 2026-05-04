@@ -674,35 +674,37 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					})()
 				}
 
-				// Wave 3 #14 evaluations plan phase 2 — end-of-run evaluator pass when the run is
-				// flagged `eval_required`. Fire-and-forget so the user sees `done` immediately —
-				// the verdict appears asynchronously in the run viewer (and Phase 3 will trigger
-				// re-plan based on the result). Wrapped in try/catch so an evaluator failure can
-				// never tank the original run.
+				// Wave 4 #17 phase 5 — was a fire-and-forget `void runEvaluatorPass(...)`. Now an
+				// enqueueJob with dedupeKey `eval:${runId}` so the work survives restart, fails
+				// visibly in /settings/jobs, and dedupes if the trigger somehow fires twice. The
+				// SSE `evaluation` event is dropped from this path — the verdict shows up in the
+				// run viewer's Evaluations panel asynchronously when the worker finishes.
 				if (run.evalRequired) {
 					void (async () => {
 						try {
-							const { runEvaluatorPass } = await import('$lib/evaluations/evaluator-runner.server')
+							const { enqueueJob } = await import('$lib/jobs/jobs.server')
 							const toolSummary = allToolCalls.length > 0
 								? allToolCalls.map((c) => (c as { name?: string }).name).filter(Boolean).join(', ')
 								: undefined
-							const result = await runEvaluatorPass({
-								runId: run.id,
+							await enqueueJob({
+								type: 'evaluation_run',
+								queue: 'default',
+								priority: 75, // higher than memory_mine (50), lower than user-initiated (100+)
+								dedupeKey: `eval:${run.id}`,
+								payload: {
+									runId: run.id,
+									userId: user.id,
+									conversationId: body.conversationId,
+									taskDescription: body.content?.trim() ?? '(no user message)',
+									generatorOutput: allTextContent,
+									toolSummary,
+								},
 								userId: user.id,
-								conversationId: body.conversationId,
-								taskDescription: body.content?.trim() ?? '(no user message)',
-								generatorOutput: allTextContent,
-								toolSummary,
+								runId: run.id,
+								sessionId: body.conversationId,
 							})
-							if (result) {
-								await session.emit('evaluation', {
-									verdict: result.verdict,
-									confidence: result.confidence,
-									findingCount: result.findings?.length ?? 0,
-								}).catch(() => undefined)
-							}
 						} catch (err) {
-							console.warn('[evaluations] evaluator pass failed', err)
+							console.warn('[evaluations] enqueue evaluation_run job failed', err)
 						}
 					})()
 				}
