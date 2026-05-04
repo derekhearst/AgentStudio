@@ -102,6 +102,19 @@
 				</svg>
 				Projects
 			</a>
+			<a href="/source-control"
+				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
+				class:bg-base-200={isActive('/source-control')} class:font-medium={isActive('/source-control')} class:text-primary={isActive('/source-control')}
+				onclick={onNavigate}>
+				<!-- git-branch -->
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<line x1="6" y1="3" x2="6" y2="15"/>
+					<circle cx="18" cy="6" r="3"/>
+					<circle cx="6" cy="18" r="3"/>
+					<path d="M18 9a9 9 0 0 1-9 9"/>
+				</svg>
+				Source control
+			</a>
 		</div>
 
 		<!-- Insights group -->

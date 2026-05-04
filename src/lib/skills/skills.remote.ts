@@ -10,6 +10,8 @@ import {
 	updateSkill,
 	updateSkillFile,
 } from '$lib/skills/skills.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { auditSkillDeleted } from '$lib/governance'
 
 /* ── Queries ────────────────────────────────────────────────── */
 
@@ -83,7 +85,22 @@ export const updateSkillCommand = command(updateSkillSchema, async ({ id, ...fie
 })
 
 export const deleteSkillCommand = command(skillIdSchema, async ({ id }) => {
+	const user = requireAuthenticatedRequestUser()
+	const before = await getSkillById(id)
 	await deleteSkill(id)
+	if (before) {
+		void auditSkillDeleted({
+			actorUserId: user.id,
+			skillId: id,
+			beforeState: {
+				name: before.name,
+				description: before.description,
+				enabled: before.enabled,
+				tags: before.tags,
+			},
+			summary: `Deleted skill "${before.name}"`,
+		})
+	}
 	return { ok: true }
 })
 

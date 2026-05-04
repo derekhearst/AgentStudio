@@ -6,6 +6,7 @@ import {
 	ORCHESTRATOR_IDENTITY_DEFAULT,
 	ORCHESTRATOR_IDENTITY_SKILL_ID,
 } from '$lib/agents/identity-seed.server'
+import { expandFragments } from '$lib/agents/fragment-expand'
 
 /**
  * Orchestrator identity — injected as system message for conversations
@@ -23,6 +24,7 @@ import {
  * default when the skill is missing/disabled. Always returns a non-empty string.
  */
 async function loadOrchestratorIdentity(): Promise<string> {
+	let raw = ORCHESTRATOR_IDENTITY_DEFAULT
 	try {
 		const [skill] = await db
 			.select({ content: skills.content, enabled: skills.enabled })
@@ -30,12 +32,34 @@ async function loadOrchestratorIdentity(): Promise<string> {
 			.where(eq(skills.id, ORCHESTRATOR_IDENTITY_SKILL_ID))
 			.limit(1)
 		if (skill && skill.enabled && skill.content.trim().length > 0) {
-			return skill.content
+			raw = skill.content
 		}
 	} catch (err) {
 		console.warn('[orchestrator] failed to load identity skill, using TS fallback', err)
 	}
-	return ORCHESTRATOR_IDENTITY_DEFAULT
+	// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup
+	// failure leaves a `<!-- @import:missing ... -->` marker in the assembled prompt rather
+	// than throwing.
+	try {
+		return await expandFragments(raw, lookupFragmentByName)
+	} catch (err) {
+		console.warn('[orchestrator] fragment expansion failed, using raw content', err)
+		return raw
+	}
+}
+
+async function lookupFragmentByName(name: string): Promise<string | null> {
+	try {
+		const [row] = await db
+			.select({ content: skills.content, enabled: skills.enabled })
+			.from(skills)
+			.where(eq(skills.name, name))
+			.limit(1)
+		if (!row || !row.enabled) return null
+		return row.content
+	} catch {
+		return null
+	}
 }
 
 /**

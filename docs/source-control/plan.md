@@ -1,6 +1,6 @@
 # Source Control Plan
 
-Status: active
+Status: active (Phase 1 + GitHub OAuth login + repo sync + agent tools shipped; commit/push/PR creation deferred)
 
 ## Overview
 
@@ -183,5 +183,5 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 
-- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — Wave 5 #19 phase 2 (GitHub login + repo sync) and phase 3 (read-only agent tools `list_my_repos` / `sync_my_repos`) shipped. AES-256-GCM token encryption, OAuth start/callback, GitHub API client, `/source-control` admin page with Connect / Sync / Disconnect actions, sidebar nav entry. 14 new tests in [tests/source-control.encryption.spec.ts](../../tests/source-control.encryption.spec.ts), [tests/source-control.oauth.spec.ts](../../tests/source-control.oauth.spec.ts), [tests/source-control.connection-flow.spec.ts](../../tests/source-control.connection-flow.spec.ts).
+- Wave 5 #19 phase 1 (durable schema + idempotent helpers) — see implementation-order #19 evidence.

@@ -4,11 +4,17 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { getAgentDetail, listAgentsWithCounts, updateAgentRecord } from '$lib/agents/agents.server'
+import {
+	ensureAgentIdentitySkill,
+	getAgentIdentity,
+	saveAgentIdentity,
+	unlinkAgentIdentity,
+} from '$lib/agents/identity-editor.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditAgentConfigUpdated } from '$lib/governance'
 
 const agentIdSchema = z.string().uuid()
-const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects'] as const
+const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects', 'source_control'] as const
 const HOOK_EVENT_NAMES = [
 	'before_run',
 	'after_run',
@@ -77,6 +83,33 @@ export const getAgentChoices = query(async () => {
 		.select({ id: agents.id, name: agents.name, status: agents.status })
 		.from(agents)
 		.orderBy(asc(agents.createdAt))
+})
+
+/* ── Wave 5 #22 phase 3 — identity editor ─────────────────────────────────── */
+
+export const getAgentIdentityQuery = query(agentIdSchema, async (agentId) => {
+	requireAuthenticatedRequestUser()
+	return getAgentIdentity(agentId)
+})
+
+export const ensureAgentIdentityCommand = command(z.object({ agentId: agentIdSchema }), async ({ agentId }) => {
+	requireAuthenticatedRequestUser()
+	return ensureAgentIdentitySkill(agentId)
+})
+
+const saveIdentitySchema = z.object({
+	agentId: agentIdSchema,
+	content: z.string().trim().min(1).max(50_000),
+})
+export const saveAgentIdentityCommand = command(saveIdentitySchema, async ({ agentId, content }) => {
+	requireAuthenticatedRequestUser()
+	return saveAgentIdentity(agentId, content)
+})
+
+export const unlinkAgentIdentityCommand = command(z.object({ agentId: agentIdSchema }), async ({ agentId }) => {
+	requireAuthenticatedRequestUser()
+	await unlinkAgentIdentity(agentId)
+	return { ok: true as const }
 })
 
 export const updateAgentCommand = command(updateAgentSchema, async (input) => {

@@ -97,6 +97,13 @@ export const capabilityGroups = {
 		] as ToolName[],
 		alwaysOn: false,
 	},
+	source_control: {
+		label: 'Source control',
+		description:
+			'Read the user\'s connected source-control repositories. Requires the user to have connected GitHub at /source-control. Use list_my_repos to discover repos, sync_my_repos to refresh the local mirror.',
+		tools: ['list_my_repos', 'sync_my_repos'] as ToolName[],
+		alwaysOn: false,
+	},
 } as const satisfies Record<string, { label: string; description: string; tools: ToolName[]; alwaysOn: boolean }>
 
 export type CapabilityGroup = keyof typeof capabilityGroups

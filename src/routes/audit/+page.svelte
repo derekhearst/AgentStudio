@@ -19,9 +19,14 @@
 		{ value: 'settings.updated', label: 'Settings updated' },
 		{ value: 'settings.reset', label: 'Settings reset' },
 		{ value: 'agent.config.updated', label: 'Agent config updated' },
+		{ value: 'agent.status.changed', label: 'Agent status changed' },
 		{ value: 'budget_limit.created', label: 'Budget limit created' },
 		{ value: 'budget_limit.updated', label: 'Budget limit updated' },
 		{ value: 'budget_limit.deleted', label: 'Budget limit deleted' },
+		{ value: 'skill.deleted', label: 'Skill deleted' },
+		{ value: 'user.created', label: 'User created' },
+		{ value: 'user.deactivated', label: 'User deactivated' },
+		{ value: 'user.role.changed', label: 'User role changed' },
 	];
 
 	const TARGET_TYPES: Array<{ value: string; label: string }> = [
@@ -29,6 +34,8 @@
 		{ value: 'settings', label: 'Settings' },
 		{ value: 'agent', label: 'Agent' },
 		{ value: 'budget_limit', label: 'Budget limit' },
+		{ value: 'skill', label: 'Skill' },
+		{ value: 'user', label: 'User' },
 	];
 
 	onMount(() => void load());

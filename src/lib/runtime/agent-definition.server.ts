@@ -7,6 +7,7 @@ import { listSkillSummaries } from '$lib/skills/skills.server'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
+import { expandFragments } from '$lib/agents/fragment-expand'
 import type { ToolDefinition } from './types'
 
 /**
@@ -184,18 +185,42 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
  * `systemPrompt` column otherwise. Always returns a non-empty string.
  */
 async function loadAgentIdentity(agent: AgentRecord): Promise<string> {
-	if (!agent.identitySkillId) return agent.systemPrompt
+	let raw = agent.systemPrompt
+	if (agent.identitySkillId) {
+		try {
+			const [skill] = await db
+				.select({ content: skills.content, enabled: skills.enabled })
+				.from(skills)
+				.where(eq(skills.id, agent.identitySkillId))
+				.limit(1)
+			if (skill && skill.enabled && skill.content.trim().length > 0) {
+				raw = skill.content
+			}
+		} catch (err) {
+			console.warn('[runtime] failed to load agent identity skill, using systemPrompt fallback', err)
+		}
+	}
+	// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup
+	// failure leaves a `<!-- @import:missing ... -->` marker in the assembled prompt rather
+	// than throwing.
 	try {
-		const [skill] = await db
+		return await expandFragments(raw, lookupFragmentByName)
+	} catch (err) {
+		console.warn('[runtime] fragment expansion failed, using raw content', err)
+		return raw
+	}
+}
+
+async function lookupFragmentByName(name: string): Promise<string | null> {
+	try {
+		const [row] = await db
 			.select({ content: skills.content, enabled: skills.enabled })
 			.from(skills)
-			.where(eq(skills.id, agent.identitySkillId))
+			.where(eq(skills.name, name))
 			.limit(1)
-		if (skill && skill.enabled && skill.content.trim().length > 0) {
-			return skill.content
-		}
-	} catch (err) {
-		console.warn('[runtime] failed to load agent identity skill, using systemPrompt fallback', err)
+		if (!row || !row.enabled) return null
+		return row.content
+	} catch {
+		return null
 	}
-	return agent.systemPrompt
 }

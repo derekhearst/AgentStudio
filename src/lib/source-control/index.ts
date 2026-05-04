@@ -32,7 +32,16 @@ export {
 	listChecksForPullRequest,
 	recordBranch,
 	listBranchesForRepository,
+	getActiveGithubConnection,
+	syncGithubReposForUser,
+	disconnectGithubForUser,
 	type AttachRepositoryInput,
 	type UpsertConnectionInput,
 	type RecordPullRequestInput,
 } from './source-control.server'
+export {
+	getSourceControlOverviewQuery,
+	syncGithubReposCommand,
+	disconnectGithubCommand,
+} from './source-control.remote'
+export { isGithubOAuthConfigured } from './github-oauth.server'

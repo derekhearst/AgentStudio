@@ -226,6 +226,24 @@ export async function updateAgentRecord(
 }
 
 export async function setAgentStatus(agentId: string, status: AgentStatus) {
+	const [before] = await db.select({ status: agents.status }).from(agents).where(eq(agents.id, agentId)).limit(1)
 	const [updated] = await db.update(agents).set({ status }).where(eq(agents.id, agentId)).returning()
-	return updated ?? null
+	if (!updated) return null
+	const beforeStatus = before?.status ?? null
+	if (beforeStatus !== status) {
+		void (async () => {
+			try {
+				const { auditAgentStatusChanged } = await import('$lib/governance')
+				await auditAgentStatusChanged({
+					actorUserId: null,
+					agentId,
+					beforeStatus,
+					afterStatus: status,
+				})
+			} catch (err) {
+				console.warn('[agents] status-changed audit failed', err)
+			}
+		})()
+	}
+	return updated
 }

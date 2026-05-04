@@ -142,6 +142,23 @@ const HEURISTICS: GroupHeuristic[] = [
 		],
 		supporting: ['version', 'revise', 'rewrite', 'continue', 'append', 'amend'],
 	},
+	{
+		group: 'source_control',
+		strong: [
+			'repo',
+			'repos',
+			'repository',
+			'repositories',
+			'github',
+			'gitlab',
+			'bitbucket',
+			'pull-request',
+			'pull-requests',
+			'pr',
+			'prs',
+		],
+		supporting: ['fork', 'clone', 'merge', 'rebase', 'remote'],
+	},
 ]
 
 const STRONG_THRESHOLD = 1

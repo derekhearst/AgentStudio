@@ -5,6 +5,11 @@ export {
 	auditSettingsUpdated,
 	auditAgentConfigUpdated,
 	auditBudgetLimitChange,
+	auditAgentStatusChanged,
+	auditSkillDeleted,
+	auditUserCreated,
+	auditUserDeactivated,
+	auditUserRoleChanged,
 	diffTopLevelKeys,
 	type RecordAuditEventInput,
 } from './governance.server'

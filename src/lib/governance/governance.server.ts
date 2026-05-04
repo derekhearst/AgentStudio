@@ -117,3 +117,88 @@ export async function auditBudgetLimitChange(opts: {
 		summary: opts.summary ?? null,
 	})
 }
+
+export async function auditAgentStatusChanged(opts: {
+	actorUserId: string | null
+	agentId: string
+	beforeStatus: string | null
+	afterStatus: string
+}) {
+	return recordAuditEvent({
+		actorUserId: opts.actorUserId,
+		action: 'agent.status.changed',
+		targetType: 'agent',
+		targetId: opts.agentId,
+		beforeState: { status: opts.beforeStatus },
+		afterState: { status: opts.afterStatus },
+		summary: `Status: ${opts.beforeStatus ?? '?'} → ${opts.afterStatus}`,
+	})
+}
+
+export async function auditSkillDeleted(opts: {
+	actorUserId: string
+	skillId: string
+	beforeState: Record<string, unknown> | null
+	summary?: string
+}) {
+	return recordAuditEvent({
+		actorUserId: opts.actorUserId,
+		action: 'skill.deleted',
+		targetType: 'skill',
+		targetId: opts.skillId,
+		beforeState: opts.beforeState,
+		afterState: null,
+		summary: opts.summary ?? null,
+	})
+}
+
+export async function auditUserCreated(opts: {
+	actorUserId: string
+	createdUserId: string
+	username: string
+	role: string
+}) {
+	return recordAuditEvent({
+		actorUserId: opts.actorUserId,
+		action: 'user.created',
+		targetType: 'user',
+		targetId: opts.createdUserId,
+		beforeState: null,
+		afterState: { username: opts.username, role: opts.role },
+		summary: `Created ${opts.role} ${opts.username}`,
+	})
+}
+
+export async function auditUserDeactivated(opts: {
+	actorUserId: string
+	targetUserId: string
+	username: string | null
+}) {
+	return recordAuditEvent({
+		actorUserId: opts.actorUserId,
+		action: 'user.deactivated',
+		targetType: 'user',
+		targetId: opts.targetUserId,
+		beforeState: { isActive: true },
+		afterState: { isActive: false },
+		summary: `Deactivated ${opts.username ?? opts.targetUserId}`,
+	})
+}
+
+export async function auditUserRoleChanged(opts: {
+	actorUserId: string
+	targetUserId: string
+	username: string | null
+	beforeRole: string
+	afterRole: string
+}) {
+	return recordAuditEvent({
+		actorUserId: opts.actorUserId,
+		action: 'user.role.changed',
+		targetType: 'user',
+		targetId: opts.targetUserId,
+		beforeState: { role: opts.beforeRole },
+		afterState: { role: opts.afterRole },
+		summary: `${opts.username ?? opts.targetUserId}: ${opts.beforeRole} → ${opts.afterRole}`,
+	})
+}

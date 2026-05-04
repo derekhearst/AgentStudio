@@ -58,6 +58,8 @@ const toolDescriptions: Record<ToolName, string> = {
 	create_artifact: 'Create a new artifact in a project (saves initial content as v1).',
 	edit_artifact: 'Append a new version to an existing artifact (append-only).',
 	set_project_context: 'Bind a project to the current conversation so subsequent edits target it by default. projectId=null unbinds.',
+	list_my_repos: 'List the user\'s connected source-control repositories. Optional `search` substring filter.',
+	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio. Returns {total, inserted, updated, skipped}.',
 	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
 	image_generate: 'Generate an image from a text prompt',
 	list_skills: 'List all available skills with their names and descriptions.',
@@ -208,6 +210,18 @@ function schemaToJsonSchema(name: ToolName) {
 		set_project_context: {
 			type: 'object',
 			properties: { projectId: { type: ['string', 'null'] } },
+		},
+		list_my_repos: {
+			type: 'object',
+			properties: { search: { type: 'string' }, limit: { type: 'integer' } },
+		},
+		sync_my_repos: {
+			type: 'object',
+			properties: {
+				includeForks: { type: 'boolean' },
+				includeArchived: { type: 'boolean' },
+				maxPages: { type: 'integer' },
+			},
 		},
 		run_subagent: {
 			type: 'object',

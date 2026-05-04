@@ -22,7 +22,7 @@
 	let draftSystemPrompt = $state('')
 	let draftModel = $state('')
 	// Wave 2 #8 phase 4 — capability binding draft state.
-	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects'] as const
+	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects', 'source_control'] as const
 	type CapabilityGroupName = (typeof ALL_CAPABILITY_GROUPS)[number]
 	let draftCapabilityGroups = $state<CapabilityGroupName[]>([])
 	let useCapabilityBinding = $state(false)
@@ -560,7 +560,10 @@
 
 			<div class="mb-2 border-t border-base-300/70"></div>
 
-			<p class="mb-2 text-xs font-semibold uppercase tracking-wide text-base-content/45">System prompt</p>
+			<div class="mb-2 flex items-center justify-between gap-2">
+				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">System prompt</p>
+				<a class="link link-primary text-[11px]" href="/agents/{agentId}/identity">Open identity editor →</a>
+			</div>
 			{#if editingConfig}
 				<textarea
 					class="textarea textarea-bordered min-h-52 w-full text-xs leading-relaxed"

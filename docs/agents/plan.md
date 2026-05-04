@@ -1,6 +1,6 @@
 # Agents Plan
 
-Status: active
+Status: active (Phases 1, 2, 3, 5, 6 complete; Phases 4, 7 deferred)
 
 ## Overview
 
@@ -229,5 +229,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 
-- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — Wave 5 #22 phases 3 + 5 + 6 — `/agents/[id]/identity` markdown editor route, `@import skill-name` fragment library with cycle/depth defense, and role-based companion-group suggestions surfaced in the editor. Tests in [tests/agents.fragment-expand.spec.ts](../../tests/agents.fragment-expand.spec.ts), [tests/agents.role-companions.spec.ts](../../tests/agents.role-companions.spec.ts), [tests/agents.identity-editor.spec.ts](../../tests/agents.identity-editor.spec.ts).
+- 2026-05-04 — Wave 5 #22 phase 2 — `agents.identity_skill_id` column + `buildAgentDefinition` reads from skill with `systemPrompt` fallback. See implementation-order #22 evidence.
+- 2026-05-04 — Wave 5 #22 phase 1 — orchestrator identity promoted to a seeded skill. See implementation-order #22 evidence.

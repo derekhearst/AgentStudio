@@ -285,6 +285,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					console.warn('[chat] agent identity skill lookup failed, using systemPrompt fallback', err)
 				}
 			}
+			// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort.
+			try {
+				const { expandFragments } = await import('$lib/agents/fragment-expand')
+				const { skills: skillsTable } = await import('$lib/skills/skills.schema')
+				identityContent = await expandFragments(identityContent, async (name) => {
+					const [row] = await db
+						.select({ content: skillsTable.content, enabled: skillsTable.enabled })
+						.from(skillsTable)
+						.where(eq(skillsTable.name, name))
+						.limit(1)
+					if (!row || !row.enabled) return null
+					return row.content
+				})
+			} catch (err) {
+				console.warn('[chat] fragment expansion failed, using raw identity content', err)
+			}
 			contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
 			const config = agent.config as
 				| {

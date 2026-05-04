@@ -1,6 +1,6 @@
 # Settings Plan
 
-Status: active
+Status: completed
 
 ## Overview
 
@@ -81,5 +81,5 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 
-- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — Wave 3 #12 phase 2-5 — per-action audit wrappers (`agent.status.changed`, `skill.deleted`, `user.created`, `user.deactivated`, `user.role.changed`) wired into the corresponding remote commands. New `setUserRoleCommand` exposed for admin promote/demote with self-protection. Audit page filters extended to surface the new actions. Tests in [tests/governance.audit-wrappers.spec.ts](../../tests/governance.audit-wrappers.spec.ts).
+- 2026-05-03 — Wave 3 #12 phase 1 — audit log table + `recordAuditEvent` core + `auditSettingsUpdated` / `auditAgentConfigUpdated` / `auditBudgetLimitChange` wrappers + admin `/audit` page. See [src/lib/governance/](../../src/lib/governance/) and [drizzle/0027_governance_audit.sql](../../drizzle/0027_governance_audit.sql).

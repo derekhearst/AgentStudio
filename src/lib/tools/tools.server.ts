@@ -916,6 +916,16 @@ export const toolSchemas = {
 	set_project_context: z.object({
 		projectId: z.string().uuid().nullable().optional(),
 	}),
+	// Wave 5 #19 phase 3 — source-control agent tools.
+	list_my_repos: z.object({
+		search: z.string().trim().min(1).max(200).optional(),
+		limit: z.number().int().min(1).max(200).optional(),
+	}),
+	sync_my_repos: z.object({
+		includeForks: z.boolean().optional(),
+		includeArchived: z.boolean().optional(),
+		maxPages: z.number().int().min(1).max(10).optional(),
+	}),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -1072,6 +1082,8 @@ const toolDescriptions: Record<ToolName, string> = {
 	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
 	list_projects: 'List the user\'s projects (durable containers for artifacts with append-only version history). Returns id, name, slug, kind, description for each project.',
 	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
+	list_my_repos: 'List source-control repositories the user has connected to AgentStudio (after OAuth). Optional `search` substring on owner/name. Returns id, owner, name, defaultBranch, htmlUrl, private. Run `sync_my_repos` first if the list looks empty or stale.',
+	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio (idempotent). Requires the user to have connected GitHub at /source-control. Returns {total, inserted, updated, skipped} or an errorMessage when the connection is missing/expired.',
 	list_artifacts: 'List artifacts in a project. Returns id, name, slug, contentType, isActive for each artifact (active by default; pass includeInactive to see soft-deleted).',
 	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s project info. Use to load an artifact before editing.',
 	create_artifact: 'Create a new artifact in a project (saves the initial content as v1). Slug auto-generated from name. Optional changeNote describes what this initial version contains.',
@@ -1651,6 +1663,61 @@ export async function executeTool(
 					input,
 					result,
 					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'list_my_repos' || call.name === 'sync_my_repos') {
+				const sourceControl = await import('$lib/source-control')
+				if (call.name === 'list_my_repos') {
+					const input = toolSchemas.list_my_repos.parse(call.arguments)
+					const repos = await sourceControl.listRepositories(userId)
+					const filter = input.search?.toLowerCase() ?? null
+					const filtered = filter
+						? repos.filter(
+								(r) => r.owner.toLowerCase().includes(filter) || r.name.toLowerCase().includes(filter),
+							)
+						: repos
+					const limited = filtered.slice(0, input.limit ?? 50)
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: limited.map((r) => {
+							const meta = (r.metadata ?? {}) as { htmlUrl?: string; private?: boolean; description?: string | null }
+							return {
+								id: r.id,
+								provider: r.provider,
+								owner: r.owner,
+								name: r.name,
+								defaultBranch: r.defaultBranch,
+								cloneUrl: r.cloneUrl,
+								htmlUrl: meta.htmlUrl ?? null,
+								private: !!meta.private,
+								description: meta.description ?? null,
+								updatedAt: r.updatedAt,
+							}
+						}),
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'sync_my_repos') {
+					const input = toolSchemas.sync_my_repos.parse(call.arguments)
+					const summary = await sourceControl.syncGithubReposForUser(userId, input)
+					if (summary.errorMessage) {
+						return {
+							success: false,
+							tool: call.name,
+							error: summary.errorMessage,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: { total: summary.total, inserted: summary.inserted, updated: summary.updated, skipped: summary.skipped },
+						executionMs: Date.now() - startedAt,
+					}
 				}
 			}
 

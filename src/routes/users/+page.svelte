@@ -6,6 +6,7 @@
 		createUserCommand,
 		listUsersQuery,
 		restoreUserCommand,
+		setUserRoleCommand,
 		softDeleteUserCommand,
 	} from '$lib/auth';
 
@@ -50,6 +51,13 @@
 
 	async function restoreUser(userId: string) {
 		await restoreUserCommand(userId);
+		await loadUsers();
+	}
+
+	async function changeRole(userId: string, nextRole: 'admin' | 'user') {
+		const label = nextRole === 'admin' ? 'promote to admin' : 'demote to user';
+		if (!confirm(`Are you sure you want to ${label}?`)) return;
+		await setUserRoleCommand({ userId, role: nextRole });
 		await loadUsers();
 	}
 
@@ -102,6 +110,17 @@
 							<td>{user.claimed ? 'Yes' : 'No'}</td>
 							<td>
 								<div class="flex justify-end gap-2">
+									{#if !user.deleted}
+										{#if user.role === 'admin'}
+											<button class="btn btn-xs btn-outline" type="button" onclick={() => changeRole(user.id, 'user')}>
+												Demote
+											</button>
+										{:else}
+											<button class="btn btn-xs btn-outline" type="button" onclick={() => changeRole(user.id, 'admin')}>
+												Promote
+											</button>
+										{/if}
+									{/if}
 									{#if user.deleted}
 										<button class="btn btn-xs" type="button" onclick={() => restoreUser(user.id)}>Restore</button>
 									{:else}
