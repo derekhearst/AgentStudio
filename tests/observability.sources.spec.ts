@@ -91,6 +91,65 @@ test.describe('observability/sources — job_failure', () => {
 	})
 })
 
+test.describe('observability/sources — hook_failure', () => {
+	test('hook_failure severity is warning + dedupes by hook:<runId>:<hookName>:<event>', async () => {
+		const prefix = uniquePrefix('hookfail')
+		const sql = getSql()
+		try {
+			const runId = randomUUID()
+			const hookName = `${prefix}-handler`
+			const event = 'after_tool'
+			const dedupeKey = `hook:${runId}:${hookName}:${event}`
+			const [item] = await sql<{ severity: string; run_id: string | null; payload: { dedupeKey?: string; hookName?: string; event?: string } }[]>`
+				insert into review_items (type, severity, summary, payload, run_id)
+				values (
+					'hook_failure', 'warning'::review_item_severity,
+					${`${prefix} hook failed`},
+					${sql.json({ hookName, event, error: 'timeout', durationMs: 5000, dedupeKey })},
+					${runId}
+				)
+				returning severity::text as severity, run_id, payload
+			`
+			expect(item.severity).toBe('warning')
+			expect(item.run_id).toBe(runId)
+			expect(item.payload.dedupeKey).toBe(dedupeKey)
+			expect(item.payload.hookName).toBe(hookName)
+			expect(item.payload.event).toBe(event)
+		} finally {
+			await cleanupReviewSourcesPrefix(prefix)
+		}
+	})
+})
+
+test.describe('observability/traces — span shape', () => {
+	test('appendTraceSpan jsonb_build_array + jsonb_set produces incrementing seq', async () => {
+		const sql = getSql()
+		const fakeRunId = randomUUID()
+		try {
+			await sql`insert into run_traces (run_id, trace) values (${fakeRunId}, '[]'::jsonb)`
+			// Mirror appendTraceSpan: trace || jsonb_build_array(jsonb_set(<span>, '{seq}', to_jsonb(jsonb_array_length(trace))))
+			for (let i = 0; i < 3; i++) {
+				await sql`
+					update run_traces
+					set trace = trace || jsonb_build_array(jsonb_set(${sql.json({ seq: 0, kind: 'tool_call', toolName: `tool_${i}`, startedAt: new Date().toISOString(), durationMs: 12, success: true })}::jsonb, '{seq}', to_jsonb(jsonb_array_length(trace))))
+					where run_id = ${fakeRunId}
+				`
+			}
+			const [{ trace }] = await sql<{ trace: Array<{ seq: number; kind: string; toolName: string }> }[]>`
+				select trace from run_traces where run_id = ${fakeRunId}
+			`
+			expect(trace.length).toBe(3)
+			expect(trace[0].seq).toBe(0)
+			expect(trace[1].seq).toBe(1)
+			expect(trace[2].seq).toBe(2)
+			expect(trace[0].toolName).toBe('tool_0')
+			expect(trace[2].toolName).toBe('tool_2')
+		} finally {
+			await sql`delete from run_traces where run_id = ${fakeRunId}`
+		}
+	})
+})
+
 test.describe('observability/traces — runtime span recording', () => {
 	test('run_trace tool_call_count + round_count increment via column expression', async () => {
 		const prefix = uniquePrefix('trace-counts')

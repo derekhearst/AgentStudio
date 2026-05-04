@@ -200,6 +200,7 @@
 										<p>
 											<span class="font-semibold uppercase tracking-wide opacity-50">Run:</span>
 											<a href="/runs/{item.runId}" class="link link-hover ml-1 font-mono">{item.runId}</a>
+											<a href="/review/trace/{item.runId}" class="link link-hover ml-2 text-[10px] opacity-70">trace →</a>
 										</p>
 									{/if}
 									{#if item.taskId}

@@ -151,9 +151,9 @@ async function dispatchOne<E extends HookEvent>(
 	const durationMs = Date.now() - startedAt
 
 	// Best-effort log. A failure to log is itself swallowed so the runtime never blocks.
+	const runId = (payload as { runId?: string | null }).runId ?? null
 	try {
 		// `runId` is required on the payload (HookContext base) but typing is event-specific.
-		const runId = (payload as { runId?: string | null }).runId ?? null
 		await db.insert(hookInvocations).values({
 			runId,
 			event,
@@ -169,5 +169,28 @@ async function dispatchOne<E extends HookEvent>(
 			hookName: hook.name,
 			error: logErr instanceof Error ? logErr.message : String(logErr),
 		})
+	}
+
+	// Wave 5 #20 — open a review item when a hook fails (timeout / thrown). Best-effort
+	// dynamic import so the hooks bus stays free of an observability dependency cycle.
+	// Dedupe per (runId, hookName, event) so a hook that fails repeatedly during one run
+	// doesn't spawn dozens of inbox rows — operators get one signal per failure source.
+	if (!success) {
+		void (async () => {
+			try {
+				const { openReviewItem } = await import('$lib/observability/review.server')
+				const dedupeKey = `hook:${runId ?? 'global'}:${hook.name}:${event}`
+				await openReviewItem({
+					type: 'hook_failure',
+					severity: 'warning',
+					summary: `Hook ${hook.name} failed on ${event}: ${errorMessage ?? 'unknown error'}`.slice(0, 500),
+					payload: { hookName: hook.name, event, error: errorMessage, durationMs },
+					runId,
+					dedupeKey,
+				})
+			} catch (err) {
+				console.warn('[hooks/bus] failed to open hook_failure review item', err)
+			}
+		})()
 	}
 }

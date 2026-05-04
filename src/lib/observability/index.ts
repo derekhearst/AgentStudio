@@ -29,6 +29,7 @@ export {
 export {
 	listReviewItemsQuery,
 	getReviewItemQuery,
+	getRunTraceQuery,
 	resolveReviewItemCommand,
 	assignReviewItemCommand,
 } from './review.remote'

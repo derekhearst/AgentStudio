@@ -9,6 +9,7 @@ import {
 	resolveReviewItem,
 	reviewInboxRollup,
 } from './review.server'
+import { getRunTraceByRunId } from './traces.server'
 
 /**
  * Wave 5 #20 phase 1 — Review Inbox SvelteKit remote surface.
@@ -93,4 +94,18 @@ export const assignReviewItemCommand = command(assignSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	if (user.role !== 'admin') throw new Error('Not authorized')
 	return assignReviewItem(input.itemId, input.userId)
+})
+
+/**
+ * Wave 5 #20 phase 3 — fetch the run-trace timeline for the trace viewer.
+ *
+ * Admin-only (traces can carry tool args + payload data). Returns null when no trace exists
+ * for the given runId. The trace itself is a jsonb array of span objects — the viewer page
+ * decides how to render each kind.
+ */
+export const getRunTraceQuery = query(z.string().uuid(), async (runId) => {
+	const user = requireAuthenticatedRequestUser()
+	if (user.role !== 'admin') return { trace: null, adminOnly: true as const }
+	const row = await getRunTraceByRunId(runId)
+	return { trace: row, adminOnly: false as const }
 })

@@ -203,4 +203,6 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 ## Completion
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — Phase 1 shipped (commit 1dfe672). 3 tables, 4 enums, lifecycle helpers, evaluator-failure first source, admin `/review` page with filters + 24h rollup.
+- 2026-05-04 — Phase 2 partial + Phase 3 partial (commit 3106ece). `runChatLoop` emits start / tool_call / finish spans. 3 more sources (approval_request, user_question, job_failure) wired with dedupeKey patterns.
+- 2026-05-04 — Phase 3 partial (next commit). `/review/trace/[runId]` viewer page (admin-gated) with summary card, expandable timeline, linked-records footer. `hook_failure` source wired at hooks-bus dispatch failure path with dedupeKey `hook:<runId>:<hookName>:<event>`. 5 of 9 enum sources now active.
