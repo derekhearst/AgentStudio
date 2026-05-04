@@ -1,6 +1,6 @@
 # Memory Plan
 
-Status: active
+Status: completed
 
 ## TL;DR
 
@@ -167,7 +167,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-03 — Completed across prior commits + this slice — full MemPalace port shipped (schema + 9 modules + chat integration + /memory UI + LongMemEval bench harness); this slice closed Phase 6 (9 schema-invariant tests) and Phase 7 (user-facing domain doc at docs/memory/memory.md).
 
 
 

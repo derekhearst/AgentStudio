@@ -147,7 +147,7 @@ Notes:
 
 ## Memory Palace
 
-AgentStudio includes an in-house port of [MemPalace](https://github.com/wcw9/mempalace) for long-term memory. Conversations are auto-mined into a Wing → Room → Closet → Drawer hierarchy with vector + tsvector + temporal hybrid recall, and recalled drawers are injected as a `<memory_context>` system block before each user turn. Configurable from **Settings → Memory Palace**, browsable at `/memory`. See [docs/memory/spec.md](docs/memory/spec.md) for the full pipeline, schema, and bench harness.
+AgentStudio includes an in-house port of [MemPalace](https://github.com/wcw9/mempalace) for long-term memory. Conversations are auto-mined into a Wing → Room → Closet → Drawer hierarchy with vector + tsvector + temporal hybrid recall, and recalled drawers are injected as a `<memory_context>` system block before each user turn. Configurable from **Settings → Memory Palace**, browsable at `/memory`. See [docs/memory/memory.md](docs/memory/memory.md) for the user-facing domain doc, [docs/memory/spec.md](docs/memory/spec.md) for the full pipeline + schema, or [docs/memory/plan.md](docs/memory/plan.md) for the build sequence + bench harness.
 
 A LongMemEval evaluation harness mirrors the upstream methodology:
 
