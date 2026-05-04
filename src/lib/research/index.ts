@@ -46,6 +46,11 @@ export {
 	type ReportPart,
 	type SourceForRender,
 } from './report-render'
+export {
+	DEFAULT_RESEARCH_CONFIG,
+	resolveResearchConfig,
+	type ResolvedResearchConfig,
+} from './research-config'
 export { runResearchLoop, type ResearchRunOutcome } from './research-runner.server'
 export { registerResearchJobHandlers } from './research-handler.server'
 export {

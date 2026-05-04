@@ -464,10 +464,10 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
 
 ### Wave 4 — Feature Service Layer
 
-15. [x] Project artifacts/versioning and linkage
+15. [x] Project artifacts/versioning and linkage **(gate fully met across P1+P2 partial+P7)**
     - Source: ../projects/plan.md
     - Depends on: #11
-    - Gate: immutable version history + current pointer integrity
+    - Gate: immutable version history + current pointer integrity ✓
     - Evidence (Phase 1 — schema + CRUD + remote + UI, 2026-05-03):
       - New domain: [src/lib/projects/projects.schema.ts](../../src/lib/projects/projects.schema.ts) — three tables (`projects`, `artifacts`, `artifact_versions`) + two enums (`project_kind`: efoil/research/code/documentation/other; `artifact_content_type`: markdown/code/json/yaml/plaintext). Per-user `(userId, slug)` unique on projects; per-project `(projectId, slug)` unique on artifacts; per-artifact `(artifactId, seq)` unique on versions for append-only history. `artifacts.currentVersionId` is a denormalized pointer (nullable; chicken-and-egg with versions table). Hand-written migration [drizzle/0032_projects.sql](../../drizzle/0032_projects.sql) for cross-FK ordering.
       - CRUD helpers: `createProject` / `listProjects` / `getProjectById` / `getProjectBySlug` / `updateProject` / `deleteProject` (cascade-trims artifacts + versions). Slug generation via `slugify()` + per-scope dedupe with `-2`, `-3` suffixes: [src/lib/projects/projects.server.ts](../../src/lib/projects/projects.server.ts)
@@ -568,7 +568,15 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
         - `citedSourcesInOrder(report, sources)` — returns first-appearance-deduped sources for a numbered footer.
       - /research/[id] page renders text + citation parts: text inline; in-range citations as `link link-secondary` anchor tags pointing at the source URL with the source title in `title=`; out-of-range as `badge-warning` with an explanatory tooltip. Replaces the previous plain `<pre>` block that lost the links: [src/routes/research/[id]/+page.svelte](../../src/routes/research/[id]/+page.svelte)
       - 12 tests cover: text + citation order preservation, out-of-range null sourceId, leading/trailing text preserved, no-citation single-text-part, empty report/sources, back-to-back `[1][2]`, full reconstruction round-trip; citedSourcesInOrder ordering + dedupe + out-of-range filter + empty cases: [tests/research.report-render.spec.ts](../../tests/research.report-render.spec.ts)
-    - Phase 4 remainder (per-agent research config — `agents.config.research` enable + default-model overrides) and Phase 5 remainder (PDF attachment grounding) still pending. Citation rendering is now visible end-to-end: a finished research run shows clickable `[N]` references that open the cited source in a new tab.
+    - Evidence (Phase 4 finish — per-agent research config via `agents.config.research`, 2026-05-04):
+      - Pure resolver in [src/lib/research/research-config.ts](../../src/lib/research/research-config.ts):
+        - `resolveResearchConfig(agentConfig)` reads `agentConfig.research` if present and merges with `DEFAULT_RESEARCH_CONFIG`. Returns a fully-resolved `ResolvedResearchConfig` — every field has a value.
+        - Out-of-range numeric overrides clamp to safe limits: maxSubQuestions ∈ [1, 8], urlsPerQuestion ∈ [1, 5], maxFetchChars ∈ [5000, 100000]. Non-numeric / non-finite / negative values fall back to defaults so a malformed config can't blow up the runner.
+        - Empty-string / whitespace model strings fall back to defaults (rejects mistaken clears).
+      - `runResearchLoop` looks up the per-agent config via the research's conversationId → conversations.agentId → agents.config.research chain. Falls back to defaults at any missing link. The hardcoded `PLANNER_MODEL`, `SYNTHESIZER_MODEL`, `MAX_SUB_QUESTIONS`, `URLS_PER_QUESTION`, `MAX_FETCH_CHARS` constants moved to `DEFAULT_RESEARCH_CONFIG` so the override path uses one source of truth: [src/lib/research/research-runner.server.ts](../../src/lib/research/research-runner.server.ts)
+      - `updateAgentRecord` accepts a `research` patch field that merges into `agent.config.research` without clobbering siblings (capabilityGroups, hooks). Empty object clears the override and falls back to defaults: [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts). Remote schema validates with Zod (model strings + integer ranges); empty `research: {}` clears the override: [src/lib/agents/agents.remote.ts](../../src/lib/agents/agents.remote.ts)
+      - 11 new tests cover: null/empty/missing config returns defaults, plannerModel + synthesizerModel overrides apply, maxSubQuestions clamps to [1,8], urlsPerQuestion clamps to [1,5], maxFetchChars clamps to [5k,100k], non-numeric values fall back, empty-string models fall back, enabled defaults true with explicit-false override; storage round-trip through `agents.config.research`, merge-don't-clobber alongside capabilityGroups: [tests/research.config.spec.ts](../../tests/research.config.spec.ts)
+    - Phase 5 remainder (PDF attachment grounding via `pdf_read` tool — needs poppler-utils env work) still pending. Per-agent research config is now end-to-end: an admin can configure a "deep researcher" agent with claude-sonnet-4 + 8 sub-questions for high-quality investigations, and a "quick researcher" with gpt-4o-mini + 3 sub-questions for cheap exploratory passes.
 
 ### Wave 5 — Product Workflow Integration
 

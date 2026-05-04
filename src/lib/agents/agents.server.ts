@@ -151,6 +151,11 @@ export async function updateAgentRecord(
 		// registered built-in hook names OR future skill slugs (Phase 3). Empty array clears the
 		// override for that event; an empty object clears all.
 		hooks?: Record<string, string[]>
+		// Wave 4 #18 phase 4 — per-agent research config overrides (resolveResearchConfig reads
+		// this when a research run is triggered from a chat with this agent). Shape:
+		// { enabled?, plannerModel?, synthesizerModel?, maxSubQuestions?, urlsPerQuestion?, maxFetchChars? }.
+		// Empty object clears the override and falls back to DEFAULT_RESEARCH_CONFIG.
+		research?: Record<string, unknown>
 	},
 ) {
 	const updates: Partial<typeof agents.$inferInsert> = {}
@@ -160,7 +165,10 @@ export async function updateAgentRecord(
 	if (patch.model !== undefined) updates.model = patch.model
 
 	const configChanged =
-		patch.capabilityGroups !== undefined || patch.allowedTools !== undefined || patch.hooks !== undefined
+		patch.capabilityGroups !== undefined ||
+		patch.allowedTools !== undefined ||
+		patch.hooks !== undefined ||
+		patch.research !== undefined
 	if (configChanged) {
 		// Read existing config so we don't clobber unrelated keys (workspace, etc.).
 		const [current] = await db.select({ config: agents.config }).from(agents).where(eq(agents.id, agentId))
@@ -190,6 +198,18 @@ export async function updateAgentRecord(
 				delete nextConfig.hooks
 			} else {
 				nextConfig.hooks = cleaned
+			}
+		}
+		if (patch.research !== undefined) {
+			// Strip undefined fields + reject if everything's empty (= clear the override).
+			const cleaned: Record<string, unknown> = {}
+			for (const [key, value] of Object.entries(patch.research)) {
+				if (value !== undefined && value !== null) cleaned[key] = value
+			}
+			if (Object.keys(cleaned).length === 0) {
+				delete nextConfig.research
+			} else {
+				nextConfig.research = cleaned
 			}
 		}
 		updates.config = nextConfig

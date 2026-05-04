@@ -37,6 +37,17 @@ const updateAgentSchema = z
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Empty object
 		// clears all bindings; empty array per-event drops that event's overrides.
 		hooks: z.record(z.enum(HOOK_EVENT_NAMES), z.array(z.string().trim().min(1))).optional(),
+		// Wave 4 #18 phase 4 — per-agent research config. Empty object clears the override.
+		research: z
+			.object({
+				enabled: z.boolean().optional(),
+				plannerModel: z.string().trim().min(1).max(120).optional(),
+				synthesizerModel: z.string().trim().min(1).max(120).optional(),
+				maxSubQuestions: z.number().int().min(1).max(8).optional(),
+				urlsPerQuestion: z.number().int().min(1).max(5).optional(),
+				maxFetchChars: z.number().int().min(5_000).max(100_000).optional(),
+			})
+			.optional(),
 	})
 	.refine(
 		(input) =>
@@ -44,7 +55,8 @@ const updateAgentSchema = z
 			input.model !== undefined ||
 			input.capabilityGroups !== undefined ||
 			input.allowedTools !== undefined ||
-			input.hooks !== undefined,
+			input.hooks !== undefined ||
+			input.research !== undefined,
 		{ message: 'Provide at least one field to update' },
 	)
 
@@ -77,6 +89,7 @@ export const updateAgentCommand = command(updateAgentSchema, async (input) => {
 		capabilityGroups: input.capabilityGroups,
 		allowedTools: input.allowedTools,
 		hooks: input.hooks,
+		research: input.research,
 	})
 	if (updated && before) {
 		void auditAgentConfigUpdated({

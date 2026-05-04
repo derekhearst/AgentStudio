@@ -1,6 +1,6 @@
 # Projects Plan
 
-Status: active
+Status: gate-met (P1 schema/CRUD/UI + P2 partial agent tools + P7 domain doc shipped; P2 finish session-binding + P3 Memory bridge + P5 AI UX polish still pending)
 
 ## Overview
 
@@ -287,4 +287,4 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 ## Completion
 
 - Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — gate met across f1a6060 (P1 schema/CRUD/UI), 2cde7be (P2 partial agent tools + capability group), and this slice (P7 user-facing domain doc at docs/projects/projects.md). Append-only version history + current-pointer integrity verified by 16 schema-invariant tests. P2 finish (sessions.projectId + set_project_context) + P3 (Memory bridge) + P5 (AI UX polish) still pending — none block #15's gate criteria.

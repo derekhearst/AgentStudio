@@ -1,3 +1,7 @@
+import { eq } from 'drizzle-orm'
+import { db } from '$lib/db.server'
+import { agents } from '$lib/agents/agents.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 import { chat, type LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { webFetch, webSearch } from '$lib/tools/tools.server'
@@ -17,6 +21,7 @@ import {
 	pickUrlsToFetch,
 	type SearchHit,
 } from './research-loop-helpers'
+import { DEFAULT_RESEARCH_CONFIG, resolveResearchConfig, type ResolvedResearchConfig } from './research-config'
 
 /**
  * Wave 4 #18 phase 2 — research orchestrator loop.
@@ -36,11 +41,8 @@ import {
  * in the research row, not in the job).
  */
 
-const PLANNER_MODEL = 'openai/gpt-4o-mini'
-const SYNTHESIZER_MODEL = 'openai/gpt-4o-mini'
-const MAX_SUB_QUESTIONS = 5
-const URLS_PER_QUESTION = 2
-const MAX_FETCH_CHARS = 30_000
+// Hardcoded constants moved to research-config.ts (DEFAULT_RESEARCH_CONFIG) so per-agent
+// overrides can take effect via `agents.config.research`. Wave 4 #18 phase 4.
 
 const PLANNER_SYSTEM = `You are a research planner. Given a user's research query, decompose it into 3-5 specific, googleable sub-questions that together answer the query.
 
@@ -101,6 +103,10 @@ export async function runResearchLoop(
 
 	let totalCost = 0
 
+	// Wave 4 #18 phase 4 — resolve per-agent research config if the research has a
+	// conversationId with an attached agent. Falls back to defaults otherwise.
+	const config = await resolveConfigForResearch(r)
+
 	// Wave 4 #17 phase 3 — durable cancellation. Wraps `opts.checkCancellation` so the loop
 	// can detect both the worker-side cancel signal AND a direct flip of research.status to
 	// 'canceled' from the cancelResearchCommand path. Throws CanceledError on either.
@@ -118,7 +124,7 @@ export async function runResearchLoop(
 		// ─────────── PHASE 1: PLAN ───────────
 		await checkCanceled()
 		await updateResearch(researchId, { status: 'planning' })
-		const planResult = await runPlanner(r)
+		const planResult = await runPlanner(r, config)
 		totalCost += planResult.costUsd
 		await addResearchStep({
 			researchId,
@@ -141,11 +147,11 @@ export async function runResearchLoop(
 				console.warn('[research] search failed', { researchId, subQuestion, err })
 				return [] as SearchHit[]
 			})
-			const picked = pickUrlsToFetch(hits, URLS_PER_QUESTION)
+			const picked = pickUrlsToFetch(hits, config.urlsPerQuestion)
 			await updateResearch(researchId, { status: 'fetching' })
 			for (const hit of picked) {
 				await checkCanceled()
-				await runFetch(researchId, subQuestion, hit).catch((err) => {
+				await runFetch(researchId, subQuestion, hit, config).catch((err) => {
 					console.warn('[research] fetch failed', { researchId, url: hit.url, err })
 				})
 			}
@@ -158,7 +164,7 @@ export async function runResearchLoop(
 		if (sources.length === 0) {
 			throw new Error('no sources fetched — cannot synthesize a report')
 		}
-		const synth = await runSynthesizer(r, planResult.subQuestions, sources)
+		const synth = await runSynthesizer(r, planResult.subQuestions, sources, config)
 		totalCost += synth.costUsd
 		const citedIds = extractCitedSourceIds(synth.report, synth.citationMap)
 		await markSourcesCited(researchId, citedIds)
@@ -233,15 +239,46 @@ class CanceledError extends Error {
 
 // ─────────── Phase helpers ───────────
 
-async function runPlanner(r: ResearchRow): Promise<{ subQuestions: string[]; raw: string; costUsd: number }> {
+/**
+ * Wave 4 #18 phase 4 — resolve per-agent research config. The research row carries a
+ * conversationId; if that conversation has an attached agentId, look up the agent's
+ * `config.research` and merge with defaults. Falls back to DEFAULT_RESEARCH_CONFIG when
+ * any link in the chain is missing.
+ */
+async function resolveConfigForResearch(r: ResearchRow): Promise<ResolvedResearchConfig> {
+	if (!r.conversationId) return { ...DEFAULT_RESEARCH_CONFIG }
+	try {
+		const [conv] = await db
+			.select({ agentId: conversations.agentId })
+			.from(conversations)
+			.where(eq(conversations.id, r.conversationId))
+			.limit(1)
+		if (!conv?.agentId) return { ...DEFAULT_RESEARCH_CONFIG }
+		const [agent] = await db
+			.select({ config: agents.config })
+			.from(agents)
+			.where(eq(agents.id, conv.agentId))
+			.limit(1)
+		if (!agent) return { ...DEFAULT_RESEARCH_CONFIG }
+		return resolveResearchConfig(agent.config)
+	} catch (err) {
+		console.warn('[research] config lookup failed, using defaults', err)
+		return { ...DEFAULT_RESEARCH_CONFIG }
+	}
+}
+
+async function runPlanner(
+	r: ResearchRow,
+	config: ResolvedResearchConfig,
+): Promise<{ subQuestions: string[]; raw: string; costUsd: number }> {
 	const messages: LlmMessage[] = [
 		{ role: 'system', content: PLANNER_SYSTEM },
 		{ role: 'user', content: `Research query: ${r.query.trim()}\n\nReturn the JSON object now.` },
 	]
-	const result = await chat(messages, PLANNER_MODEL)
+	const result = await chat(messages, config.plannerModel)
 	const cost = await logLlmUsage({
 		source: 'evaluator', // research planning is advisor-tier work; reuses the existing source label
-		model: PLANNER_MODEL,
+		model: config.plannerModel,
 		tokensIn: result.usage?.promptTokens ?? 0,
 		tokensOut: result.usage?.completionTokens ?? 0,
 		userId: r.userId ?? null,
@@ -249,7 +286,7 @@ async function runPlanner(r: ResearchRow): Promise<{ subQuestions: string[]; raw
 		metadata: { researchId: r.id, stage: 'plan' },
 	}).catch(() => '0')
 
-	const subQuestions = parsePlannerResponse(result.content).slice(0, MAX_SUB_QUESTIONS)
+	const subQuestions = parsePlannerResponse(result.content).slice(0, config.maxSubQuestions)
 	return { subQuestions, raw: result.content, costUsd: parseFloat(cost) || 0 }
 }
 
@@ -271,8 +308,13 @@ async function runSearch(researchId: string, subQuestion: string): Promise<Searc
 	return hits
 }
 
-async function runFetch(researchId: string, subQuestion: string, hit: SearchHit): Promise<ResearchSourceRow | null> {
-	const result = await webFetch(hit.url, MAX_FETCH_CHARS)
+async function runFetch(
+	researchId: string,
+	subQuestion: string,
+	hit: SearchHit,
+	config: ResolvedResearchConfig,
+): Promise<ResearchSourceRow | null> {
+	const result = await webFetch(hit.url, config.maxFetchChars)
 	const source = await addResearchSource({
 		researchId,
 		url: result.url,
@@ -294,6 +336,7 @@ async function runSynthesizer(
 	r: ResearchRow,
 	subQuestions: string[],
 	sources: ResearchSourceRow[],
+	config: ResolvedResearchConfig,
 ): Promise<{ report: string; citationMap: Map<string, string>; costUsd: number }> {
 	const { block, citationMap } = buildSourcesPromptBlock(sources)
 	const subQuestionsBlock = subQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')
@@ -311,10 +354,10 @@ Now produce the markdown report. Cite every claim with the source number it came
 		{ role: 'system', content: SYNTHESIZER_SYSTEM },
 		{ role: 'user', content: userMessage },
 	]
-	const result = await chat(messages, SYNTHESIZER_MODEL)
+	const result = await chat(messages, config.synthesizerModel)
 	const cost = await logLlmUsage({
 		source: 'evaluator',
-		model: SYNTHESIZER_MODEL,
+		model: config.synthesizerModel,
 		tokensIn: result.usage?.promptTokens ?? 0,
 		tokensOut: result.usage?.completionTokens ?? 0,
 		userId: r.userId ?? null,

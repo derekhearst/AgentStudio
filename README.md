@@ -145,6 +145,10 @@ Notes:
 - UI spec: `docs/ui/spec.md`
 - Operations spec: `docs/operations/spec.md`
 
+## Projects
+
+Projects are durable containers for the work users produce with their agents — named artifacts with append-only version history. Each edit creates a new immutable version, rollback is non-destructive (creates a new version with the older content). Browse at `/projects`. Agents can read/create/edit artifacts via the `projects` capability group when a project-related query auto-suggests it. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
+
 ## Memory Palace
 
 AgentStudio includes an in-house port of [MemPalace](https://github.com/wcw9/mempalace) for long-term memory. Conversations are auto-mined into a Wing → Room → Closet → Drawer hierarchy with vector + tsvector + temporal hybrid recall, and recalled drawers are injected as a `<memory_context>` system block before each user turn. Configurable from **Settings → Memory Palace**, browsable at `/memory`. See [docs/memory/memory.md](docs/memory/memory.md) for the user-facing domain doc, [docs/memory/spec.md](docs/memory/spec.md) for the full pipeline + schema, or [docs/memory/plan.md](docs/memory/plan.md) for the build sequence + bench harness.
