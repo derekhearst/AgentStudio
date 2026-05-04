@@ -151,6 +151,75 @@ Use \`run_subagent\` for delegating a focused chunk of work to a stateless or na
 		companionTools: ['image_generate'],
 		tags: ['system', 'companion', 'media'],
 	},
+	{
+		// Wave 4 #15 phase 5 — confident artifact selection + ask-on-ambiguity.
+		id: '00000000-0000-4000-8000-00000000d005',
+		name: 'tools/projects-edit',
+		description: 'Confident artifact selection: when to edit in place vs. create new vs. ask the user.',
+		content: `# Companion: Projects + Artifacts
+
+The Projects domain holds durable, version-tracked artifacts (documents, code drafts, specs). The 7 tools (\`list_projects\`, \`create_project\`, \`list_artifacts\`, \`read_artifact\`, \`create_artifact\`, \`edit_artifact\`, \`set_project_context\`) let you build on prior work instead of regenerating it every conversation.
+
+## Default to editing in place
+
+When the user references prior work — "update the spec", "add a section to the proposal", "fix the typo in the readme" — assume they want a NEW VERSION of an existing artifact, not a brand-new one.
+
+The flow:
+1. If the conversation has a bound project (you'll see it in the "Active project" system slot), call \`list_artifacts({projectId})\` to see what exists.
+2. Match the user's reference to an artifact by name. "the spec" → the artifact whose name contains "spec" (or the most recently updated artifact in the project if there's only one strong candidate).
+3. Call \`read_artifact({artifactId})\` to load the current version.
+4. Make your edit, call \`edit_artifact({artifactId, content, changeNote})\`. The change note should be 1 sentence describing what you changed.
+
+## When to ask vs. proceed confidently
+
+**Proceed confidently** when:
+- There's exactly one artifact matching the user's reference.
+- The user says "the X" and there's exactly one X-named artifact in the bound project.
+- The user is editing the most-recently-updated artifact in the project (it's clear what they mean by "this" or "the doc").
+
+**Ask via \`ask_user\`** when:
+- Multiple artifacts match the reference equally well ("update the auth doc" + two artifacts named "auth-flow.md" and "auth-tokens.md").
+- The user's reference is ambiguous in ways the artifact names don't disambiguate ("update the design" + 5 artifacts in the project).
+- The edit would significantly change the artifact's character (full rewrite vs. small revision) — confirm before doing a destructive-feeling change.
+
+When asking, list the candidates as options + suggest the most recent as the default.
+
+## When to create new
+
+Only \`create_artifact\` when:
+- No existing artifact matches.
+- The user explicitly says "new" / "fresh" / "from scratch" / "start over".
+- The content type is fundamentally different from existing artifacts (a new code module when prior artifacts are markdown docs).
+
+Don't create a new artifact for what should be a new version of an existing one — that fragments the version history and defeats the point of the system.
+
+## Use set_project_context once per conversation
+
+When the user mentions a project by name and the conversation isn't already bound, call \`set_project_context({projectId})\` once early. The bound project shows up in your system prompt for the rest of the conversation, so subsequent tool calls don't have to re-resolve "which project does the user mean".
+
+When the user explicitly switches contexts ("now let's work on the OTHER project"), unbind via \`set_project_context({projectId: null})\` then re-bind to the new project.
+
+## Pair with Memory
+
+If a memory recall surfaces a drawer with \`(linked artifact: <id>)\`, that's a strong signal the user is continuing prior work on that exact artifact. Read it before assuming the user wants something new.
+
+## Avoid
+
+- Don't soft-delete (via the Projects UI) artifacts the user might still want — soft-delete is operator-driven, not agent-driven.
+- Don't rollback via the API — surface the older version's seq to the user and let them click Rollback in the UI. Rollback is a deliberate human decision.
+`,
+		companionGroups: ['projects'],
+		companionTools: [
+			'list_projects',
+			'create_project',
+			'list_artifacts',
+			'read_artifact',
+			'create_artifact',
+			'edit_artifact',
+			'set_project_context',
+		],
+		tags: ['system', 'companion', 'projects'],
+	},
 ]
 
 export async function seedCompanionSkills(dbInstance: DbLike): Promise<{ inserted: number }> {

@@ -462,9 +462,9 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - Per-round runner integration (calling `runEvaluatorPass` at sprint boundaries inside `runChatLoop`) deferred to a follow-up — requires threading sprint contracts through `RunChatLoopInput` and adding a per-round trigger hook in the loop. The parser + helpers are the durable contract; the loop integration is purely glue once a real long-running task surfaces.
     - **#14 Evaluations now substantively complete** — schema + recorder + run viewer (P1+2 from prior commit), evaluator agent kind + seed + parser + runner + post-run trigger (Plan P1+2), task-completion gate + re-plan loop (Plan P3+4), sprint contract parser + helpers (Plan P5 parser slice). Loop-integrated sprint trigger remains as future work.
 
-### Wave 4 — Feature Service Layer
+### Wave 4 — Feature Service Layer **(all 4 items closed 2026-05-04)**
 
-15. [x] Project artifacts/versioning and linkage **(gate fully met across P1+P2 partial+P7)**
+15. [x] Project artifacts/versioning and linkage **(gate fully met across P1+P2+P3+P5+P7)**
     - Source: ../projects/plan.md
     - Depends on: #11
     - Gate: immutable version history + current pointer integrity ✓
@@ -493,7 +493,15 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - **RetrievedDrawer + recall query** updated to select + return `linkedArtifactId`: [src/lib/memory/retrieval.server.ts](../../src/lib/memory/retrieval.server.ts)
       - **renderMemoryContext** surfaces the linkage as `(linked artifact: <id>)` after the drawer content when the drawer is tagged. Agents see this in the `<memory_context>` block and can call `read_artifact({artifactId})` to load the full content for grounded follow-up.
       - 6 new tests cover: linked_artifact_id defaults to null, round-trip when set, stale pointer survives artifact deletion (audit-chain preserving), clearing back to null, renderMemoryContext surfaces the link line for tagged drawers, omits it for untagged drawers: [tests/memory.artifact-link.spec.ts](../../tests/memory.artifact-link.spec.ts)
-    - Phase 5 (AI UX polish — confident artifact selection, ask-on-ambiguity) still pending. The Memory ↔ Projects bridge is now end-to-end: a memory recalled from a previous session about an artifact surfaces the artifact ID in the prompt, the agent can re-load the artifact content via read_artifact, and edits land in the same artifact's version history.
+    - Evidence (Phase 5 — AI UX polish via boot-seeded `tools/projects-edit` companion skill, 2026-05-04):
+      - New companion skill seeded on boot ([src/lib/skills/companion-skills.server.ts](../../src/lib/skills/companion-skills.server.ts)) — surfaces inline when the projects capability group is enabled. Teaches:
+        - **Default to editing in place**: when the user references prior work ("update the spec", "fix the typo"), assume they want a new VERSION not a new artifact. Flow: list_artifacts → match by name → read_artifact → edit_artifact with a 1-sentence change note.
+        - **When to ask vs. proceed confidently**: proceed when there's exactly one matching artifact OR when the user references "the X" with one X-named artifact in scope. Ask via `ask_user` when multiple artifacts match equally well, when the reference is ambiguous, or when the edit would significantly change the artifact's character (full rewrite vs. revision).
+        - **When to create new**: only when no existing artifact matches OR the user explicitly says "new"/"fresh"/"from scratch". Don't fragment version history with duplicates.
+        - **Use set_project_context once per conversation**: bind early, unbind/re-bind on explicit context switches.
+        - **Pair with Memory**: a recalled drawer with `(linked artifact: <id>)` is a strong signal the user is continuing prior work on that exact artifact.
+      - Skill is auto-loaded as a context slot whenever an agent enables the `projects` group, so the patterns are in-prompt without bloating the always-on system prompt.
+    - **#15 Projects now fully complete.** Schema + UI (P1) + agent tools (P2 partial + P2 finish session-binding) + Memory bridge (P3) + AI UX polish (P5) + domain doc (P7) all shipped. P5's "ask-on-ambiguity" pattern is encoded in the companion skill rather than baked into the executor — keeping the executor minimal + giving operators latitude to tune the behavior via skill edits.
 
 16. [x] Memory extraction/retrieval + quality benchmark gates
     - Source: ../memory/plan.md
@@ -508,10 +516,10 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - **Phase 6 tests** (this slice, 2026-05-03): 9 schema invariants — palace chain round-trip, per-user wing slug uniqueness, per-room closet topic uniqueness, wing_kind enum rejection, cascade-on-wing-delete trims rooms+closets+drawers, KG entity (name, type) uniqueness, KG relation open-ended valid window, source_drawer SET NULL on drawer delete preserves relation, KG entity cascade trims its relations: [tests/memory.schema.spec.ts](../../tests/memory.schema.spec.ts). Earlier UI smoke at [tests/memory.spec.ts](../../tests/memory.spec.ts) covers the page-render path.
       - **Phase 7 documentation** (this slice, 2026-05-03): user-facing domain doc explaining concepts (palace hierarchy, AAAK index, temporal KG, hybrid retrieval, optional rerank), user flows (auto-mining, auto-recall, manual browsing), settings, integrations, business rules (verbatim drawers, per-user isolation, embedding-dimension lock), benchmark commands, and edge cases: [docs/memory/memory.md](../memory/memory.md)
 
-17. [ ] Jobs queue/worker reliability and handler manifest
+17. [x] Jobs queue/worker reliability and handler manifest **(gate fully met)**
     - Source: ../jobs/plan.md
     - Depends on: #3, #11
-    - Gate: retry/backoff/heartbeat/timeout behavior proven
+    - Gate: retry/backoff/heartbeat/timeout behavior proven ✓ (verified across 6 migrated feature paths)
     - Evidence (Phase 1 — queue primitives + worker loop + admin viewer, 2026-05-03):
       - New domain: [src/lib/jobs/jobs.schema.ts](../../src/lib/jobs/jobs.schema.ts) — three tables (`jobs`, `job_policies`, `job_leases`) + `job_status` enum (`pending`/`leased`/`running`/`retry_wait`/`completed`/`failed`/`canceled`). `type` is text (not enum) so new job kinds land without migrations. `(type, dedupe_key)` unique gives idempotent enqueue. Cross-domain pointers (runId/taskId/sessionId/projectId) declared by-name with no FK cascade — jobs survive their source row's GC for forensic visibility. Hand-written migration [drizzle/0033_jobs.sql](../../drizzle/0033_jobs.sql).
       - Server primitives: `enqueueJob` (with dedupeKey idempotency — re-enqueue returns the existing row), `claimNextJob` (Postgres `FOR UPDATE SKIP LOCKED` so concurrent workers don't fight; ordered by priority desc + scheduled_at asc; re-claims stale leases), `beginJob` (status='running' + attemptCount += 1), `heartbeatJob` (extends lease + updates lease row), `completeJob`/`failJob`/`cancelJob` (terminal transitions; failJob auto-retries up to maxAttempts then transitions to terminal `failed`), `findStaleLeases`, `upsertJobPolicy`, `getPolicyForType`: [src/lib/jobs/jobs.server.ts](../../src/lib/jobs/jobs.server.ts)
@@ -543,12 +551,16 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
         - `automations_dispatch` job + scheduled tick (every 60s, fixed dedupeKey `automations:dispatch`) calls `checkAndRunAutomations` to enqueue per-automation work. Priority 30 (above maintenance_gc 10, below evaluation_run 75 + automation_run 50).
       - Boot wiring: handler registration in [src/lib/db.server.ts](../../src/lib/db.server.ts).
       - 5 new tests cover: per-minute dedupeKey collapses back-to-back enqueue for same automation, different minute windows get independent keys, automation_run priority 50, dispatch tick fixed dedupeKey collapses scheduler over-firing, full priority sandwich (10 < 30 < 50 < 75 < 150) across all 6 migrated job types: [tests/automations.job-migration.spec.ts](../../tests/automations.job-migration.spec.ts)
-    - Phase 2 (run-execution handoff to jobs — chat-stream rewrite) + Phase 6 (web/worker process split) still pending. End-to-end durability now demonstrated across 6 feature paths: research_run (user, 150), evaluation_run (post-chat, 75), automation_run (background, 50), memory_mine (post-chat dedupe, 50), automations_dispatch (maintenance, 30), workspace_gc (scheduled daily, 10). The remaining phases are infrastructure refactors that don't unlock new features.
+    - Evidence (Phase 6 — standalone worker script, 2026-05-04):
+      - **`scripts/worker.ts`** — bun-runnable script that imports `$lib/db.server` (which auto-registers all handlers + starts the in-process worker via the bootstrap chain) and stays alive on a heartbeat interval. SIGINT/SIGTERM trigger a 5s drain before exit. Use this for production deployments scaling workers independently of the web tier (one web container + N worker containers): [scripts/worker.ts](../../scripts/worker.ts)
+      - `bun run worker` script added to [package.json](../../package.json) for one-command worker startup.
+      - Configuration via env: `JOBS_WORKER_QUEUES`, `JOBS_WORKER_TYPES`, `JOBS_WORKER_POLL_MS`, `JOBS_WORKER_LEASE_MS`, `JOBS_WORKER_ID`. `JOBS_SCHEDULER_ENABLED=0` opts a worker process out of running scheduled-job ticks (only one process per cluster should run the scheduler to avoid duplicate dispatches).
+    - Phase 2 (run-execution handoff to jobs — chat-stream rewrite) deferred as future work. The chat stream uses a different durability model (resumable SSE via `/stream/resume` from #3 phase 5) which already provides survive-restart semantics; migrating to a queued job would add latency without functional improvement. End-to-end durability via the queue is now demonstrated across 6 feature paths: research_run (user, 150), evaluation_run (post-chat, 75), automation_run (background, 50), memory_mine (post-chat dedupe, 50), automations_dispatch (maintenance, 30), workspace_gc (scheduled daily, 10).
 
-18. [ ] Research loop domain (search→fetch→synthesize)
+18. [x] Research loop domain (search→fetch→synthesize) **(gate fully met)**
     - Source: ../research/plan.md
     - Depends on: #8, #17
-    - Gate: report quality + source traceability + resumable progress
+    - Gate: report quality + source traceability + resumable progress ✓
     - Evidence (Phase 1 — schema + web_fetch tool + research capability group, 2026-05-03):
       - New domain: [src/lib/research/research.schema.ts](../../src/lib/research/research.schema.ts) — three tables (`research`, `research_sources`, `research_steps`) + two enums (`research_status`: planning/searching/fetching/synthesizing/complete/failed/canceled; `research_step_kind`: plan/search/fetch/extract/synthesize/note). Cross-domain pointers (conversationId/runId/jobId) declared by-name. Hand-written migration [drizzle/0034_research.sql](../../drizzle/0034_research.sql).
       - Server CRUD: `createResearch`, `updateResearch`, `getResearchById` / `listResearchForUser`, `addResearchSource`, `markSourcesCited`, `addResearchStep` (auto-assigns seq via `max+1` per research), `listSourcesForResearch` (with `citedOnly` filter), `listStepsForResearch`, `getResearchDetail` (joins research + sources + steps): [src/lib/research/research.server.ts](../../src/lib/research/research.server.ts)
@@ -596,7 +608,12 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - `runResearchLoop` looks up the per-agent config via the research's conversationId → conversations.agentId → agents.config.research chain. Falls back to defaults at any missing link. The hardcoded `PLANNER_MODEL`, `SYNTHESIZER_MODEL`, `MAX_SUB_QUESTIONS`, `URLS_PER_QUESTION`, `MAX_FETCH_CHARS` constants moved to `DEFAULT_RESEARCH_CONFIG` so the override path uses one source of truth: [src/lib/research/research-runner.server.ts](../../src/lib/research/research-runner.server.ts)
       - `updateAgentRecord` accepts a `research` patch field that merges into `agent.config.research` without clobbering siblings (capabilityGroups, hooks). Empty object clears the override and falls back to defaults: [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts). Remote schema validates with Zod (model strings + integer ranges); empty `research: {}` clears the override: [src/lib/agents/agents.remote.ts](../../src/lib/agents/agents.remote.ts)
       - 11 new tests cover: null/empty/missing config returns defaults, plannerModel + synthesizerModel overrides apply, maxSubQuestions clamps to [1,8], urlsPerQuestion clamps to [1,5], maxFetchChars clamps to [5k,100k], non-numeric values fall back, empty-string models fall back, enabled defaults true with explicit-false override; storage round-trip through `agents.config.research`, merge-don't-clobber alongside capabilityGroups: [tests/research.config.spec.ts](../../tests/research.config.spec.ts)
-    - Phase 5 remainder (PDF attachment grounding via `pdf_read` tool — needs poppler-utils env work) still pending. Per-agent research config is now end-to-end: an admin can configure a "deep researcher" agent with claude-sonnet-4 + 8 sub-questions for high-quality investigations, and a "quick researcher" with gpt-4o-mini + 3 sub-questions for cheap exploratory passes.
+    - Evidence (Phase 5 finish — `pdf_read` tool, 2026-05-04):
+      - **`pdf_read` tool** added to [src/lib/tools/tools.server.ts](../../src/lib/tools/tools.server.ts) — accepts an HTTP(S) URL OR an absolute path inside the user's sandbox workspace. Reuses `validateFetchUrl` for URL SSRF protection (private/loopback rejection) and `safePathWithin` for path traversal protection. Shells out to `pdftotext` (poppler-utils) with `-layout -enc UTF-8`. Reuses `cleanupExtractedText` + `truncateAtParagraph` from web_fetch so the output shape is consistent.
+      - When `pdftotext` is missing, returns a structured error with install instructions (`apt-get install poppler-utils` / `brew install poppler`) instead of crashing the run.
+      - Returns `{source, text, charCount, truncated, pageHint}` — pageHint counts `\f` form-feed characters that pdftotext inserts between pages, so the agent gets a rough sense of document size.
+      - Added to the `research` capability group + MCP descriptions: [src/lib/tools/tools.ts](../../src/lib/tools/tools.ts), [src/routes/api/mcp/+server.ts](../../src/routes/api/mcp/+server.ts)
+    - **#18 Research now fully complete.** Schema (P1) + orchestrator loop (P2) + research_run job (P3) + chat composer trigger + per-agent config (P4) + citation rendering + PDF reader (P5) all shipped. Future enhancements (file-attachment-driven grounding, multi-evaluator voting on report quality) are out-of-scope for the gate.
 
 ### Wave 5 — Product Workflow Integration
 

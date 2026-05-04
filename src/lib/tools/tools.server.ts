@@ -668,6 +668,114 @@ export async function browserScreenshot(url?: string) {
 }
 
 /**
+ * Wave 4 #18 phase 5 — `pdf_read` tool implementation.
+ *
+ * Shells out to `pdftotext` (poppler-utils, available in most Linux/macOS dev environments
+ * + the production Docker image). Accepts either:
+ *   - HTTP(S) URL — downloads to a temp file via fetch(), then runs pdftotext
+ *   - Absolute path inside the user's sandbox workspace — used directly
+ *
+ * URL validation reuses the SSRF defense from web_fetch (private/loopback rejection). Path
+ * validation uses safePathWithin so an agent can't traverse out of its sandbox via `../`.
+ *
+ * Returns the extracted text trimmed to maxChars at the nearest paragraph boundary. When
+ * pdftotext is missing, returns a structured error with install instructions instead of
+ * crashing the run.
+ */
+export async function pdfRead(rawSource: string, maxChars = 100_000): Promise<{
+	source: string
+	text: string
+	charCount: number
+	truncated: boolean
+	pageHint: number | null
+}> {
+	const { spawn } = await import('node:child_process')
+	const { mkdtemp, writeFile, rm, stat } = await import('node:fs/promises')
+	const { join } = await import('node:path')
+	const { tmpdir } = await import('node:os')
+	const { validateFetchUrl, truncateAtParagraph, cleanupExtractedText } = await import('$lib/research/web-fetch')
+
+	const trimmed = rawSource.trim()
+	let pdfPath: string
+	let cleanupTempDir: string | null = null
+	let resolvedSource = trimmed
+
+	if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+		const validation = validateFetchUrl(trimmed)
+		if (!validation.ok) throw new Error(validation.error)
+		// Download to a tmp dir.
+		const tempDir = await mkdtemp(join(tmpdir(), 'pdf-read-'))
+		cleanupTempDir = tempDir
+		const response = await fetch(validation.url.toString(), {
+			signal: AbortSignal.timeout(45_000),
+		})
+		if (!response.ok) {
+			await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
+			throw new Error(`failed to download PDF: HTTP ${response.status}`)
+		}
+		const buf = Buffer.from(await response.arrayBuffer())
+		pdfPath = join(tempDir, 'source.pdf')
+		await writeFile(pdfPath, buf)
+		resolvedSource = validation.url.toString()
+	} else {
+		// Treat as a path inside the user's sandbox workspace.
+		const ctxSnapshot = toolUserContext.getStore()
+		if (!ctxSnapshot?.userId) throw new Error('Missing user context for pdf_read')
+		await ensureWorkspaceDir()
+		const workspaceRoot = getWorkspace()
+		pdfPath = await safePathWithin(workspaceRoot, trimmed)
+		const fileStat = await stat(pdfPath).catch(() => null)
+		if (!fileStat || !fileStat.isFile()) {
+			throw new Error(`PDF not found at sandbox path: ${trimmed}`)
+		}
+	}
+
+	try {
+		const stdout = await new Promise<string>((resolve, reject) => {
+			const proc = spawn('pdftotext', ['-layout', '-enc', 'UTF-8', pdfPath, '-'], {
+				stdio: ['ignore', 'pipe', 'pipe'],
+			})
+			const out: Buffer[] = []
+			const err: Buffer[] = []
+			proc.stdout.on('data', (chunk) => out.push(chunk as Buffer))
+			proc.stderr.on('data', (chunk) => err.push(chunk as Buffer))
+			proc.on('error', (e) => {
+				if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+					reject(
+						new Error(
+							'pdftotext binary not found — install poppler-utils (apt-get install poppler-utils on Debian/Ubuntu, brew install poppler on macOS) to enable pdf_read.',
+						),
+					)
+				} else {
+					reject(e)
+				}
+			})
+			proc.on('close', (code) => {
+				if (code === 0) resolve(Buffer.concat(out).toString('utf8'))
+				else reject(new Error(`pdftotext exited with code ${code}: ${Buffer.concat(err).toString('utf8').slice(0, 500)}`))
+			})
+		})
+
+		const cleaned = cleanupExtractedText(stdout)
+		const text = truncateAtParagraph(cleaned, maxChars)
+		// pdftotext doesn't expose a page count from the -layout pipe, but we can hint by
+		// counting form-feed characters which it inserts between pages.
+		const pageHint = (stdout.match(/\f/g) ?? []).length || null
+		return {
+			source: resolvedSource,
+			text,
+			charCount: cleaned.length,
+			truncated: cleaned.length > maxChars,
+			pageHint,
+		}
+	} finally {
+		if (cleanupTempDir) {
+			await rm(cleanupTempDir, { recursive: true, force: true }).catch(() => undefined)
+		}
+	}
+}
+
+/**
  * Wave 4 #18 phase 1 — `web_fetch` tool implementation.
  *
  * Reuses the existing Playwright browser singleton (same one `browser_screenshot` uses) so we
@@ -769,6 +877,13 @@ export const toolSchemas = {
 	web_fetch: z.object({
 		url: z.string().min(1).max(2048),
 		maxChars: z.number().int().min(1000).max(100_000).default(50_000).optional(),
+	}),
+	pdf_read: z.object({
+		// HTTP(S) URL to download + parse, OR an absolute path to a file the agent already
+		// wrote into its sandbox workspace (file_write produces these). Validated against the
+		// same private-IP/loopback rejection as web_fetch.
+		source: z.string().min(1).max(2048),
+		maxChars: z.number().int().min(1000).max(200_000).default(100_000).optional(),
 	}),
 	// Wave 4 #15 phase 2 — Projects + Artifacts agent tools.
 	list_projects: z.object({}),
@@ -954,6 +1069,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
+	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
 	list_projects: 'List the user\'s projects (durable containers for artifacts with append-only version history). Returns id, name, slug, kind, description for each project.',
 	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
 	list_artifacts: 'List artifacts in a project. Returns id, name, slug, contentType, isActive for each artifact (active by default; pass includeInactive to see soft-deleted).',
@@ -1272,6 +1388,18 @@ export async function executeTool(
 			if (call.name === 'web_fetch') {
 				const input = toolSchemas.web_fetch.parse(call.arguments)
 				const result = await webFetch(input.url, input.maxChars)
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'pdf_read') {
+				const input = toolSchemas.pdf_read.parse(call.arguments)
+				const result = await pdfRead(input.source, input.maxChars)
 				return {
 					success: true,
 					tool: call.name,

@@ -50,6 +50,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	file_info: 'Return metadata for a file or directory',
 	browser_screenshot: 'Take a screenshot of a web page',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt }. Blocks private/loopback addresses for SSRF safety.',
+	pdf_read: 'Extract text from a PDF (URL or sandbox path) via pdftotext. Returns { source, text, charCount, truncated, pageHint }.',
 	list_projects: 'List the user\'s projects (durable artifact containers).',
 	create_project: 'Create a new project to group related artifacts.',
 	list_artifacts: 'List artifacts in a project.',
@@ -158,6 +159,11 @@ function schemaToJsonSchema(name: ToolName) {
 			type: 'object',
 			properties: { url: { type: 'string' }, maxChars: { type: 'integer' } },
 			required: ['url'],
+		},
+		pdf_read: {
+			type: 'object',
+			properties: { source: { type: 'string' }, maxChars: { type: 'integer' } },
+			required: ['source'],
 		},
 		list_projects: { type: 'object', properties: {} },
 		create_project: {

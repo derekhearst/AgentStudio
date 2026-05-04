@@ -9,6 +9,7 @@
 		"android:install:local": "powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1",
 		"android:run:local": "bun run android:build:local && bun run android:install:local",
 		"dev": "vite dev",
+		"worker": "bun scripts/worker.ts",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

@@ -79,8 +79,8 @@ export const capabilityGroups = {
 	},
 	research: {
 		label: 'Research',
-		description: 'Read full web page content (web_fetch) for deeper investigation than web_search snippets allow',
-		tools: ['web_fetch'] as ToolName[],
+		description: 'Read full web page content (web_fetch) and PDF documents (pdf_read) for deeper investigation than web_search snippets allow',
+		tools: ['web_fetch', 'pdf_read'] as ToolName[],
 		alwaysOn: false,
 	},
 	projects: {
