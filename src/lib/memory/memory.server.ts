@@ -93,9 +93,43 @@ export function renderMemoryContext(drawers: RetrievedDrawer[]): string {
 	const blocks = drawers.map((drawer, i) => {
 		const date = drawer.occurredAt.toISOString().slice(0, 10)
 		const header = `[${i + 1}] ${date} · ${drawer.wingName} › ${drawer.closetTopic}`
-		return `${header}\n${drawer.content}`
+		// Wave 4 #15 phase 3 — when a drawer is linked to a project artifact, surface the
+		// linkage so the agent knows the memory is grounded in a specific artifact it can
+		// load via read_artifact for full content.
+		const linkLine = drawer.linkedArtifactId
+			? `\n(linked artifact: ${drawer.linkedArtifactId})`
+			: ''
+		return `${header}\n${drawer.content}${linkLine}`
 	})
 	return `<memory_context>\n${blocks.join('\n\n')}\n</memory_context>`
+}
+
+/**
+ * Wave 4 #15 phase 3 — Memory ↔ Projects bridge helper.
+ *
+ * Tag a drawer with a specific artifact reference so subsequent memory recalls can surface
+ * the linked artifact alongside the drawer content. Pass `null` to clear the linkage.
+ *
+ * Application uses cases:
+ *   - mining.server.ts: when mining a conversation bound to a project, scan drawer content
+ *     for artifact references and tag matching drawers
+ *   - manual API: a future remote endpoint or admin tool could let users tag drawers by hand
+ *
+ * Stale-pointer semantics: deleting the artifact does NOT cascade — the drawer keeps the
+ * stale pointer, and `renderMemoryContext` shows it as `(linked artifact: <id>)`. The
+ * application can detect the stale pointer by joining against artifacts.
+ */
+export async function linkDrawerToArtifact(
+	drawerId: string,
+	artifactId: string | null,
+): Promise<{ updated: boolean }> {
+	const { eq } = await import('drizzle-orm')
+	const result = await db
+		.update(memoryDrawers)
+		.set({ linkedArtifactId: artifactId })
+		.where(eq(memoryDrawers.id, drawerId))
+		.returning({ id: memoryDrawers.id })
+	return { updated: result.length > 0 }
 }
 
 export { mineSession, mineSessions }

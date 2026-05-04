@@ -253,6 +253,13 @@
       "when": 1777884000000,
       "tag": "0035_conversation_project",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1777887000000,
+      "tag": "0036_memory_artifact_link",
+      "breakpoints": true
     }
   ]
 }

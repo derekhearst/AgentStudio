@@ -106,6 +106,11 @@ export const memoryDrawers = pgTable(
 		}>(),
 		tokenCount: integer('token_count').notNull().default(0),
 		sourceMessageId: uuid('source_message_id').references(() => messages.id, { onDelete: 'set null' }),
+		// Wave 4 #15 phase 3 — link a drawer to a specific artifact so retrieval can surface
+		// artifact context alongside the drawer content. Declared by-name (no enforced FK) to
+		// avoid a circular import with $lib/projects. Application logic treats stale pointers
+		// (artifact deleted) as null when rendering memory context.
+		linkedArtifactId: uuid('linked_artifact_id'),
 		occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	},
@@ -115,6 +120,7 @@ export const memoryDrawers = pgTable(
 		// HNSW index for cosine semantic search; added by hand-edited migration.
 		index('memory_drawers_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
 		index('memory_drawers_content_tsv_idx').using('gin', sql`to_tsvector('english', ${t.content})`),
+		index('memory_drawers_linked_artifact_idx').on(t.linkedArtifactId),
 	],
 )
 

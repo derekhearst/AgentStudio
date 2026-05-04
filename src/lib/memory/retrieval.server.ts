@@ -32,6 +32,10 @@ export type RetrievedDrawer = {
 	keywordScore: number
 	temporalScore: number
 	finalScore: number
+	// Wave 4 #15 phase 3 — Memory ↔ Projects bridge. When set, the drawer references a specific
+	// project artifact and renderMemoryContext surfaces the linkage so the agent knows it can
+	// load the full artifact via read_artifact for grounded follow-up.
+	linkedArtifactId: string | null
 }
 
 export type RecallOptions = {
@@ -98,6 +102,7 @@ export async function recall(userId: string, query: string, options: RecallOptio
 			wingName: memoryWings.name,
 			roomLabel: memoryRooms.label,
 			closetTopic: memoryClosets.topic,
+			linkedArtifactId: memoryDrawers.linkedArtifactId,
 			semantic: semanticExpr,
 			keyword: keywordExpr,
 		})
@@ -126,6 +131,7 @@ export async function recall(userId: string, query: string, options: RecallOptio
 			wingName: row.wingName,
 			roomLabel: row.roomLabel,
 			closetTopic: row.closetTopic,
+			linkedArtifactId: row.linkedArtifactId ?? null,
 			semanticScore: semantic,
 			keywordScore: keyword,
 			temporalScore: temporal,
