@@ -452,6 +452,15 @@ async function bootstrapDatabase() {
 			console.warn('[db] Workspace handler registration failed (non-fatal):', err)
 		}
 
+		// Wave 4 #17 phase 5 finish — register the `automation_run` + `automations_dispatch`
+		// job handlers + the per-minute dispatch tick.
+		try {
+			const { registerAutomationJobHandlers } = await import('$lib/automations/automation-handler.server')
+			registerAutomationJobHandlers()
+		} catch (err) {
+			console.warn('[db] Automation handler registration failed (non-fatal):', err)
+		}
+
 		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0
 		// for cases like running migrations + seed in a one-shot script. Default-on so dev sessions
 		// pick up jobs immediately. A future deployment can run a separate worker process with the

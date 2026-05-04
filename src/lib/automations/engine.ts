@@ -117,6 +117,29 @@ async function getOrCreateAutomationConversation(automation: typeof automations.
  * detached Session. Without an agent, we keep the legacy single-shot `chat()` synthesis path —
  * lighter, no wasted infra, no need for a chat_run row.
  */
+/**
+ * Wave 4 #17 phase 5 — public entry point for the automation_run job handler.
+ * Looks up the automation by id, runs it via the existing runAutomation pipeline, then
+ * updates last_run_at / next_run_at on the automation row. Throws if the automation is
+ * missing or disabled (the job marks failed and won't retry past maxAttempts).
+ */
+export async function runAutomationById(automationId: string, now = new Date()) {
+	const [automation] = await db.select().from(automations).where(eq(automations.id, automationId)).limit(1)
+	if (!automation) {
+		throw new Error(`Automation ${automationId} not found`)
+	}
+	if (!automation.enabled) {
+		throw new Error(`Automation ${automationId} is disabled`)
+	}
+	const result = await runAutomation(automation, now)
+	const nextRunAt = computeNextRunAt(automation.cronExpression, now)
+	await db
+		.update(automations)
+		.set({ lastRunAt: now, nextRunAt, updatedAt: now })
+		.where(eq(automations.id, automation.id))
+	return { ...result, nextRunAt: nextRunAt?.toISOString() ?? null }
+}
+
 async function runAutomation(automation: typeof automations.$inferSelect, now: Date) {
 	const conversation = await getOrCreateAutomationConversation(automation)
 	const [agent] = automation.agentId
@@ -305,6 +328,15 @@ async function runAutomationWithAgent(args: {
 	}
 }
 
+/**
+ * Wave 4 #17 phase 5 — was an inline-execution pass. Now enqueues `automation_run` jobs for
+ * each due automation; the worker picks them up + runs them durably. Benefits: ticks survive
+ * restart, dedupe per-automation prevents double-execution, failures show up in /settings/jobs.
+ *
+ * Caller (cron route OR scheduled tick) just enqueues. The job worker handles execution.
+ * `lastRunAt` / `nextRunAt` are updated by the job handler (`runAutomationById`) once the run
+ * actually succeeds, so a queued job that hasn't run yet won't accidentally bump the schedule.
+ */
 export async function checkAndRunAutomations(now = new Date()) {
 	const due = await db
 		.select()
@@ -313,33 +345,36 @@ export async function checkAndRunAutomations(now = new Date()) {
 		.orderBy(asc(automations.nextRunAt))
 		.limit(25)
 
-	const results: Array<{ automationId: string; ok: boolean; conversationId?: string; error?: string }> = []
-	for (const automation of due) {
-		try {
-			const runResult = await runAutomation(automation, now)
-			const nextRunAt = computeNextRunAt(automation.cronExpression, now)
-			await db
-				.update(automations)
-				.set({
-					lastRunAt: now,
-					nextRunAt,
-					updatedAt: now,
+	const enqueued: Array<{ automationId: string; jobId?: string; error?: string }> = []
+	if (due.length > 0) {
+		const { enqueueJob } = await import('$lib/jobs/jobs.server')
+		for (const automation of due) {
+			try {
+				// Dedupe key includes the next-run minute so back-to-back ticks within the same
+				// minute collapse, but the next minute's tick gets a fresh enqueue if the job
+				// is still pending (the worker will skip when it sees lastRunAt updated).
+				const dedupeKey = `automation:${automation.id}:${(automation.nextRunAt ?? now).toISOString().slice(0, 16)}`
+				const job = await enqueueJob({
+					type: 'automation_run',
+					queue: 'default',
+					priority: 50, // background tier — same as memory_mine
+					dedupeKey,
+					payload: { automationId: automation.id },
+					userId: automation.userId,
 				})
-				.where(eq(automations.id, automation.id))
-
-			results.push({ automationId: automation.id, ok: true, conversationId: runResult.conversationId })
-		} catch (error) {
-			results.push({
-				automationId: automation.id,
-				ok: false,
-				error: error instanceof Error ? error.message : 'Automation run failed',
-			})
+				enqueued.push({ automationId: automation.id, jobId: job.id })
+			} catch (error) {
+				enqueued.push({
+					automationId: automation.id,
+					error: error instanceof Error ? error.message : 'Failed to enqueue automation_run',
+				})
+			}
 		}
 	}
 
 	return {
 		runAt: now.toISOString(),
 		evaluated: due.length,
-		results,
+		enqueued,
 	}
 }
