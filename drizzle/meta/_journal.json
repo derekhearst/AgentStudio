@@ -281,6 +281,13 @@
       "when": 1777896000000,
       "tag": "0039_agent_identity_skill",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1777896060000,
+      "tag": "0040_automation_mode",
+      "breakpoints": true
     }
   ]
 }

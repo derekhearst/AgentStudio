@@ -131,13 +131,56 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 	if (!automation.enabled) {
 		throw new Error(`Automation ${automationId} is disabled`)
 	}
-	const result = await runAutomation(automation, now)
-	const nextRunAt = computeNextRunAt(automation.cronExpression, now)
-	await db
-		.update(automations)
-		.set({ lastRunAt: now, nextRunAt, updatedAt: now })
-		.where(eq(automations.id, automation.id))
-	return { ...result, nextRunAt: nextRunAt?.toISOString() ?? null }
+
+	// Wave 5 #21 phase 3 — mode dispatch hook. Today every mode falls through to the legacy
+	// chat-followup behavior. Phases 4-5 will switch on automation.mode here:
+	//   research → enqueue research_run with outputTarget routing
+	//   code → enqueue code_run against the linked repository
+	//   maintenance → run hygiene work (no chat surface)
+	if (automation.mode !== 'chat_followup') {
+		console.info('[automations] mode dispatch not yet implemented; falling back to chat_followup', {
+			automationId,
+			mode: automation.mode,
+			outputTarget: automation.outputTarget,
+		})
+	}
+
+	const startedAt = Date.now()
+	let success = true
+	try {
+		const result = await runAutomation(automation, now)
+		const nextRunAt = computeNextRunAt(automation.cronExpression, now)
+		await db
+			.update(automations)
+			.set({ lastRunAt: now, nextRunAt, updatedAt: now })
+			.where(eq(automations.id, automation.id))
+		return { ...result, nextRunAt: nextRunAt?.toISOString() ?? null }
+	} catch (err) {
+		success = false
+		throw err
+	} finally {
+		// Wave 5 #21 phase 3 + #20 phase 4 — emit per-mode lifecycle metric so /review/health
+		// shows automation throughput broken out by mode + outputTarget. Best-effort dynamic
+		// import keeps the engine free of an observability cycle.
+		void (async () => {
+			try {
+				const { recordMetric } = await import('$lib/observability/metrics.server')
+				const durationMs = Math.max(0, Date.now() - startedAt)
+				await recordMetric({
+					metric: 'automations.duration_ms',
+					dimension: { mode: automation.mode, outputTarget: automation.outputTarget, status: success ? 'completed' : 'failed' },
+					value: durationMs,
+				})
+				await recordMetric({
+					metric: `automations.lifecycle.${success ? 'completed' : 'failed'}`,
+					dimension: { mode: automation.mode, outputTarget: automation.outputTarget },
+					value: 1,
+				})
+			} catch (err) {
+				console.warn('[automations] lifecycle metric failed (non-fatal)', err)
+			}
+		})()
+	}
 }
 
 async function runAutomation(automation: typeof automations.$inferSelect, now: Date) {
