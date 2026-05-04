@@ -232,6 +232,13 @@
       "when": 1777875000000,
       "tag": "0032_projects",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1777878000000,
+      "tag": "0033_jobs",
+      "breakpoints": true
     }
   ]
 }
