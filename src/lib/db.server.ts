@@ -417,6 +417,29 @@ async function bootstrapDatabase() {
 			console.warn('[db] Default evaluator seed failed (non-fatal):', err)
 		}
 
+		// Wave 4 #18 phase 3 — register the `research_run` job handler. Must happen BEFORE the
+		// worker starts so claimed research jobs find a handler.
+		try {
+			const { registerResearchJobHandlers } = await import('$lib/research/research-handler.server')
+			registerResearchJobHandlers()
+		} catch (err) {
+			console.warn('[db] Research handler registration failed (non-fatal):', err)
+		}
+
+		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0
+		// for cases like running migrations + seed in a one-shot script. Default-on so dev sessions
+		// pick up jobs immediately. A future deployment can run a separate worker process with the
+		// web tier's worker disabled.
+		if (env.JOBS_WORKER_ENABLED !== '0') {
+			try {
+				const { startJobWorker } = await import('$lib/jobs/worker.server')
+				const worker = startJobWorker({ pollIntervalMs: 2000, leaseTtlMs: 120_000 })
+				console.log(`[db] Started in-process job worker (id=${worker.workerId})`)
+			} catch (err) {
+				console.warn('[db] Job worker start failed (non-fatal):', err)
+			}
+		}
+
 		// Phase 4 of #4: backfill embeddings for any skills that don't have them yet, so the
 		// relevance filter has something to rank. Best-effort; failures are non-fatal (the
 		// fallback path lists every skill exactly like before).
