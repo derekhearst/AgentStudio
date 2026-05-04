@@ -30,6 +30,7 @@ export {
 	listReviewItemsQuery,
 	getReviewItemQuery,
 	getRunTraceQuery,
+	getOperationalSnapshotQuery,
 	resolveReviewItemCommand,
 	assignReviewItemCommand,
 } from './review.remote'
@@ -42,3 +43,10 @@ export {
 	type StartRunTraceInput,
 	type FinishRunTraceInput,
 } from './traces.server'
+export {
+	recordMetric,
+	runMetricsSample,
+	listLatestMetrics,
+	listMetricTimeseries,
+	type RecordMetricInput,
+} from './metrics.server'

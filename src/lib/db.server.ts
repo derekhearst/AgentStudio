@@ -478,6 +478,14 @@ async function bootstrapDatabase() {
 			console.warn('[db] Automation handler registration failed (non-fatal):', err)
 		}
 
+		// Wave 5 #20 phase 4 — register the `metrics_sample` job handler + 5min sampler tick.
+		try {
+			const { registerMetricsJobHandlers } = await import('$lib/observability/metrics-handler.server')
+			registerMetricsJobHandlers()
+		} catch (err) {
+			console.warn('[db] Metrics handler registration failed (non-fatal):', err)
+		}
+
 		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0
 		// for cases like running migrations + seed in a one-shot script. Default-on so dev sessions
 		// pick up jobs immediately. A future deployment can run a separate worker process with the

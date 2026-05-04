@@ -109,6 +109,7 @@
 					</p>
 				</div>
 				<div class="flex items-center gap-2">
+					<a class="btn btn-ghost btn-xs" href="/review/health">Health →</a>
 					<select class="select select-sm select-bordered text-xs" bind:value={typeFilter} onchange={() => void load()}>
 						{#each TYPES as opt (opt.value)}
 							<option value={opt.value}>{opt.label}</option>

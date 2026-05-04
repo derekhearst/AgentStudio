@@ -10,6 +10,7 @@ import {
 	reviewInboxRollup,
 } from './review.server'
 import { getRunTraceByRunId } from './traces.server'
+import { listLatestMetrics } from './metrics.server'
 
 /**
  * Wave 5 #20 phase 1 — Review Inbox SvelteKit remote surface.
@@ -108,4 +109,17 @@ export const getRunTraceQuery = query(z.string().uuid(), async (runId) => {
 	if (user.role !== 'admin') return { trace: null, adminOnly: true as const }
 	const row = await getRunTraceByRunId(runId)
 	return { trace: row, adminOnly: false as const }
+})
+
+/**
+ * Wave 5 #20 phase 4 — latest operational metrics snapshot for the health dashboard.
+ *
+ * Admin-only. Returns the most recent value for each (metric, dimension) pair from the last
+ * 24h, plus the inbox rollup so the page can render queue + review summary in one shot.
+ */
+export const getOperationalSnapshotQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	if (user.role !== 'admin') return { metrics: [], rollup: [], adminOnly: true as const }
+	const [metrics, rollup] = await Promise.all([listLatestMetrics(500), reviewInboxRollup()])
+	return { metrics, rollup, adminOnly: false as const }
 })
