@@ -444,6 +444,14 @@ async function bootstrapDatabase() {
 			console.warn('[db] Evaluation handler registration failed (non-fatal):', err)
 		}
 
+		// Wave 4 #17 phase 4 + 5 — register the `workspace_gc` job handler + its daily schedule.
+		try {
+			const { registerWorkspaceJobHandlers } = await import('$lib/workspace/workspace-handler.server')
+			registerWorkspaceJobHandlers()
+		} catch (err) {
+			console.warn('[db] Workspace handler registration failed (non-fatal):', err)
+		}
+
 		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0
 		// for cases like running migrations + seed in a one-shot script. Default-on so dev sessions
 		// pick up jobs immediately. A future deployment can run a separate worker process with the
@@ -455,6 +463,21 @@ async function bootstrapDatabase() {
 				console.log(`[db] Started in-process job worker (id=${worker.workerId})`)
 			} catch (err) {
 				console.warn('[db] Job worker start failed (non-fatal):', err)
+			}
+		}
+
+		// Wave 4 #17 phase 4 — start the scheduler AFTER handler registration so the first tick
+		// always finds a registered handler. Opt-out via JOBS_SCHEDULER_ENABLED=0.
+		if (env.JOBS_WORKER_ENABLED !== '0' && env.JOBS_SCHEDULER_ENABLED !== '0') {
+			try {
+				const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
+				startScheduler()
+				const scheduled = listScheduledJobs()
+				if (scheduled.length > 0) {
+					console.log(`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`)
+				}
+			} catch (err) {
+				console.warn('[db] Scheduler start failed (non-fatal):', err)
 			}
 		}
 

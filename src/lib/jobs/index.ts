@@ -39,3 +39,11 @@ export {
 	type WorkerOptions,
 } from './worker.server'
 export { listJobsQuery } from './jobs.remote'
+export {
+	registerScheduledJob,
+	listScheduledJobs,
+	startScheduler,
+	_resetScheduler,
+	type ScheduledJob,
+	type Scheduler,
+} from './scheduler.server'
