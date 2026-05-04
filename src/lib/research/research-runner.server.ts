@@ -69,7 +69,23 @@ export type ResearchRunOutcome = {
 	error?: string | null
 }
 
-export async function runResearchLoop(researchId: string): Promise<ResearchRunOutcome> {
+export type RunResearchLoopOptions = {
+	/**
+	 * Wave 4 #17 phase 3 — durable cancellation.
+	 *
+	 * Job handlers pass `ctx.checkCancellation` here so the loop can bail at safe boundaries
+	 * (between planning/searching/synthesizing stages). When the underlying job has been
+	 * canceled, `checkCancellation` throws — the loop catches, transitions research.status
+	 * to `canceled`, and returns the outcome. Direct callers (tests, scripts) omit this and
+	 * the loop runs to completion.
+	 */
+	checkCancellation?: () => Promise<void>
+}
+
+export async function runResearchLoop(
+	researchId: string,
+	opts: RunResearchLoopOptions = {},
+): Promise<ResearchRunOutcome> {
 	const r = await getResearchById(researchId)
 	if (!r) {
 		return {
@@ -85,8 +101,22 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 
 	let totalCost = 0
 
+	// Wave 4 #17 phase 3 — durable cancellation. Wraps `opts.checkCancellation` so the loop
+	// can detect both the worker-side cancel signal AND a direct flip of research.status to
+	// 'canceled' from the cancelResearchCommand path. Throws CanceledError on either.
+	const checkCanceled = async () => {
+		if (opts.checkCancellation) {
+			await opts.checkCancellation()
+		}
+		const fresh = await getResearchById(researchId)
+		if (fresh?.status === 'canceled') {
+			throw new CanceledError(`research ${researchId} canceled`)
+		}
+	}
+
 	try {
 		// ─────────── PHASE 1: PLAN ───────────
+		await checkCanceled()
 		await updateResearch(researchId, { status: 'planning' })
 		const planResult = await runPlanner(r)
 		totalCost += planResult.costUsd
@@ -103,8 +133,10 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 		await updateResearch(researchId, { plan: planResult.subQuestions })
 
 		// ─────────── PHASE 2: SEARCH + FETCH ───────────
+		await checkCanceled()
 		await updateResearch(researchId, { status: 'searching' })
 		for (const subQuestion of planResult.subQuestions) {
+			await checkCanceled()
 			const hits = await runSearch(researchId, subQuestion).catch((err) => {
 				console.warn('[research] search failed', { researchId, subQuestion, err })
 				return [] as SearchHit[]
@@ -112,6 +144,7 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 			const picked = pickUrlsToFetch(hits, URLS_PER_QUESTION)
 			await updateResearch(researchId, { status: 'fetching' })
 			for (const hit of picked) {
+				await checkCanceled()
 				await runFetch(researchId, subQuestion, hit).catch((err) => {
 					console.warn('[research] fetch failed', { researchId, url: hit.url, err })
 				})
@@ -119,6 +152,7 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 		}
 
 		// ─────────── PHASE 3: SYNTHESIZE ───────────
+		await checkCanceled()
 		await updateResearch(researchId, { status: 'synthesizing' })
 		const sources = await listSourcesForResearch(researchId)
 		if (sources.length === 0) {
@@ -152,6 +186,25 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 			costUsd: totalCost,
 		}
 	} catch (err) {
+		// Wave 4 #17 phase 3 — distinguish cancellation from failure. Canceled runs
+		// transition to status='canceled' (not 'failed') and don't record err.message
+		// as a research-row failure. The job handler also sees the throw and reports
+		// completion with the canceled outcome.
+		if (err instanceof CanceledError) {
+			await updateResearch(researchId, {
+				status: 'canceled',
+				finishedAt: new Date(),
+				costUsd: totalCost,
+			})
+			return {
+				researchId,
+				status: 'canceled',
+				report: null,
+				sourceCount: 0,
+				citedCount: 0,
+				costUsd: totalCost,
+			}
+		}
 		const errorMsg = err instanceof Error ? err.message : String(err)
 		await updateResearch(researchId, {
 			status: 'failed',
@@ -168,6 +221,13 @@ export async function runResearchLoop(researchId: string): Promise<ResearchRunOu
 			costUsd: totalCost,
 			error: errorMsg,
 		}
+	}
+}
+
+class CanceledError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = 'CanceledError'
 	}
 }
 

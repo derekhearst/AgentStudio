@@ -1,7 +1,7 @@
 import { command, query } from '$app/server'
 import { z } from 'zod'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
-import { enqueueJob } from '$lib/jobs/jobs.server'
+import { cancelJob, enqueueJob } from '$lib/jobs/jobs.server'
 import {
 	createResearch,
 	getResearchById,
@@ -77,7 +77,15 @@ export const startResearchCommand = command(startResearchSchema, async (input) =
 
 export const cancelResearchCommand = command(z.string().uuid(), async (researchId) => {
 	const user = requireAuthenticatedRequestUser()
-	await ensureResearchOwned(researchId, user.id)
+	const research = await ensureResearchOwned(researchId, user.id)
+	// Wave 4 #17 phase 3 — flip the research row + ALSO cancel the underlying job so the
+	// worker stops at the next safe boundary. Without the job-cancel, the worker would keep
+	// going and complete the research even after the user clicked cancel.
 	await updateResearch(researchId, { status: 'canceled', finishedAt: new Date() })
-	return { canceled: true }
+	if (research.jobId) {
+		await cancelJob(research.jobId, `Canceled by user ${user.id}`).catch((err) => {
+			console.warn('[research] failed to cancel underlying job', err)
+		})
+	}
+	return { canceled: true, jobCanceled: !!research.jobId }
 })

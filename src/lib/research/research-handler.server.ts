@@ -22,20 +22,22 @@ let registered = false
 
 export function registerResearchJobHandlers(): void {
 	if (registered) return
-	registerJobHandler('research_run', async ({ job }) => {
+	registerJobHandler('research_run', async ({ job, checkCancellation }) => {
 		const parsed = RESEARCH_RUN_PAYLOAD.safeParse(job.payload)
 		if (!parsed.success) {
 			throw new Error(`research_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
 		}
-		const outcome = await runResearchLoop(parsed.data.researchId)
-		// If the loop bailed with status='failed', surface that to the job too so it shows
-		// up in the failures-only filter in /settings/jobs. The runner has already recorded
-		// the error on the research row.
+		// Wave 4 #17 phase 3 — pass the worker's checkCancellation through so the runner can
+		// bail at safe boundaries when the user clicks Cancel. The runner ALSO checks the
+		// research row directly so a cancel via cancelResearchCommand is honored even if the
+		// underlying job-cancel is racing.
+		const outcome = await runResearchLoop(parsed.data.researchId, { checkCancellation })
 		if (outcome.status === 'failed') {
 			throw new Error(outcome.error ?? 'research run failed')
 		}
 		return {
 			researchId: outcome.researchId,
+			status: outcome.status,
 			sourceCount: outcome.sourceCount,
 			citedCount: outcome.citedCount,
 			costUsd: outcome.costUsd,
