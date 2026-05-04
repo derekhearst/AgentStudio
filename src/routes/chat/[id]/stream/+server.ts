@@ -503,22 +503,51 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 	}
 	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
+		const blockedBy = budgetCheck.blockedBy
 		// Await the alert write so callers querying budget_alerts immediately after the 402
 		// response see the row (no fire-and-forget race).
 		try {
 			await recordBudgetAlert({
-				limit: budgetCheck.blockedBy,
+				limit: blockedBy,
 				triggerType: 'block',
-				spendUsd: parseFloat(budgetCheck.blockedBy.limitUsd),
+				spendUsd: parseFloat(blockedBy.limitUsd),
 			})
 		} catch (err) {
 			console.warn('[budget] block alert insert failed', err)
 		}
+		// Wave 5 #20 — surface the block as a policy_override_request in the review inbox so
+		// an operator can decide whether to lift the cap or hold it. Best-effort dynamic
+		// import keeps the chat-stream path free of an observability cycle. DedupeKey
+		// `budget:<limitId>:<userId>` collapses repeated denials into one open item.
+		void (async () => {
+			try {
+				const { openReviewItem } = await import('$lib/observability/review.server')
+				await openReviewItem({
+					type: 'policy_override_request',
+					severity: 'warning',
+					summary: `Budget block: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd} for user ${user.id.slice(0, 8)}`,
+					payload: {
+						kind: 'budget',
+						limitId: blockedBy.id,
+						scope: blockedBy.scope,
+						scopeId: blockedBy.scopeId,
+						period: blockedBy.period,
+						limitUsd: blockedBy.limitUsd,
+						userId: user.id,
+						conversationId: body.conversationId,
+					},
+					sessionId: body.conversationId,
+					dedupeKey: `budget:${blockedBy.id}:${user.id}`,
+				})
+			} catch (err) {
+				console.warn('[budget] policy_override_request open failed', err)
+			}
+		})()
 		return json(
 			{
 				error: 'budget_exceeded',
-				message: `Budget cap exceeded: ${budgetCheck.blockedBy.scope} ${budgetCheck.blockedBy.period} limit of $${budgetCheck.blockedBy.limitUsd}`,
-				limitId: budgetCheck.blockedBy.id,
+				message: `Budget cap exceeded: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd}`,
+				limitId: blockedBy.id,
 			},
 			{ status: 402 },
 		)

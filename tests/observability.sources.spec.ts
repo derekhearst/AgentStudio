@@ -91,6 +91,33 @@ test.describe('observability/sources — job_failure', () => {
 	})
 })
 
+test.describe('observability/sources — policy_override_request', () => {
+	test('policy_override_request severity is warning + dedupes by budget:<limitId>:<userId>', async () => {
+		const prefix = uniquePrefix('policy')
+		const sql = getSql()
+		try {
+			const limitId = randomUUID()
+			const userId = randomUUID()
+			const dedupeKey = `budget:${limitId}:${userId}`
+			const [item] = await sql<{ severity: string; payload: { dedupeKey?: string; kind?: string; limitId?: string } }[]>`
+				insert into review_items (type, severity, summary, payload)
+				values (
+					'policy_override_request', 'warning'::review_item_severity,
+					${`${prefix} budget block`},
+					${sql.json({ kind: 'budget', limitId, userId, scope: 'global', period: 'monthly', limitUsd: '50.00', dedupeKey })}
+				)
+				returning severity::text as severity, payload
+			`
+			expect(item.severity).toBe('warning')
+			expect(item.payload.dedupeKey).toBe(dedupeKey)
+			expect(item.payload.kind).toBe('budget')
+			expect(item.payload.limitId).toBe(limitId)
+		} finally {
+			await cleanupReviewSourcesPrefix(prefix)
+		}
+	})
+})
+
 test.describe('observability/sources — hook_failure', () => {
 	test('hook_failure severity is warning + dedupes by hook:<runId>:<hookName>:<event>', async () => {
 		const prefix = uniquePrefix('hookfail')
