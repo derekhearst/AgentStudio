@@ -22,6 +22,27 @@ export async function enqueuePendingQuestion(runId: string, entry: EnqueueInput)
 		const next = [...(row.pendingQuestions ?? []).filter((e) => e.token !== entry.token), entry]
 		await tx.update(chatRuns).set({ pendingQuestions: next }).where(eq(chatRuns.id, runId))
 	})
+	// Wave 5 #20 — open a review item so user_question prompts show up in /review even
+	// when the SSE client is disconnected. Best-effort + deduped by token.
+	void (async () => {
+		try {
+			const { openReviewItem } = await import('$lib/observability/review.server')
+			const firstQ = entry.questions?.[0]
+			const summaryFragment = firstQ?.question
+				? firstQ.question.slice(0, 120)
+				: `${entry.questions?.length ?? 0} question(s)`
+			await openReviewItem({
+				type: 'user_question',
+				severity: 'warning',
+				summary: `Agent asked: ${summaryFragment}`,
+				payload: { token: entry.token, questions: entry.questions ?? [] },
+				runId,
+				dedupeKey: `question:${entry.token}`,
+			})
+		} catch (err) {
+			console.warn('[questions] review item open failed (non-fatal)', err)
+		}
+	})()
 }
 
 export async function recordQuestionAnswers(

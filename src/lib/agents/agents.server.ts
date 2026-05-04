@@ -156,6 +156,9 @@ export async function updateAgentRecord(
 		// { enabled?, plannerModel?, synthesizerModel?, maxSubQuestions?, urlsPerQuestion?, maxFetchChars? }.
 		// Empty object clears the override and falls back to DEFAULT_RESEARCH_CONFIG.
 		research?: Record<string, unknown>
+		// Wave 5 #22 phase 2 — link the agent to a skill whose content overrides the legacy
+		// systemPrompt at runtime. Pass null to clear the linkage (falls back to systemPrompt).
+		identitySkillId?: string | null
 	},
 ) {
 	const updates: Partial<typeof agents.$inferInsert> = {}
@@ -163,6 +166,7 @@ export async function updateAgentRecord(
 	if (patch.role !== undefined) updates.role = patch.role
 	if (patch.systemPrompt !== undefined) updates.systemPrompt = patch.systemPrompt
 	if (patch.model !== undefined) updates.model = patch.model
+	if (patch.identitySkillId !== undefined) updates.identitySkillId = patch.identitySkillId
 
 	const configChanged =
 		patch.capabilityGroups !== undefined ||

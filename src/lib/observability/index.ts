@@ -32,3 +32,12 @@ export {
 	resolveReviewItemCommand,
 	assignReviewItemCommand,
 } from './review.remote'
+export {
+	startRunTrace,
+	appendTraceSpan,
+	finishRunTrace,
+	getRunTraceByRunId,
+	type TraceSpan,
+	type StartRunTraceInput,
+	type FinishRunTraceInput,
+} from './traces.server'

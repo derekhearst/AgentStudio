@@ -70,6 +70,18 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		source: input.isOrchestrator ? 'chat_stream' : 'agent',
 	})
 
+	// Wave 5 #20 phase 2 — open a run_traces row at loop start so spans can append as the
+	// loop progresses. Best-effort + dynamic import to avoid loading observability when the
+	// runtime is exercised in tests that don't need it.
+	void (async () => {
+		try {
+			const { startRunTrace } = await import('$lib/observability/traces.server')
+			await startRunTrace({ runId: session.runId, sessionId: input.conversationId })
+		} catch (err) {
+			console.warn('[runtime] startRunTrace failed (non-fatal)', err)
+		}
+	})()
+
 	let currentMessages: LoopMessage[] = [...input.initialMessages]
 	const allToolCalls: Array<Record<string, unknown>> = []
 	let allTextContent = ''
@@ -461,6 +473,22 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 				durationMs: toolResult.executionMs,
 			})
 
+			// Wave 5 #20 phase 2 — record a tool_call span on the run's trace.
+			void (async () => {
+				try {
+					const { appendTraceSpan } = await import('$lib/observability/traces.server')
+					await appendTraceSpan(session.runId, {
+						kind: 'tool_call',
+						startedAt: new Date(Date.now() - toolResult.executionMs).toISOString(),
+						durationMs: toolResult.executionMs,
+						success: toolResult.success,
+						toolName: tc.name,
+					})
+				} catch (err) {
+					console.warn('[runtime] appendTraceSpan failed (non-fatal)', err)
+				}
+			})()
+
 			const rawResultStr = toolResult.success
 				? JSON.stringify(toolResult.result)
 				: `Error: ${toolResult.error}`
@@ -543,6 +571,18 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		durationMs: Date.now() - startedAt,
 		success: true,
 	})
+
+	// Wave 5 #20 phase 2 — flip the run_traces row to `completed`. The caller updates cost
+	// after logLlmUsage; we leave costUsd unset here so it's recorded by the caller's own
+	// trace-finish call (or stays at the default 0 when the caller skips it).
+	void (async () => {
+		try {
+			const { finishRunTrace } = await import('$lib/observability/traces.server')
+			await finishRunTrace({ runId: session.runId, status: 'completed' })
+		} catch (err) {
+			console.warn('[runtime] finishRunTrace failed (non-fatal)', err)
+		}
+	})()
 
 	return {
 		finalText: allTextContent || assistantContent,

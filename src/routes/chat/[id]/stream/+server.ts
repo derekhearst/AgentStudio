@@ -263,11 +263,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const orchestratorPrompt = await buildOrchestratorPrompt()
 		contextSlots.push({ name: 'identity', priority: 100, content: orchestratorPrompt })
 	} else {
-		// Agent conversation — load agent's own system prompt
+		// Agent conversation — load agent's own system prompt.
+		// Wave 5 #22 phase 2 — when agent.identitySkillId is set, prefer the skill's content
+		// so /skills edits hot-reload without a deploy. Fall back to systemPrompt otherwise.
 		const { agents: agentsTable } = await import('$lib/agents/agents.schema')
 		const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, conversation.agentId!)).limit(1)
 		if (agent) {
-			contextSlots.push({ name: 'identity', priority: 100, content: agent.systemPrompt })
+			let identityContent = agent.systemPrompt
+			if (agent.identitySkillId) {
+				try {
+					const { skills: skillsTable } = await import('$lib/skills/skills.schema')
+					const [skill] = await db
+						.select({ content: skillsTable.content, enabled: skillsTable.enabled })
+						.from(skillsTable)
+						.where(eq(skillsTable.id, agent.identitySkillId))
+						.limit(1)
+					if (skill && skill.enabled && skill.content.trim().length > 0) {
+						identityContent = skill.content
+					}
+				} catch (err) {
+					console.warn('[chat] agent identity skill lookup failed, using systemPrompt fallback', err)
+				}
+			}
+			contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
 			const config = agent.config as
 				| {
 						allowedTools?: string[]

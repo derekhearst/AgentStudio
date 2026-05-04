@@ -22,5 +22,12 @@ export const agents = pgTable('agents', {
 	status: agentStatusEnum('status').notNull().default('idle'),
 	kind: agentKindEnum('kind').notNull().default('worker'),
 	parentAgentId: uuid('parent_agent_id'),
+	// Wave 5 #22 phase 2 — optional link to a `skill` row whose content overrides
+	// `system_prompt` at runtime. Operators edit the skill at /skills/[id] and the next
+	// run picks up the change without a deploy. Declared by-name (no enforced FK) so
+	// deleting a skill leaves the agent's pointer stale; buildAgentDefinition falls back
+	// to `systemPrompt` when the skill is missing/disabled. Same pattern as the
+	// orchestrator-identity skill from Phase 1.
+	identitySkillId: uuid('identity_skill_id'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })

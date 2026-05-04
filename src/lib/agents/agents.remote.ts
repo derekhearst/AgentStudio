@@ -48,6 +48,9 @@ const updateAgentSchema = z
 				maxFetchChars: z.number().int().min(5_000).max(100_000).optional(),
 			})
 			.optional(),
+		// Wave 5 #22 phase 2 — link to a skill whose content overrides systemPrompt at runtime.
+		// Pass null to clear; pass a uuid to link.
+		identitySkillId: z.string().uuid().nullable().optional(),
 	})
 	.refine(
 		(input) =>
@@ -56,7 +59,8 @@ const updateAgentSchema = z
 			input.capabilityGroups !== undefined ||
 			input.allowedTools !== undefined ||
 			input.hooks !== undefined ||
-			input.research !== undefined,
+			input.research !== undefined ||
+			input.identitySkillId !== undefined,
 		{ message: 'Provide at least one field to update' },
 	)
 
@@ -90,6 +94,7 @@ export const updateAgentCommand = command(updateAgentSchema, async (input) => {
 		allowedTools: input.allowedTools,
 		hooks: input.hooks,
 		research: input.research,
+		identitySkillId: input.identitySkillId,
 	})
 	if (updated && before) {
 		void auditAgentConfigUpdated({

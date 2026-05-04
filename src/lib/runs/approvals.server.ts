@@ -10,7 +10,7 @@ type EnqueueInput = Omit<PendingApprovalEntry, 'decision' | 'decidedAt'>
 export async function enqueuePendingApproval(runId: string, entry: EnqueueInput): Promise<void> {
 	await db.transaction(async (tx) => {
 		const [row] = await tx
-			.select({ pendingApprovals: chatRuns.pendingApprovals })
+			.select({ pendingApprovals: chatRuns.pendingApprovals, conversationId: chatRuns.conversationId })
 			.from(chatRuns)
 			.where(eq(chatRuns.id, runId))
 			.for('update')
@@ -22,6 +22,23 @@ export async function enqueuePendingApproval(runId: string, entry: EnqueueInput)
 		const next = [...(row.pendingApprovals ?? []).filter((e) => e.token !== entry.token), entry]
 		await tx.update(chatRuns).set({ pendingApprovals: next }).where(eq(chatRuns.id, runId))
 	})
+	// Wave 5 #20 — open a review item so approval requests show up in /review even when the
+	// SSE client is disconnected. Best-effort + deduped by token so retries collapse.
+	void (async () => {
+		try {
+			const { openReviewItem } = await import('$lib/observability/review.server')
+			await openReviewItem({
+				type: 'approval_request',
+				severity: 'warning',
+				summary: `Tool approval requested: ${entry.toolName}`,
+				payload: { toolName: entry.toolName, args: entry.args, token: entry.token },
+				runId,
+				dedupeKey: `approval:${entry.token}`,
+			})
+		} catch (err) {
+			console.warn('[approvals] review item open failed (non-fatal)', err)
+		}
+	})()
 }
 
 export async function recordApprovalDecision(

@@ -1,4 +1,7 @@
+import { eq } from 'drizzle-orm'
+import { db } from '$lib/db.server'
 import type { agents } from '$lib/agents/agents.schema'
+import { skills } from '$lib/skills/skills.schema'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
@@ -97,8 +100,15 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 				}
 			: null
 
+	// Wave 5 #22 phase 2 — when the agent has an `identitySkillId`, prefer the skill's
+	// content over the legacy `systemPrompt` column. Operators edit the skill at /skills/[id]
+	// and the next run picks up the change without a deploy. Falls back to systemPrompt when
+	// the skill is missing/disabled (defense in depth — a misconfigured skill row never
+	// breaks an agent's run).
+	const identityContent = await loadAgentIdentity(input.agent)
+
 	const slots: ContextSlot[] = [
-		{ name: 'identity', priority: 100, content: input.agent.systemPrompt },
+		{ name: 'identity', priority: 100, content: identityContent },
 		{ name: 'role', priority: 95, content: `Your role: ${input.agent.role}` },
 		{ name: 'tool_policy', priority: 90, content: input.toolPolicy },
 	]
@@ -166,4 +176,26 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 		worktree,
 		includedSlots: assembled.includedSlots,
 	}
+}
+
+/**
+ * Wave 5 #22 phase 2 — load the agent's identity content from the linked skill (when
+ * `identitySkillId` is set + the skill is enabled), falling back to the legacy
+ * `systemPrompt` column otherwise. Always returns a non-empty string.
+ */
+async function loadAgentIdentity(agent: AgentRecord): Promise<string> {
+	if (!agent.identitySkillId) return agent.systemPrompt
+	try {
+		const [skill] = await db
+			.select({ content: skills.content, enabled: skills.enabled })
+			.from(skills)
+			.where(eq(skills.id, agent.identitySkillId))
+			.limit(1)
+		if (skill && skill.enabled && skill.content.trim().length > 0) {
+			return skill.content
+		}
+	} catch (err) {
+		console.warn('[runtime] failed to load agent identity skill, using systemPrompt fallback', err)
+	}
+	return agent.systemPrompt
 }

@@ -642,7 +642,15 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - Admin-only `/review` page with type/status/severity filters + 24h rollup cards + expandable rows + resolve/dismiss actions. Sidebar nav entry under Settings: [src/routes/review/+page.svelte](../../src/routes/review/+page.svelte), [src/lib/ui/Sidebar.svelte](../../src/lib/ui/Sidebar.svelte)
       - Remote layer with admin gate: `listReviewItemsQuery`, `getReviewItemQuery`, `resolveReviewItemCommand`, `assignReviewItemCommand`: [src/lib/observability/review.remote.ts](../../src/lib/observability/review.remote.ts)
       - 7 tests cover: review_item defaults + enum rejection + resolve transition + cross-domain pointer survival; runTrace defaults; metric storage shape: [tests/observability.review.spec.ts](../../tests/observability.review.spec.ts)
-    - Phases 2-5 (runtime/job instrumentation, dashboards, more review-item sources, artifact + memory conflict items) deferred — the foundation is in place + the evaluator-failure source proves the pattern end-to-end.
+    - Evidence (Phase 2 partial — runChatLoop spans + 3 more review-item sources, 2026-05-04):
+      - **Run-trace recording**: new module [src/lib/observability/traces.server.ts](../../src/lib/observability/traces.server.ts) — `startRunTrace` (upserts on resume), `appendTraceSpan` (jsonb array append + counter increments via column expression), `finishRunTrace` (terminal status + cost), `getRunTraceByRunId`. Pure best-effort: a thrown DB error never blocks the runtime loop.
+      - **runChatLoop wiring** [src/lib/runtime/loop.server.ts](../../src/lib/runtime/loop.server.ts): start trace at loop entry, append `tool_call` span (with toolName + durationMs + success) after each tool execution, finish trace as `completed` after the loop returns. All void-prefixed for fire-and-forget — the loop never blocks on trace writes.
+      - **3 more review-item sources** wired (now 4 of the 9 enum values fully sourced):
+        - `approval_request` from `enqueuePendingApproval` ([src/lib/runs/approvals.server.ts](../../src/lib/runs/approvals.server.ts)) — dedupeKey `approval:<token>`, severity warning. Approval requests now show up in /review even when the SSE client is disconnected.
+        - `user_question` from `enqueuePendingQuestion` ([src/lib/runs/questions.server.ts](../../src/lib/runs/questions.server.ts)) — dedupeKey `question:<token>`, severity warning. First-question text included in summary.
+        - `job_failure` from `failJob` terminal path ([src/lib/jobs/jobs.server.ts](../../src/lib/jobs/jobs.server.ts)) — dedupeKey `job:<jobId>`, severity critical, opens only on terminal failure (not on retries).
+      - 6 new tests cover: per-source severity + dedupeKey shape; run_trace counter increments via column expression; status transition running → completed: [tests/observability.sources.spec.ts](../../tests/observability.sources.spec.ts)
+    - Phases 3-5 (run-trace dashboard UI, queue health metrics, additional review-item sources for hook_failure / artifact_conflict / memory_conflict / policy_override_request) deferred. The trace + 4 review sources prove the pattern end-to-end across runtime + jobs + evaluator paths; remaining sources land incrementally as the corresponding domains add the openReviewItem call.
 
 21. [x] Automations scheduling and trigger framework **(gate met via Wave 4 #17 P5 finish migration)**
     - Source: ../automations/plan.md
@@ -665,7 +673,13 @@ UX-1. [x] UI platform and interaction system (cross-cutting) - Source: ../ui/pla
       - Boot wiring: `seedOrchestratorIdentity` called once at startup alongside the other system seeds: [src/lib/db.server.ts](../../src/lib/db.server.ts)
       - Operators can edit the prompt at `/skills/[id]` (existing UI) and the next chat run picks up the change without a deploy.
       - 3 tests cover: skill seed presence + content + tags; content edit persists across reads; pure helper exports the right defaults: [tests/agents.identity-skill.spec.ts](../../tests/agents.identity-skill.spec.ts)
-    - Phases 2-6 (link agents to identity skills via `agents.identitySkillId`, markdown editor route, AGENTS.md discovery, fragment library, companion bundles per agent role) deferred. Phase 1 satisfies the gate's no-hardcoded-identity criterion; the rest is editor-UX polish that doesn't unblock other waves.
+    - Evidence (Phase 2 — agents.identity_skill_id column + buildAgentDefinition reads from skill, 2026-05-04):
+      - **`agents.identity_skill_id` uuid column** added via [drizzle/0039_agent_identity_skill.sql](../../drizzle/0039_agent_identity_skill.sql). Declared by-name (no enforced FK to skills) so deleting a skill leaves a stale pointer; `buildAgentDefinition` falls back to `systemPrompt` when the linked skill is missing/disabled (defense in depth, same pattern as orchestrator identity).
+      - **`buildAgentDefinition` rewritten** to call a new `loadAgentIdentity(agent)` helper that reads from the linked skill if `identitySkillId` is set + enabled, otherwise returns `agent.systemPrompt`: [src/lib/runtime/agent-definition.server.ts](../../src/lib/runtime/agent-definition.server.ts)
+      - **Chat-stream agent path** (which uses its own slot pipeline, not buildAgentDefinition) gets the same skill-first-with-fallback logic inline: [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/[id]/stream/+server.ts)
+      - **`updateAgentRecord` + remote schema** accept `identitySkillId: uuid | null` so operators can link/unlink via the existing agent detail page: [src/lib/agents/agents.server.ts](../../src/lib/agents/agents.server.ts), [src/lib/agents/agents.remote.ts](../../src/lib/agents/agents.remote.ts)
+      - 3 schema-invariant tests cover: defaults to null, link/unlink/relink round-trip, stale-pointer survival on skill delete: [tests/agents.identity-link.spec.ts](../../tests/agents.identity-link.spec.ts)
+    - Phases 3-6 (markdown editor route, AGENTS.md discovery, fragment library, companion bundles per agent role) deferred. Phases 1+2 give the prompt-as-data foundation across orchestrator + per-agent paths; the rest is editor-UX polish.
 
 ---
 

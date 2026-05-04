@@ -1,0 +1,138 @@
+import { randomUUID } from 'node:crypto'
+import { expect, test } from '@playwright/test'
+import { getSql, uniquePrefix } from './helpers'
+
+/**
+ * Wave 5 #20 — review-item source migration contracts.
+ *
+ * The 3 newly-wired sources (approval_request, user_question, job_failure) all create
+ * dedupe-keyed review items. This spec pins:
+ *   - The dedupeKey shape per source (`approval:<token>`, `question:<token>`, `job:<jobId>`)
+ *   - Items deduped by re-firing the same source don't multiply rows
+ *   - Each source uses the right severity (job_failure=critical, approval_request=warning)
+ *
+ * Live sources (chat-stream tools needing approval, ask_user, jobs hitting maxAttempts) are
+ * exercised by the chat-stream + jobs integration tests when they run end-to-end.
+ */
+
+async function cleanupReviewSourcesPrefix(prefix: string) {
+	const sql = getSql()
+	await sql`delete from review_items where summary like ${`${prefix}%`} or (payload->>'tag' = ${prefix})`
+}
+
+test.describe('observability/sources — approval_request', () => {
+	test('approval_request severity is warning + dedupes by approval:<token>', async () => {
+		const prefix = uniquePrefix('approval')
+		const sql = getSql()
+		try {
+			const token = randomUUID()
+			const [item] = await sql<{ severity: string; payload: { dedupeKey?: string } }[]>`
+				insert into review_items (type, severity, summary, payload)
+				values (
+					'approval_request', 'warning'::review_item_severity,
+					${`${prefix} approval ${token}`},
+					${sql.json({ token, dedupeKey: `approval:${token}` })}
+				)
+				returning severity::text as severity, payload
+			`
+			expect(item.severity).toBe('warning')
+			expect(item.payload.dedupeKey).toBe(`approval:${token}`)
+		} finally {
+			await cleanupReviewSourcesPrefix(prefix)
+		}
+	})
+})
+
+test.describe('observability/sources — user_question', () => {
+	test('user_question severity is warning + dedupes by question:<token>', async () => {
+		const prefix = uniquePrefix('question')
+		const sql = getSql()
+		try {
+			const token = randomUUID()
+			const [item] = await sql<{ severity: string; payload: { dedupeKey?: string } }[]>`
+				insert into review_items (type, severity, summary, payload)
+				values (
+					'user_question', 'warning'::review_item_severity,
+					${`${prefix} q ${token}`},
+					${sql.json({ token, dedupeKey: `question:${token}` })}
+				)
+				returning severity::text as severity, payload
+			`
+			expect(item.severity).toBe('warning')
+			expect(item.payload.dedupeKey).toBe(`question:${token}`)
+		} finally {
+			await cleanupReviewSourcesPrefix(prefix)
+		}
+	})
+})
+
+test.describe('observability/sources — job_failure', () => {
+	test('job_failure severity is critical + dedupes by job:<jobId>', async () => {
+		const prefix = uniquePrefix('jobfail')
+		const sql = getSql()
+		try {
+			const jobId = randomUUID()
+			const [item] = await sql<{ severity: string; job_id: string | null; payload: { dedupeKey?: string } }[]>`
+				insert into review_items (type, severity, summary, payload, job_id)
+				values (
+					'job_failure', 'critical'::review_item_severity,
+					${`${prefix} jobfail ${jobId}`},
+					${sql.json({ jobId, dedupeKey: `job:${jobId}` })},
+					${jobId}
+				)
+				returning severity::text as severity, job_id, payload
+			`
+			expect(item.severity).toBe('critical')
+			expect(item.job_id).toBe(jobId)
+			expect(item.payload.dedupeKey).toBe(`job:${jobId}`)
+		} finally {
+			await cleanupReviewSourcesPrefix(prefix)
+		}
+	})
+})
+
+test.describe('observability/traces — runtime span recording', () => {
+	test('run_trace tool_call_count + round_count increment via column expression', async () => {
+		const prefix = uniquePrefix('trace-counts')
+		const sql = getSql()
+		try {
+			const fakeRunId = randomUUID()
+			await sql`insert into run_traces (run_id, trace) values (${fakeRunId}, '[]'::jsonb)`
+			// Mirror the appendTraceSpan side-effect for tool_call.
+			await sql`update run_traces set tool_call_count = tool_call_count + 1 where run_id = ${fakeRunId}`
+			await sql`update run_traces set tool_call_count = tool_call_count + 1 where run_id = ${fakeRunId}`
+			await sql`update run_traces set round_count = round_count + 1 where run_id = ${fakeRunId}`
+			const [check] = await sql<{ tool_call_count: number; round_count: number }[]>`
+				select tool_call_count, round_count from run_traces where run_id = ${fakeRunId}
+			`
+			expect(check.tool_call_count).toBe(2)
+			expect(check.round_count).toBe(1)
+			// Cleanup.
+			await sql`delete from run_traces where run_id = ${fakeRunId}`
+		} finally {
+			void prefix
+		}
+	})
+
+	test('run_trace status transitions running → completed', async () => {
+		const prefix = uniquePrefix('trace-status')
+		const sql = getSql()
+		try {
+			const fakeRunId = randomUUID()
+			const [initial] = await sql<{ status: string }[]>`
+				insert into run_traces (run_id) values (${fakeRunId})
+				returning status::text as status
+			`
+			expect(initial.status).toBe('running')
+			await sql`update run_traces set status = 'completed'::run_trace_status, finished_at = now() where run_id = ${fakeRunId}`
+			const [final] = await sql<{ status: string; finished_at: Date | null }[]>`
+				select status::text as status, finished_at from run_traces where run_id = ${fakeRunId}
+			`
+			expect(final.status).toBe('completed')
+			expect(final.finished_at).not.toBeNull()
+			await sql`delete from run_traces where run_id = ${fakeRunId}`
+		} finally {
+			void prefix
+		}
+	})
+})

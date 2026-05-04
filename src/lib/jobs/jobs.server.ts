@@ -277,6 +277,34 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 		})
 		.where(eq(jobs.id, jobId))
 		.returning()
+
+	// Wave 5 #20 — open a review item when a job exhausts retries and lands at terminal
+	// failed. DedupeKey on jobId so multiple readers/observers don't multiply the rows.
+	// Best-effort: failure to open the review item never blocks the job state transition.
+	if (row) {
+		void (async () => {
+			try {
+				const { openReviewItem } = await import('$lib/observability/review.server')
+				await openReviewItem({
+					type: 'job_failure',
+					severity: 'critical',
+					summary: `Job ${row.type} failed after ${row.attemptCount} attempt(s): ${opts.error.message.slice(0, 120)}`,
+					payload: {
+						jobType: row.type,
+						attemptCount: row.attemptCount,
+						maxAttempts: row.maxAttempts,
+						error: opts.error,
+					},
+					runId: row.runId,
+					taskId: row.taskId,
+					jobId: row.id,
+					dedupeKey: `job:${row.id}`,
+				})
+			} catch (err) {
+				console.warn('[jobs] review item open failed (non-fatal)', err)
+			}
+		})()
+	}
 	return row ?? null
 }
 
