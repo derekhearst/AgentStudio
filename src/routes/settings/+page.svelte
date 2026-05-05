@@ -107,6 +107,8 @@
 			settings = updated;
 			applyTheme('AgentStudio-night');
 			statusMessage = 'Settings saved.';
+		} catch (err) {
+			statusMessage = `Save failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
 			busy = false;
 		}
@@ -121,6 +123,8 @@
 			settings = updated;
 			applyTheme('AgentStudio-night');
 			statusMessage = 'Settings reset to defaults.';
+		} catch (err) {
+			statusMessage = `Reset failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
 			busy = false;
 		}
@@ -178,6 +182,8 @@
 
 			statusMessage = 'Push notifications enabled.';
 			await refresh();
+		} catch (err) {
+			statusMessage = `Push enable failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
 			busy = false;
 		}
@@ -197,6 +203,8 @@
 			}
 			statusMessage = 'Push notifications disabled.';
 			await refresh();
+		} catch (err) {
+			statusMessage = `Push disable failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
 			busy = false;
 		}
@@ -215,13 +223,20 @@
 			});
 			statusMessage = 'Test notification sent.';
 			await refresh();
+		} catch (err) {
+			statusMessage = `Test failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
 			busy = false;
 		}
 	}
 
 	async function markRead(notificationId: string, read: boolean) {
-		await markNotification({ notificationId, read });
+		try {
+			await markNotification({ notificationId, read });
+		} catch (err) {
+			statusMessage = `Notification update failed: ${err instanceof Error ? err.message : String(err)}`;
+			return;
+		}
 		await refresh();
 	}
 
@@ -243,10 +258,32 @@
 		return requiredTools.includes('*') || requiredTools.includes(toolName);
 	}
 
+	const isWildcardApproval = $derived(
+		(settings?.toolConfig?.approvalRequiredTools ?? []).includes('*'),
+	);
+
 	function toggleToolApproval(toolName: string, required: boolean) {
 		if (!settings) return;
-		const base = (settings.toolConfig?.approvalRequiredTools ?? []).filter((name) => name !== '*');
+		// If the wildcard is currently active, toggling any specific tool would silently
+		// strip the "approve every tool" posture. Refuse — operator must clear the
+		// wildcard explicitly via the master toggle below.
+		if (isWildcardApproval) {
+			statusMessage = 'Per-tool approval is disabled while "Require approval for all tools" is on.';
+			return;
+		}
+		const base = settings.toolConfig?.approvalRequiredTools ?? [];
 		const next = required ? [...new Set([...base, toolName])] : base.filter((name) => name !== toolName);
+		settings = {
+			...settings,
+			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
+		};
+	}
+
+	function setWildcardApproval(value: boolean) {
+		if (!settings) return;
+		const current = settings.toolConfig?.approvalRequiredTools ?? [];
+		const without = current.filter((name) => name !== '*');
+		const next = value ? [...without, '*'] : without;
 		settings = {
 			...settings,
 			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
@@ -422,7 +459,19 @@
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Tool Approval
 			</p>
-			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4">
+			<label class="mb-3 flex items-start justify-between gap-3 rounded-xl border border-warning/40 bg-warning/5 px-3 py-2.5">
+				<span>
+					<span class="block text-sm font-medium">Require approval for all tools</span>
+					<span class="block text-xs text-base-content/55">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
+				</span>
+				<input
+					type="checkbox"
+					class="checkbox checkbox-sm checkbox-warning mt-0.5"
+					checked={isWildcardApproval}
+					onchange={(e) => setWildcardApproval((e.currentTarget as HTMLInputElement).checked)}
+				/>
+			</label>
+			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4" class:opacity-60={isWildcardApproval} class:pointer-events-none={isWildcardApproval} aria-disabled={isWildcardApproval}>
 				{#each toolsByGroup as groupEntry, i (groupEntry.groupKey)}
 					{#if i > 0}
 						<div class="border-t border-base-content/6"></div>
@@ -486,7 +535,19 @@
 				</label>
 				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
 					<span class="block text-sm font-medium">Top-K results</span>
-					<input type="number" min="1" max="20" class="input input-sm input-bordered w-20" bind:value={settings.memoryConfig.topK} />
+					<input
+						type="number"
+						min="1"
+						max="20"
+						class="input input-sm input-bordered w-20"
+						value={settings.memoryConfig.topK}
+						oninput={(e) => {
+							if (!settings) return;
+							const raw = Number((e.currentTarget as HTMLInputElement).value);
+							const topK = Number.isFinite(raw) && raw >= 1 ? Math.min(20, Math.max(1, Math.round(raw))) : 1;
+							settings = { ...settings, memoryConfig: { ...settings.memoryConfig, topK } };
+						}}
+					/>
 				</label>
 				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
 					<span class="block text-sm font-medium">Rerank model</span>
@@ -552,10 +613,12 @@
 							step="0.01"
 							placeholder="No limit"
 							value={settings.budgetConfig?.dailyLimit ?? ''}
-							onchange={(e) => {
+							oninput={(e) => {
 								if (!settings) return;
-								const val = (e.currentTarget as HTMLInputElement).value;
-								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit: val ? Number(val) : null } };
+								const raw = (e.currentTarget as HTMLInputElement).value.trim();
+								const parsed = raw === '' ? null : Math.max(0, Number(raw));
+								const dailyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
+								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit } };
 							}}
 						/>
 					</div>
@@ -572,10 +635,12 @@
 							step="0.01"
 							placeholder="No limit"
 							value={settings.budgetConfig?.monthlyLimit ?? ''}
-							onchange={(e) => {
+							oninput={(e) => {
 								if (!settings) return;
-								const val = (e.currentTarget as HTMLInputElement).value;
-								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit: val ? Number(val) : null } };
+								const raw = (e.currentTarget as HTMLInputElement).value.trim();
+								const parsed = raw === '' ? null : Math.max(0, Number(raw));
+								const monthlyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
+								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit } };
 							}}
 						/>
 					</div>
