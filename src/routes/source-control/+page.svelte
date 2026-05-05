@@ -130,15 +130,19 @@
 						</div>
 					</div>
 					<div class="flex gap-2">
-						{#if !overview.githubConfigured}
+						{#if !overview.githubConfigured && !githubConnection}
 							<span class="badge badge-warning badge-sm" title="Set GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET in env">
 								Not configured
 							</span>
 						{:else if githubConnection}
-							<button class="btn btn-primary btn-sm" type="button" onclick={syncRepos} disabled={syncing}>
-								{syncing ? 'Syncing…' : 'Sync repos'}
-							</button>
-							<a class="btn btn-outline btn-sm" href="/source-control/github/connect">Reconnect</a>
+							{#if overview.githubConfigured}
+								<button class="btn btn-primary btn-sm" type="button" onclick={syncRepos} disabled={syncing}>
+									{syncing ? 'Syncing…' : 'Sync repos'}
+								</button>
+								<a class="btn btn-outline btn-sm" href="/source-control/github/connect">Reconnect</a>
+							{/if}
+							<!-- Disconnect always available when a connection exists, even if OAuth env -->
+							<!-- has been removed since (so operators can clean up dangling tokens). -->
 							<button class="btn btn-error btn-outline btn-sm" type="button" onclick={disconnect} disabled={busy}>
 								Disconnect
 							</button>

@@ -1,7 +1,4 @@
-export { default as ActionCard } from './ActionCard.svelte'
 export { default as Avatar } from './Avatar.svelte'
-export { default as ColorChip } from './ColorChip.svelte'
-export { default as CommandInput } from './CommandInput.svelte'
 export { default as ContentPanel } from './ContentPanel.svelte'
 export { default as MobileNav } from './MobileNav.svelte'
 export { default as RunningSessionsDock } from './RunningSessionsDock.svelte'

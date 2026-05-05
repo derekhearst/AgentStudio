@@ -926,6 +926,37 @@ export const toolSchemas = {
 		includeArchived: z.boolean().optional(),
 		maxPages: z.number().int().min(1).max(10).optional(),
 	}),
+	prepare_commit: z.object({
+		path: z.string().trim().min(1).max(1024).optional(),
+	}),
+	push_branch: z.object({
+		path: z.string().trim().min(1).max(1024).optional(),
+		owner: z.string().trim().min(1).max(200),
+		repo: z.string().trim().min(1).max(200),
+		branch: z.string().trim().min(1).max(200).optional(),
+		force: z.boolean().optional(),
+	}),
+	create_pull_request: z.object({
+		owner: z.string().trim().min(1).max(200),
+		repo: z.string().trim().min(1).max(200),
+		title: z.string().trim().min(1).max(256),
+		body: z.string().max(20_000).optional(),
+		head: z.string().trim().min(1).max(200),
+		base: z.string().trim().min(1).max(200),
+		draft: z.boolean().optional(),
+	}),
+	list_pull_requests: z.object({
+		owner: z.string().trim().min(1).max(200),
+		repo: z.string().trim().min(1).max(200),
+		limit: z.number().int().min(1).max(100).optional(),
+	}),
+	get_pull_request: z.object({
+		pullRequestId: z.string().uuid(),
+	}),
+	clone_repository: z.object({
+		owner: z.string().trim().min(1).max(200),
+		repo: z.string().trim().min(1).max(200),
+	}),
 	run_subagent: z.object({
 		task: z.string().min(1),
 		context: z.string().optional(),
@@ -1084,6 +1115,12 @@ const toolDescriptions: Record<ToolName, string> = {
 	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
 	list_my_repos: 'List source-control repositories the user has connected to AgentStudio (after OAuth). Optional `search` substring on owner/name. Returns id, owner, name, defaultBranch, htmlUrl, private. Run `sync_my_repos` first if the list looks empty or stale.',
 	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio (idempotent). Requires the user to have connected GitHub at /source-control. Returns {total, inserted, updated, skipped} or an errorMessage when the connection is missing/expired.',
+	prepare_commit: 'Inspect a working tree (defaults to the workspace root; supply a relative `path` to inspect a subdirectory) and produce a structured commit draft. Returns {branch, upstream, ahead, behind, dirty, diff: {filesChanged, insertions, deletions, files}, suggestedSubject, files}. Read-only — no commit/push happens. Use as the first step before requesting human approval to push or open a PR. The path must be a git repository (has a .git entry); otherwise the call fails with a clear error.',
+	push_branch: 'Push a local branch to GitHub. ALWAYS REQUIRES OPERATOR APPROVAL — mandatory regardless of per-tool settings, refused entirely in detached/automation runs. Authenticates with the user\'s connected GitHub OAuth token (no SSH keys). Pushes to `https://github.com/<owner>/<repo>.git` so the local `origin` remote is irrelevant; `branch` defaults to the current HEAD if omitted. `force=true` enables `--force-with-lease` (safer than plain --force; rejected if the remote ref moved since last fetch). Returns {success, branch, remote, stdout, stderr, exitCode} with the token redacted from any output.',
+	create_pull_request: 'Open a pull request on GitHub against an attached repository. ALWAYS REQUIRES OPERATOR APPROVAL — mandatory regardless of per-tool settings, refused entirely in detached/automation runs. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch (typically the repo default). `draft=true` opens a draft PR (the default). Persists the resulting PR row to the source-control schema linked to the active run, and opens a `pull_request_ready` review-inbox item so an operator can spot the new PR in /review. Returns {number, htmlUrl, state, draft, recordedId}.',
+	list_pull_requests: 'List pull requests recorded for a repository (the user must have synced the repo via sync_my_repos first). Returns up to `limit` rows (default 50) ordered by most recently updated, each with {id, providerPrNumber, title, status, headBranch, baseBranch, providerUrl, runId, taskId, createdBy, createdAt, updatedAt}. Read-only. Returns an empty list when the repo has no recorded PRs yet.',
+	get_pull_request: 'Fetch a single pull request by its AgentStudio id (the `recordedId` returned by create_pull_request, or any id from list_pull_requests). Returns the full row including title, body, status, head/base branches, providerUrl, runId, taskId, metadata. Read-only. Returns null when the id is unknown.',
+	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox (`${SANDBOX_WORKSPACE}/<userId>/repos/<owner>/<repo>`). Idempotent — if the path already has a clone, runs `git fetch --prune` instead of re-cloning. Authenticated via the user\'s stored OAuth token (private repos work without the agent ever seeing the token). Returns {path, fresh, branch} where `fresh=true` indicates a brand-new clone vs. an updated existing one. Refuses repos the user has not connected (i.e., not present in the sync\'d list). After clone, use prepare_commit / push_branch / create_pull_request against the returned path.',
 	list_artifacts: 'List artifacts in a project. Returns id, name, slug, contentType, isActive for each artifact (active by default; pass includeInactive to see soft-deleted).',
 	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s project info. Use to load an artifact before editing.',
 	create_artifact: 'Create a new artifact in a project (saves the initial content as v1). Slug auto-generated from name. Optional changeNote describes what this initial version contains.',
@@ -1716,6 +1753,375 @@ export async function executeTool(
 						tool: call.name,
 						input,
 						result: { total: summary.total, inserted: summary.inserted, updated: summary.updated, skipped: summary.skipped },
+						executionMs: Date.now() - startedAt,
+					}
+				}
+			}
+
+			if (call.name === 'push_branch' || call.name === 'create_pull_request') {
+				// Defense-in-depth: chat-stream unions MANDATORY_APPROVAL_TOOLS into the
+				// runtime's approval set so the loop pauses and the operator confirms before
+				// these tools execute. We additionally refuse at the execution layer for runs
+				// that have no approval surface (automation, sub-agent) — even if the runtime
+				// were misconfigured to forward such a call, the tool itself fails closed.
+				const ctx = toolUserContext.getStore()
+				if (!ctx?.runId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: `${call.name} requires an interactive chat run with an operator; this call has no run context.`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				try {
+					const { chatRuns } = await import('$lib/runs/runs.schema')
+					const [runRow] = await db
+						.select({ source: chatRuns.source })
+						.from(chatRuns)
+						.where(eq(chatRuns.id, ctx.runId))
+						.limit(1)
+					if (!runRow) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `${call.name}: run not found.`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					if (runRow.source !== 'chat_stream') {
+						return {
+							success: false,
+							tool: call.name,
+							error: `${call.name} cannot run in a ${runRow.source} context. It requires operator approval through an interactive chat run.`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+				} catch (err) {
+					return {
+						success: false,
+						tool: call.name,
+						error: `${call.name}: failed to verify approval surface (${err instanceof Error ? err.message : String(err)})`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				const sourceControl = await import('$lib/source-control')
+				const conn = await sourceControl.getActiveGithubConnection(userId)
+				if (!conn) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'No active GitHub connection. Connect at /source-control before pushing or opening pull requests.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				if (call.name === 'push_branch') {
+					const input = toolSchemas.push_branch.parse(call.arguments)
+					const absPath = safePath(input.path ?? '.')
+					try {
+						let branch = input.branch
+						if (!branch) {
+							const { defaultGitRunner } = await import('$lib/workspace/worktree.server')
+							const headResult = await defaultGitRunner(['-C', absPath, 'symbolic-ref', '--short', 'HEAD'])
+							if (headResult.code !== 0) {
+								return {
+									success: false,
+									tool: call.name,
+									error: `Could not detect current branch (${headResult.stderr.trim() || 'detached HEAD?'}). Pass an explicit branch.`,
+									executionMs: Date.now() - startedAt,
+								}
+							}
+							branch = headResult.stdout.trim()
+						}
+						const { pushBranchToGithub } = await import('$lib/source-control/git-push.server')
+						const pushResult = await pushBranchToGithub({
+							repoPath: absPath,
+							owner: input.owner,
+							repo: input.repo,
+							branch,
+							token: conn.accessToken,
+							force: input.force ?? false,
+						})
+						if (!pushResult.success) {
+							return {
+								success: false,
+								tool: call.name,
+								input: { ...input, branch },
+								error: `git push failed (exit ${pushResult.exitCode}): ${pushResult.stderr.trim() || pushResult.stdout.trim()}`,
+								executionMs: Date.now() - startedAt,
+							}
+						}
+						return {
+							success: true,
+							tool: call.name,
+							input: { ...input, branch },
+							result: {
+								branch: pushResult.branch,
+								remote: pushResult.remote,
+								stdout: pushResult.stdout,
+								stderr: pushResult.stderr,
+							},
+							executionMs: Date.now() - startedAt,
+						}
+					} catch (err) {
+						return {
+							success: false,
+							tool: call.name,
+							error: err instanceof Error ? err.message : String(err),
+							executionMs: Date.now() - startedAt,
+						}
+					}
+				}
+
+				// create_pull_request
+				const input = toolSchemas.create_pull_request.parse(call.arguments)
+				try {
+					const { createPullRequest } = await import('$lib/source-control/github-api.server')
+					const pr = await createPullRequest(conn.accessToken, {
+						owner: input.owner,
+						repo: input.repo,
+						title: input.title,
+						body: input.body,
+						head: input.head,
+						base: input.base,
+						draft: input.draft ?? true,
+					})
+					// Persist the PR to source-control schema if we have an attached repo row.
+					let recordedId: string | null = null
+					try {
+						const repos = await sourceControl.listRepositories(userId)
+						const matched = repos.find(
+							(r) => r.owner.toLowerCase() === input.owner.toLowerCase() && r.name.toLowerCase() === input.repo.toLowerCase(),
+						)
+						if (matched) {
+							const recorded = await sourceControl.recordPullRequest({
+								repositoryId: matched.id,
+								providerPrNumber: pr.number,
+								title: input.title,
+								body: input.body ?? null,
+								headBranch: input.head,
+								baseBranch: input.base,
+								status: pr.draft ? 'draft' : pr.state === 'closed' ? 'closed' : 'open',
+								runId: toolUserContext.getStore()?.runId ?? null,
+								createdBy: userId,
+								providerUrl: pr.htmlUrl,
+								metadata: { source: 'agent' },
+							})
+							recordedId = recorded.id
+						}
+					} catch (err) {
+						console.warn('[create_pull_request] recordPullRequest failed (non-fatal)', err)
+					}
+					// Wave 5 #19 phase 4 — review-inbox handoff. Best-effort: a failed insert
+					// never blocks the agent's report-back to the user. DedupeKey ensures a single
+					// open row per (owner, repo, prNumber) even if the agent retries.
+					void (async () => {
+						try {
+							const { openReviewItem } = await import('$lib/observability/review.server')
+							await openReviewItem({
+								type: 'pull_request_ready',
+								severity: 'info',
+								summary: `PR opened: ${input.owner}/${input.repo}#${pr.number} — ${input.title.slice(0, 120)}`,
+								payload: {
+									kind: 'pull_request',
+									owner: input.owner,
+									repo: input.repo,
+									prNumber: pr.number,
+									htmlUrl: pr.htmlUrl,
+									draft: pr.draft,
+									head: input.head,
+									base: input.base,
+									recordedId,
+									userId,
+								},
+								runId: toolUserContext.getStore()?.runId ?? null,
+								dedupeKey: `pull_request:${input.owner}/${input.repo}:${pr.number}`,
+							})
+						} catch (err) {
+							console.warn('[create_pull_request] review-inbox handoff failed (non-fatal)', err)
+						}
+					})()
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: {
+							number: pr.number,
+							htmlUrl: pr.htmlUrl,
+							state: pr.state,
+							draft: pr.draft,
+							recordedId,
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: err instanceof Error ? err.message : String(err),
+						executionMs: Date.now() - startedAt,
+					}
+				}
+			}
+
+			if (call.name === 'list_pull_requests') {
+				const input = toolSchemas.list_pull_requests.parse(call.arguments)
+				const sourceControl = await import('$lib/source-control')
+				const repos = await sourceControl.listRepositories(userId)
+				const matched = repos.find(
+					(r) => r.owner.toLowerCase() === input.owner.toLowerCase() && r.name.toLowerCase() === input.repo.toLowerCase(),
+				)
+				if (!matched) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: `Repository ${input.owner}/${input.repo} is not synced for this user. Run sync_my_repos first.`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				const prs = await sourceControl.listPullRequestsForRepository(matched.id)
+				const limit = input.limit ?? 50
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: prs.slice(0, limit).map((pr) => ({
+						id: pr.id,
+						providerPrNumber: pr.providerPrNumber,
+						title: pr.title,
+						status: pr.status,
+						headBranch: pr.headBranch,
+						baseBranch: pr.baseBranch,
+						providerUrl: pr.providerUrl,
+						runId: pr.runId,
+						taskId: pr.taskId,
+						createdBy: pr.createdBy,
+						createdAt: pr.createdAt,
+						updatedAt: pr.updatedAt,
+					})),
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'get_pull_request') {
+				const input = toolSchemas.get_pull_request.parse(call.arguments)
+				const sourceControl = await import('$lib/source-control')
+				const pr = await sourceControl.getPullRequestById(input.pullRequestId)
+				if (!pr) {
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: null,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				// Authorization check: the PR must belong to a repo the user owns.
+				const repos = await sourceControl.listRepositories(userId)
+				const owns = repos.some((r) => r.id === pr.repositoryId)
+				if (!owns) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: `Pull request ${input.pullRequestId} is not visible to this user.`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				return {
+					success: true,
+					tool: call.name,
+					input,
+					result: pr,
+					executionMs: Date.now() - startedAt,
+				}
+			}
+
+			if (call.name === 'clone_repository') {
+				const input = toolSchemas.clone_repository.parse(call.arguments)
+				const sourceControl = await import('$lib/source-control')
+				const owns = (await sourceControl.listRepositories(userId)).find(
+					(r) => r.owner.toLowerCase() === input.owner.toLowerCase() && r.name.toLowerCase() === input.repo.toLowerCase(),
+				)
+				if (!owns) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: `Repository ${input.owner}/${input.repo} is not connected for this user. Run sync_my_repos first.`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				const conn = await sourceControl.getActiveGithubConnection(userId)
+				if (!conn) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: 'No active GitHub connection. Connect at /source-control before cloning private repos.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				const workspaceRoot = getWorkspace()
+				// Mirror lives at `${workspace}/repos/<owner>/<repo>` so cleanup of the per-user
+				// sandbox sweeps mirrors too. The path is bounded by safePathWithin so a hostile
+				// owner/repo string cannot escape the workspace root even if it bypassed the
+				// SAFE_SEGMENT regex (defense in depth).
+				const mirrorRoot = safePath('repos')
+				try {
+					const { materializeRepoMirror } = await import('$lib/source-control/repo-mirror.server')
+					const result = await materializeRepoMirror({
+						mirrorRoot,
+						owner: input.owner,
+						repo: input.repo,
+						defaultBranch: owns.defaultBranch,
+						token: conn.accessToken,
+					})
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: {
+							path: result.path,
+							fresh: result.fresh,
+							branch: result.branch,
+							workspaceRoot,
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: err instanceof Error ? err.message : String(err),
+						executionMs: Date.now() - startedAt,
+					}
+				}
+			}
+
+			if (call.name === 'prepare_commit') {
+				const input = toolSchemas.prepare_commit.parse(call.arguments)
+				const absPath = safePath(input.path ?? '.')
+				const { prepareCommitDraft } = await import('$lib/source-control/git-local.server')
+				try {
+					const draft = await prepareCommitDraft(absPath)
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: draft,
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: err instanceof Error ? err.message : String(err),
 						executionMs: Date.now() - startedAt,
 					}
 				}

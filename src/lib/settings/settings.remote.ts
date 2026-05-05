@@ -15,20 +15,7 @@ const settingsUpdateSchema = z.object({
 		.object({
 			taskCompleted: z.boolean().optional(),
 			needsInput: z.boolean().optional(),
-			dreamSummary: z.boolean().optional(),
 			agentErrors: z.boolean().optional(),
-		})
-		.optional(),
-	dreamConfig: z
-		.object({
-			autoRun: z.boolean().optional(),
-			frequencyHours: z
-				.number()
-				.int()
-				.min(1)
-				.max(24 * 30)
-				.optional(),
-			aggressiveness: z.number().min(0).max(1).optional(),
 		})
 		.optional(),
 	budgetConfig: z

@@ -8,6 +8,7 @@ import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/runtime'
+import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
 
 function parseField(field: string, min: number, max: number) {
 	if (field === '*') {
@@ -132,23 +133,39 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 		throw new Error(`Automation ${automationId} is disabled`)
 	}
 
-	// Wave 5 #21 phase 3 — mode dispatch hook. Today every mode falls through to the legacy
-	// chat-followup behavior. Phases 4-5 will switch on automation.mode here:
-	//   research → enqueue research_run with outputTarget routing
-	//   code → enqueue code_run against the linked repository
-	//   maintenance → run hygiene work (no chat surface)
-	if (automation.mode !== 'chat_followup') {
-		console.info('[automations] mode dispatch not yet implemented; falling back to chat_followup', {
-			automationId,
-			mode: automation.mode,
-			outputTarget: automation.outputTarget,
-		})
+	// Wave 5 #21 phase 5 — budget pre-check. Skip the run + bump nextRunAt + open a review
+	// item when an applicable cap is exceeded; the next scheduled tick can try again once the
+	// period rolls or an operator lifts the cap. Mirrors the chat-stream policy_override_request
+	// flow so the same /review surface covers both interactive and scheduled execution paths.
+	const budgetCheck = await checkBudgetLimits({
+		userId: automation.userId,
+		agentId: automation.agentId ?? undefined,
+	})
+	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
+		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now)
 	}
 
+	// Wave 5 #21 phase 4 — per-mode dispatch. Code mode still falls through to chat_followup
+	// since the runtime worktree-from-mirror integration (#19 P2 finish) is the keystone for
+	// the code-mode workflow; see engine fallback below.
 	const startedAt = Date.now()
 	let success = true
 	try {
-		const result = await runAutomation(automation, now)
+		let result: { conversationId: string; runId?: string } | { conversationId: string | null; researchId?: string; jobId?: string; mode?: string } | { mode: 'maintenance'; summary: string; conversationId: null }
+		if (automation.mode === 'research') {
+			result = await runResearchModeAutomation(automation)
+		} else if (automation.mode === 'maintenance') {
+			result = await runMaintenanceModeAutomation(automation, now)
+		} else {
+			if (automation.mode === 'code') {
+				console.info('[automations] code mode dispatch not yet implemented; falling back to chat_followup', {
+					automationId,
+					mode: automation.mode,
+					outputTarget: automation.outputTarget,
+				})
+			}
+			result = await runAutomation(automation, now)
+		}
 		const nextRunAt = computeNextRunAt(automation.cronExpression, now)
 		await db
 			.update(automations)
@@ -180,6 +197,183 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 				console.warn('[automations] lifecycle metric failed (non-fatal)', err)
 			}
 		})()
+	}
+}
+
+/**
+ * Wave 5 #21 phase 5 — budget block side-channel.
+ *
+ * Skips the scheduled run, persists a budget block alert (idempotent per period), opens a
+ * `policy_override_request` review item so an operator can lift the cap or hold it, advances
+ * the schedule so we don't immediately re-attempt on the next minute tick, and emits a
+ * `blocked` lifecycle metric so /review/health distinguishes blocked from completed/failed
+ * automations. Returns a marker shape parallel to the success path so callers can branch.
+ */
+async function handleAutomationBudgetBlocked(
+	automation: typeof automations.$inferSelect,
+	blockedBy: BudgetLimitRow,
+	now: Date,
+) {
+	try {
+		await recordBudgetAlert({
+			limit: blockedBy,
+			triggerType: 'block',
+			spendUsd: parseFloat(blockedBy.limitUsd),
+		})
+	} catch (err) {
+		console.warn('[automations] budget block alert insert failed', err)
+	}
+
+	void (async () => {
+		try {
+			const { openReviewItem } = await import('$lib/observability/review.server')
+			await openReviewItem({
+				type: 'policy_override_request',
+				severity: 'warning',
+				summary: `Automation budget block: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd} blocked "${automation.description.slice(0, 80)}"`,
+				payload: {
+					kind: 'budget',
+					source: 'automation',
+					limitId: blockedBy.id,
+					scope: blockedBy.scope,
+					scopeId: blockedBy.scopeId,
+					period: blockedBy.period,
+					limitUsd: blockedBy.limitUsd,
+					userId: automation.userId,
+					automationId: automation.id,
+					automationDescription: automation.description,
+				},
+				dedupeKey: `budget:${blockedBy.id}:${automation.userId}:${automation.id}`,
+			})
+		} catch (err) {
+			console.warn('[automations] policy_override_request open failed', err)
+		}
+	})()
+
+	let nextRunAt: Date | null = null
+	try {
+		nextRunAt = computeNextRunAt(automation.cronExpression, now)
+	} catch {
+		// Bad cron expression — leave nextRunAt unchanged so the dispatcher won't keep
+		// re-evaluating; the same condition would re-trigger immediately otherwise.
+	}
+	await db
+		.update(automations)
+		.set({ lastRunAt: now, nextRunAt: nextRunAt ?? automation.nextRunAt, updatedAt: now })
+		.where(eq(automations.id, automation.id))
+
+	void (async () => {
+		try {
+			const { recordMetric } = await import('$lib/observability/metrics.server')
+			await recordMetric({
+				metric: 'automations.lifecycle.blocked',
+				dimension: { mode: automation.mode, outputTarget: automation.outputTarget },
+				value: 1,
+			})
+		} catch (err) {
+			console.warn('[automations] blocked lifecycle metric failed (non-fatal)', err)
+		}
+	})()
+
+	return {
+		blocked: true as const,
+		conversationId: null,
+		runId: null,
+		nextRunAt: nextRunAt?.toISOString() ?? null,
+		blockedBy: {
+			limitId: blockedBy.id,
+			scope: blockedBy.scope,
+			period: blockedBy.period,
+			limitUsd: blockedBy.limitUsd,
+		},
+	}
+}
+
+/**
+ * Wave 5 #21 phase 4 — research-mode dispatch.
+ *
+ * Instead of running the prompt as a chat reply, we open a `research` row carrying the
+ * automation's prompt as the query and enqueue a `research_run` job. The Wave 4 #18
+ * orchestrator picks it up: planner → sub-question fan-out → synthesizer → final report.
+ * The conversation context (when reused) gets the research linked back via
+ * `research.conversationId` so the user sees the resulting report alongside the chat
+ * history when they next open it.
+ *
+ * Output routing (review_inbox, task, artifact targets) is intentionally NOT wired here —
+ * those targets are layered downstream of the research_run completion event. The
+ * automation lifecycle metric still emits with `mode='research'` so the dashboard
+ * distinguishes research throughput from chat-followup throughput.
+ */
+async function runResearchModeAutomation(automation: typeof automations.$inferSelect) {
+	const conversation = await getOrCreateAutomationConversation(automation)
+	const { createResearch, updateResearch } = await import('$lib/research/research.server')
+	const { enqueueJob } = await import('$lib/jobs/jobs.server')
+
+	const research = await createResearch({
+		userId: automation.userId,
+		query: automation.prompt,
+		conversationId: conversation.id,
+	})
+	const job = await enqueueJob({
+		type: 'research_run',
+		queue: 'default',
+		// Background-tier — a scheduled research automation shouldn't preempt user-initiated
+		// research runs (which use priority 150). 100 keeps it ahead of chat_followup ticks
+		// (priority 50) without getting in the way of an interactive operator.
+		priority: 100,
+		payload: { researchId: research.id },
+		userId: automation.userId,
+		dedupeKey: `automation_research:${automation.id}:${(automation.nextRunAt ?? new Date()).toISOString().slice(0, 16)}`,
+	})
+	await updateResearch(research.id, { jobId: job.id })
+
+	return {
+		conversationId: conversation.id,
+		researchId: research.id,
+		jobId: job.id,
+		mode: 'research' as const,
+	}
+}
+
+/**
+ * Wave 5 #21 phase 4 — maintenance-mode dispatch.
+ *
+ * Maintenance ticks are the "scheduled hygiene that doesn't belong in chat history" mode:
+ * cleanup prompts, log digests, anything where filling up a conversation thread is noise.
+ * Implementation: run the prompt as a single LLM synthesis call, log the cost ledger entry
+ * for the run, and return a short summary marker. We intentionally don't insert
+ * user/assistant messages into any conversation — operators inspect maintenance ticks via
+ * `automations.lifecycle.<status>` metrics + `/automations` last-run timestamps, not chat.
+ *
+ * Output routing (review_inbox, task, artifact) is documented as a follow-up; the
+ * minimum-viable maintenance dispatch ships here so operators can schedule low-noise work
+ * today.
+ */
+async function runMaintenanceModeAutomation(
+	automation: typeof automations.$inferSelect,
+	now: Date,
+) {
+	const settings = await getOrCreateSettings(automation.userId)
+	const model = settings.defaultModel
+
+	const prompt = `Maintenance run at ${now.toISOString()}\n\n${automation.prompt}`
+	const response = await chat([{ role: 'user', content: prompt }], model)
+
+	void logLlmUsage({
+		source: 'automation',
+		model,
+		tokensIn: response.usage?.promptTokens ?? 0,
+		tokensOut: response.usage?.completionTokens ?? 0,
+		userId: automation.userId,
+		agentId: automation.agentId ?? null,
+		metadata: { automationId: automation.id, mode: 'maintenance' },
+	}).catch(() => {})
+
+	const summary = (response.content ?? '').trim().slice(0, 500)
+	return {
+		conversationId: null,
+		mode: 'maintenance' as const,
+		summary,
 	}
 }
 

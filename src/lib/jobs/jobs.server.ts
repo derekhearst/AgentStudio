@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, lte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { jobLeases, jobPolicies, jobs, type JobRow, type JobStatus } from './jobs.schema'
 
@@ -398,7 +398,7 @@ export async function listJobs(filters: ListJobsFilters = {}): Promise<JobRow[]>
 	if (filters.userId) where.push(eq(jobs.userId, filters.userId))
 	if (filters.runId) where.push(eq(jobs.runId, filters.runId))
 	if (filters.taskId) where.push(eq(jobs.taskId, filters.taskId))
-	if (filters.since) where.push(drizzleSql`${jobs.createdAt} >= ${filters.since}`)
+	if (filters.since) where.push(gte(jobs.createdAt, filters.since))
 
 	return db
 		.select()

@@ -122,6 +122,12 @@
 			<p class="text-sm font-medium">Admin only</p>
 			<p class="mt-1 text-xs opacity-70">Hook invocations are visible only to users with the <code>admin</code> role.</p>
 		</div>
+	{:else if 'loadError' in result && result.loadError}
+		<div class="rounded-2xl border border-error/40 bg-error/10 p-6">
+			<p class="text-sm font-medium text-error">Failed to load hook invocations</p>
+			<p class="mt-1 text-xs opacity-80">{result.loadError}</p>
+			<p class="mt-2 text-xs opacity-60">Check that database migrations are applied in this environment (look for <code>0028_hook_invocations.sql</code>).</p>
+		</div>
 	{:else}
 		{#if result.summary.length > 0}
 			<ContentPanel>

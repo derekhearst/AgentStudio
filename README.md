@@ -74,6 +74,8 @@ cp .env.example .env
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
+- `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
+- `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
 
 Database note:
 
@@ -123,16 +125,9 @@ Optional script args:
 - Build with a different URL: `powershell -ExecutionPolicy Bypass -File scripts/android-build-local.ps1 -RemoteUrl "https://your-host"`
 - Install a specific APK file: `powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1 -ApkPath "path\\to\\app.apk"`
 
-For an explicit live-focused subset:
-
-```sh
-bun run test:e2e:live
-```
-
 Notes:
 
 - `bun run test:e2e` is the primary CI path and uses real integrations.
-- `bun run test:e2e:live` remains available for targeted provider-focused runs.
 - Provider auth errors (for example `User not found`) indicate credential/account issues rather than app test harness issues.
 
 ## Docs

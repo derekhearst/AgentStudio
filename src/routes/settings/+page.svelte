@@ -42,11 +42,11 @@
 	const searchLower = $derived(searchQuery.toLowerCase().trim());
 
 	const sections = [
-		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval dream aggressiveness frequency auto run' },
+		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval' },
 		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
 		{ id: 'tools', keywords: 'tools sandbox coding skills agents media image generation disabled enabled toggle' },
 		{ id: 'memory', keywords: 'memory palace recall mining embeddings rerank topk wings rooms drawers' },
-		{ id: 'notifications', keywords: 'notification task completed needs input dream summary agent errors' },
+		{ id: 'notifications', keywords: 'notification task completed needs input agent errors' },
 		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
 		{ id: 'devtools', keywords: 'developer tools test notification feed debug' },
@@ -99,7 +99,6 @@
 				transcriptionModel: settings.transcriptionModel,
 				theme: 'AgentStudio-night',
 				notificationPrefs: settings.notificationPrefs,
-				dreamConfig: settings.dreamConfig,
 				budgetConfig: settings.budgetConfig,
 				contextConfig: settings.contextConfig,
 				toolConfig: settings.toolConfig,
@@ -233,17 +232,6 @@
 		installPromptEvent = null;
 	}
 
-	function updateDreamAutoRun(autoRun: boolean) {
-		if (!settings) return;
-		settings = {
-			...settings,
-			dreamConfig: {
-				...settings.dreamConfig,
-				autoRun
-			}
-		};
-	}
-
 	const toolsByGroup = Object.entries(capabilityGroups).map(([groupKey, group]) => ({
 		groupKey,
 		group,
@@ -353,57 +341,6 @@
 							}}
 						/>
 					</div>
-				</div>
-				<div class="border-t border-base-content/6"></div>
-
-				<!-- Dream Auto Run -->
-				<div class="flex items-center justify-between gap-4 py-3.5">
-					<div>
-						<p class="text-sm font-medium">Dream Auto Run</p>
-						<p class="mt-0.5 text-xs text-base-content/40">Automatically run dream cycles on schedule</p>
-					</div>
-					<input
-						type="checkbox"
-						class="toggle toggle-primary toggle-sm"
-						bind:checked={settings.dreamConfig.autoRun}
-						onchange={(e) => updateDreamAutoRun((e.currentTarget as HTMLInputElement).checked)}
-					/>
-				</div>
-				<div class="border-t border-base-content/6"></div>
-
-				<!-- Dream Frequency -->
-				<div class="flex items-center justify-between gap-4 py-3.5">
-					<div>
-						<p class="text-sm font-medium">Dream Frequency</p>
-						<p class="mt-0.5 text-xs text-base-content/40">Hours between automatic dream cycles</p>
-					</div>
-					<div class="flex items-center gap-1.5">
-						<input
-							type="number"
-							class="input input-bordered input-sm w-20 text-right font-mono"
-							min="1"
-							max="720"
-							bind:value={settings.dreamConfig.frequencyHours}
-						/>
-						<span class="text-xs text-base-content/30">hrs</span>
-					</div>
-				</div>
-				<div class="border-t border-base-content/6"></div>
-
-				<!-- Dream Aggressiveness -->
-				<div class="py-3.5">
-					<div class="flex items-center justify-between">
-						<p class="text-sm font-medium">Aggressiveness</p>
-						<span class="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary">{settings.dreamConfig.aggressiveness.toFixed(2)}</span>
-					</div>
-					<input
-						type="range"
-						min="0"
-						max="1"
-						step="0.05"
-						class="range range-primary range-xs mt-3"
-						bind:value={settings.dreamConfig.aggressiveness}
-					/>
 				</div>
 			</div>
 		</section>
@@ -583,11 +520,6 @@
 				<div class="flex items-center justify-between gap-4 py-3">
 					<p class="text-sm font-medium">Needs input</p>
 					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.needsInput} />
-				</div>
-				<div class="border-t border-base-content/6"></div>
-				<div class="flex items-center justify-between gap-4 py-3">
-					<p class="text-sm font-medium">Dream summary</p>
-					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.dreamSummary} />
 				</div>
 				<div class="border-t border-base-content/6"></div>
 				<div class="flex items-center justify-between gap-4 py-3">

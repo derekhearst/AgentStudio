@@ -150,7 +150,7 @@ export async function updateAgentRecord(
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Refs are either
 		// registered built-in hook names OR future skill slugs (Phase 3). Empty array clears the
 		// override for that event; an empty object clears all.
-		hooks?: Record<string, string[]>
+		hooks?: Record<string, string[] | undefined>
 		// Wave 4 #18 phase 4 — per-agent research config overrides (resolveResearchConfig reads
 		// this when a research run is triggered from a chat with this agent). Shape:
 		// { enabled?, plannerModel?, synthesizerModel?, maxSubQuestions?, urlsPerQuestion?, maxFetchChars? }.
@@ -195,6 +195,7 @@ export async function updateAgentRecord(
 		if (patch.hooks !== undefined) {
 			const cleaned: Record<string, string[]> = {}
 			for (const [event, refs] of Object.entries(patch.hooks)) {
+				if (!refs) continue // schema allows missing values per-event
 				const trimmed = refs.map((r) => r.trim()).filter((r) => r.length > 0)
 				if (trimmed.length > 0) cleaned[event] = trimmed
 			}

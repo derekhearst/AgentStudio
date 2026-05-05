@@ -1,4 +1,4 @@
-import { redirect, type Handle } from '@sveltejs/kit'
+import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit'
 import { and, arrayContains, sql } from 'drizzle-orm'
 import { ensureAuthBootstrap, getSessionUser } from '$lib/auth/auth.server'
 import { db, ensureDatabaseReady } from '$lib/db.server'
@@ -19,7 +19,10 @@ async function cleanupLegacyCapabilitySkills() {
 	}
 }
 
-const PUBLIC_PATH_PREFIXES = ['/login', '/demo', '/icon-preview']
+// `/api/webhooks` is unauthenticated by design — third-party providers (GitHub, …) POST
+// here without session cookies. The handlers verify provider signatures themselves so the
+// path-level skip is safe; never broaden this prefix without an explicit signature check.
+const PUBLIC_PATH_PREFIXES = ['/login', '/demo', '/api/webhooks']
 const ADMIN_PATH_PREFIXES = ['/users']
 
 function isPublicPath(pathname: string) {
@@ -56,4 +59,19 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	return resolve(event)
+}
+
+/**
+ * Production "Internal Error" 500 responses hide the underlying error message from the
+ * client by design — logging the full error here is what surfaces it in our server logs
+ * so we can actually diagnose remote-function failures from prod traffic.
+ */
+export const handleError: HandleServerError = ({ error, event, status, message }) => {
+	const url = event.url?.pathname ?? '<unknown>'
+	const errMsg = error instanceof Error ? error.message : String(error)
+	const errStack = error instanceof Error ? error.stack : undefined
+	console.error(
+		`[hooks/handleError] ${status} ${event.request?.method ?? 'GET'} ${url}: ${message}\n  cause: ${errMsg}\n${errStack ?? ''}`,
+	)
+	return { message: message ?? 'Internal Error' }
 }

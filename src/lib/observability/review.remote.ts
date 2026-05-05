@@ -30,6 +30,7 @@ const REVIEW_ITEM_TYPES = [
 	'artifact_conflict',
 	'memory_conflict',
 	'policy_override_request',
+	'pull_request_ready',
 ] as const
 
 const REVIEW_ITEM_STATUSES = ['open', 'in_progress', 'resolved', 'dismissed'] as const

@@ -434,6 +434,32 @@ async function bootstrapDatabase() {
 			console.warn('[db] Orchestrator identity seed failed (non-fatal):', err)
 		}
 
+		// Wave 5 #22 phase 4 — AGENTS.md repo-file discovery. Runs AFTER the Phase 1 seed so
+		// repo-priority overrides have a row to update. No-op if neither AGENTS.md nor any
+		// docs/agents/<slug>/AGENT.md files exist at the configured root, so the default
+		// deployment stays quiet for operators who don't use this feature.
+		try {
+			const { loadAgentSourcesAtBoot } = await import('$lib/agents/agent-source-loader.server')
+			const seedDb = createDatabase(client)
+			const result = await loadAgentSourcesAtBoot(seedDb)
+			if (result) {
+				const summary = [
+					result.orchestratorOverridden ? 'orchestrator override' : null,
+					result.agentsInserted > 0 ? `${result.agentsInserted} inserted` : null,
+					result.agentsUpdated > 0 ? `${result.agentsUpdated} updated` : null,
+					result.agentsSkipped > 0 ? `${result.agentsSkipped} skipped` : null,
+				].filter(Boolean).join(', ')
+				if (summary) {
+					console.log(`[db] AGENTS.md scan: ${summary}`)
+				}
+				for (const err of result.errors) {
+					console.warn(`[db] AGENTS.md scan: ${err}`)
+				}
+			}
+		} catch (err) {
+			console.warn('[db] AGENTS.md scan failed (non-fatal):', err)
+		}
+
 		// Wave 4 #18 phase 3 — register the `research_run` job handler. Must happen BEFORE the
 		// worker starts so claimed research jobs find a handler.
 		try {
@@ -484,6 +510,15 @@ async function bootstrapDatabase() {
 			registerMetricsJobHandlers()
 		} catch (err) {
 			console.warn('[db] Metrics handler registration failed (non-fatal):', err)
+		}
+
+		// Wave 2 #11 phase 3 finish — register `task_run` + `tasks_dispatch` job handlers
+		// + the 90s scheduled tick that picks up pending top-level tasks with an ownerAgentId.
+		try {
+			const { registerTaskJobHandlers } = await import('$lib/tasks/task-handler.server')
+			registerTaskJobHandlers()
+		} catch (err) {
+			console.warn('[db] Task handler registration failed (non-fatal):', err)
 		}
 
 		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0

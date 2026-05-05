@@ -1,6 +1,6 @@
 # Agents Plan
 
-Status: active (Phases 1, 2, 3, 5, 6 complete; Phases 4, 7 deferred)
+Status: active (Phases 1, 2, 3, 4, 5, 6 complete; Phase 7 deferred)
 
 ## Overview
 
@@ -229,6 +229,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 
+- 2026-05-04 — Wave 5 #22 phase 4 — AGENTS.md repo-file discovery scanner. Pure file walker + frontmatter parser in [src/lib/agents/agent-source-loader.ts](../../src/lib/agents/agent-source-loader.ts); DB application + boot wiring in [src/lib/agents/agent-source-loader.server.ts](../../src/lib/agents/agent-source-loader.server.ts). Reads `${root}/AGENTS.md` for orchestrator identity overrides + `${root}/docs/agents/<slug>/AGENT.md` for individual agent definitions. `AGENT_SOURCE_PRIORITY=repo|db` (default `db`) controls last-write-wins; `AGENT_SOURCE_PATH` overrides the scan root. Match-by `config.sourceSlug` so renames in frontmatter never collide with hand-created agents that share a name. Tests in [tests/agents.source-loader.spec.ts](../../tests/agents.source-loader.spec.ts).
 - 2026-05-04 — Wave 5 #22 phases 3 + 5 + 6 — `/agents/[id]/identity` markdown editor route, `@import skill-name` fragment library with cycle/depth defense, and role-based companion-group suggestions surfaced in the editor. Tests in [tests/agents.fragment-expand.spec.ts](../../tests/agents.fragment-expand.spec.ts), [tests/agents.role-companions.spec.ts](../../tests/agents.role-companions.spec.ts), [tests/agents.identity-editor.spec.ts](../../tests/agents.identity-editor.spec.ts).
 - 2026-05-04 — Wave 5 #22 phase 2 — `agents.identity_skill_id` column + `buildAgentDefinition` reads from skill with `systemPrompt` fallback. See implementation-order #22 evidence.
 - 2026-05-04 — Wave 5 #22 phase 1 — orchestrator identity promoted to a seeded skill. See implementation-order #22 evidence.

@@ -2,19 +2,21 @@ import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
 
+/**
+ * Note on `dreamConfig` + `notificationPrefs.dreamSummary`:
+ * Both fields are deprecated — the spec calls dream-run config out as removed
+ * (background memory work moved into the memory domain). The DB columns stay
+ * for migration compatibility but the application no longer reads or writes
+ * them. A future destructive migration can drop them once we're confident no
+ * downstream consumer references them.
+ */
 export const DEFAULT_SETTINGS = {
 	defaultModel: 'anthropic/claude-sonnet-4',
 	transcriptionModel: 'google/gemini-2.5-flash',
 	notificationPrefs: {
 		taskCompleted: true,
 		needsInput: true,
-		dreamSummary: true,
 		agentErrors: true,
-	},
-	dreamConfig: {
-		autoRun: false,
-		frequencyHours: 24,
-		aggressiveness: 0.5,
 	},
 	budgetConfig: {
 		dailyLimit: null as number | null,
@@ -54,8 +56,9 @@ export async function getOrCreateSettings(userId: string) {
 			userId,
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			transcriptionModel: DEFAULT_SETTINGS.transcriptionModel,
+			// notificationPrefs: schema's column-default fills in dreamSummary for legacy
+			// rows; we just don't expose it through this pipeline anymore.
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
-			dreamConfig: DEFAULT_SETTINGS.dreamConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
 			memoryConfig: DEFAULT_SETTINGS.memoryConfig,
@@ -74,13 +77,7 @@ export async function updateSettings(input: {
 	notificationPrefs?: {
 		taskCompleted?: boolean
 		needsInput?: boolean
-		dreamSummary?: boolean
 		agentErrors?: boolean
-	}
-	dreamConfig?: {
-		autoRun?: boolean
-		frequencyHours?: number
-		aggressiveness?: number
 	}
 	budgetConfig?: {
 		dailyLimit?: number | null
@@ -128,10 +125,6 @@ export async function updateSettings(input: {
 				...current.notificationPrefs,
 				...(input.notificationPrefs ?? {}),
 			},
-			dreamConfig: {
-				...current.dreamConfig,
-				...(input.dreamConfig ?? {}),
-			},
 			budgetConfig: {
 				...(current.budgetConfig ?? DEFAULT_SETTINGS.budgetConfig),
 				...(input.budgetConfig ?? {}),
@@ -175,7 +168,6 @@ export async function resetSettings(userId: string) {
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			theme: DEFAULT_SETTINGS.theme,
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
-			dreamConfig: DEFAULT_SETTINGS.dreamConfig,
 			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,

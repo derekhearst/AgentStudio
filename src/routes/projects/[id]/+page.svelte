@@ -186,7 +186,7 @@
 								</p>
 							</div>
 							<button
-								class="invisible btn btn-xs btn-ghost text-error group-hover:visible"
+								class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100"
 								type="button"
 								onclick={() => handleDelete(a.id, a.name)}
 							>

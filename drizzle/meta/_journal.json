@@ -288,6 +288,20 @@
       "when": 1777896060000,
       "tag": "0040_automation_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1777940000000,
+      "tag": "0041_drop_dream_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1777945000000,
+      "tag": "0042_pull_request_ready_enum",
+      "breakpoints": true
     }
   ]
 }

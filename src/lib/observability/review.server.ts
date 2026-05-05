@@ -1,4 +1,4 @@
-import { and, desc, eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, desc, eq, gte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import {
 	reviewItems,
@@ -181,7 +181,10 @@ export async function reviewInboxRollup(): Promise<
 			count: drizzleSql<number>`count(*)::int`,
 		})
 		.from(reviewItems)
-		.where(drizzleSql`${reviewItems.createdAt} >= ${since}`)
+		// `gte` handles Date → timestamptz conversion via the column's mapper.
+		// The previous `drizzleSql\`... >= ${since}\`` template binds Date directly,
+		// which postgres-js rejects with "string argument must be ... Received an instance of Date".
+		.where(gte(reviewItems.createdAt, since))
 		.groupBy(reviewItems.type, reviewItems.status)
 	return rows.map((r) => ({ type: r.type as string, status: r.status as string, count: Number(r.count) }))
 }

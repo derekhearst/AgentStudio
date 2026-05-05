@@ -43,36 +43,51 @@ export const listHookInvocationsQuery = query(listSchema, async (input) => {
 
 	const where = filters.length > 0 ? and(...filters) : undefined
 
-	const invocations = await db
-		.select({
-			id: hookInvocations.id,
-			runId: hookInvocations.runId,
-			event: hookInvocations.event,
-			hookKind: hookInvocations.hookKind,
-			hookRef: hookInvocations.hookRef,
-			success: hookInvocations.success,
-			durationMs: hookInvocations.durationMs,
-			error: hookInvocations.error,
-			createdAt: hookInvocations.createdAt,
-		})
-		.from(hookInvocations)
-		.where(where)
-		.orderBy(desc(hookInvocations.createdAt))
-		.limit(input.limit ?? 200)
+	// Wrap both queries in a try/catch so a missing-table or aggregate-cast failure on a
+	// freshly-deployed environment degrades to an empty list with an explanatory error
+	// instead of a generic "Internal Error" 500 that hides the root cause from the user.
+	try {
+		const invocations = await db
+			.select({
+				id: hookInvocations.id,
+				runId: hookInvocations.runId,
+				event: hookInvocations.event,
+				hookKind: hookInvocations.hookKind,
+				hookRef: hookInvocations.hookRef,
+				success: hookInvocations.success,
+				durationMs: hookInvocations.durationMs,
+				error: hookInvocations.error,
+				createdAt: hookInvocations.createdAt,
+			})
+			.from(hookInvocations)
+			.where(where)
+			.orderBy(desc(hookInvocations.createdAt))
+			.limit(input.limit ?? 200)
 
-	// Per-event rollup — last 24h, ignoring filters so the header always shows the global health.
-	const sinceLast24h = new Date(Date.now() - 24 * 60 * 60 * 1000)
-	const summary = await db
-		.select({
-			event: hookInvocations.event,
-			total: drizzleSql<number>`count(*)::int`,
-			failures: drizzleSql<number>`sum(case when ${hookInvocations.success} then 0 else 1 end)::int`,
-			avgDurationMs: drizzleSql<number>`avg(${hookInvocations.durationMs})::int`,
-		})
-		.from(hookInvocations)
-		.where(gte(hookInvocations.createdAt, sinceLast24h))
-		.groupBy(hookInvocations.event)
-		.orderBy(desc(drizzleSql`count(*)`))
+		// Per-event rollup — last 24h, ignoring filters so the header always shows the global health.
+		// COALESCE around aggregates so empty groups + null casts don't blow up.
+		const sinceLast24h = new Date(Date.now() - 24 * 60 * 60 * 1000)
+		const summary = await db
+			.select({
+				event: hookInvocations.event,
+				total: drizzleSql<number>`coalesce(count(*), 0)::int`,
+				failures: drizzleSql<number>`coalesce(sum(case when ${hookInvocations.success} then 0 else 1 end), 0)::int`,
+				avgDurationMs: drizzleSql<number>`coalesce(avg(${hookInvocations.durationMs})::int, 0)`,
+			})
+			.from(hookInvocations)
+			.where(gte(hookInvocations.createdAt, sinceLast24h))
+			.groupBy(hookInvocations.event)
+			.orderBy(desc(drizzleSql`count(*)`))
 
-	return { invocations, summary, adminOnly: false as const }
+		return { invocations, summary, adminOnly: false as const }
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err)
+		console.error('[hooks/listHookInvocationsQuery] DB error:', message)
+		return {
+			invocations: [],
+			summary: [],
+			adminOnly: false as const,
+			loadError: `Could not load hook invocations: ${message}`,
+		}
+	}
 })

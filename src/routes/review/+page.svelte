@@ -28,6 +28,7 @@
 		{ value: 'artifact_conflict', label: 'Artifact conflict' },
 		{ value: 'memory_conflict', label: 'Memory conflict' },
 		{ value: 'policy_override_request', label: 'Policy override request' },
+		{ value: 'pull_request_ready', label: 'Pull request ready' },
 	];
 
 	onMount(() => void load());

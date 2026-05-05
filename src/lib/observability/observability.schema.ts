@@ -46,6 +46,10 @@ export const reviewItemTypeEnum = pgEnum('review_item_type', [
 	'artifact_conflict',
 	'memory_conflict',
 	'policy_override_request',
+	// Wave 5 #19 phase 4 — agent successfully opened a pull request via `create_pull_request`.
+	// Operator surfaces the PR in /review without monitoring chat; payload carries the PR
+	// number, html url, and originating run id.
+	'pull_request_ready',
 ])
 
 export const reviewItemStatusEnum = pgEnum('review_item_status', [

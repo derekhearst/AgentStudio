@@ -184,8 +184,9 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Completion
-- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+
+- 2026-05-04 — Wave 5 #21 phase 4 (mode dispatch slice) — `runAutomationById` now branches on `automation.mode`. Research mode creates a `research` row + enqueues a `research_run` job (Wave 4 #18 orchestrator owns the report write); maintenance mode runs an LLM synthesis without persisting messages (operators inspect via lifecycle metrics); code mode falls through to chat_followup with an info log until #19 P2 finish lands the worktree integration. Lifecycle metrics emit with `mode` + `outputTarget` dimensions so /review/health distinguishes throughput by mode. See `runResearchModeAutomation` + `runMaintenanceModeAutomation` in [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts); 3 dispatch tests in [tests/automations.mode-dispatch.spec.ts](../../tests/automations.mode-dispatch.spec.ts). Output-target routing (review_inbox / task / artifact) remains a follow-up.
+- 2026-05-04 — Wave 5 #21 phase 5 (budget gate slice) — `runAutomationById` pre-checks `checkBudgetLimits` before doing any work; blocked runs persist a `block` budget_alert, open a `policy_override_request` review item (deduped by `budget:<limitId>:<userId>:<automationId>`), advance the schedule, and emit an `automations.lifecycle.blocked` metric. See [src/lib/automations/engine.ts](../../src/lib/automations/engine.ts) `handleAutomationBudgetBlocked`. 3 tests in [tests/automations.budget-gate.spec.ts](../../tests/automations.budget-gate.spec.ts). Approval gates (per-automation `requireApproval` flag) remain deferred — the budget side of P5 is the concrete operator-visible surface today; per-action approvals (push, PR) belong with the source-control write-tools work in #19.
 
 
 

@@ -42,7 +42,9 @@ const updateAgentSchema = z
 		allowedTools: z.array(z.string().trim().min(1)).optional(),
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Empty object
 		// clears all bindings; empty array per-event drops that event's overrides.
-		hooks: z.record(z.enum(HOOK_EVENT_NAMES), z.array(z.string().trim().min(1))).optional(),
+		// Value is `.optional()` so missing keys are accepted — Zod 4's `z.record(K, V)`
+		// without this rejects payloads that don't list every event from K.
+		hooks: z.record(z.enum(HOOK_EVENT_NAMES), z.array(z.string().trim().min(1)).optional()).optional(),
 		// Wave 4 #18 phase 4 — per-agent research config. Empty object clears the override.
 		research: z
 			.object({

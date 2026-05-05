@@ -19,5 +19,4 @@ function createPanelState(): PanelState {
 	}
 }
 
-export const dreamPanel = createPanelState()
 export const skillsPanel = createPanelState()

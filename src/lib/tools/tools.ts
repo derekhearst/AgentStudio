@@ -1,6 +1,18 @@
 type ToolName = string
 
 /**
+ * Wave 5 #19 phase 3 finish — tools that ALWAYS require human approval, regardless of the
+ * user's per-tool approval-mode setting. These are tools whose blast radius reaches outside
+ * AgentStudio (pushing commits to a third-party SCM, opening pull requests on GitHub, etc.).
+ *
+ * The chat-stream handler unions this set into the runtime's `approvalRequiredTools`, so an
+ * operator can never accidentally turn approval off for these. Tool execution branches also
+ * refuse when the run has no approval surface (e.g. detached automation runs), so the same
+ * tool registered into an automation handler will fail-closed instead of silently pushing.
+ */
+export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = ['push_branch', 'create_pull_request']
+
+/**
  * Capability groups that organize tools into logical bundles.
  * Only the groups detected as relevant are loaded per message,
  * reducing token usage and improving model focus.
@@ -100,8 +112,8 @@ export const capabilityGroups = {
 	source_control: {
 		label: 'Source control',
 		description:
-			'Read the user\'s connected source-control repositories. Requires the user to have connected GitHub at /source-control. Use list_my_repos to discover repos, sync_my_repos to refresh the local mirror.',
-		tools: ['list_my_repos', 'sync_my_repos'] as ToolName[],
+			'Read the user\'s connected source-control repositories and inspect local working trees. Use list_my_repos / sync_my_repos to discover GitHub repos. Use prepare_commit to draft a commit summary from the workspace working tree (no push or PR creation in this surface yet — sandbox-mode `git_status` / `git_diff` / `git_log` cover lower-level inspection).',
+		tools: ['list_my_repos', 'sync_my_repos', 'prepare_commit', 'push_branch', 'create_pull_request', 'list_pull_requests', 'get_pull_request', 'clone_repository'] as ToolName[],
 		alwaysOn: false,
 	},
 } as const satisfies Record<string, { label: string; description: string; tools: ToolName[]; alwaysOn: boolean }>

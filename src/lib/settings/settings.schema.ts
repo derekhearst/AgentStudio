@@ -10,19 +10,10 @@ export const appSettings = pgTable('app_settings', {
 		.$type<{
 			taskCompleted: boolean
 			needsInput: boolean
-			dreamSummary: boolean
 			agentErrors: boolean
 		}>()
 		.notNull()
-		.default({ taskCompleted: true, needsInput: true, dreamSummary: true, agentErrors: true }),
-	dreamConfig: jsonb('dream_config')
-		.$type<{
-			autoRun: boolean
-			frequencyHours: number
-			aggressiveness: number
-		}>()
-		.notNull()
-		.default({ autoRun: false, frequencyHours: 24, aggressiveness: 0.5 }),
+		.default({ taskCompleted: true, needsInput: true, agentErrors: true }),
 	budgetConfig: jsonb('budget_config')
 		.$type<{
 			dailyLimit: number | null

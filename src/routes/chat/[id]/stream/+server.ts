@@ -186,6 +186,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const approvalRequiredTools = new Set(
 		toolConfig?.approvalRequiredTools ?? (toolConfig?.approvalMode === 'confirm' ? ['*'] : []),
 	)
+	// Wave 5 #19 phase 3 finish — destructive source-control tools (push_branch /
+	// create_pull_request) ALWAYS require operator approval, regardless of per-user
+	// settings. Refused outright in non-interactive runs at the tool execution layer.
+	const { MANDATORY_APPROVAL_TOOLS } = await import('$lib/tools/tools')
+	for (const toolName of MANDATORY_APPROVAL_TOOLS) approvalRequiredTools.add(toolName)
 
 	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
 	// Phase 4 of #4: filter by relevance to the user's query when available, capped to skillTopK

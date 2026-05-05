@@ -19,7 +19,7 @@
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
-	import LiveToolCallCard from '$lib/chat/LiveToolCallCard.svelte';
+	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
@@ -1669,12 +1669,11 @@
 								/>
 							{/if}
 						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'propose_plan'}
-							<LiveToolCallCard
+							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}
 								result={block.result ?? ''}
-								status={block.status === 'failed' ? 'completed' : block.status}
-								failed={block.status === 'failed'}
+								status={block.status}
 								executionMs={block.executionMs ?? null}
 								expanded={block.expanded}
 								token={block.token ?? null}

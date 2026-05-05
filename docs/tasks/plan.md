@@ -142,8 +142,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 - Include approval, question, and interruption flows where relevant.
 
 ## Completion
-- Template: YYYY-MM-DD - Completed in <PR/commit> - <one-line outcome>
-- Pending.
+- 2026-05-04 — Wave 2 #11 phase 3 finish — background dispatcher for non-`propose_plan` tasks. New `task_run` job handler + `tasks.dispatch` scheduled tick (90s) in [src/lib/tasks/task-handler.server.ts](../../src/lib/tasks/task-handler.server.ts), boot wiring in [src/lib/db.server.ts](../../src/lib/db.server.ts). Tests: [tests/tasks.dispatcher.spec.ts](../../tests/tasks.dispatcher.spec.ts).
 
 
 

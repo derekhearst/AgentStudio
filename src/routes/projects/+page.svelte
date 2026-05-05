@@ -186,7 +186,7 @@
 					<div class="flex items-center justify-between text-xs text-base-content/45">
 						<span>Updated {fmtDate(project.updatedAt)}</span>
 						<button
-							class="invisible btn btn-xs btn-ghost text-error group-hover:visible"
+							class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100"
 							type="button"
 							onclick={() => handleDelete(project)}
 							aria-label="Delete project"
