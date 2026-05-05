@@ -1,8 +1,9 @@
 import { command, query } from '$app/server'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { chatRuns } from '$lib/runs/runs.schema'
+import { ACTIVE_CHAT_RUN_STATES } from '$lib/runs/runs.server'
 import { tasks } from './tasks.schema'
 import {
 	getTaskById,
@@ -66,16 +67,18 @@ export const listTasksQuery = query(listTasksSchema, async (input) => {
 		limit: input.limit,
 	})
 	// Annotate with child counts so the kanban can render "3 steps" without a second roundtrip.
+	// Scoped to `parentTaskId IN (visible rows)` so we don't scan every task row in the table
+	// when the user is looking at a small list.
 	if (rows.length === 0) return rows.map((r) => ({ ...r, childCount: 0 }))
 	const parentIds = rows.map((r) => r.id)
-	const childCounts = new Map<string, number>()
 	const children = await db
 		.select({ parentTaskId: tasks.parentTaskId })
 		.from(tasks)
+		.where(inArray(tasks.parentTaskId, parentIds))
+	const childCounts = new Map<string, number>()
 	for (const c of children) {
-		if (c.parentTaskId && parentIds.includes(c.parentTaskId)) {
-			childCounts.set(c.parentTaskId, (childCounts.get(c.parentTaskId) ?? 0) + 1)
-		}
+		if (!c.parentTaskId) continue
+		childCounts.set(c.parentTaskId, (childCounts.get(c.parentTaskId) ?? 0) + 1)
 	}
 	return rows.map((r) => ({ ...r, childCount: childCounts.get(r.id) ?? 0 }))
 })
@@ -133,27 +136,28 @@ export const getTaskSubtreeQuery = query(subtreeSchema, async ({ rootTaskId, max
 
 	const limit = maxDepth ?? 5
 	const flat: Array<TaskRow & { depth: number }> = [{ ...root, depth: 0 }]
-	const queue: Array<{ id: string; depth: number }> = [{ id: rootTaskId, depth: 0 }]
 	const seen = new Set<string>([rootTaskId])
+	let frontier: string[] = [rootTaskId]
 
-	while (queue.length > 0) {
-		const next = queue.shift()!
-		if (next.depth >= limit) continue
+	// One query per depth level instead of per-node — a 4-deep × 5-wide tree drops from
+	// ~156 sequential round-trips to 4. Cycle defense via `seen` is preserved.
+	for (let depth = 0; depth < limit && frontier.length > 0; depth++) {
 		const children = await db
 			.select()
 			.from(tasks)
-			.where(eq(tasks.parentTaskId, next.id))
-		// Stable order: priority asc, then createdAt asc (matches the kanban + detail page).
+			.where(inArray(tasks.parentTaskId, frontier))
 		children.sort((a: TaskRow, b: TaskRow) => {
 			if (a.priority !== b.priority) return a.priority - b.priority
 			return a.createdAt.getTime() - b.createdAt.getTime()
 		})
+		const nextFrontier: string[] = []
 		for (const c of children) {
-			if (seen.has(c.id)) continue // forward-compat: defend against cycles
+			if (seen.has(c.id)) continue
 			seen.add(c.id)
-			flat.push({ ...c, depth: next.depth + 1 })
-			queue.push({ id: c.id, depth: next.depth + 1 })
+			flat.push({ ...c, depth: depth + 1 })
+			nextFrontier.push(c.id)
 		}
+		frontier = nextFrontier
 	}
 
 	return { root, flat }
@@ -237,16 +241,41 @@ export const listConnectedRepositoriesQuery = query(async () => {
 
 /**
  * Cancel a task and any non-terminal direct children (one level — matches the propose_plan tree
- * shape today). Preserves completed/failed/already-canceled descendants for forensic visibility.
+ * shape today). ALSO cancels any in-flight `chat_runs` linked to the task — without this, the
+ * row says "Canceled" but the runtime keeps spending tokens. Preserves
+ * completed/failed/already-canceled descendants for forensic visibility.
  */
 export const cancelTaskCommand = command(cancelTaskSchema, async ({ taskId }) => {
 	const target = await getTaskById(taskId)
 	if (!target) return null
 	if (['completed', 'failed', 'canceled'].includes(target.status)) return target
-	await db.update(tasks).set({ status: 'canceled', updatedAt: new Date() }).where(eq(tasks.id, taskId))
+	const now = new Date()
+	await db.update(tasks).set({ status: 'canceled', updatedAt: now }).where(eq(tasks.id, taskId))
+
+	// Stop any in-flight chat_runs materializing this task (the runner's poll loops break
+	// out when they see `state='canceled'` on next tick). Mirrors the runtime cancel patch
+	// shape from runs.server.ts — clears pending tokens so the conversation can be reused.
+	await db
+		.update(chatRuns)
+		.set({
+			state: 'canceled',
+			finishedAt: now,
+			updatedAt: now,
+			error: 'Task canceled by user',
+			pendingApprovals: [],
+			pendingQuestions: [],
+		})
+		.where(
+			and(
+				eq(chatRuns.taskId, taskId),
+				isNull(chatRuns.finishedAt),
+				inArray(chatRuns.state, ACTIVE_CHAT_RUN_STATES),
+			),
+		)
+
 	await db
 		.update(tasks)
-		.set({ status: 'canceled', updatedAt: new Date() })
+		.set({ status: 'canceled', updatedAt: now })
 		.where(
 			and(
 				eq(tasks.parentTaskId, taskId),

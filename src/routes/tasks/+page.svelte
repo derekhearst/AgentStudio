@@ -31,10 +31,14 @@
 	async function load() {
 		loading = true;
 		try {
-			tasks = await listTasksQuery({
+			// Invalidate the SvelteKit query cache before re-reading so navigating back from
+			// /tasks/[id] after editing reflects the latest state instead of stale rows.
+			const q = listTasksQuery({
 				includeTerminal: showTerminal,
 				parentTaskId: onlyTopLevel ? null : undefined,
 			});
+			await q.refresh();
+			tasks = await q;
 		} finally {
 			loading = false;
 		}

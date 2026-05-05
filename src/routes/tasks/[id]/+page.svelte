@@ -112,6 +112,8 @@
 		try {
 			await cancelTaskCommand({ taskId: detail.task.id });
 			await load(true);
+		} catch (e) {
+			error = e instanceof Error ? e.message : 'Cancel failed';
 		} finally {
 			busy = false;
 		}
@@ -138,8 +140,11 @@
 		repoError = null;
 		try {
 			await setTaskRepositoryCommand({ taskId: detail.task.id, repositoryId: repoId });
-			repoPickerOpen = false;
+			// Reload first so the badge reflects the new state, then close the picker. Closing
+			// before refresh produced a one-roundtrip flicker where the badge showed the old
+			// link, and a fast double-click could fire the command twice against stale state.
 			await load(true);
+			repoPickerOpen = false;
 		} catch (e) {
 			repoError = e instanceof Error ? e.message : 'Failed to update repository';
 		} finally {
