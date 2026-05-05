@@ -1058,10 +1058,12 @@
 
 			await streamMessage(content, false, attachments);
 		} catch (error) {
+			const message = error instanceof Error ? error.message : 'Could not send message'
 			logChatUi('error', 'Composer submission failed', {
-				error: error instanceof Error ? error.message : String(error),
+				error: message,
 				attachmentCount: attachments.length,
 			});
+			setRecoverableError(message, null, { action: 'handleComposerSubmit' });
 		}
 	}
 
@@ -1079,9 +1081,9 @@
 			});
 			await goto(`/research/${result.research.id}`);
 		} catch (error) {
-			logChatUi('error', 'Research submission failed', {
-				error: error instanceof Error ? error.message : String(error),
-			});
+			const message = error instanceof Error ? error.message : 'Research could not be started'
+			logChatUi('error', 'Research submission failed', { error: message });
+			setRecoverableError(message, null, { action: 'handleResearchSubmit' });
 		}
 	}
 
@@ -1670,6 +1672,15 @@
 			{/if}
 
 			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
+				{#if displayedMessages.length === 0 && !streaming && !waitingForFirstToken}
+					<div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-base-content/45">
+						<svg class="size-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+						</svg>
+						<p class="text-sm">Start the conversation by typing below.</p>
+					</div>
+				{/if}
+
 				{#each displayedMessages as message (message.id)}
 					<MessageBubble {message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
 				{/each}
@@ -1686,7 +1697,8 @@
 						{#if block.kind === 'tool' && block.name === 'ask_user'}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
 							{@const askAnswers = getAskUserAnswersFromTool(block)}
-							{#if askQuestions.length > 0}
+							{@const askLive = block.status === 'pending' || block.status === 'approved' || block.status === 'executing'}
+							{#if askQuestions.length > 0 && (askLive || (block.status === 'completed' && askAnswers))}
 								<AskUserCard
 									questions={askQuestions}
 									status={block.status}
