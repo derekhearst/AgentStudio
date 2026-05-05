@@ -9,7 +9,12 @@
 		updateAutomationCommand,
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
+	import { getSourceControlOverviewQuery } from '$lib/source-control/source-control.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+
+	type AutomationMode = 'chat_followup' | 'research' | 'code' | 'maintenance';
+	type AutomationOutputTarget = 'chat_session' | 'task' | 'artifact' | 'review_inbox';
+	type RepoChoice = Awaited<ReturnType<typeof getSourceControlOverviewQuery>>['repositories'][number];
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
@@ -37,8 +42,12 @@
 	let cronExpression = $state('0 9 * * *');
 	let prompt = $state('Summarize important updates since the last run and recommend next actions.');
 	let conversationMode = $state<'new_each_run' | 'reuse'>('new_each_run');
+	let mode = $state<AutomationMode>('chat_followup');
+	let outputTarget = $state<AutomationOutputTarget>('chat_session');
+	let selectedRepositoryId = $state<string>('');
 	let enabled = $state(true);
 	let selectedAgentId = $state('orchestrator');
+	let repositories = $state<RepoChoice[]>([]);
 
 	const enabledCount = $derived(rows.filter((row) => row.enabled).length);
 	const dueSoonCount = $derived(rows.filter((row) => isDueSoon(row.nextRunAt)).length);
@@ -72,9 +81,14 @@
 		loading = true;
 		formError = null;
 		try {
-			const [automations, agentChoices] = await Promise.all([listAutomationsQuery(), getAgentChoices()]);
+			const [automations, agentChoices, sourceControlOverview] = await Promise.all([
+				listAutomationsQuery(),
+				getAgentChoices(),
+				getSourceControlOverviewQuery().catch(() => ({ repositories: [] as RepoChoice[] })),
+			]);
 			rows = automations;
 			agents = agentChoices;
+			repositories = sourceControlOverview.repositories;
 		} catch {
 			formError = 'Unable to load automations right now. Try again in a moment.';
 		} finally {
@@ -142,9 +156,17 @@
 		return null;
 	}
 
+	function validateModeSpecific(): string | null {
+		if (mode === 'code') {
+			if (!selectedRepositoryId) return 'Code mode requires a connected repository — pick one or sync at /source-control.';
+			if (selectedAgentId === 'orchestrator') return 'Code mode requires a coding agent — assign one before creating.';
+		}
+		return null;
+	}
+
 	async function createAutomation() {
 		clearCreateMessage();
-		formError = validateCreateForm();
+		formError = validateCreateForm() ?? validateModeSpecific();
 		if (formError) return;
 
 		saving = true;
@@ -156,10 +178,14 @@
 				prompt: prompt.trim(),
 				enabled,
 				conversationMode,
+				mode,
+				outputTarget,
+				repositoryId: mode === 'code' && selectedRepositoryId ? selectedRepositoryId : null,
 			});
 
 			await loadPageData();
 			description = '';
+			selectedRepositoryId = '';
 			createMessage = 'Automation created successfully.';
 		} catch {
 			formError = 'Failed to create automation. Check values and try again.';
@@ -412,6 +438,67 @@
 								onclick={() => (conversationMode = 'reuse')}
 							>Reuse thread</button>
 						</div>
+					</div>
+
+					<!-- Wave 5 #21 phase 4 — execution mode + per-mode config (repository for code,
+					     output target for maintenance). Mode picks the engine handler at run time. -->
+					<div class="space-y-2 rounded-xl border border-base-300/70 bg-base-200/20 p-3">
+						<p class="text-xs font-medium">Execution mode</p>
+						<select
+							data-testid="automation-mode-select"
+							class="select select-bordered select-sm w-full"
+							bind:value={mode}
+							onchange={clearCreateMessage}
+						>
+							<option value="chat_followup">Chat followup — append prompt to a conversation (default)</option>
+							<option value="research">Research — open a research run with citations</option>
+							<option value="code">Code — clone a repo + create a coding task for an agent</option>
+							<option value="maintenance">Maintenance — run hygiene work, no chat surface</option>
+						</select>
+
+						{#if mode === 'code'}
+							<div class="mt-2 space-y-1">
+								<p class="text-xs text-base-content/70">Target repository</p>
+								{#if repositories.length === 0}
+									<p class="text-xs text-warning">
+										No connected repositories. <a class="link" href="/source-control">Connect GitHub</a> to enable code mode.
+									</p>
+								{:else}
+									<select
+										data-testid="automation-repo-select"
+										class="select select-bordered select-sm w-full font-mono"
+										bind:value={selectedRepositoryId}
+										onchange={clearCreateMessage}
+									>
+										<option value="">Pick a repository…</option>
+										{#each repositories as repo (repo.id)}
+											<option value={repo.id}>{repo.owner}/{repo.name}</option>
+										{/each}
+									</select>
+								{/if}
+								<p class="text-xs text-base-content/55">
+									Code-mode automations create a task with the repo attached. The task runner provisions
+									a per-attempt worktree; an operator opens the task to review + push.
+								</p>
+							</div>
+						{/if}
+
+						{#if mode === 'maintenance'}
+							<div class="mt-2 space-y-1">
+								<p class="text-xs text-base-content/70">Output target</p>
+								<select
+									data-testid="automation-output-target-select"
+									class="select select-bordered select-sm w-full"
+									bind:value={outputTarget}
+									onchange={clearCreateMessage}
+								>
+									<option value="chat_session">Chat session — assistant message in the conversation</option>
+									<option value="review_inbox">Review inbox — automation_summary item</option>
+									<option value="task">Task — create a pending task with the summary</option>
+									<option value="artifact">Artifact — write a versioned artifact (project must be bound)</option>
+								</select>
+							</div>
+						{/if}
 					</div>
 
 					<label class="form-control">

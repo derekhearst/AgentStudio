@@ -35,6 +35,11 @@ export async function createAutomationRecord(input: {
 	prompt: string
 	enabled?: boolean
 	conversationMode?: 'new_each_run' | 'reuse'
+	// Wave 5 #21 phase 4 — execution mode + output routing.
+	mode?: 'chat_followup' | 'research' | 'code' | 'maintenance'
+	outputTarget?: 'chat_session' | 'task' | 'artifact' | 'review_inbox'
+	// Wave 5 #21 phase 4 finish — code-mode target repository.
+	repositoryId?: string | null
 }) {
 	const now = new Date()
 	const nextRunAt = computeNextRunAt(input.cronExpression, now)
@@ -48,6 +53,9 @@ export async function createAutomationRecord(input: {
 			prompt: input.prompt,
 			enabled: input.enabled ?? true,
 			conversationMode: input.conversationMode ?? 'new_each_run',
+			mode: input.mode ?? 'chat_followup',
+			outputTarget: input.outputTarget ?? 'chat_session',
+			repositoryId: input.repositoryId ?? null,
 			nextRunAt,
 			updatedAt: now,
 		})
@@ -66,6 +74,9 @@ export async function updateAutomationRecord(
 		prompt?: string
 		enabled?: boolean
 		conversationMode?: 'new_each_run' | 'reuse'
+		mode?: 'chat_followup' | 'research' | 'code' | 'maintenance'
+		outputTarget?: 'chat_session' | 'task' | 'artifact' | 'review_inbox'
+		repositoryId?: string | null
 	},
 ) {
 	const [existing] = await db
@@ -84,6 +95,9 @@ export async function updateAutomationRecord(
 	if (patch.prompt !== undefined) updates.prompt = patch.prompt
 	if (patch.enabled !== undefined) updates.enabled = patch.enabled
 	if (patch.conversationMode !== undefined) updates.conversationMode = patch.conversationMode
+	if (patch.mode !== undefined) updates.mode = patch.mode
+	if (patch.outputTarget !== undefined) updates.outputTarget = patch.outputTarget
+	if (patch.repositoryId !== undefined) updates.repositoryId = patch.repositoryId
 	if (patch.cronExpression !== undefined) {
 		updates.cronExpression = patch.cronExpression
 		updates.nextRunAt = computeNextRunAt(patch.cronExpression)

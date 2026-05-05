@@ -49,6 +49,12 @@ export const automations = pgTable(
 		// outputTarget controls where the result lands. See enum docs above.
 		mode: automationModeEnum('mode').notNull().default('chat_followup'),
 		outputTarget: automationOutputTargetEnum('output_target').notNull().default('chat_session'),
+		// Wave 5 #21 phase 4 finish — code-mode target repository. When mode='code', the
+		// runner creates a task carrying this repository_id forward so the task runner
+		// provisions a per-attempt worktree against the connected repo. Declared by-name
+		// (no enforced FK); a deleted repo leaves the automation pointing at a stale id
+		// that the runner detects + falls back from with a clear log.
+		repositoryId: uuid('repository_id'),
 		lastRunAt: timestamp('last_run_at', { withTimezone: true }),
 		nextRunAt: timestamp('next_run_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -56,6 +62,7 @@ export const automations = pgTable(
 	},
 	(t) => ({
 		modeIdx: index('automations_mode_idx').on(t.mode),
+		repositoryIdx: index('automations_repository_idx').on(t.repositoryId),
 	}),
 )
 

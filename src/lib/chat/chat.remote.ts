@@ -126,9 +126,55 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		.where(eq(messages.conversationId, conversationId))
 		.orderBy(asc(messages.createdAt))
 
+	// Surface the active run's first un-decided pending ask_user entry so a cold page load
+	// after a hard refresh can recover the question without an SSE round-trip. The stream
+	// path still owns updates while connected; this is purely the resume seed.
+	const [activeRun] = await db
+		.select({
+			id: chatRuns.id,
+			state: chatRuns.state,
+			pendingQuestions: chatRuns.pendingQuestions,
+		})
+		.from(chatRuns)
+		.where(
+			and(
+				eq(chatRuns.conversationId, conversationId),
+				eq(chatRuns.userId, user.id),
+				isNull(chatRuns.finishedAt),
+			),
+		)
+		.orderBy(desc(chatRuns.updatedAt))
+		.limit(1)
+
+	let pendingAskUser: {
+		token: string
+		questions: Array<{
+			header: string
+			question: string
+			options: Array<{ label: string; description?: string; recommended?: boolean }>
+			allowFreeformInput?: boolean
+		}>
+	} | null = null
+	if (activeRun?.pendingQuestions && Array.isArray(activeRun.pendingQuestions)) {
+		const undecided = (activeRun.pendingQuestions as Array<{
+			token: string
+			questions: Array<{
+				header: string
+				question: string
+				options: Array<{ label: string; description?: string; recommended?: boolean }>
+				allowFreeformInput?: boolean
+			}>
+			decidedAt?: string
+		}>).find((entry) => entry && entry.token && !entry.decidedAt)
+		if (undecided) {
+			pendingAskUser = { token: undecided.token, questions: undecided.questions ?? [] }
+		}
+	}
+
 	return {
 		conversation,
 		messages: rows,
+		pendingAskUser,
 	}
 })
 

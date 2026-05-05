@@ -8,6 +8,9 @@ import {
 	updateAutomationRecord,
 } from '$lib/automations/automation.server'
 
+const automationModeSchema = z.enum(['chat_followup', 'research', 'code', 'maintenance'])
+const automationOutputTargetSchema = z.enum(['chat_session', 'task', 'artifact', 'review_inbox'])
+
 const createAutomationSchema = z.object({
 	agentId: z.string().uuid().nullable().optional(),
 	description: z.string().trim().min(1).max(200),
@@ -15,6 +18,9 @@ const createAutomationSchema = z.object({
 	prompt: z.string().trim().min(1),
 	enabled: z.boolean().optional(),
 	conversationMode: z.enum(['new_each_run', 'reuse']).optional(),
+	mode: automationModeSchema.optional(),
+	outputTarget: automationOutputTargetSchema.optional(),
+	repositoryId: z.string().uuid().nullable().optional(),
 })
 
 const updateAutomationSchema = z.object({
@@ -25,6 +31,9 @@ const updateAutomationSchema = z.object({
 	prompt: z.string().trim().min(1).optional(),
 	enabled: z.boolean().optional(),
 	conversationMode: z.enum(['new_each_run', 'reuse']).optional(),
+	mode: automationModeSchema.optional(),
+	outputTarget: automationOutputTargetSchema.optional(),
+	repositoryId: z.string().uuid().nullable().optional(),
 })
 
 const automationIdSchema = z.object({
@@ -46,6 +55,9 @@ export const createAutomationCommand = command(createAutomationSchema, async (in
 		prompt: input.prompt,
 		enabled: input.enabled,
 		conversationMode: input.conversationMode,
+		mode: input.mode,
+		outputTarget: input.outputTarget,
+		repositoryId: input.repositoryId ?? null,
 	})
 })
 

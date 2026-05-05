@@ -903,6 +903,15 @@
 		stats = statsResult;
 		activeTask = taskResult ?? null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
+		// Cold-load resume: a hard refresh during an active ask_user pause loses the SSE-derived
+		// pendingAskUser state. The remote query now ships the un-decided entry from chat_runs.
+		// Trust the live SSE state if it's already populated — that path is fresher.
+		if (!pendingAskUser && conversationResult?.pendingAskUser) {
+			pendingAskUser = {
+				token: conversationResult.pendingAskUser.token,
+				questions: conversationResult.pendingAskUser.questions,
+			};
+		}
 	}
 
 	async function refreshAll() {

@@ -145,25 +145,18 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now)
 	}
 
-	// Wave 5 #21 phase 4 — per-mode dispatch. Code mode still falls through to chat_followup
-	// since the runtime worktree-from-mirror integration (#19 P2 finish) is the keystone for
-	// the code-mode workflow; see engine fallback below.
+	// Wave 5 #21 phase 4 — per-mode dispatch.
 	const startedAt = Date.now()
 	let success = true
 	try {
-		let result: { conversationId: string; runId?: string } | { conversationId: string | null; researchId?: string; jobId?: string; mode?: string } | { mode: 'maintenance'; summary: string; conversationId: null }
+		let result: { conversationId: string; runId?: string } | { conversationId: string | null; researchId?: string; jobId?: string; mode?: string } | { mode: 'maintenance'; summary: string; conversationId: null } | { mode: 'code'; taskId: string; conversationId: null }
 		if (automation.mode === 'research') {
 			result = await runResearchModeAutomation(automation)
 		} else if (automation.mode === 'maintenance') {
 			result = await runMaintenanceModeAutomation(automation, now)
+		} else if (automation.mode === 'code') {
+			result = await runCodeModeAutomation(automation)
 		} else {
-			if (automation.mode === 'code') {
-				console.info('[automations] code mode dispatch not yet implemented; falling back to chat_followup', {
-					automationId,
-					mode: automation.mode,
-					outputTarget: automation.outputTarget,
-				})
-			}
 			result = await runAutomation(automation, now)
 		}
 		const nextRunAt = computeNextRunAt(automation.cronExpression, now)
@@ -333,6 +326,60 @@ async function runResearchModeAutomation(automation: typeof automations.$inferSe
 		jobId: job.id,
 		mode: 'research' as const,
 	}
+}
+
+/**
+ * Wave 5 #21 phase 4 finish — code-mode dispatch.
+ *
+ * Creates a task linked to the automation's repository so the task runner provisions a
+ * per-attempt worktree (via #19 P2 finish: `provisionRepoBackedWorkspace`) before the
+ * agent loop begins. The agent operates inside the cloned mirror, can call
+ * `prepare_commit` to inspect changes, and — when run interactively from `/tasks/[id]` —
+ * can call `push_branch` / `create_pull_request` (mandatory operator approval).
+ *
+ * Code-mode automations never auto-push: the destructive tools refuse outright in
+ * non-chat_stream contexts (defense in depth on top of the mandatory-approval set). The
+ * automation's job is to QUEUE the work; an operator opens the resulting task and
+ * either re-runs interactively or reviews the agent's prepared commit and pushes
+ * manually.
+ *
+ * Failure modes:
+ *   - automation has no `repositoryId` → return a marker with `taskId: null` and log a
+ *     warning; the operator either sets the repo on the automation or switches modes.
+ *   - automation has no `agentId` → same: a coding agent is required.
+ *   - repository_id stale (repo deleted post-create) → the task runner detects this at
+ *     dispatch time and falls back to the agent's legacy workspace with a warning. We
+ *     don't validate ownership here because cross-user automations aren't possible
+ *     (the FK is via createdBy on the automation row).
+ */
+async function runCodeModeAutomation(
+	automation: typeof automations.$inferSelect,
+): Promise<{ mode: 'code'; taskId: string; conversationId: null } | { mode: 'code'; taskId: null; conversationId: null }> {
+	if (!automation.agentId) {
+		console.warn('[automations] code mode automation has no agentId; skipping', { automationId: automation.id })
+		return { mode: 'code', taskId: null, conversationId: null }
+	}
+	if (!automation.repositoryId) {
+		console.warn('[automations] code mode automation has no repositoryId; skipping', { automationId: automation.id })
+		return { mode: 'code', taskId: null, conversationId: null }
+	}
+
+	const { createTask } = await import('$lib/tasks/tasks.server')
+	const task = await createTask({
+		title: automation.description.slice(0, 200),
+		spec: automation.prompt,
+		status: 'pending',
+		ownerAgentId: automation.agentId,
+		repositoryId: automation.repositoryId,
+		metadata: {
+			source: 'automation_code',
+			automationId: automation.id,
+			mode: 'code',
+		},
+		createdBy: automation.userId,
+	})
+
+	return { mode: 'code', taskId: task.id, conversationId: null }
 }
 
 /**
