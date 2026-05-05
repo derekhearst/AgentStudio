@@ -598,8 +598,11 @@
 			.filter(Boolean) as Array<Record<string, unknown>>;
 	}
 
-	async function persistCanceledPartialIfAny() {
-		if (!stoppedByUser || pendingMessageId) return;
+	async function persistPartialIfIncomplete() {
+		// Persist any visible partial whenever the stream didn't complete with a `done` event
+		// (i.e., `pendingMessageId` was never assigned). Covers user-stop AND error paths —
+		// without this, the finally block wipes streamingBlocks and the partial vanishes.
+		if (pendingMessageId) return;
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
 
@@ -615,7 +618,7 @@
 			toolCalls: getCompletedToolCallsFromBlocks(),
 			metadata: {
 				partial: true,
-				stoppedByUser: true,
+				stoppedByUser,
 				reasoningEffort,
 				reasoningTokens: getLatestReasoningTokensFromBlocks(),
 				blocks: getSerializableBlocksForMetadata(),
@@ -667,9 +670,10 @@
 			await getConversation(conversationId).refresh();
 			await loadConversationState();
 		} catch (error) {
-			logChatUi('error', 'Mode switch failed', {
-				error: error instanceof Error ? error.message : String(error),
-			});
+			const message = error instanceof Error ? error.message : 'Could not change mode'
+			logChatUi('error', 'Mode switch failed', { error: message });
+			// Surface the failure to the user instead of silently snapping the dropdown back.
+			setRecoverableError(message, null, { action: 'handleModeChange', next });
 		}
 	}
 	const initialPrompt = $derived(page.url.searchParams.get('prompt')?.trim() ?? '');
@@ -871,9 +875,24 @@
 	});
 
 	function reconcilePendingWithRemote(remoteMessages: typeof messages) {
-		pendingAssistantDrafts = pendingAssistantDrafts.filter((draft) =>
-			!remoteMessages.some((message) => message.id === draft.id)
-		);
+		const now = Date.now();
+		// Drop drafts whose id matches a remote message OR whose remote counterpart matches by
+		// content + recency (covers id rewrites from compaction/branching), AND drop any draft
+		// older than 60 seconds unconditionally to prevent indefinite phantom bubbles when a
+		// stream errored before the `done` event landed.
+		pendingAssistantDrafts = pendingAssistantDrafts.filter((draft) => {
+			if (remoteMessages.some((message) => message.id === draft.id)) return false;
+			const matchesByContent = draft.content.trim().length > 0
+				&& remoteMessages.some(
+					(remote) =>
+						remote.role === 'assistant'
+						&& remote.content === draft.content
+						&& new Date(remote.createdAt).getTime() >= draft.createdAt.getTime() - 15000,
+				);
+			if (matchesByContent) return false;
+			if (now - draft.createdAt.getTime() > 60_000) return false;
+			return true;
+		});
 		pendingUserMessages = pendingUserMessages.filter(
 			(pending) =>
 				!remoteMessages.some(
@@ -903,14 +922,17 @@
 		stats = statsResult;
 		activeTask = taskResult ?? null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
-		// Cold-load resume: a hard refresh during an active ask_user pause loses the SSE-derived
-		// pendingAskUser state. The remote query now ships the un-decided entry from chat_runs.
-		// Trust the live SSE state if it's already populated — that path is fresher.
-		if (!pendingAskUser && conversationResult?.pendingAskUser) {
-			pendingAskUser = {
-				token: conversationResult.pendingAskUser.token,
-				questions: conversationResult.pendingAskUser.questions,
-			};
+		// Reconcile pendingAskUser with the server's view: if mid-stream there's a live token
+		// the SSE stream owns it and we don't touch it; otherwise (cold-load OR after a
+		// disconnect that left a stale token), trust the server's un-decided entry — null
+		// included, so a resolved/expired question clears the modal/HUD.
+		if (!streaming) {
+			pendingAskUser = conversationResult?.pendingAskUser
+				? {
+					token: conversationResult.pendingAskUser.token,
+					questions: conversationResult.pendingAskUser.questions,
+				}
+				: null;
 		}
 	}
 
@@ -1174,6 +1196,10 @@
 				buffer = events.pop() ?? '';
 
 				for (const raw of events) {
+					// User clicked Stop — abort() rejects the next read() but events already
+					// buffered will keep flowing through this loop. Don't mutate state any
+					// further; the finally block will tear down cleanly.
+					if (stoppedByUser) break;
 					const lines = raw.split('\n');
 					const idLine = lines.find((line) => line.startsWith('id: '));
 					if (idLine) {
@@ -1488,7 +1514,7 @@
 				);
 			}
 		} finally {
-			await persistCanceledPartialIfAny().catch((error) => {
+			await persistPartialIfIncomplete().catch((error) => {
 				logChatUi('warn', 'Failed to persist partial assistant message', {
 					error: error instanceof Error ? error.message : String(error),
 				});
@@ -1586,7 +1612,9 @@
 	}
 
 	async function compactContext() {
-		console.log('Compact context requested for', conversationId);
+		if (!conversationId || streaming) return;
+		const compactionPrompt = `Please compact this conversation. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary so we can continue from a smaller context.`;
+		await streamMessage(compactionPrompt, false);
 	}
 </script>
 
