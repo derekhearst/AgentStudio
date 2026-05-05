@@ -1,28 +1,15 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveAdminUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * An empty assistant message (no content, no toolCalls, no metadata.blocks — or where every
- * saved block has nothing renderable) used to render as a bordered placeholder bubble. With
- * 4+ pending automation runs writing into the conversation list, these were stacking up
- * visually under the real reply. The guard in MessageBubble now skips the whole article when
- * there's nothing meaningful inside.
+ * saved block has nothing renderable) used to render as a bordered placeholder bubble. The
+ * guard in MessageBubble now skips the whole article when there's nothing meaningful inside.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function seedConversationWithMessages(prefix: string) {
 	const sql = getSql()
-	const userId = await getActiveUserId()
+	const userId = await getActiveAdminUserId()
 
 	const [conversation] = await sql<{ id: string }[]>`
 		insert into conversations (title, user_id, model, total_tokens, total_cost)

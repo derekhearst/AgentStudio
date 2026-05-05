@@ -123,7 +123,7 @@
 						class="shrink-0 rounded-md p-1 opacity-40 hover:bg-error/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
 						title="Dismiss this run"
 						aria-label="Dismiss run"
-						disabled={dismissingId === run.id}
+						disabled={!!dismissingId}
 						onclick={(e) => handleDismiss(e, run.id)}
 					>
 						<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">

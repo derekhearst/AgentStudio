@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt, isNull, ne, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages, CHAT_MODES, type ChatMode } from '$lib/sessions/sessions.schema'
-import { chatRuns } from '$lib/runs/runs.schema'
+import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import {
@@ -121,56 +121,35 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		return null
 	}
 
-	const rows = await db
-		.select()
-		.from(messages)
-		.where(eq(messages.conversationId, conversationId))
-		.orderBy(asc(messages.createdAt))
+	// Parallelize messages + active-run lookup — both are scoped to the now-verified conversation.
+	const [rows, [activeRun]] = await Promise.all([
+		db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt)),
+		db
+			.select({
+				id: chatRuns.id,
+				state: chatRuns.state,
+				pendingQuestions: chatRuns.pendingQuestions,
+			})
+			.from(chatRuns)
+			.where(
+				and(
+					eq(chatRuns.conversationId, conversationId),
+					eq(chatRuns.userId, user.id),
+					isNull(chatRuns.finishedAt),
+				),
+			)
+			.orderBy(desc(chatRuns.updatedAt))
+			.limit(1),
+	])
 
-	// Surface the active run's first un-decided pending ask_user entry so a cold page load
-	// after a hard refresh can recover the question without an SSE round-trip. The stream
-	// path still owns updates while connected; this is purely the resume seed.
-	const [activeRun] = await db
-		.select({
-			id: chatRuns.id,
-			state: chatRuns.state,
-			pendingQuestions: chatRuns.pendingQuestions,
-		})
-		.from(chatRuns)
-		.where(
-			and(
-				eq(chatRuns.conversationId, conversationId),
-				eq(chatRuns.userId, user.id),
-				isNull(chatRuns.finishedAt),
-			),
-		)
-		.orderBy(desc(chatRuns.updatedAt))
-		.limit(1)
-
-	let pendingAskUser: {
-		token: string
-		questions: Array<{
-			header: string
-			question: string
-			options: Array<{ label: string; description?: string; recommended?: boolean }>
-			allowFreeformInput?: boolean
-		}>
-	} | null = null
-	if (activeRun?.pendingQuestions && Array.isArray(activeRun.pendingQuestions)) {
-		const undecided = (activeRun.pendingQuestions as Array<{
-			token: string
-			questions: Array<{
-				header: string
-				question: string
-				options: Array<{ label: string; description?: string; recommended?: boolean }>
-				allowFreeformInput?: boolean
-			}>
-			decidedAt?: string
-		}>).find((entry) => entry && entry.token && !entry.decidedAt)
-		if (undecided) {
-			pendingAskUser = { token: undecided.token, questions: undecided.questions ?? [] }
-		}
-	}
+	// Surface the first un-decided ask_user entry so a hard refresh during a paused question
+	// can resume — the stream path owns updates while connected; this is the resume seed.
+	const undecided = (activeRun?.pendingQuestions ?? []).find(
+		(entry): entry is PendingQuestionEntry => !!entry?.token && !entry.decidedAt,
+	)
+	const pendingAskUser = undecided
+		? { token: undecided.token, questions: undecided.questions ?? [] }
+		: null
 
 	return {
 		conversation,

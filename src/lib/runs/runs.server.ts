@@ -7,13 +7,34 @@ export const ACTIVE_CHAT_RUN_STATES = ['queued', 'running', 'waiting_tool_approv
 export type ActiveChatRunState = (typeof ACTIVE_CHAT_RUN_STATES)[number]
 
 /**
- * Default stale threshold for the stuck-run reaper. A run that has been in an active state
- * with no `updatedAt` movement for this long is presumed orphaned (the runtime that started
- * it is gone — process restart, crash, etc.). 1 hour is generous on top of the 5-minute
- * `QUESTION_TIMEOUT_MS` / `APPROVAL_TIMEOUT_MS` poll loops in the runtime, so a legitimate
- * pause-and-resume window won't trip the reaper.
+ * Default stale threshold for the stuck-run reaper. 1 hour is generous on top of the 5-minute
+ * `QUESTION_TIMEOUT_MS` / `APPROVAL_TIMEOUT_MS` poll loops, so a legitimate pause-and-resume
+ * window won't trip the reaper.
  */
-export const STUCK_RUN_THRESHOLD_MS = 60 * 60 * 1000 // 1 hour
+export const STUCK_RUN_THRESHOLD_MS = 60 * 60 * 1000
+
+function formatThresholdLabel(ms: number): string {
+	const mins = Math.round(ms / 60_000)
+	if (mins < 60) return `${mins} minutes`
+	const hours = mins / 60
+	return hours === Math.round(hours) ? `${hours} hour${hours === 1 ? '' : 's'}` : `${hours.toFixed(1)} hours`
+}
+
+/**
+ * SET payload for a `chat_runs` row being marked `canceled`. Shared by the bulk reaper and
+ * the per-run dismiss command — both clear `pendingApprovals` + `pendingQuestions` so the
+ * conversation can be re-used cleanly after the cancel.
+ */
+function cancelChatRunPatch(now: Date, errorReason: string) {
+	return {
+		state: 'canceled' as const,
+		finishedAt: now,
+		updatedAt: now,
+		error: errorReason,
+		pendingApprovals: [],
+		pendingQuestions: [],
+	}
+}
 
 export async function listActiveChatRunsForUser(userId: string) {
 	const rows = await db
@@ -97,14 +118,10 @@ export async function reapStuckRuns(opts?: {
 
 	const reaped = await db
 		.update(chatRuns)
-		.set({
-			state: 'canceled',
-			finishedAt: now,
-			updatedAt: now,
-			error: `Reaped: stuck in active state for >${Math.round(thresholdMs / 60_000)} minutes (process restart or orphaned runtime)`,
-			pendingApprovals: [],
-			pendingQuestions: [],
-		})
+		.set(cancelChatRunPatch(
+			now,
+			`Reaped: stuck in active state for >${formatThresholdLabel(thresholdMs)} (process restart or orphaned runtime)`,
+		))
 		.where(
 			and(
 				isNull(chatRuns.finishedAt),
@@ -133,14 +150,7 @@ export async function dismissStuckRun(
 	const now = new Date()
 	const updated = await db
 		.update(chatRuns)
-		.set({
-			state: 'canceled',
-			finishedAt: now,
-			updatedAt: now,
-			error: 'Dismissed by user from the running-sessions dock',
-			pendingApprovals: [],
-			pendingQuestions: [],
-		})
+		.set(cancelChatRunPatch(now, 'Dismissed by user from the running-sessions dock'))
 		.where(
 			and(
 				eq(chatRuns.id, runId),

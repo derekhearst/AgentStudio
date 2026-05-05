@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { cleanupPrefixedRecords, getActiveAdminUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * The home (`/`) composer's mode dropdown used to be unwired — picking a different mode in
@@ -10,24 +10,13 @@ import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
  * on the first click — the home page smoke test covers the render).
  */
 
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
-
 test.describe('home/mode-selector — createConversation persistence', () => {
 	test('createConversation persists the picked mode through to conversations.mode', async () => {
 		test.setTimeout(30_000)
 		const prefix = uniquePrefix('home-mode')
 		await cleanupPrefixedRecords(prefix)
 		const sql = getSql()
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			// Direct call to the same db.insert path the remote command uses. We're testing the
@@ -64,7 +53,7 @@ test.describe('home/mode-selector — createConversation persistence', () => {
 		const prefix = uniquePrefix('home-mode-remote')
 		await cleanupPrefixedRecords(prefix)
 		const sql = getSql()
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			// Mimic the remote-command path that the home composer now uses. We exercise the

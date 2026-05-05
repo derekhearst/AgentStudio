@@ -119,10 +119,8 @@
 	};
 	const normalizedToolCalls = $derived.by(() => asArray(message.toolCalls) as NormalizedToolCall[]);
 
-	// Skip rendering an empty assistant article entirely. An assistant message with no
-	// savedBlocks producing output, no tool calls, and no content is just visual noise —
-	// these can show up from interrupted streams, partial saves, or automation runs that
-	// finished with no text body.
+	// Suppress empty assistant articles (interrupted streams, automation runs with no body).
+	// User + system messages always render via a different branch in the template.
 	const hasRenderableContent = $derived.by(() => {
 		if (message.role !== 'assistant') return true
 		if (savedBlocks && savedBlocks.length > 0) {
@@ -391,7 +389,7 @@
 						expanded={true}
 					/>
 				</div>
-			{:else if block.kind === 'subagent' && (block.agentName?.trim() || block.task?.trim() || block.content?.trim())}
+			{:else if block.kind === 'subagent' && blockHasRenderableOutput(block)}
 				<div class="mb-1.5 w-full">
 					<SubagentBlockCard
 						agentName={block.agentName}

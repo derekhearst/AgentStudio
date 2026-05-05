@@ -1,36 +1,26 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import {
+	cleanupPrefixedRecords,
+	getActiveAdminUserId,
+	getSql,
+	seedConversation as seedConversationFull,
+	uniquePrefix,
+} from './helpers'
 
 /**
- * Stuck-run reaper. A chat_run that's been in an active state with no `updatedAt` movement
- * for >1 hour is presumed orphaned (runtime crashed/restarted, poll loops gone). The reaper
- * marks them canceled so the home page recent-chats list and the RunningSessionsDock stop
- * showing perpetual "Waiting for you" badges with no path to dismissal.
- *
- * The scheduled tick (`runs_reap.5min`) wraps `reapStuckRuns` — these tests exercise the
- * function directly to keep them deterministic + parallel-safe.
+ * Stuck-run reaper + manual dismiss. The scheduled tick (`runs_reap.5min`) wraps
+ * `reapStuckRuns` — these tests exercise the functions directly to keep them deterministic
+ * + parallel-safe.
  */
 
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
-
 async function seedConversation(prefix: string, userId: string) {
+	const conversation = await seedConversationFull(prefix, { userId, title: `${prefix} convo` })
 	const sql = getSql()
-	const [row] = await sql<{ id: string }[]>`
-		insert into conversations (title, user_id, model, total_tokens, total_cost)
-		values (${`${prefix} convo`}, ${userId}, 'anthropic/claude-sonnet-4', 0, '0')
-		returning id
-	`
-	return row.id
+	// `seedConversationFull` also writes user + assistant messages we don't need here. Drop
+	// them so the test fixture is just an empty conversation row.
+	await sql`delete from messages where conversation_id = ${conversation.id}`
+	return conversation.id
 }
 
 async function seedRun(opts: {
@@ -89,7 +79,7 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-dismiss')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -121,7 +111,7 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		const prefix = uniquePrefix('runs-dismiss-other')
 		await cleanupPrefixedRecords(prefix)
 		const sql = getSql()
-		const ownerId = await getActiveUserId()
+		const ownerId = await getActiveAdminUserId()
 		// Username column is unique-constrained; use a per-test random suffix so parallel
 		// projects (desktop + mobile) running this test concurrently don't collide.
 		const otherUsername = `e2e_other_${randomUUID().slice(0, 12)}`
@@ -161,7 +151,7 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-dismiss-idem')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -189,7 +179,7 @@ test.describe('runs/reaper — sweeps stuck active runs', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-reaper-stuck')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -227,7 +217,7 @@ test.describe('runs/reaper — sweeps stuck active runs', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-reaper-fresh')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -256,7 +246,7 @@ test.describe('runs/reaper — sweeps stuck active runs', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-reaper-done')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -286,7 +276,7 @@ test.describe('runs/reaper — sweeps stuck active runs', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-reaper-threshold')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
@@ -311,7 +301,7 @@ test.describe('runs/reaper — sweeps stuck active runs', () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-reaper-idem')
 		await cleanupPrefixedRecords(prefix)
-		const userId = await getActiveUserId()
+		const userId = await getActiveAdminUserId()
 
 		try {
 			const conversationId = await seedConversation(prefix, userId)
