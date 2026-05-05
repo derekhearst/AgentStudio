@@ -1,4 +1,3 @@
-import { env } from '$env/dynamic/private'
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
@@ -8,7 +7,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		throw error(401, 'Unauthorized')
 	}
 
-	if (!env.OPENROUTER_API_KEY) {
+	if (!process.env.OPENROUTER_API_KEY) {
 		throw error(500, 'OPENROUTER_API_KEY is not set')
 	}
 
@@ -33,7 +32,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+			Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({

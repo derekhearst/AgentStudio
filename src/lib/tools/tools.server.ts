@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { env } from '$env/dynamic/private'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFile } from 'node:child_process'
 import {
@@ -118,7 +117,7 @@ function getWorkspace() {
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
-		sandboxRoot: env.SANDBOX_WORKSPACE,
+		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 }
 
@@ -142,7 +141,7 @@ async function ensureWorkspaceDir() {
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
-		sandboxRoot: env.SANDBOX_WORKSPACE,
+		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 }
 
@@ -451,7 +450,7 @@ async function getPage(): Promise<Page> {
 
 	if (!browser || !browser.isConnected()) {
 		const { chromium } = await import('playwright')
-		const executablePath = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined
+		const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined
 		browser = await chromium.launch({
 			headless: true,
 			executablePath,
@@ -486,18 +485,18 @@ async function browserClose() {
 }
 
 function buildAuthHeader() {
-	if (!env.SEARXNG_PASSWORD) return undefined
-	const username = env.SEARXNG_USERNAME || 'derek'
-	const token = Buffer.from(`${username}:${env.SEARXNG_PASSWORD}`).toString('base64')
+	if (!process.env.SEARXNG_PASSWORD) return undefined
+	const username = process.env.SEARXNG_USERNAME || 'derek'
+	const token = Buffer.from(`${username}:${process.env.SEARXNG_PASSWORD}`).toString('base64')
 	return `Basic ${token}`
 }
 
 export async function webSearch(query: string, limit = 8): Promise<SearchResult[]> {
-	if (!env.SEARXNG_URL) {
+	if (!process.env.SEARXNG_URL) {
 		throw new Error('SEARXNG_URL is not configured')
 	}
 
-	const url = new URL('/search', env.SEARXNG_URL)
+	const url = new URL('/search', process.env.SEARXNG_URL)
 	url.searchParams.set('q', query)
 	url.searchParams.set('format', 'json')
 
@@ -532,14 +531,14 @@ export async function generateImage(
 	model: ImageModel = 'flux',
 	size: ImageSize = '1024x1024',
 ): Promise<ImageResult> {
-	if (!env.OPENROUTER_API_KEY) {
+	if (!process.env.OPENROUTER_API_KEY) {
 		throw new Error('OPENROUTER_API_KEY is not set')
 	}
 
 	const response = await fetch('https://openrouter.ai/api/v1/images/generations', {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+			Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
@@ -817,7 +816,7 @@ export async function webFetch(rawUrl: string, maxChars = 50_000) {
 }
 
 export async function getSandboxStatus() {
-	const workspace = env.SANDBOX_WORKSPACE || '/workspace'
+	const workspace = process.env.SANDBOX_WORKSPACE || '/workspace'
 	try {
 		const s = await stat(workspace)
 		return {
@@ -1282,10 +1281,10 @@ export async function executeTool(
 				// Phase 2 ledger: log every web_search as 1 call. SEARCH_COST_PER_CALL_USD lets
 				// operators set a per-call cost (e.g. for paid backends like Serper); SearXNG is
 				// self-hosted so cost defaults to 0 but the call count is still tracked.
-				const costPerCall = Number.parseFloat(env.SEARCH_COST_PER_CALL_USD ?? '0') || 0
+				const costPerCall = Number.parseFloat(process.env.SEARCH_COST_PER_CALL_USD ?? '0') || 0
 				void logToolUsage({
 					toolName: 'web_search',
-					provider: env.SEARXNG_URL ? 'searxng' : null,
+					provider: process.env.SEARXNG_URL ? 'searxng' : null,
 					unitType: 'call',
 					units: 1,
 					cost: costPerCall,

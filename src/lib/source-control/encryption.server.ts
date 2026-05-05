@@ -1,4 +1,3 @@
-import { env } from '$env/dynamic/private'
 import { decryptWithKey, deriveKeyFromSecret, encryptWithKey } from './encryption'
 
 /**
@@ -10,7 +9,7 @@ import { decryptWithKey, deriveKeyFromSecret, encryptWithKey } from './encryptio
  */
 
 function getKey(): Buffer {
-	const secret = env.APP_ENCRYPTION_KEY ?? env.CLAIM_KEY
+	const secret = process.env.APP_ENCRYPTION_KEY ?? process.env.CLAIM_KEY
 	if (!secret || secret.length === 0) {
 		throw new Error(
 			'Token encryption requires APP_ENCRYPTION_KEY or CLAIM_KEY to be set in the environment.',
@@ -28,6 +27,6 @@ export function decryptSecret(payload: string): string {
 }
 
 export function hasEncryptionKey(): boolean {
-	const secret = env.APP_ENCRYPTION_KEY ?? env.CLAIM_KEY
+	const secret = process.env.APP_ENCRYPTION_KEY ?? process.env.CLAIM_KEY
 	return !!secret && secret.length > 0
 }

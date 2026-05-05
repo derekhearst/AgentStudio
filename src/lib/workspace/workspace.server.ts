@@ -19,6 +19,12 @@ export type WorktreeConfig = {
 	baseBranch?: string
 	/** When true, also delete the run/<runId> branch on cleanup. Default: keep it. */
 	deleteBranchOnCleanup?: boolean
+	/**
+	 * Wave 5 #19 phase 2 finish — explicit branch name override. Repo-backed task runs use
+	 * `agent/<taskId>/attempt-<N>` so branches reflect the originating task and survive
+	 * across run-id retries. Falls back to `run/<runId>` when omitted.
+	 */
+	branch?: string
 }
 
 export type WorkspaceContext = {
@@ -104,6 +110,7 @@ export async function ensureWorkspace(
 				worktreePath: root,
 				runId: ctx.runId,
 				baseBranch: ctx.worktree.baseBranch,
+				branch: ctx.worktree.branch,
 			},
 			gitRunner,
 		)

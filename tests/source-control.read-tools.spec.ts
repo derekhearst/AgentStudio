@@ -106,15 +106,11 @@ test.describe('observability/review_items — pull_request_ready source', () => 
 		}
 	})
 
-	test('REVIEW_ITEM_TYPES enum in review.remote includes pull_request_ready', async () => {
-		// Smoke test — operators shouldn't be able to filter by a type the remote rejects.
-		// Structural check via the remote schema's listSchema acceptance: pull_request_ready
-		// is valid input.
-		const { listReviewItemsQuery } = await import('../src/lib/observability/review.remote')
-		// `listReviewItemsQuery` is admin-gated; we can't call it without an admin session
-		// here, but importing it without throwing means the zod schema accepted the type at
-		// module load. That covers the contract — the runtime check is the same shape.
-		expect(typeof listReviewItemsQuery).toBe('function')
+	test('review_item_type enum in observability.schema includes pull_request_ready', async () => {
+		// Verify at the schema level (enum array) since importing review.remote.ts pulls
+		// in $app/server which doesn't resolve in the Playwright Node runtime.
+		const { reviewItemTypeEnum } = await import('../src/lib/observability/observability.schema')
+		expect(reviewItemTypeEnum.enumValues).toContain('pull_request_ready')
 	})
 })
 
@@ -131,8 +127,8 @@ test.describe('list_pull_requests / get_pull_request — visibility scoping', ()
 			const otherUserId = '00000000-0000-4000-8000-000000aaaaaa'
 			// Make sure the synthetic user actually exists so the FK doesn't reject.
 			await sql`
-				insert into users (id, username, role, is_active, password_hash)
-				values (${otherUserId}, ${`${prefix}-user`}, 'user', true, 'unused')
+				insert into users (id, name, username, role, is_active)
+				values (${otherUserId}, 'Test User', ${`${prefix}-user`}, 'user', true)
 				on conflict (id) do nothing
 			`
 			const [repo] = await sql<{ id: string }[]>`

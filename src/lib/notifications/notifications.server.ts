@@ -1,6 +1,5 @@
 import webpush from 'web-push'
 import { and, desc, eq } from 'drizzle-orm'
-import { env } from '$env/dynamic/private'
 import { db } from '$lib/db.server'
 import { notifications, pushSubscriptions } from '$lib/notifications/notifications.schema'
 
@@ -25,23 +24,23 @@ let configured = false
 
 function ensurePushConfigured() {
 	if (configured) return
-	if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) {
+	if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
 		throw new Error('VAPID keys are not configured')
 	}
 
 	webpush.setVapidDetails(
-		env.ORIGIN ? `${env.ORIGIN}` : 'mailto:AgentStudio@localhost',
-		env.VAPID_PUBLIC_KEY,
-		env.VAPID_PRIVATE_KEY,
+		process.env.ORIGIN ? `${process.env.ORIGIN}` : 'mailto:AgentStudio@localhost',
+		process.env.VAPID_PUBLIC_KEY,
+		process.env.VAPID_PRIVATE_KEY,
 	)
 	configured = true
 }
 
 export async function getVapidPublicKey() {
-	if (!env.VAPID_PUBLIC_KEY) {
+	if (!process.env.VAPID_PUBLIC_KEY) {
 		throw new Error('VAPID_PUBLIC_KEY is not configured')
 	}
-	return env.VAPID_PUBLIC_KEY
+	return process.env.VAPID_PUBLIC_KEY
 }
 
 export async function upsertPushSubscription(input: SubscriptionInput) {

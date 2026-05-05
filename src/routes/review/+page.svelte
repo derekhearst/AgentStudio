@@ -29,6 +29,7 @@
 		{ value: 'memory_conflict', label: 'Memory conflict' },
 		{ value: 'policy_override_request', label: 'Policy override request' },
 		{ value: 'pull_request_ready', label: 'Pull request ready' },
+		{ value: 'automation_summary', label: 'Automation summary' },
 	];
 
 	onMount(() => void load());

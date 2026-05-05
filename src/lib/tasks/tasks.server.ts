@@ -20,6 +20,13 @@ export type CreateTaskInput = {
 	budgetUsd?: number | string | null
 	metadata?: Record<string, unknown>
 	createdBy?: string | null
+	/**
+	 * Wave 5 #19 phase 2 finish — when set, the task runner provisions a real worktree
+	 * against the linked repository's local mirror. Caller is responsible for supplying a
+	 * repositoryId the user actually owns (the runner does a defensive lookup but won't
+	 * cross-validate ownership beyond what the FK shape allows).
+	 */
+	repositoryId?: string | null
 }
 
 /**
@@ -40,6 +47,7 @@ export async function createTask(input: CreateTaskInput): Promise<TaskRow> {
 			budgetUsd: input.budgetUsd != null ? String(input.budgetUsd) : null,
 			metadata: input.metadata ?? {},
 			createdBy: input.createdBy ?? null,
+			repositoryId: input.repositoryId ?? null,
 		})
 		.returning()
 	return row

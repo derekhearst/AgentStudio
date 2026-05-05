@@ -1,4 +1,3 @@
-import { env } from '$env/dynamic/private'
 import {
 	GITHUB_DEFAULT_SCOPES,
 	GITHUB_OAUTH_RETURN_COOKIE,
@@ -30,8 +29,8 @@ export {
 }
 
 export function getGithubOAuthCredentials(): { clientId: string; clientSecret: string } | null {
-	const clientId = env.GITHUB_OAUTH_CLIENT_ID
-	const clientSecret = env.GITHUB_OAUTH_CLIENT_SECRET
+	const clientId = process.env.GITHUB_OAUTH_CLIENT_ID
+	const clientSecret = process.env.GITHUB_OAUTH_CLIENT_SECRET
 	if (!clientId || !clientSecret) return null
 	return { clientId, clientSecret }
 }
@@ -43,7 +42,7 @@ export function isGithubOAuthConfigured(): boolean {
 export function buildRedirectUri(origin: string): string {
 	// Honors GITHUB_OAUTH_CALLBACK_URL when set so deployments behind a reverse proxy can
 	// pin the absolute callback (avoids origin-mismatch with the GitHub OAuth App config).
-	const override = env.GITHUB_OAUTH_CALLBACK_URL
+	const override = process.env.GITHUB_OAUTH_CALLBACK_URL
 	if (override && override.length > 0) return override
 	return buildCallbackUriFromOrigin(origin)
 }

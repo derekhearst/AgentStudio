@@ -1,11 +1,10 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { env } from '$env/dynamic/private'
 import { checkAndRunAutomations } from '$lib/automations/engine'
 import { runWorkspaceGc } from '$lib/workspace/gc.server'
 import { backfillSkillEmbeddings } from '$lib/skills/skills.server'
 
 function hasCronAccess(request: Request) {
-	const expected = env.CRON_SECRET?.trim()
+	const expected = process.env.CRON_SECRET?.trim()
 	if (!expected) return true
 	const auth = request.headers.get('authorization')
 	if (!auth) return false
@@ -23,7 +22,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	// Workspace GC: tick at most once per 60 minutes (last-run gate is on disk via mtime check
 	// would over-engineer; this is fine as a per-cron-invocation pass).
-	const sandboxRoot = env.SANDBOX_WORKSPACE
+	const sandboxRoot = process.env.SANDBOX_WORKSPACE
 	let workspace: Awaited<ReturnType<typeof runWorkspaceGc>> | null = null
 	if (sandboxRoot) {
 		try {

@@ -1,5 +1,4 @@
 import { OpenRouter } from '@openrouter/sdk'
-import { env } from '$env/dynamic/private'
 
 export type ModelInfo = {
 	id: string
@@ -28,11 +27,11 @@ export async function listModels(): Promise<ModelInfo[]> {
 		return cachedModels
 	}
 
-	if (!env.OPENROUTER_API_KEY) {
+	if (!process.env.OPENROUTER_API_KEY) {
 		throw new Error('OPENROUTER_API_KEY is not set')
 	}
 
-	const client = new OpenRouter({ apiKey: env.OPENROUTER_API_KEY })
+	const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })
 	const response = await client.models.list()
 
 	cachedModels = response.data

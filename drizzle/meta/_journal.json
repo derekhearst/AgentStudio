@@ -302,6 +302,20 @@
       "when": 1777945000000,
       "tag": "0042_pull_request_ready_enum",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1777951000000,
+      "tag": "0043_automation_summary_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1777952000000,
+      "tag": "0044_task_repository_id",
+      "breakpoints": true
     }
   ]
 }

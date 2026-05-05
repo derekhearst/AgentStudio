@@ -1,8 +1,18 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { env } from '$env/dynamic/private'
-import { getRequestEvent } from '$app/server'
 import { error } from '@sveltejs/kit'
 import type { Cookies } from '@sveltejs/kit'
+
+// Lazy-load `getRequestEvent` from `$app/server` so this module is importable from
+// non-SvelteKit contexts (Playwright Node runtime, scripts). Tests never call
+// `requireAuthenticatedRequestUser` (they use raw SQL via getSql); the dev/prod path
+// resolves the SvelteKit virtual module on first use.
+let _getRequestEvent: (() => { locals: { user?: AuthenticatedUser } }) | null = null
+try {
+	const mod = (await import('$app/server')) as unknown as { getRequestEvent: () => { locals: { user?: AuthenticatedUser } } }
+	_getRequestEvent = mod.getRequestEvent
+} catch {
+	// $app/server not resolvable — auth-context-required functions throw at call time below.
+}
 import { and, eq, gt, isNull } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { authSessions, bootstrapClaims, users, userRoleEnum } from '$lib/auth/auth.schema'
@@ -43,7 +53,7 @@ function hashToken(token: string) {
 }
 
 function shouldUseSecureCookie() {
-	return env.NODE_ENV === 'production'
+	return process.env.NODE_ENV === 'production'
 }
 
 export function normalizeUsername(input: string) {
@@ -59,8 +69,8 @@ export function validateUsername(input: string) {
 }
 
 async function ensureBootstrapClaimExists(baseUrl?: string) {
-	const adminUsername = env.USER_NAME
-	const claimKey = env.CLAIM_KEY
+	const adminUsername = process.env.USER_NAME
+	const claimKey = process.env.CLAIM_KEY
 	if (!adminUsername || !claimKey) {
 		console.warn('[auth] USER_NAME and CLAIM_KEY env vars are required for bootstrap. Skipping.')
 		return
@@ -247,7 +257,10 @@ export async function touchUserLastLogin(userId: string) {
 }
 
 export function requireAuthenticatedRequestUser() {
-	const event = getRequestEvent()
+	if (!_getRequestEvent) {
+		throw error(500, 'Auth context unavailable (SvelteKit virtual module not loaded)')
+	}
+	const event = _getRequestEvent()
 	if (!event.locals.user) {
 		throw error(401, 'Not authenticated')
 	}

@@ -129,3 +129,8 @@ export function getModeAnchorPrompt(mode: ChatMode): string {
 export async function getModePostureContent(mode: ChatMode): Promise<string> {
 	return loadModeIdentitySkill(mode)
 }
+
+// Wave 5 #22 phase 7 — pure mode-aware tool filter lives in `mode-filter.ts` so the
+// Playwright Node test runner can import it without pulling in $lib/db.server. We
+// re-export here so existing call sites (chat-stream + agent-definition) don't change.
+export { filterToolsByMode, isToolAllowedInMode, getReadOnlyToolNames } from './mode-filter'

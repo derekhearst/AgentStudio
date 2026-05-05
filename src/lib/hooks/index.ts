@@ -15,5 +15,9 @@ export {
 	type EmitOptions,
 } from './bus.server'
 export { registerBuiltinHooks } from './builtins.server'
-export { listHookInvocationsQuery } from './hooks.remote'
 export { runSkillHook, type RunSkillHookInput, type RunSkillHookResult } from './skill-hook-runner.server'
+
+// `listHookInvocationsQuery` is intentionally NOT re-exported from this barrel: it
+// pulls in `$app/server` which is unresolvable from non-SvelteKit module graphs (the
+// Playwright Node test runtime). Callers that need it import from `./hooks.remote`
+// directly — that's just `+page.svelte` files in the routes layer.

@@ -1,6 +1,13 @@
 import { spawn } from 'node:child_process'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import {
+	buildCloneArgs,
+	buildFetchArgs,
+	buildHeadBranchArgs,
+	buildMirrorPath,
+	sanitizeRepoSegment,
+} from './repo-mirror'
 
 /**
  * Wave 5 #19 phase 2 (mirror slice) — local-mirror materialization for connected repos.
@@ -40,15 +47,6 @@ export type MaterializeMirrorResult = {
 	stderr: string
 }
 
-const SAFE_SEGMENT = /^[A-Za-z0-9._-][A-Za-z0-9._-]{0,99}$/
-
-function sanitizeRepoSegment(segment: string, kind: string): string {
-	if (!SAFE_SEGMENT.test(segment)) {
-		throw new Error(`Invalid ${kind} segment for repo mirror: ${segment}`)
-	}
-	return segment
-}
-
 async function pathExists(absPath: string): Promise<boolean> {
 	try {
 		await stat(absPath)
@@ -71,9 +69,6 @@ function redact(text: string, token: string): string {
 	if (!token) return text
 	return text.split(token).join('***REDACTED***')
 }
-
-const CREDENTIAL_HELPER_ARG =
-	'credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_TOKEN"; }; f'
 
 async function runGitCommand(args: string[], token: string): Promise<{ stdout: string; stderr: string; code: number }> {
 	return new Promise((resolve) => {
@@ -107,38 +102,8 @@ async function runGitCommand(args: string[], token: string): Promise<{ stdout: s
 	})
 }
 
-export function buildCloneArgs(input: { remoteUrl: string; targetPath: string }): string[] {
-	return [
-		'-c',
-		CREDENTIAL_HELPER_ARG,
-		'clone',
-		'--no-tags',
-		input.remoteUrl,
-		input.targetPath,
-	]
-}
-
-export function buildFetchArgs(input: { repoPath: string; remoteUrl: string }): string[] {
-	return [
-		'-c',
-		CREDENTIAL_HELPER_ARG,
-		'-C',
-		input.repoPath,
-		'fetch',
-		'--prune',
-		input.remoteUrl,
-	]
-}
-
-export function buildHeadBranchArgs(repoPath: string): string[] {
-	return ['-C', repoPath, 'symbolic-ref', '--short', 'HEAD']
-}
-
-export function buildMirrorPath(mirrorRoot: string, owner: string, repo: string): string {
-	const safeOwner = sanitizeRepoSegment(owner, 'owner')
-	const safeRepo = sanitizeRepoSegment(repo, 'repo')
-	return join(mirrorRoot, safeOwner, safeRepo)
-}
+// Re-exports so existing imports of `./repo-mirror.server` keep working.
+export { buildCloneArgs, buildFetchArgs, buildHeadBranchArgs, buildMirrorPath } from './repo-mirror'
 
 export async function materializeRepoMirror(input: MaterializeMirrorInput): Promise<MaterializeMirrorResult> {
 	const targetPath = buildMirrorPath(input.mirrorRoot, input.owner, input.repo)

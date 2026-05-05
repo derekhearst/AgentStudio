@@ -92,6 +92,34 @@ export async function executeTaskOnce(
 		].join('\n'),
 	})
 
+	// Wave 5 #19 phase 2 finish — when the task is linked to a repository, materialize
+	// the local mirror + override the agent's worktree config so runChatLoop checks out
+	// the real repo on a per-attempt branch. Failure here is non-fatal: the runner falls
+	// back to the agent's legacy workspace + logs a warning so the task still runs (with
+	// the agent's normal sandbox surface, just without a real git checkout).
+	const currentRetry = opts._currentRetry ?? 0
+	let provisionedWorktree: typeof definition.worktree = definition.worktree
+	if (task.repositoryId) {
+		try {
+			const { provisionRepoBackedWorkspace } = await import(
+				'$lib/source-control/repo-worktree.server'
+			)
+			const provisioned = await provisionRepoBackedWorkspace({
+				userId,
+				taskId,
+				attemptNumber: currentRetry + 1,
+				repositoryId: task.repositoryId,
+			})
+			provisionedWorktree = provisioned.worktree
+		} catch (err) {
+			console.warn('[task-runner] repo-backed workspace provisioning failed; falling back to agent workspace', {
+				taskId,
+				repositoryId: task.repositoryId,
+				error: err instanceof Error ? err.message : String(err),
+			})
+		}
+	}
+
 	// Pick a conversation: explicit override → task root → fresh one.
 	let conversationId: string
 	if (opts.conversationId) {
@@ -125,7 +153,6 @@ export async function executeTaskOnce(
 	// `evalRequired` flag to the chat_run so the run viewer + future ad-hoc evaluator queries can
 	// rely on it (and so isRunEvaluationClear can short-circuit when the task didn't ask for one).
 	const startedAt = new Date()
-	const currentRetry = opts._currentRetry ?? 0
 	const [run] = await db
 		.insert(chatRuns)
 		.values({
@@ -182,7 +209,7 @@ export async function executeTaskOnce(
 			isOrchestrator: false,
 			agentId: agent.id,
 			persistentKey: definition.persistentKey,
-			worktree: definition.worktree,
+			worktree: provisionedWorktree,
 			spawnSubagent: undefined,
 		})
 

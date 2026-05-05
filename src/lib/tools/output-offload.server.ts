@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { env } from '$env/dynamic/private'
 import { ensureWorkspace, safePathWithin } from '$lib/workspace/workspace.server'
 import { trimWithOffload, type OffloadHandle, type TrimWithOffloadInput } from './output-offload'
 
@@ -60,7 +59,7 @@ async function materializeOutput(
 		runId: ctx.runId,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
-		sandboxRoot: env.SANDBOX_WORKSPACE,
+		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 	const fullPath = safePathWithin(workspaceRoot, handle)
 	await mkdir(dirname(fullPath), { recursive: true })

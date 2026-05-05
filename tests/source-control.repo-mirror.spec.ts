@@ -10,12 +10,15 @@ import { expect, test } from '@playwright/test'
 
 test.describe('source-control/repo-mirror — argv builders', () => {
 	test('buildCloneArgs uses the credential helper indirection (token from env, not argv)', async () => {
-		const { buildCloneArgs } = await import('../src/lib/source-control/repo-mirror.server')
+		const { buildCloneArgs } = await import('../src/lib/source-control/repo-mirror')
 		const args = buildCloneArgs({
 			remoteUrl: 'https://github.com/acme/widgets.git',
 			targetPath: '/sandbox/u1/repos/acme/widgets',
 		})
-		expect(args.join(' ')).not.toContain('GIT_TOKEN')
+		// `buildCloneArgs` has no `token` parameter — that's the structural guarantee no
+		// caller-provided secret can leak into argv. The helper string DOES reference the
+		// env var name `$GIT_TOKEN` (that's how the indirection works); the token VALUE
+		// itself is sourced from the spawned process's env at runtime, never argv.
 		expect(args).toContain('credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_TOKEN"; }; f')
 		expect(args).toContain('https://github.com/acme/widgets.git')
 		expect(args).toContain('/sandbox/u1/repos/acme/widgets')
@@ -23,7 +26,7 @@ test.describe('source-control/repo-mirror — argv builders', () => {
 	})
 
 	test('buildFetchArgs targets the existing mirror with -C and uses --prune', async () => {
-		const { buildFetchArgs } = await import('../src/lib/source-control/repo-mirror.server')
+		const { buildFetchArgs } = await import('../src/lib/source-control/repo-mirror')
 		const args = buildFetchArgs({
 			repoPath: '/sandbox/u1/repos/acme/widgets',
 			remoteUrl: 'https://github.com/acme/widgets.git',
@@ -38,7 +41,7 @@ test.describe('source-control/repo-mirror — argv builders', () => {
 
 test.describe('source-control/repo-mirror — path containment', () => {
 	test('buildMirrorPath joins owner + repo under the configured mirror root', async () => {
-		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror.server')
+		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror')
 		const path = buildMirrorPath('/sandbox/u1/repos', 'acme', 'widgets')
 		// Don't pin the separator (Windows vs Unix differs); just check the segments are present.
 		expect(path).toContain('acme')
@@ -47,7 +50,7 @@ test.describe('source-control/repo-mirror — path containment', () => {
 	})
 
 	test('hostile owner/repo segments are rejected before any path is built', async () => {
-		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror.server')
+		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror')
 		// Path traversal attempt
 		expect(() => buildMirrorPath('/root', '../escape', 'repo')).toThrow(/Invalid owner segment/)
 		// Slash in repo name
@@ -59,7 +62,7 @@ test.describe('source-control/repo-mirror — path containment', () => {
 	})
 
 	test('legitimate names with dots / underscores / dashes are accepted', async () => {
-		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror.server')
+		const { buildMirrorPath } = await import('../src/lib/source-control/repo-mirror')
 		expect(() => buildMirrorPath('/root', 'a.b-c_d', 'repo.name')).not.toThrow()
 	})
 })

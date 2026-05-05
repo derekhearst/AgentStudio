@@ -42,6 +42,10 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		const prefix = uniquePrefix('automation-research')
 		const sql = getSql()
 		const userId = await getActiveUserId()
+		// Defensive: clear any budget_limit a prior test might have left around.
+		const sql_clear = getSql()
+		await sql_clear`delete from budget_limits where user_id = ${userId}`
+		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
 			const past = new Date(Date.now() - 5 * 60_000)
@@ -103,6 +107,10 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		const prefix = uniquePrefix('automation-research-metric')
 		const sql = getSql()
 		const userId = await getActiveUserId()
+		// Defensive: clear any budget_limit a prior test might have left around.
+		const sql_clear = getSql()
+		await sql_clear`delete from budget_limits where user_id = ${userId}`
+		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
 			const past = new Date(Date.now() - 5 * 60_000)
@@ -141,6 +149,10 @@ test.describe('automations/mode-dispatch — code mode fallback', () => {
 		const prefix = uniquePrefix('automation-code-fallback')
 		const sql = getSql()
 		const userId = await getActiveUserId()
+		// Defensive: clear any budget_limit a prior test might have left around.
+		const sql_clear = getSql()
+		await sql_clear`delete from budget_limits where user_id = ${userId}`
+		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
 			const past = new Date(Date.now() - 5 * 60_000)

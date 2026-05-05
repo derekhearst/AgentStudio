@@ -1,6 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { and, eq } from 'drizzle-orm'
-import { env } from '$env/dynamic/private'
 import { db } from '$lib/db.server'
 import { repositories, pullRequests, pullRequestChecks } from '$lib/source-control/source-control.schema'
 import {
@@ -31,7 +30,7 @@ import { openReviewItem } from '$lib/observability/review.server'
  */
 
 export const POST: RequestHandler = async ({ request }) => {
-	const secret = env.GITHUB_WEBHOOK_SECRET
+	const secret = process.env.GITHUB_WEBHOOK_SECRET
 	if (!secret) {
 		console.warn('[github-webhook] received delivery but GITHUB_WEBHOOK_SECRET is not configured — rejecting')
 		return json({ error: 'webhook not configured' }, { status: 503 })

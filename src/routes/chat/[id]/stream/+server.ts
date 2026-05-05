@@ -19,7 +19,7 @@ import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
-import { getModePostureContent } from '$lib/chat/mode.server'
+import { filterToolsByMode, getModePostureContent } from '$lib/chat/mode.server'
 import { runChatLoop, createSseSession } from '$lib/runtime'
 
 const encoder = new TextEncoder()
@@ -494,16 +494,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	function computeToolsFor(enabledGroupNames: string[]) {
 		const all = getToolDefinitions()
 		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
+		let assembled: typeof askUserFiltered
 		if (scopedAgentTools) {
-			return askUserFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
+			assembled = askUserFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
+		} else if (!useProgressiveDisclosure) {
+			assembled = askUserFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
+		} else {
+			const activeNames = new Set(expandGroupsToToolNames(enabledGroupNames))
+			assembled = askUserFiltered
+				.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
+				.filter((tool) => activeNames.has(tool.function.name))
 		}
-		if (!useProgressiveDisclosure) {
-			return askUserFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
-		}
-		const activeNames = new Set(expandGroupsToToolNames(enabledGroupNames))
-		return askUserFiltered
-			.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
-			.filter((tool) => activeNames.has(tool.function.name))
+		// Wave 5 #22 phase 7 — research + plan modes strip write tools so the model has to
+		// surface findings/proposals instead of silently taking action. Allow-list shape
+		// (see mode.server.ts) so newly added tools fail closed for research/plan until
+		// explicitly audited.
+		return filterToolsByMode(assembled, conversation.mode ?? 'chat')
 	}
 	const initialTools = computeToolsFor(initialEnabledGroups)
 	// No hard limit — loop exits when the model stops calling tools

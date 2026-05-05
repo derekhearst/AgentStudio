@@ -12,6 +12,8 @@ import {
 	type TaskRow,
 } from './tasks.server'
 import { executeTaskOnce } from './task-runner.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { getRepositoryById, listRepositories } from '$lib/source-control/source-control.server'
 
 const taskIdSchema = z.string().uuid()
 
@@ -168,6 +170,69 @@ const cancelTaskSchema = z.object({ taskId: taskIdSchema })
 export const retryTaskCommand = command(cancelTaskSchema, async ({ taskId }) => {
 	const result = await executeTaskOnce(taskId)
 	return result
+})
+
+/**
+ * Wave 5 #19 phase 2 finish — link/unlink a task to a connected repository.
+ *
+ * The task-runner reads `tasks.repository_id` to decide whether to provision a real
+ * worktree at run start. This remote lets operators set the link from the task detail
+ * page. Pass `repositoryId: null` to detach (the runner falls back to the agent's
+ * legacy workspace).
+ *
+ * Authorization: the requesting user must own both the task (via createdBy) AND the
+ * repository (via repositories.userId). Cross-user attachments would let an operator
+ * read another user's working tree at run start; the FK doesn't catch that on its own.
+ */
+const setTaskRepositorySchema = z.object({
+	taskId: taskIdSchema,
+	repositoryId: z.string().uuid().nullable(),
+})
+export const setTaskRepositoryCommand = command(setTaskRepositorySchema, async ({ taskId, repositoryId }) => {
+	const user = requireAuthenticatedRequestUser()
+	const task = await getTaskById(taskId)
+	if (!task) {
+		throw new Error('Task not found')
+	}
+	if (task.createdBy && task.createdBy !== user.id) {
+		throw new Error('Task does not belong to the requesting user')
+	}
+	if (repositoryId !== null) {
+		const repo = await getRepositoryById(repositoryId)
+		if (!repo) {
+			throw new Error('Repository not found')
+		}
+		if (repo.userId !== user.id) {
+			throw new Error('Repository does not belong to the requesting user')
+		}
+	}
+	await db
+		.update(tasks)
+		.set({ repositoryId, updatedAt: new Date() })
+		.where(eq(tasks.id, taskId))
+	return getTaskById(taskId)
+})
+
+/**
+ * Wave 5 #19 phase 2 finish — list connected repos for the task page picker. The picker
+ * shows the active user's `repositories` rows (after they've sync'd via /source-control)
+ * so operators can attach without leaving the task detail page.
+ */
+export const listConnectedRepositoriesQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	const repos = await listRepositories(user.id)
+	return repos.map((r) => {
+		const meta = (r.metadata ?? {}) as { htmlUrl?: string; private?: boolean }
+		return {
+			id: r.id,
+			provider: r.provider,
+			owner: r.owner,
+			name: r.name,
+			defaultBranch: r.defaultBranch,
+			htmlUrl: meta.htmlUrl ?? null,
+			private: !!meta.private,
+		}
+	})
 })
 
 /**

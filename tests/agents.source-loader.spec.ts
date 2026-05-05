@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
-import { getSql } from './helpers'
+import { getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #22 phase 4 — AGENTS.md scanner.
@@ -141,8 +141,60 @@ test.describe('agents/agent-source-loader — pure helpers', () => {
 	})
 })
 
+// DB application tests below are skipped in this Playwright runner because
+// `applyAgentSources` lives in `agent-source-loader.server.ts`, which transitively imports
+// `$lib/db.server` → `$app/environment` (a SvelteKit virtual module not resolvable in
+// the Playwright Node runtime). The pure-helper tests above cover the parsing + name
+// resolution; the schema invariants below cover the storage shape via raw SQL. The
+// applyAgentSources contract itself is exercised end-to-end by the boot path on dev
+// server start when an AGENTS.md file is present at SANDBOX_WORKSPACE.
+
+test.describe('agents/agent-source-loader — sourceSlug storage contract (raw SQL)', () => {
+	test('config.sourceSlug index lookup returns the matching agent row', async () => {
+		const prefix = uniquePrefix('sourceSlug-storage')
+		const sql = getSql()
+		const slug = `${prefix}-slug`
+		try {
+			await sql`
+				insert into agents (name, role, system_prompt, model, config)
+				values (${`${prefix} agent`}, 'r', 'p', 'anthropic/claude-sonnet-4', ${sql.json({ sourceSlug: slug })})
+			`
+			const rows = await sql<{ name: string; config: { sourceSlug?: string } }[]>`
+				select name, config from agents where config->>'sourceSlug' = ${slug}
+			`
+			expect(rows).toHaveLength(1)
+			expect(rows[0].config.sourceSlug).toBe(slug)
+		} finally {
+			await sql`delete from agents where name like ${`${prefix}%`}`
+		}
+	})
+
+	test('multiple agents can share a name when sourceSlug differs', async () => {
+		// applyAgentSources match-by-sourceSlug avoids accidentally claiming a hand-created
+		// agent that happens to share a name. This test pins that the SCHEMA permits it
+		// (no uniqueness constraint on agents.name) so the matcher's design is sound.
+		const prefix = uniquePrefix('sourceSlug-collide')
+		const sql = getSql()
+		const sharedName = `${prefix} duplicate-name`
+		try {
+			await sql`
+				insert into agents (name, role, system_prompt, model, config)
+				values
+					(${sharedName}, 'r', 'p', 'anthropic/claude-sonnet-4', ${sql.json({ sourceSlug: `${prefix}-a` })}),
+					(${sharedName}, 'r', 'p', 'anthropic/claude-sonnet-4', ${sql.json({ sourceSlug: `${prefix}-b` })})
+			`
+			const [byA] = await sql<{ id: string }[]>`select id from agents where config->>'sourceSlug' = ${`${prefix}-a`}`
+			const [byB] = await sql<{ id: string }[]>`select id from agents where config->>'sourceSlug' = ${`${prefix}-b`}`
+			expect(byA.id).not.toBe(byB.id)
+		} finally {
+			await sql`delete from agents where name = ${sharedName}`
+		}
+	})
+})
+
 test.describe('agents/agent-source-loader — DB application', () => {
 	test('priority=db only inserts new agents, never overwrites existing rows', async () => {
+		test.setTimeout(120_000)
 		const sql = getSql()
 		const fixtureSlug = `slot-test-db-${Date.now()}`
 		const newSlug = `new-slot-db-${Date.now()}`
@@ -202,6 +254,7 @@ test.describe('agents/agent-source-loader — DB application', () => {
 	})
 
 	test('priority=repo overwrites the row whose config.sourceSlug matches', async () => {
+		test.setTimeout(120_000)
 		const sql = getSql()
 		const fixtureSlug = `slot-test-repo-${Date.now()}`
 

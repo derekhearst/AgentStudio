@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { env } from '$env/dynamic/private'
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
 import { runWorkspaceGc } from './gc.server'
@@ -35,7 +34,7 @@ export function registerWorkspaceJobHandlers(): void {
 		if (!parsed.success) {
 			throw new Error(`workspace_gc payload invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
 		}
-		const sandboxRoot = env.SANDBOX_WORKSPACE || '/workspace'
+		const sandboxRoot = process.env.SANDBOX_WORKSPACE || '/workspace'
 		const summary = await runWorkspaceGc({
 			sandboxRoot,
 			ttlDays: parsed.data.ttlDays,

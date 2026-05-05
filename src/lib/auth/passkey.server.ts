@@ -7,7 +7,6 @@ import {
 	type AuthenticationResponseJSON,
 	type RegistrationResponseJSON,
 } from '@simplewebauthn/server'
-import { env } from '$env/dynamic/private'
 import { db } from '$lib/db.server'
 import { authChallenges, userPasskeys, users } from '$lib/auth/auth.schema'
 import {
@@ -42,7 +41,7 @@ async function getActiveUser(userId: string) {
 }
 
 async function requiresBootstrapClaim(userId: string) {
-	const bootstrapUsername = env.USER_NAME
+	const bootstrapUsername = process.env.USER_NAME
 	if (!bootstrapUsername) return false
 
 	const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)

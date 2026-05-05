@@ -34,6 +34,12 @@ export type EnsureWorktreeInput = {
 	worktreePath: string
 	runId: string
 	baseBranch?: string
+	/**
+	 * Wave 5 #19 phase 2 finish — when set, use this branch name instead of the default
+	 * `run/<runId>`. Repo-backed task runs override with `agent/<taskId>/attempt-<N>` so
+	 * branches reflect the originating task and survive across runIds within a retry chain.
+	 */
+	branch?: string
 }
 
 export type EnsureWorktreeResult = {
@@ -58,7 +64,7 @@ export async function ensureWorktree(
 	input: EnsureWorktreeInput,
 	gitRunner: GitRunner = defaultGitRunner,
 ): Promise<EnsureWorktreeResult> {
-	const branch = branchForRun(input.runId)
+	const branch = input.branch ?? branchForRun(input.runId)
 
 	// If the dir already exists AND is registered as a worktree of repoPath, no-op.
 	const existing = await pathExists(input.worktreePath)

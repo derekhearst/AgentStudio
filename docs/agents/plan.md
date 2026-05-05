@@ -1,6 +1,6 @@
 # Agents Plan
 
-Status: active (Phases 1, 2, 3, 4, 5, 6 complete; Phase 7 deferred)
+Status: active (Phases 1-7 complete)
 
 ## Overview
 
@@ -229,6 +229,7 @@ Implementation in this domain must comply with [../ui/plan.md](../ui/plan.md) an
 
 ## Completion
 
+- 2026-05-04 — Wave 5 #22 phase 7 (Conversation Modes) — final piece (mode-aware tool filtering) lands. Phases 7.1-7.6 already shipped: mode-identity skills seeded ([src/lib/chat/mode-skills.server.ts](../../src/lib/chat/mode-skills.server.ts)), `conversations.mode` enum column, `setConversationMode` writes a system anchor message on flip ([src/lib/chat/mode.server.ts](../../src/lib/chat/mode.server.ts)), mode posture injected as a context slot in stream `+server.ts`, mode selector in chat composer. New: `filterToolsByMode` + `isToolAllowedInMode` + `getReadOnlyToolNames` in [src/lib/chat/mode.server.ts](../../src/lib/chat/mode.server.ts) — research and plan modes are allow-list shape (newly added tools fail closed until audited), strip every write tool while keeping `propose_plan`, `web_search`, `web_fetch`, `pdf_read`, file/list/git read-only, source-control read-only (incl. `prepare_commit`), and projects/artifacts/skills read-only. Wired into `computeToolsFor` in [src/routes/chat/[id]/stream/+server.ts](../../src/routes/chat/%5Bid%5D/stream/+server.ts). 9 contract tests in [tests/chat.mode-tool-filter.spec.ts](../../tests/chat.mode-tool-filter.spec.ts).
 - 2026-05-04 — Wave 5 #22 phase 4 — AGENTS.md repo-file discovery scanner. Pure file walker + frontmatter parser in [src/lib/agents/agent-source-loader.ts](../../src/lib/agents/agent-source-loader.ts); DB application + boot wiring in [src/lib/agents/agent-source-loader.server.ts](../../src/lib/agents/agent-source-loader.server.ts). Reads `${root}/AGENTS.md` for orchestrator identity overrides + `${root}/docs/agents/<slug>/AGENT.md` for individual agent definitions. `AGENT_SOURCE_PRIORITY=repo|db` (default `db`) controls last-write-wins; `AGENT_SOURCE_PATH` overrides the scan root. Match-by `config.sourceSlug` so renames in frontmatter never collide with hand-created agents that share a name. Tests in [tests/agents.source-loader.spec.ts](../../tests/agents.source-loader.spec.ts).
 - 2026-05-04 — Wave 5 #22 phases 3 + 5 + 6 — `/agents/[id]/identity` markdown editor route, `@import skill-name` fragment library with cycle/depth defense, and role-based companion-group suggestions surfaced in the editor. Tests in [tests/agents.fragment-expand.spec.ts](../../tests/agents.fragment-expand.spec.ts), [tests/agents.role-companions.spec.ts](../../tests/agents.role-companions.spec.ts), [tests/agents.identity-editor.spec.ts](../../tests/agents.identity-editor.spec.ts).
 - 2026-05-04 — Wave 5 #22 phase 2 — `agents.identity_skill_id` column + `buildAgentDefinition` reads from skill with `systemPrompt` fallback. See implementation-order #22 evidence.

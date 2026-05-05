@@ -369,12 +369,123 @@ async function runMaintenanceModeAutomation(
 		metadata: { automationId: automation.id, mode: 'maintenance' },
 	}).catch(() => {})
 
-	const summary = (response.content ?? '').trim().slice(0, 500)
+	const fullSummary = (response.content ?? '').trim()
+	const route = await routeMaintenanceOutput(automation, fullSummary, model, now).catch((err) => {
+		console.warn('[automations] output routing failed (non-fatal)', err)
+		return { target: 'none' as const }
+	})
+
 	return {
-		conversationId: null,
+		conversationId: route.target === 'chat_session' ? (route as { conversationId?: string }).conversationId ?? null : null,
 		mode: 'maintenance' as const,
-		summary,
+		summary: fullSummary.slice(0, 500),
+		outputTarget: automation.outputTarget,
+		routedTo: route.target,
+		taskId: 'taskId' in route ? route.taskId : null,
+		artifactId: 'artifactId' in route ? route.artifactId : null,
+		reviewItemId: 'reviewItemId' in route ? route.reviewItemId : null,
 	}
+}
+
+/**
+ * Wave 5 #21 phase 4 (output routing) — maintenance-mode result destination.
+ *
+ * Each `outputTarget` enum value gets a destination:
+ *   - `chat_session` (default): assistant message in the automation's conversation
+ *   - `review_inbox`: `automation_summary` review item (deduped per-hour by automation id)
+ *   - `task`: new task with the summary as the spec (operator triages it like any other)
+ *   - `artifact`: new versioned artifact in the conversation's bound project (skipped + logged
+ *     with a clear marker if no project is bound, since artifacts require one)
+ *
+ * Best-effort: failures are caught at the caller so a routing hiccup never invalidates the
+ * already-completed maintenance work.
+ */
+async function routeMaintenanceOutput(
+	automation: typeof automations.$inferSelect,
+	summary: string,
+	model: string,
+	now: Date,
+): Promise<
+	| { target: 'chat_session'; conversationId: string }
+	| { target: 'review_inbox'; reviewItemId: string | null }
+	| { target: 'task'; taskId: string }
+	| { target: 'artifact'; artifactId: string }
+	| { target: 'artifact_skipped'; reason: string }
+	| { target: 'none' }
+> {
+	const trimmed = summary.length > 0 ? summary : '(no output)'
+
+	if (automation.outputTarget === 'review_inbox') {
+		const { openReviewItem } = await import('$lib/observability/review.server')
+		const item = await openReviewItem({
+			type: 'automation_summary',
+			severity: 'info',
+			summary: `Maintenance: ${automation.description.slice(0, 100)}`,
+			payload: {
+				kind: 'maintenance_summary',
+				automationId: automation.id,
+				summary: trimmed.slice(0, 4000),
+				mode: 'maintenance',
+			},
+			// One open item per automation per hour — back-to-back ticks within an hour
+			// collapse to a single inbox row instead of flooding the queue.
+			dedupeKey: `automation_summary:${automation.id}:${now.toISOString().slice(0, 13)}`,
+		})
+		return { target: 'review_inbox', reviewItemId: item?.id ?? null }
+	}
+
+	if (automation.outputTarget === 'task') {
+		const { createTask } = await import('$lib/tasks/tasks.server')
+		const task = await createTask({
+			title: automation.description.slice(0, 200),
+			spec: trimmed.slice(0, 8000),
+			status: 'pending',
+			ownerAgentId: automation.agentId ?? null,
+			metadata: {
+				source: 'automation_maintenance',
+				automationId: automation.id,
+				mode: 'maintenance',
+			},
+			createdBy: automation.userId,
+		})
+		return { target: 'task', taskId: task.id }
+	}
+
+	if (automation.outputTarget === 'artifact') {
+		const conversation = await getOrCreateAutomationConversation(automation)
+		if (!conversation.projectId) {
+			console.info('[automations] outputTarget=artifact but conversation has no project bound; skipping', {
+				automationId: automation.id,
+				conversationId: conversation.id,
+			})
+			return { target: 'artifact_skipped', reason: 'no project bound to automation conversation' }
+		}
+		const { createArtifact } = await import('$lib/projects/projects.server')
+		const artifact = await createArtifact({
+			projectId: conversation.projectId,
+			name: `${automation.description.slice(0, 80)} (${now.toISOString().slice(0, 10)})`,
+			contentType: 'markdown',
+			content: trimmed,
+			changeNote: `Maintenance run at ${now.toISOString()}`,
+			editedBy: automation.userId,
+		})
+		return { target: 'artifact', artifactId: artifact.id }
+	}
+
+	// chat_session (default) — append the summary into the automation's conversation as
+	// an assistant message. Differs from chat_followup mode because we don't insert the
+	// user prompt; only the summary lands so the conversation isn't littered with the
+	// "Maintenance run at …" header lines.
+	const conversation = await getOrCreateAutomationConversation(automation)
+	await db.insert(messages).values({
+		conversationId: conversation.id,
+		role: 'assistant',
+		content: trimmed,
+		model,
+		metadata: { source: 'automation_maintenance', automationId: automation.id, mode: 'maintenance' },
+	})
+	await db.update(conversations).set({ updatedAt: now }).where(eq(conversations.id, conversation.id))
+	return { target: 'chat_session', conversationId: conversation.id }
 }
 
 async function runAutomation(automation: typeof automations.$inferSelect, now: Date) {

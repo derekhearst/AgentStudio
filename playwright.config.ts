@@ -38,6 +38,10 @@ export default defineConfig({
 		env: {
 			...process.env,
 			E2E_MOCK_EXTERNALS: '0',
+			// Default values for env vars that gate test coverage. Operators can override
+			// via .env or the shell env to point at real services. The webhook secret here
+			// is a test-only constant so the webhook endpoint tests always run end-to-end.
+			GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET ?? 'e2e-test-webhook-secret-do-not-use-in-prod',
 		},
 		port: 4173,
 		reuseExistingServer: true,

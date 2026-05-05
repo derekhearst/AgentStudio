@@ -1,10 +1,38 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { building } from '$app/environment'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
-import { env } from '$env/dynamic/private'
+
+// Load .env into process.env so server modules can read directly without depending on
+// SvelteKit's `$env/dynamic/private` virtual module. Bun auto-loads .env when invoking
+// scripts but Vite's SSR module runner doesn't inherit that into the same evaluation
+// context (we saw DATABASE_URL come back undefined during `vite dev` spawn). Explicit
+// load is idempotent — already-set vars are preserved.
+loadDotEnv()
+function loadDotEnv() {
+	try {
+		const envPath = resolve(process.cwd(), '.env')
+		if (!existsSync(envPath)) return
+		const raw = readFileSync(envPath, 'utf8')
+		for (const line of raw.split(/\r?\n/)) {
+			const trimmed = line.trim()
+			if (!trimmed || trimmed.startsWith('#')) continue
+			const eqIndex = trimmed.indexOf('=')
+			if (eqIndex === -1) continue
+			const key = trimmed.slice(0, eqIndex).trim()
+			let value = trimmed.slice(eqIndex + 1).trim()
+			if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+				value = value.slice(1, -1)
+			}
+			if (process.env[key] === undefined) {
+				process.env[key] = value
+			}
+		}
+	} catch {
+		// non-fatal — env-dependent code paths will throw with their own clearer messages
+	}
+}
 import * as authSchema from '$lib/auth/auth.schema'
 import * as sessionsSchema from '$lib/sessions/sessions.schema'
 import * as agentsSchema from '$lib/agents/agents.schema'
@@ -29,8 +57,11 @@ import * as observabilitySchema from '$lib/observability/observability.schema'
 import * as sourceControlSchema from '$lib/source-control/source-control.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
 
-const databaseUrl = env.DATABASE_URL
-const skipDatabaseInitialization = building
+// Bootstrap detection without `$app/environment` so the module is importable from
+// non-SvelteKit contexts (Playwright Node runtime, scripts, …). The `BUILD_PHASE` env
+// var is set by `package.json`'s `build` script; missing/unset means runtime.
+const databaseUrl = process.env.DATABASE_URL
+const skipDatabaseInitialization = process.env.BUILD_PHASE === '1'
 
 const schema = {
 	...authSchema,
@@ -525,7 +556,7 @@ async function bootstrapDatabase() {
 		// for cases like running migrations + seed in a one-shot script. Default-on so dev sessions
 		// pick up jobs immediately. A future deployment can run a separate worker process with the
 		// web tier's worker disabled.
-		if (env.JOBS_WORKER_ENABLED !== '0') {
+		if (process.env.JOBS_WORKER_ENABLED !== '0') {
 			try {
 				const { startJobWorker } = await import('$lib/jobs/worker.server')
 				const worker = startJobWorker({ pollIntervalMs: 2000, leaseTtlMs: 120_000 })
@@ -537,7 +568,7 @@ async function bootstrapDatabase() {
 
 		// Wave 4 #17 phase 4 — start the scheduler AFTER handler registration so the first tick
 		// always finds a registered handler. Opt-out via JOBS_SCHEDULER_ENABLED=0.
-		if (env.JOBS_WORKER_ENABLED !== '0' && env.JOBS_SCHEDULER_ENABLED !== '0') {
+		if (process.env.JOBS_WORKER_ENABLED !== '0' && process.env.JOBS_SCHEDULER_ENABLED !== '0') {
 			try {
 				const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
 				startScheduler()
@@ -575,6 +606,10 @@ export async function ensureDatabaseReady() {
 	await databaseReadyPromise
 }
 
-await databaseReadyPromise
+// Top-level await intentionally removed: it caused a circular ESM-await deadlock when
+// bootstrap's own dynamic seeders (which transitively import db.server) waited on this
+// module's load to complete. All real callers (hooks.server.ts, every remote function
+// handler) already call `ensureDatabaseReady()` at the request boundary, so the promise
+// is awaited at the right time without blocking the module graph.
 
 export const db: Database = client ? createDatabase(client) : createUnavailableDatabase()

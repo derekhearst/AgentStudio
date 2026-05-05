@@ -4,7 +4,15 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { getTaskByIdQuery, getTaskSubtreeQuery, setTaskStatusCommand, cancelTaskCommand, retryTaskCommand } from '$lib/tasks/tasks.remote';
+	import {
+		getTaskByIdQuery,
+		getTaskSubtreeQuery,
+		setTaskStatusCommand,
+		cancelTaskCommand,
+		retryTaskCommand,
+		setTaskRepositoryCommand,
+		listConnectedRepositoriesQuery,
+	} from '$lib/tasks/tasks.remote';
 	import TaskTree from '$lib/tasks/TaskTree.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
@@ -14,24 +22,40 @@
 	type Status = TaskDetail['task']['status'];
 	type Subtree = NonNullable<Awaited<ReturnType<typeof getTaskSubtreeQuery>>>;
 
+	type RepoSummary = Awaited<ReturnType<typeof listConnectedRepositoriesQuery>>[number];
+
 	let detail = $state<TaskDetail | null>(null);
 	let subtree = $state<Subtree | null>(null);
 	let loading = $state(true);
 	let busy = $state(false);
 	let error = $state<string | null>(null);
+	let repos = $state<RepoSummary[] | null>(null);
+	let repoPickerOpen = $state(false);
+	let repoBusy = $state(false);
+	let repoError = $state<string | null>(null);
+	const linkedRepo = $derived(detail?.task.repositoryId
+		? repos?.find((r) => r.id === detail!.task.repositoryId) ?? null
+		: null);
 
 	onMount(() => {
 		void load();
 	});
 
-	async function load() {
+	async function load(forceRefresh = false) {
 		loading = true;
 		error = null;
 		try {
+			// SvelteKit remote queries cache by default; calling `.refresh()` invalidates the
+			// cache so the next read returns fresh data. The first load (initial onMount)
+			// doesn't need it — there's nothing to invalidate yet.
+			if (forceRefresh) {
+				await Promise.all([
+					getTaskByIdQuery(taskId).refresh().catch(() => undefined),
+					getTaskSubtreeQuery({ rootTaskId: taskId, maxDepth: 4 }).refresh().catch(() => undefined),
+				]);
+			}
 			const [d, s] = await Promise.all([
 				getTaskByIdQuery(taskId),
-				// Walk one level deeper than the simple children list so we can show grandchildren
-				// when the propose_plan tree has nested steps. Bounded inside the query.
 				getTaskSubtreeQuery({ rootTaskId: taskId, maxDepth: 4 }).catch(() => null),
 			]);
 			detail = d;
@@ -73,7 +97,7 @@
 		busy = true;
 		try {
 			await setTaskStatusCommand({ taskId: detail.task.id, status: next });
-			await load();
+			await load(true);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to update status';
 		} finally {
@@ -87,9 +111,39 @@
 		busy = true;
 		try {
 			await cancelTaskCommand({ taskId: detail.task.id });
-			await load();
+			await load(true);
 		} finally {
 			busy = false;
+		}
+	}
+
+	async function loadRepos() {
+		if (repos !== null) return;
+		try {
+			repos = await listConnectedRepositoriesQuery();
+		} catch (e) {
+			repoError = e instanceof Error ? e.message : 'Failed to load repos';
+		}
+	}
+
+	async function openRepoPicker() {
+		repoError = null;
+		repoPickerOpen = true;
+		await loadRepos();
+	}
+
+	async function attachRepo(repoId: string | null) {
+		if (!detail) return;
+		repoBusy = true;
+		repoError = null;
+		try {
+			await setTaskRepositoryCommand({ taskId: detail.task.id, repositoryId: repoId });
+			repoPickerOpen = false;
+			await load(true);
+		} catch (e) {
+			repoError = e instanceof Error ? e.message : 'Failed to update repository';
+		} finally {
+			repoBusy = false;
 		}
 	}
 
@@ -104,7 +158,7 @@
 		error = null;
 		try {
 			await retryTaskCommand({ taskId: detail.task.id });
-			await load();
+			await load(true);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Retry failed';
 		} finally {
@@ -180,6 +234,63 @@
 						{/if}
 						{#if t.priority > 0}
 							<span class="badge badge-sm badge-outline">priority {t.priority}</span>
+						{/if}
+					</div>
+				{/if}
+
+				<!-- Wave 5 #19 phase 2 finish — repo linkage. The runner reads tasks.repositoryId
+				     to decide whether to provision a real worktree before invoking runChatLoop. -->
+				<div class="flex flex-wrap items-center gap-2 text-xs">
+					<span class="text-base-content/55 font-medium">Repository:</span>
+					{#if linkedRepo}
+						<span class="badge badge-sm badge-info gap-1.5 font-mono">
+							{linkedRepo.owner}/{linkedRepo.name}
+						</span>
+						{#if linkedRepo.htmlUrl}
+							<a class="text-base-content/55 hover:text-info" href={linkedRepo.htmlUrl} target="_blank" rel="noopener">↗</a>
+						{/if}
+						<button class="btn btn-ghost btn-xs" type="button" onclick={() => attachRepo(null)} disabled={repoBusy || isTerminal}>Detach</button>
+					{:else if t.repositoryId}
+						<span class="badge badge-sm badge-error font-mono" title="Linked repo not found in your synced list — re-sync /source-control or detach.">
+							missing repo
+						</span>
+						<button class="btn btn-ghost btn-xs" type="button" onclick={() => attachRepo(null)} disabled={repoBusy || isTerminal}>Detach</button>
+					{:else}
+						<span class="text-base-content/55">none — runs use the agent's default workspace</span>
+						{#if !isTerminal}
+							<button class="btn btn-ghost btn-xs" type="button" onclick={openRepoPicker} disabled={repoBusy}>Attach</button>
+						{/if}
+					{/if}
+				</div>
+
+				{#if repoPickerOpen}
+					<div class="rounded-lg border border-base-300 bg-base-100/50 p-3 space-y-2">
+						<div class="flex items-center justify-between gap-2">
+							<p class="text-xs font-semibold text-base-content/70">Select a repository to attach</p>
+							<button class="btn btn-ghost btn-xs" type="button" onclick={() => (repoPickerOpen = false)}>Close</button>
+						</div>
+						{#if repos === null}
+							<p class="text-xs text-base-content/55">Loading…</p>
+						{:else if repos.length === 0}
+							<p class="text-xs text-base-content/55">
+								No repos synced yet. <a class="link" href="/source-control">Connect GitHub</a> first.
+							</p>
+						{:else}
+							<div class="flex flex-wrap gap-1.5">
+								{#each repos as r (r.id)}
+									<button
+										class="btn btn-ghost btn-xs font-mono"
+										type="button"
+										onclick={() => attachRepo(r.id)}
+										disabled={repoBusy}
+									>
+										{r.owner}/{r.name}{r.private ? ' 🔒' : ''}
+									</button>
+								{/each}
+							</div>
+						{/if}
+						{#if repoError}
+							<p class="text-xs text-error">{repoError}</p>
 						{/if}
 					</div>
 				{/if}

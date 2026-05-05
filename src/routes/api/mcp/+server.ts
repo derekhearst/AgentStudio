@@ -1,12 +1,11 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { env } from '$env/dynamic/private'
 import { executeTool, toolSchemas, type ToolName } from '$lib/tools/tools.server'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { desc, eq } from 'drizzle-orm'
 
-const MCP_API_KEY = env.MCP_API_KEY
+const MCP_API_KEY = process.env.MCP_API_KEY
 
 function verifyApiKey(request: Request): boolean {
 	if (!MCP_API_KEY) return true // No key configured = open (dev mode)

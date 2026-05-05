@@ -6,7 +6,6 @@
  * column dimension declared in src/lib/memory/memory.schema.ts.
  */
 
-import { env } from '$env/dynamic/private'
 import { logLlmUsage } from '$lib/costs/usage'
 
 export const EMBEDDING_DIM = 1536
@@ -30,7 +29,7 @@ type EmbeddingResponse = {
 }
 
 async function callEmbeddings(model: string, input: string[]): Promise<EmbeddingResponse> {
-	if (!env.OPENROUTER_API_KEY) {
+	if (!process.env.OPENROUTER_API_KEY) {
 		throw new Error('OPENROUTER_API_KEY is not set')
 	}
 
@@ -40,7 +39,7 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 		const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
 			method: 'POST',
 			headers: {
-				authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+				authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
 				'content-type': 'application/json',
 			},
 			body: JSON.stringify({ model, input }),

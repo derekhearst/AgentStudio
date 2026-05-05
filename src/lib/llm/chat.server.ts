@@ -1,5 +1,4 @@
 import { OpenRouter } from '@openrouter/sdk'
-import { env } from '$env/dynamic/private'
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -44,13 +43,13 @@ const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
 let singleton: OpenRouter | null = null
 
 function getClient() {
-	if (!env.OPENROUTER_API_KEY) {
+	if (!process.env.OPENROUTER_API_KEY) {
 		throw new Error('OPENROUTER_API_KEY is not set')
 	}
 
 	if (!singleton) {
 		singleton = new OpenRouter({
-			apiKey: env.OPENROUTER_API_KEY,
+			apiKey: process.env.OPENROUTER_API_KEY,
 		})
 	}
 

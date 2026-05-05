@@ -50,6 +50,10 @@ export const reviewItemTypeEnum = pgEnum('review_item_type', [
 	// Operator surfaces the PR in /review without monitoring chat; payload carries the PR
 	// number, html url, and originating run id.
 	'pull_request_ready',
+	// Wave 5 #21 phase 4 (output routing) — maintenance-mode automation tick wrote its
+	// summary to the review inbox via `outputTarget = review_inbox`. Payload carries the
+	// automation id, mode, and a truncated summary.
+	'automation_summary',
 ])
 
 export const reviewItemStatusEnum = pgEnum('review_item_status', [

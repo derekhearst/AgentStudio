@@ -71,6 +71,12 @@ export const tasks = pgTable(
 		// chat_runs.eval_attempt). Bumped each time the runner spawns a retry from a
 		// `needs_revision` verdict. Cap-bounded by the runner.
 		evalAttempt: integer('eval_attempt').notNull().default(0),
+		// Wave 5 #19 phase 2 finish — when set, the runner provisions a real worktree against
+		// the linked repository's local mirror before invoking runChatLoop. Declared by-name
+		// (no enforced FK) so deleting the repository row doesn't cascade-delete tasks — the
+		// runner falls back to the legacy non-repo workspace + logs a warning if the linked
+		// row is gone.
+		repositoryId: uuid('repository_id'),
 		metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -82,6 +88,7 @@ export const tasks = pgTable(
 		ownerIdx: index('tasks_owner_idx').on(table.ownerAgentId),
 		createdByIdx: index('tasks_created_by_idx').on(table.createdBy),
 		rootConversationIdx: index('tasks_root_conversation_idx').on(table.rootConversationId),
+		repositoryIdx: index('tasks_repository_idx').on(table.repositoryId),
 	}),
 )
 
