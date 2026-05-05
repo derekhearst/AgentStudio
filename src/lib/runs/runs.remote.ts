@@ -1,4 +1,4 @@
-import { query } from '$app/server'
+import { command, query } from '$app/server'
 import { asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
@@ -7,6 +7,8 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { tasks } from '$lib/tasks/tasks.schema'
 import { listEvaluationsForRun } from '$lib/evaluations/evaluations.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { dismissStuckRun } from '$lib/runs/runs.server'
 
 /**
  * Wave 2 #11 follow-up — single-run detail viewer.
@@ -92,4 +94,17 @@ export const getRunDetailQuery = query(detailSchema, async ({ runId, includeNois
 		eventCount: eventRows.length,
 		filteredOutCount: includeNoisyEvents ? 0 : eventRows.length - events.length,
 	}
+})
+
+/**
+ * Manual dismiss of a stuck run from the running-sessions dock.
+ *
+ * Counterpart to the time-based bulk reaper (`runs_reap.5min`). The reaper waits 1h before
+ * cleaning up; this command lets the user clear an orphaned "Waiting for you" chip the
+ * instant they see it. Auth-gated by `requireAuthenticatedRequestUser` and ownership-gated
+ * inside `dismissStuckRun` (the WHERE clause requires `userId` match).
+ */
+export const dismissStuckRunCommand = command(z.object({ runId: runIdSchema }), async ({ runId }) => {
+	const user = requireAuthenticatedRequestUser()
+	return dismissStuckRun(user.id, runId)
 })

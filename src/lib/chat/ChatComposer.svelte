@@ -99,15 +99,17 @@
 
 	<div class="mt-1.5 flex items-center justify-between gap-1 px-0.5 sm:mt-2 sm:gap-2 sm:px-1">
 		<div class="flex items-center gap-1">
-			<button
-				type="button"
-				class="btn btn-ghost btn-sm gap-1 rounded-full px-2 sm:gap-2"
-				disabled={busy}
-				onclick={() => onAddFiles?.()}
-			>
-				<span class="text-lg leading-none">+</span>
-				<span class="hidden sm:inline">Add files</span>
-			</button>
+			{#if onAddFiles}
+				<button
+					type="button"
+					class="btn btn-ghost btn-sm gap-1 rounded-full px-2 sm:gap-2"
+					disabled={busy}
+					onclick={() => onAddFiles?.()}
+				>
+					<span class="text-lg leading-none">+</span>
+					<span class="hidden sm:inline">Add files</span>
+				</button>
+			{/if}
 		</div>
 
 		<div class="flex items-center gap-1">

@@ -22,6 +22,7 @@ const updateConversationMetaSchema = z.object({
 const createConversationSchema = z.object({
 	title: z.string().trim().min(1).max(120),
 	model: z.string().trim().min(1).max(120).optional(),
+	mode: z.enum(CHAT_MODES).optional(),
 })
 
 const conversationIdSchema = z.string().uuid()
@@ -187,6 +188,7 @@ export const createConversation = command(createConversationSchema, async (input
 			title: input.title,
 			userId: user.id,
 			model: input.model ?? settings.defaultModel,
+			mode: input.mode ?? 'chat',
 		})
 		.returning()
 

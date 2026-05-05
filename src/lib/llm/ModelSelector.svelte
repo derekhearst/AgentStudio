@@ -349,7 +349,7 @@
 			></button>
 
 			<div
-				class="modal-panel relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden bg-base-100 shadow-2xl sm:mt-[6vh] sm:h-[82vh] sm:w-[96vw] sm:max-w-6xl sm:rounded-2xl sm:border sm:border-base-300"
+				class="modal-panel relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden bg-base-100 shadow-2xl sm:mt-[8vh] sm:h-[78vh] sm:w-[80vw] sm:max-w-3xl sm:rounded-2xl sm:border sm:border-base-300"
 				class:modal-panel-closing={closing}
 				style="background-color: Canvas; color: CanvasText; opacity: 1"
 			>

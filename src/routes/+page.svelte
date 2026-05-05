@@ -14,6 +14,8 @@
 	let busy = $state(false);
 	let prompt = $state('');
 	let model = $state('anthropic/claude-sonnet-4');
+	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
+	let mode = $state<ChatMode>('chat');
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
 	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -234,7 +236,7 @@
 		try {
 			const trimmedPrompt = initialPrompt?.trim() ?? '';
 			const title = trimmedPrompt.slice(0, 80) || 'New conversation';
-			const created = await createConversation({ title, model });
+			const created = await createConversation({ title, model, mode });
 			if (trimmedPrompt) {
 				await goto(`/chat/${created.id}?prompt=${encodeURIComponent(trimmedPrompt)}`);
 			} else {
@@ -243,6 +245,14 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	async function handleComposerSubmit(content: string) {
+		if (mode === 'research') {
+			await handleNewResearch(content);
+			return;
+		}
+		await handleNewChat(content);
 	}
 
 	// Wave 4 #18 phase 4 — Deep Research from the home composer. No conversation context yet
@@ -276,21 +286,18 @@
 				bind:value={prompt}
 				{busy}
 				{model}
+				{mode}
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
-				onSubmit={(content) => handleNewChat(content)}
-				onResearchSubmit={(content) => handleNewResearch(content)}
+				onSubmit={(content) => handleComposerSubmit(content)}
 				onModelChange={(id) => {
 					model = id;
 				}}
 				onReasoningEffortChange={(next) => {
 					reasoningEffort = next;
 				}}
-				onAddFiles={() => {
-					// File picker hook will be wired in a later pass.
-				}}
-				onMicClick={() => {
-					// Voice capture hook will be wired in a later pass.
+				onModeChange={(next) => {
+					mode = next;
 				}}
 			/>
 		</div>

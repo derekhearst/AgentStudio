@@ -1,10 +1,14 @@
 import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
 
+// Plan-mode UUID was bumped c003 → c023 when the plan-mode skill content was rewritten to
+// require the `propose_plan` tool (Wave 1 #6 phase 4). The bump forces a clean re-seed
+// instead of preserving the old content via ON CONFLICT DO NOTHING. Source of truth:
+// src/lib/chat/mode-skills.server.ts.
 const MODE_SKILL_IDS = {
 	chat: '00000000-0000-4000-8000-00000000c001',
 	research: '00000000-0000-4000-8000-00000000c002',
-	plan: '00000000-0000-4000-8000-00000000c003',
+	plan: '00000000-0000-4000-8000-00000000c023',
 	agent: '00000000-0000-4000-8000-00000000c004',
 } as const
 

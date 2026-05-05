@@ -543,6 +543,15 @@ async function bootstrapDatabase() {
 			console.warn('[db] Metrics handler registration failed (non-fatal):', err)
 		}
 
+		// Stuck-run reaper — sweeps chat_runs stuck in active states with no `updatedAt`
+		// movement for >1h (runtime crashed/restarted, leaving "Waiting for you" rows alive).
+		try {
+			const { registerRunsJobHandlers } = await import('$lib/runs/runs-handler.server')
+			registerRunsJobHandlers()
+		} catch (err) {
+			console.warn('[db] Runs handler registration failed (non-fatal):', err)
+		}
+
 		// Wave 2 #11 phase 3 finish — register `task_run` + `tasks_dispatch` job handlers
 		// + the 90s scheduled tick that picks up pending top-level tasks with an ownerAgentId.
 		try {

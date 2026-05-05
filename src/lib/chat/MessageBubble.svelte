@@ -104,6 +104,13 @@
 		return Array.isArray(blocks) ? (blocks as SavedBlock[]) : null;
 	});
 
+	function blockHasRenderableOutput(block: SavedBlock): boolean {
+		if (block.kind === 'text' || block.kind === 'thinking') return !!block.content?.trim()
+		if (block.kind === 'tool') return !!block.name
+		if (block.kind === 'subagent') return !!(block.agentName?.trim() || block.task?.trim() || block.content?.trim())
+		return false
+	}
+
 	type NormalizedToolCall = {
 		name?: string | null;
 		arguments?: unknown;
@@ -111,6 +118,19 @@
 		success?: boolean | null;
 	};
 	const normalizedToolCalls = $derived.by(() => asArray(message.toolCalls) as NormalizedToolCall[]);
+
+	// Skip rendering an empty assistant article entirely. An assistant message with no
+	// savedBlocks producing output, no tool calls, and no content is just visual noise —
+	// these can show up from interrupted streams, partial saves, or automation runs that
+	// finished with no text body.
+	const hasRenderableContent = $derived.by(() => {
+		if (message.role !== 'assistant') return true
+		if (savedBlocks && savedBlocks.length > 0) {
+			return savedBlocks.some(blockHasRenderableOutput)
+		}
+		if (normalizedToolCalls.length > 0) return true
+		return !!message.content?.trim()
+	});
 
 	function getAskUserQuestions(argumentsValue: unknown, resultValue: unknown): Array<{ header: string; question?: string }> {
 		const args = asRecord(argumentsValue);
@@ -293,6 +313,7 @@
 	}
 </script>
 
+{#if hasRenderableContent}
 <article class={`chat-message w-full ${isUser ? 'chat chat-end' : ''}`}>
 	{#if isUser}
 		<div class={`max-w-[90%] ${editing ? '' : 'rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3'}`}>
@@ -367,9 +388,10 @@
 					<ThinkingBlockCard
 						content={block.content}
 						reasoningTokens={idx === lastThinkingBlockIndex ? messageReasoningTokens : block.reasoningTokens ?? null}
+						expanded={true}
 					/>
 				</div>
-			{:else if block.kind === 'subagent'}
+			{:else if block.kind === 'subagent' && (block.agentName?.trim() || block.task?.trim() || block.content?.trim())}
 				<div class="mb-1.5 w-full">
 					<SubagentBlockCard
 						agentName={block.agentName}
@@ -509,6 +531,7 @@
 	{/if}
 
 </article>
+{/if}
 
 <style>
 	:global(.markdown-body) {
