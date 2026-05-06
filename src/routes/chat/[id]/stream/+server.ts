@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { and, asc, desc, eq, gt } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
@@ -13,6 +13,7 @@ import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { listSkillSummaries, listRelevantSkillSummaries } from '$lib/skills/skills.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
@@ -117,18 +118,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'content is required when regenerate=false' }, { status: 400 })
 		}
 
-		const [createdUser] = await db
-			.insert(messages)
-			.values({
-				conversationId: body.conversationId,
-				role: 'user',
-				content: body.content.trim(),
-				model: routedModel,
-				metadata: {},
-				toolCalls: [],
-				attachments: body.attachments ?? [],
-			})
-			.returning()
+		const createdUser = await insertMessageWithSequence({
+			conversationId: body.conversationId,
+			role: 'user',
+			content: body.content.trim(),
+			model: routedModel,
+			metadata: {},
+			toolCalls: [],
+			attachments: body.attachments ?? [],
+		})
 
 		parentMessageId = createdUser.id
 	} else {
@@ -136,7 +134,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.select()
 			.from(messages)
 			.where(and(eq(messages.conversationId, body.conversationId), eq(messages.role, 'user')))
-			.orderBy(desc(messages.createdAt))
+			.orderBy(desc(messages.sequence))
 			.limit(1)
 		parentMessageId = lastUser?.id ?? null
 	}
@@ -145,7 +143,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		.select({ role: messages.role, content: messages.content, attachments: messages.attachments })
 		.from(messages)
 		.where(eq(messages.conversationId, body.conversationId))
-		.orderBy(asc(messages.createdAt))
+		.orderBy(asc(messages.sequence))
 
 	// First exchange = only the message we just inserted exists (historyRows has exactly 1 row)
 	const isFirstExchange = historyRows.length === 1 && !body.regenerate
@@ -691,39 +689,87 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					metadata: { conversationId: body.conversationId },
 				})
 
-				const [assistantMessage] = await db
-					.insert(messages)
-					.values({
-						conversationId: body.conversationId,
-						role: 'assistant',
-						content: allTextContent || '(no output)',
-						model: routedModel,
-						parentMessageId,
-						tokensIn: promptTokens,
-						tokensOut: completionTokens,
-						ttftMs,
-						totalMs,
-						tokensPerSec,
-						cost: messageCost,
-						metadata: {
-							modelSelection,
-							reasoningEffort,
-							reasoningTokens,
-							blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
-						},
-						toolCalls: allToolCalls,
-					})
-					.returning()
+				// Wrap the assistant insert (or partial-merge) and the conversation totals
+				// update in a single transaction so a crash between leaves the row + totals
+				// consistent. Title generation stays outside (it's a fire-and-forget side
+				// effect started below).
+				const finalMetadata = {
+					modelSelection,
+					reasoningEffort,
+					reasoningTokens,
+					runId: run.id,
+					blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
+				}
 
-				await db
-					.update(conversations)
-					.set({
-						model: routedModel,
-						totalTokens: conversation.totalTokens + promptTokens + completionTokens,
-						totalCost: String(parseFloat(conversation.totalCost) + parseFloat(messageCost)),
-						updatedAt: new Date(),
-					})
-					.where(eq(conversations.id, body.conversationId))
+				const assistantMessage = await db.transaction(async (tx) => {
+					// Detect-and-merge: if `savePartialAssistant` wrote a partial row for this
+					// run (network-blip recovery path), update it in place instead of inserting
+					// a second assistant row for the same logical turn. Match by runId stamped
+					// into metadata + the `partial` flag.
+					const [existingPartial] = await tx
+						.select({ id: messages.id })
+						.from(messages)
+						.where(
+							and(
+								eq(messages.conversationId, body.conversationId),
+								eq(messages.role, 'assistant'),
+								sql`${messages.metadata}->>'runId' = ${run.id}`,
+								sql`${messages.metadata}->>'partial' = 'true'`,
+							),
+						)
+						.limit(1)
+
+					const written = existingPartial
+						? (
+								await tx
+									.update(messages)
+									.set({
+										content: allTextContent || '(no output)',
+										model: routedModel,
+										parentMessageId,
+										tokensIn: promptTokens,
+										tokensOut: completionTokens,
+										ttftMs,
+										totalMs,
+										tokensPerSec,
+										cost: messageCost,
+										metadata: finalMetadata,
+										toolCalls: allToolCalls,
+									})
+									.where(eq(messages.id, existingPartial.id))
+									.returning()
+							)[0]
+						: await insertMessageWithSequence(
+								{
+									conversationId: body.conversationId,
+									role: 'assistant',
+									content: allTextContent || '(no output)',
+									model: routedModel,
+									parentMessageId,
+									tokensIn: promptTokens,
+									tokensOut: completionTokens,
+									ttftMs,
+									totalMs,
+									tokensPerSec,
+									cost: messageCost,
+									metadata: finalMetadata,
+									toolCalls: allToolCalls,
+								},
+								tx,
+							)
+
+					await tx
+						.update(conversations)
+						.set({
+							model: routedModel,
+							totalTokens: conversation.totalTokens + promptTokens + completionTokens,
+							totalCost: String(parseFloat(conversation.totalCost) + parseFloat(messageCost)),
+							updatedAt: new Date(),
+						})
+						.where(eq(conversations.id, body.conversationId))
+
+					return written
+				})
 
 				if (isFirstExchange && body.content) {
 					void generateTitle([

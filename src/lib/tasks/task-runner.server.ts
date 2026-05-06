@@ -9,6 +9,7 @@ import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/r
 import { runEvaluatorPass } from '$lib/evaluations'
 import type { EvaluationVerdict, EvaluationFinding } from '$lib/evaluations/evaluations.schema'
 import { getTaskById, recordAttempt, setTaskStatus, updateAttempt } from './tasks.server'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 
 /**
  * Wave 2 #11 phases 3 + 5 — execute one task once, end-to-end.
@@ -226,7 +227,7 @@ export async function executeTaskOnce(
 			metadata: { conversationId, taskAttemptId: attempt.id },
 		}).catch(() => '0')
 
-		await db.insert(messages).values({
+		await insertMessageWithSequence({
 			conversationId,
 			role: 'assistant',
 			content: loopResult.finalText || '(no output)',

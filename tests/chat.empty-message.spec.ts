@@ -19,20 +19,21 @@ async function seedConversationWithMessages(prefix: string) {
 
 	// Real user prompt.
 	await sql`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'user', 'real user prompt', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'user', 'real user prompt', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb, 1)
 	`
 
 	// Real assistant reply with text content — should always render.
 	await sql`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
 		values (
 			${conversation.id},
 			'assistant',
 			${'real assistant reply text'},
 			${'anthropic/claude-sonnet-4'},
 			${sql.json({ blocks: [{ kind: 'text', content: 'real assistant reply text' }] })},
-			'[]'::jsonb
+			'[]'::jsonb,
+			2
 		)
 	`
 
@@ -41,22 +42,23 @@ async function seedConversationWithMessages(prefix: string) {
 	//   2. content=' ' (whitespace only), toolCalls=[], metadata.blocks=undefined
 	//   3. content='', toolCalls=[], metadata.blocks=[{kind:'text', content:''}, {kind:'thinking', content:'  '}]
 	await sql`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'assistant', '', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'assistant', '', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb, 3)
 	`
 	await sql`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'assistant', '   ', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'assistant', '   ', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb, 4)
 	`
 	await sql`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
 		values (
 			${conversation.id},
 			'assistant',
 			'',
 			${'anthropic/claude-sonnet-4'},
 			${sql.json({ blocks: [{ kind: 'text', content: '' }, { kind: 'thinking', content: '  ' }] })},
-			'[]'::jsonb
+			'[]'::jsonb,
+			5
 		)
 	`
 

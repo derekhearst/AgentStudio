@@ -4,6 +4,7 @@ import { conversations, type ChatMode } from '$lib/sessions/sessions.schema'
 import { messages } from '$lib/sessions/sessions.schema'
 import { chatWorkbenchPreferences, type WorkbenchPanelLayout } from '$lib/chat/chat.workbench.schema'
 import { loadModeIdentitySkill } from '$lib/chat/mode-skills.server'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 
 // Short anchor sentences inserted into the conversation history when the mode flips.
 // Full posture guidance lives in the seeded mode-identity skills (loadModeIdentitySkill).
@@ -104,15 +105,15 @@ export async function setConversationMode(
 			.set({ mode, updatedAt: new Date() })
 			.where(eq(conversations.id, conversationId))
 
-		const [anchor] = await tx
-			.insert(messages)
-			.values({
+		const anchor = await insertMessageWithSequence(
+			{
 				conversationId,
 				role: 'system',
 				content: anchorContent,
 				metadata: { type: 'mode_anchor', previousMode, mode },
-			})
-			.returning({ id: messages.id })
+			},
+			tx,
+		)
 
 		return anchor.id
 	})

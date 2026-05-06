@@ -12,6 +12,7 @@ import {
 	setShowRightPanel as writeShowRightPanel,
 	setConversationMode as writeConversationMode,
 } from '$lib/chat/mode.server'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -57,7 +58,11 @@ export const getConversations = query(async () => {
 
 	const conversationIds = rows.map((row) => row.id)
 	const lastMessages = conversationIds.length
-		? await db.select().from(messages).where(eq(messages.role, 'assistant')).orderBy(desc(messages.createdAt))
+		? await db
+				.select()
+				.from(messages)
+				.where(eq(messages.role, 'assistant'))
+				.orderBy(desc(messages.createdAt), desc(messages.id))
 		: []
 
 	const conversationIdSet = new Set(conversationIds)
@@ -123,7 +128,11 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 
 	// Parallelize messages + active-run lookup — both are scoped to the now-verified conversation.
 	const [rows, [activeRun]] = await Promise.all([
-		db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(asc(messages.createdAt)),
+		db
+			.select()
+			.from(messages)
+			.where(eq(messages.conversationId, conversationId))
+			.orderBy(asc(messages.sequence)),
 		db
 			.select({
 				id: chatRuns.id,
@@ -254,20 +263,34 @@ export const savePartialAssistant = command(savePartialAssistantSchema, async (i
 		return { success: false as const, error: 'Conversation not found' as const }
 	}
 
-	const [created] = await db
-		.insert(messages)
-		.values({
-			conversationId: input.conversationId,
-			role: 'assistant',
-			content: input.content,
-			model: input.model ?? null,
-			metadata: {
-				partial: true,
-				...input.metadata,
-			},
-			toolCalls: input.toolCalls ?? [],
-		})
-		.returning({ id: messages.id })
+	// Stamp the active run id into metadata so the stream's final-insert path can detect
+	// this partial and update it in place (instead of producing a duplicate assistant row).
+	// We pick the most recently started, still-active run for the conversation.
+	const [activeRun] = await db
+		.select({ id: chatRuns.id })
+		.from(chatRuns)
+		.where(
+			and(
+				eq(chatRuns.conversationId, input.conversationId),
+				eq(chatRuns.userId, user.id),
+				isNull(chatRuns.finishedAt),
+			),
+		)
+		.orderBy(desc(chatRuns.startedAt), desc(chatRuns.id))
+		.limit(1)
+
+	const created = await insertMessageWithSequence({
+		conversationId: input.conversationId,
+		role: 'assistant',
+		content: input.content,
+		model: input.model ?? null,
+		metadata: {
+			partial: true,
+			...(activeRun ? { runId: activeRun.id } : {}),
+			...input.metadata,
+		},
+		toolCalls: input.toolCalls ?? [],
+	})
 
 	await db.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, input.conversationId))
 
@@ -301,7 +324,7 @@ export const getMessageStats = query(conversationIdSchema, async (conversationId
 		})
 		.from(messages)
 		.where(eq(messages.conversationId, conversationId))
-		.orderBy(asc(messages.createdAt))
+		.orderBy(asc(messages.sequence))
 
 	return rows
 })

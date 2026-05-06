@@ -682,6 +682,12 @@
 		const remoteMessages = messages;
 		const remoteIds = new Set(remoteMessages.map((message) => message.id));
 
+		// Optimistic / pending drafts that don't yet have a server-assigned `sequence`
+		// sort to the end via Number.MAX_SAFE_INTEGER, in the order they were created.
+		// Once the real DB row arrives, the draft is filtered out (see remoteIds /
+		// content-match dedupe below) and the real row's `sequence` takes its place.
+		let pendingSeq = Number.MAX_SAFE_INTEGER - 10000;
+
 		const optimisticUsers = pendingUserMessages
 			.filter((message) =>
 				!remoteMessages.some(
@@ -703,6 +709,7 @@
 				totalMs: null,
 				tokensPerSec: null,
 				createdAt: message.createdAt,
+				sequence: ++pendingSeq,
 				toolCalls: []
 			}));
 
@@ -720,26 +727,16 @@
 				totalMs: null,
 				tokensPerSec: null,
 				createdAt: message.createdAt,
+				sequence: ++pendingSeq,
 				toolCalls: message.toolCalls ?? []
 			}));
 
-		// Stable chronological sort. When timestamps tie (the SSE save path can stamp
-		// user / assistant / tool rows within the same millisecond) we tiebreak by
-		// canonical conversation order: user → assistant → tool. Within the same role
-		// we fall back to the insertion order so remote-from-DB rows stay before any
-		// optimistic / pending drafts that match the same instant.
-		const roleOrder: Record<string, number> = { user: 0, assistant: 1, tool: 2, system: 3 };
+		// Order by per-conversation `sequence` — assigned by insertMessageWithSequence at
+		// write time. Real DB rows always have it; optimistic drafts get the sentinel
+		// values above so they sort to the end while a streaming turn is in flight.
 		const combined = [...remoteMessages, ...optimisticUsers, ...pendingAssistants];
-		const indexed = combined.map((message, index) => ({ message, index }));
-		indexed.sort((a, b) => {
-			const dt = new Date(a.message.createdAt).getTime() - new Date(b.message.createdAt).getTime();
-			if (dt !== 0) return dt;
-			const ra = roleOrder[a.message.role] ?? 99;
-			const rb = roleOrder[b.message.role] ?? 99;
-			if (ra !== rb) return ra - rb;
-			return a.index - b.index;
-		});
-		return indexed.map((entry) => entry.message);
+		combined.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+		return combined;
 	});
 
 	const activeContextLimit = $derived.by(() => {
@@ -1367,16 +1364,54 @@
 							pendingAskUser = null;
 							askUserModalOpen = false;
 						}
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'tool' && b.id === payload.id && (b.status === 'executing' || b.status === 'approved')
-								? {
-										...b,
-										status: payload.success ? ('completed' as const) : ('failed' as const),
-										executionMs: payload.executionMs ?? null,
-										result: payload.result ?? (payload.success ? 'Success' : 'Tool execution failed'),
-									}
-								: b
-						);
+						const finalStatus = payload.success ? ('completed' as const) : ('failed' as const);
+						const resultText =
+							payload.result ?? (payload.success ? 'Success' : 'Tool execution failed');
+						const idx = streamingBlocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id);
+						if (idx === -1) {
+							// tool_result arrived without a matching tool_call/pending block. Append a
+							// completed block so the result is still visible — better than the silent
+							// drop the previous predicate produced when status didn't match.
+							logChatUi('warn', 'tool_result without matching tool block', {
+								id: payload.id,
+								name: payload.name,
+							});
+							streamingBlocks = [
+								...streamingBlocks.map((b) =>
+									b.kind === 'tool' ? { ...b, expanded: false } :
+									b.kind === 'thinking' ? { ...b, expanded: false } : b
+								),
+								{
+									kind: 'tool' as const,
+									id: payload.id,
+									name: payload.name ?? 'unknown',
+									arguments: '',
+									status: finalStatus,
+									expanded: true,
+									token: null,
+									executionMs: payload.executionMs ?? null,
+									result: resultText,
+								},
+							];
+						} else {
+							const existing = streamingBlocks[idx];
+							if (existing.kind === 'tool' && existing.status !== 'executing' && existing.status !== 'approved') {
+								logChatUi('warn', 'tool_result for tool block in unexpected status', {
+									id: payload.id,
+									status: existing.status,
+								});
+							}
+							streamingBlocks = streamingBlocks.map((b, i) =>
+								i === idx && b.kind === 'tool'
+									? {
+											...b,
+											status: finalStatus,
+											executionMs: payload.executionMs ?? null,
+											result: resultText,
+										}
+									: b
+							);
+						}
 					}
 
 					if (eventName === 'tool_denied') {

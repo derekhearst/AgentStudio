@@ -2,7 +2,7 @@
  * Public memory facade — the surface used by chat, agents, and the bench harness.
  */
 
-import { eq, inArray } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { memoryDrawers } from '$lib/memory/memory.schema'
@@ -31,7 +31,7 @@ export async function mineConversation(opts: {
 		.select()
 		.from(messages)
 		.where(eq(messages.conversationId, opts.conversationId))
-		.orderBy(messages.createdAt)
+		.orderBy(asc(messages.sequence))
 
 	// Skip messages that have already been mined into a drawer.
 	const messageIds = messageRows.map((row) => row.id)

@@ -18,8 +18,8 @@ async function seedAskUserConversation(prefix: string) {
 	`
 
 	const [userMsg] = await sql<{ id: string }[]>`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'user', 'Ask a question', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'user', 'Ask a question', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb, 1)
 		returning id
 	`
 
@@ -63,7 +63,7 @@ async function seedAskUserConversation(prefix: string) {
 	]
 
 	const [assistantMsg] = await sql<{ id: string }[]>`
-		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls)
+		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls, sequence)
 		values (
 			${conversation.id},
 			'assistant',
@@ -71,7 +71,8 @@ async function seedAskUserConversation(prefix: string) {
 			${'anthropic/claude-sonnet-4'},
 			${userMsg.id},
 			${sql.json({ blocks })},
-			${sql.json(toolCalls)}
+			${sql.json(toolCalls)},
+			2
 		)
 		returning id
 	`

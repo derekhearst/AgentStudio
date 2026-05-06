@@ -45,8 +45,8 @@ async function seedConversationWithToolBlock(
 		returning id
 	`
 	const [userMsg] = await sql<{ id: string }[]>`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'user', ${`${prefix} prompt`}, 'anthropic/claude-sonnet-4', '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'user', ${`${prefix} prompt`}, 'anthropic/claude-sonnet-4', '{}'::jsonb, '[]'::jsonb, 1)
 		returning id
 	`
 	const blocks = [block, { kind: 'text', content: `${prefix} done` }]
@@ -57,7 +57,7 @@ async function seedConversationWithToolBlock(
 		executionMs: block.executionMs ?? 0,
 	}]
 	await sql`
-		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls)
+		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls, sequence)
 		values (
 			${conversation.id},
 			'assistant',
@@ -65,7 +65,8 @@ async function seedConversationWithToolBlock(
 			'anthropic/claude-sonnet-4',
 			${userMsg.id},
 			${sql.json({ blocks } as never)},
-			${sql.json(toolCalls as never)}
+			${sql.json(toolCalls as never)},
+			2
 		)
 	`
 	return conversation
@@ -206,8 +207,8 @@ test.describe('chat/tool-call-render — multiple new source-control tools coexi
 				returning id
 			`
 			const [userMsg] = await sql<{ id: string }[]>`
-				insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-				values (${conversation.id}, 'user', ${`${prefix} prompt`}, 'anthropic/claude-sonnet-4', '{}'::jsonb, '[]'::jsonb)
+				insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+				values (${conversation.id}, 'user', ${`${prefix} prompt`}, 'anthropic/claude-sonnet-4', '{}'::jsonb, '[]'::jsonb, 1)
 				returning id
 			`
 			const blocks = [
@@ -235,7 +236,7 @@ test.describe('chat/tool-call-render — multiple new source-control tools coexi
 				{ kind: 'text', content: `${prefix} all done` },
 			]
 			await sql`
-				insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls)
+				insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls, sequence)
 				values (
 					${conversation.id},
 					'assistant',
@@ -243,7 +244,8 @@ test.describe('chat/tool-call-render — multiple new source-control tools coexi
 					'anthropic/claude-sonnet-4',
 					${userMsg.id},
 					${sql.json({ blocks })},
-					'[]'::jsonb
+					'[]'::jsonb,
+					2
 				)
 			`
 

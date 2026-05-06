@@ -49,4 +49,10 @@ export const messages = pgTable('messages', {
 	tokensPerSec: real('tokens_per_sec'),
 	parentMessageId: uuid('parent_message_id'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	// Per-conversation monotonic counter assigned at insert time. Replaces the old
+	// "order by created_at, id" workaround — millisecond timestamp ties between
+	// user/assistant rows on fast turns no longer affect render order. Always
+	// written via insertMessageWithSequence() so the (conversation_id, sequence)
+	// unique index serializes racing writers.
+	sequence: integer('sequence').notNull(),
 })

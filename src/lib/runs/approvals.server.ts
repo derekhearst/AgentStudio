@@ -7,7 +7,16 @@ const POLL_INTERVAL_MS = 500
 
 type EnqueueInput = Omit<PendingApprovalEntry, 'decision' | 'decidedAt'>
 
-export async function enqueuePendingApproval(runId: string, entry: EnqueueInput): Promise<void> {
+type TransitionPatch = {
+	state?: (typeof chatRuns.$inferInsert)['state']
+	label?: string
+}
+
+export async function enqueuePendingApproval(
+	runId: string,
+	entry: EnqueueInput,
+	transition?: TransitionPatch,
+): Promise<void> {
 	await db.transaction(async (tx) => {
 		const [row] = await tx
 			.select({ pendingApprovals: chatRuns.pendingApprovals, conversationId: chatRuns.conversationId })
@@ -20,7 +29,16 @@ export async function enqueuePendingApproval(runId: string, entry: EnqueueInput)
 		}
 
 		const next = [...(row.pendingApprovals ?? []).filter((e) => e.token !== entry.token), entry]
-		await tx.update(chatRuns).set({ pendingApprovals: next }).where(eq(chatRuns.id, runId))
+		// Bundle the pendingApprovals write with the state transition so we never end up
+		// with the run in `running` state while pendingApprovals already has the entry
+		// (or vice versa) on a crash between the two writes.
+		const patch: Partial<typeof chatRuns.$inferInsert> = {
+			pendingApprovals: next,
+			updatedAt: new Date(),
+		}
+		if (transition?.state) patch.state = transition.state
+		if (transition?.label !== undefined) patch.label = transition.label
+		await tx.update(chatRuns).set(patch).where(eq(chatRuns.id, runId))
 	})
 	// Wave 5 #20 — open a review item so approval requests show up in /review even when the
 	// SSE client is disconnected. Best-effort + deduped by token so retries collapse.

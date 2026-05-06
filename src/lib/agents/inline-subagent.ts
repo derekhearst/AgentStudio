@@ -6,6 +6,7 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import type { LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { buildAgentDefinition, createForwardedSession, runChatLoop } from '$lib/runtime'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 
 const encoder = new TextEncoder()
 
@@ -94,7 +95,7 @@ export async function runInlineSubagent(
 	)
 
 	// Save the task as the user message in the sub-agent conversation.
-	await db.insert(messages).values({
+	await insertMessageWithSequence({
 		conversationId: subConversation.id,
 		role: 'user',
 		content: step.task,
@@ -140,7 +141,7 @@ export async function runInlineSubagent(
 			metadata: { conversationId: subConversation.id, parentConversationId },
 		}).catch(() => '0')
 
-		await db.insert(messages).values({
+		await insertMessageWithSequence({
 			conversationId: subConversation.id,
 			role: 'assistant',
 			content: loopResult.finalText || '(no output)',

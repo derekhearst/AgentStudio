@@ -7,7 +7,16 @@ const POLL_INTERVAL_MS = 500
 
 type EnqueueInput = Omit<PendingQuestionEntry, 'answers' | 'decidedAt'>
 
-export async function enqueuePendingQuestion(runId: string, entry: EnqueueInput): Promise<void> {
+type TransitionPatch = {
+	state?: (typeof chatRuns.$inferInsert)['state']
+	label?: string
+}
+
+export async function enqueuePendingQuestion(
+	runId: string,
+	entry: EnqueueInput,
+	transition?: TransitionPatch,
+): Promise<void> {
 	await db.transaction(async (tx) => {
 		const [row] = await tx
 			.select({ pendingQuestions: chatRuns.pendingQuestions })
@@ -20,7 +29,15 @@ export async function enqueuePendingQuestion(runId: string, entry: EnqueueInput)
 		}
 
 		const next = [...(row.pendingQuestions ?? []).filter((e) => e.token !== entry.token), entry]
-		await tx.update(chatRuns).set({ pendingQuestions: next }).where(eq(chatRuns.id, runId))
+		// Bundle pendingQuestions write + state transition so a crash between can never
+		// leave the run in `running` state with an invisible question pending.
+		const patch: Partial<typeof chatRuns.$inferInsert> = {
+			pendingQuestions: next,
+			updatedAt: new Date(),
+		}
+		if (transition?.state) patch.state = transition.state
+		if (transition?.label !== undefined) patch.label = transition.label
+		await tx.update(chatRuns).set(patch).where(eq(chatRuns.id, runId))
 	})
 	// Wave 5 #20 — open a review item so user_question prompts show up in /review even
 	// when the SSE client is disconnected. Best-effort + deduped by token.

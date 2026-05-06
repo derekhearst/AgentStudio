@@ -231,10 +231,10 @@ export async function seedConversation(
 	`
 
 	await sql`
-		insert into messages (conversation_id, role, content, metadata, tool_calls, tokens_in, tokens_out, cost)
+		insert into messages (conversation_id, role, content, metadata, tool_calls, tokens_in, tokens_out, cost, sequence)
 		values
-			(${conversation.id}, ${'user'}, ${overrides?.userMessage ?? `${prefix} user message`}, '{}'::jsonb, '[]'::jsonb, 12, 0, '0'),
-			(${conversation.id}, ${'assistant'}, ${overrides?.assistantMessage ?? `${prefix} assistant reply`}, '{}'::jsonb, '[]'::jsonb, 0, 30, '0')
+			(${conversation.id}, ${'user'}, ${overrides?.userMessage ?? `${prefix} user message`}, '{}'::jsonb, '[]'::jsonb, 12, 0, '0', 1),
+			(${conversation.id}, ${'assistant'}, ${overrides?.assistantMessage ?? `${prefix} assistant reply`}, '{}'::jsonb, '[]'::jsonb, 0, 30, '0', 2)
 	`
 
 	return conversation

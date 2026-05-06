@@ -8,6 +8,7 @@ import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/runtime'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
 
 function parseField(field: string, min: number, max: number) {
@@ -524,7 +525,7 @@ async function routeMaintenanceOutput(
 	// user prompt; only the summary lands so the conversation isn't littered with the
 	// "Maintenance run at …" header lines.
 	const conversation = await getOrCreateAutomationConversation(automation)
-	await db.insert(messages).values({
+	await insertMessageWithSequence({
 		conversationId: conversation.id,
 		role: 'assistant',
 		content: trimmed,
@@ -547,11 +548,11 @@ async function runAutomation(automation: typeof automations.$inferSelect, now: D
 		.select({ role: messages.role, content: messages.content })
 		.from(messages)
 		.where(eq(messages.conversationId, conversation.id))
-		.orderBy(asc(messages.createdAt))
+		.orderBy(asc(messages.sequence))
 		.limit(12)
 
 	const prompt = `Automation run at ${now.toISOString()}\n\n${automation.prompt}`
-	await db.insert(messages).values({
+	await insertMessageWithSequence({
 		conversationId: conversation.id,
 		role: 'user',
 		content: prompt,
@@ -583,7 +584,7 @@ async function runAutomationSynthesis(args: {
 	llmMessages.push({ role: 'user', content: prompt })
 
 	const response = await chat(llmMessages, model)
-	await db.insert(messages).values({
+	await insertMessageWithSequence({
 		conversationId: conversation.id,
 		role: 'assistant',
 		content: response.content,
@@ -682,7 +683,7 @@ async function runAutomationWithAgent(args: {
 			metadata: { conversationId: conversation.id, automationId: automation.id },
 		}).catch(() => '0')
 
-		await db.insert(messages).values({
+		await insertMessageWithSequence({
 			conversationId: conversation.id,
 			role: 'assistant',
 			content: loopResult.finalText || '(no output)',

@@ -65,8 +65,8 @@ async function seedPausedAskUser(prefix: string) {
 
 	// User prompt + assistant message carrying the (executing) ask_user tool block.
 	const [userMsg] = await sql<{ id: string }[]>`
-		insert into messages (conversation_id, role, content, model, metadata, tool_calls)
-		values (${conversation.id}, 'user', 'Pick a color', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb)
+		insert into messages (conversation_id, role, content, model, metadata, tool_calls, sequence)
+		values (${conversation.id}, 'user', 'Pick a color', ${'anthropic/claude-sonnet-4'}, '{}'::jsonb, '[]'::jsonb, 1)
 		returning id
 	`
 
@@ -80,7 +80,7 @@ async function seedPausedAskUser(prefix: string) {
 	]
 
 	await sql`
-		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls)
+		insert into messages (conversation_id, role, content, model, parent_message_id, metadata, tool_calls, sequence)
 		values (
 			${conversation.id},
 			'assistant',
@@ -88,7 +88,8 @@ async function seedPausedAskUser(prefix: string) {
 			${'anthropic/claude-sonnet-4'},
 			${userMsg.id},
 			${sql.json({ blocks })},
-			${sql.json([{ name: 'ask_user', arguments: { questions }, executionMs: 0 }])}
+			${sql.json([{ name: 'ask_user', arguments: { questions }, executionMs: 0 }])},
+			2
 		)
 	`
 

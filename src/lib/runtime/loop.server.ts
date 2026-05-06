@@ -210,16 +210,22 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 
 			if (requiresApproval) {
 				const approvalToken = crypto.randomUUID()
-				await enqueuePendingApproval(session.runId, {
-					token: approvalToken,
-					toolName: tc.name,
-					args: parsedArgs,
-					requestedAt: new Date().toISOString(),
-				})
-				await session.updateRun({
-					state: 'waiting_tool_approval',
-					label: `Waiting for approval: ${tc.name}`,
-				})
+				// Bundle the pendingApprovals enqueue + state transition in a single transaction
+				// (inside enqueuePendingApproval) so a crash between the two never leaves the run
+				// in `running` state with an invisible pending approval, or vice versa.
+				await enqueuePendingApproval(
+					session.runId,
+					{
+						token: approvalToken,
+						toolName: tc.name,
+						args: parsedArgs,
+						requestedAt: new Date().toISOString(),
+					},
+					{
+						state: 'waiting_tool_approval',
+						label: `Waiting for approval: ${tc.name}`,
+					},
+				)
 				await session.emit('tool_pending', {
 					token: approvalToken,
 					id: tc.id,
@@ -308,12 +314,15 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 				}
 
 				const questionToken = crypto.randomUUID()
-				await enqueuePendingQuestion(session.runId, {
-					token: questionToken,
-					questions: askInput.questions,
-					requestedAt: new Date().toISOString(),
-				})
-				await session.updateRun({ state: 'waiting_user_input', label: 'Waiting for user input' })
+				await enqueuePendingQuestion(
+					session.runId,
+					{
+						token: questionToken,
+						questions: askInput.questions,
+						requestedAt: new Date().toISOString(),
+					},
+					{ state: 'waiting_user_input', label: 'Waiting for user input' },
+				)
 				await session.emit('ask_user', {
 					token: questionToken,
 					id: tc.id,
