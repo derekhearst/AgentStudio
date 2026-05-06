@@ -90,12 +90,12 @@
 			{/if}
 		{/each}
 	{:else if isWaiting}
-		<article class="chat chat-start">
-			<div class="alert alert-warning alert-soft border-warning/40 max-w-full flex-col items-stretch px-4 py-3">
+		<article class="w-full">
+			<div class="bg-warning/5 border-warning/40 w-full rounded-2xl border px-4 py-3">
 				{#if activeQuestion}
-					<div class="mb-3 flex items-center gap-2 text-sm font-medium leading-snug">
-						<span class="badge badge-warning badge-sm">Question {Math.min(clampedIndex + 1, totalQuestions)}/{totalQuestions || 1}</span>
-						<span>{activeQuestion.question}</span>
+					<div class="mb-3 flex flex-wrap items-start gap-2 text-sm font-medium leading-snug">
+						<span class="badge badge-warning badge-sm shrink-0">Question {Math.min(clampedIndex + 1, totalQuestions)}/{totalQuestions || 1}</span>
+						<span class="min-w-0 flex-1">{activeQuestion.question}</span>
 					</div>
 
 					<AskUserQuestionCard

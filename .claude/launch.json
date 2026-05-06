@@ -1,0 +1,28 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "SvelteKit dev (vite)",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "dev"],
+			"port": 5173
+		},
+		{
+			"name": "Job worker (background)",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["scripts/worker.ts"]
+		},
+		{
+			"name": "Drizzle Studio (db browser)",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "db:studio"],
+			"port": 4983
+		},
+		{
+			"name": "Vite preview (built bundle)",
+			"runtimeExecutable": "bun",
+			"runtimeArgs": ["run", "preview"],
+			"port": 4173
+		}
+	]
+}

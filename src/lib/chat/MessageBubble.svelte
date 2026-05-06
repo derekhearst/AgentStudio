@@ -312,7 +312,7 @@
 </script>
 
 {#if hasRenderableContent}
-<article class={`chat-message w-full ${isUser ? 'chat chat-end' : 'chat chat-start'}`}>
+<article class={`chat-message w-full ${isUser ? 'chat chat-end' : 'flex flex-col'}`}>
 	{#if isUser}
 		{#if editing}
 			<div bind:this={editorRoot} class="card bg-base-100 border-base-300 max-w-[90%] border p-2 shadow-sm sm:p-3">
@@ -461,7 +461,7 @@
 	{/if}
 
 	{#if !editing}
-		<div class={`chat-footer mt-1 flex w-full items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
+		<div class={`chat-footer mt-1 flex items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`} style={isUser ? 'grid-column: 1 / -1; justify-self: end;' : 'grid-column: 1 / -1; justify-self: start;'}>
 			{#if isUser}
 				<button class="btn btn-ghost btn-xs btn-circle" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
 					<i class="mdi mdi-pencil-outline text-sm" aria-hidden="true"></i>

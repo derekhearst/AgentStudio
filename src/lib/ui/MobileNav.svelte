@@ -59,7 +59,7 @@
 				aria-haspopup="true"
 				aria-expanded={moreOpen}
 			>
-				<i class="mdi mdi-dots-vertical text-xl"></i>
+				<i class="mdi mdi-dots-horizontal text-xl"></i>
 				<span class="dock-label">{moreLabel ?? 'More'}</span>
 			</button>
 			{#if moreOpen}

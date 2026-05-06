@@ -24,7 +24,6 @@
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
-	import RunHud from '$lib/chat/RunHud.svelte';
 	import PlanProposalCard from '$lib/chat/PlanProposalCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
@@ -724,9 +723,23 @@
 				toolCalls: message.toolCalls ?? []
 			}));
 
+		// Stable chronological sort. When timestamps tie (the SSE save path can stamp
+		// user / assistant / tool rows within the same millisecond) we tiebreak by
+		// canonical conversation order: user → assistant → tool. Within the same role
+		// we fall back to the insertion order so remote-from-DB rows stay before any
+		// optimistic / pending drafts that match the same instant.
+		const roleOrder: Record<string, number> = { user: 0, assistant: 1, tool: 2, system: 3 };
 		const combined = [...remoteMessages, ...optimisticUsers, ...pendingAssistants];
-		combined.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-		return combined;
+		const indexed = combined.map((message, index) => ({ message, index }));
+		indexed.sort((a, b) => {
+			const dt = new Date(a.message.createdAt).getTime() - new Date(b.message.createdAt).getTime();
+			if (dt !== 0) return dt;
+			const ra = roleOrder[a.message.role] ?? 99;
+			const rb = roleOrder[b.message.role] ?? 99;
+			if (ra !== rb) return ra - rb;
+			return a.index - b.index;
+		});
+		return indexed.map((entry) => entry.message);
 	});
 
 	const activeContextLimit = $derived.by(() => {
@@ -912,6 +925,15 @@
 			return;
 		}
 
+		// Invalidate the SvelteKit query cache before re-reading. Without these refresh
+		// calls, the assistant message the server JUST persisted at the end of streaming
+		// is missing from the returned payload (cache hit), so the streaming view
+		// disappears (we already cleared streamingBlocks) before the new row arrives —
+		// the user perceives this as messages getting wiped after the stream ends.
+		await Promise.all([
+			getConversation(conversationId).refresh(),
+			getMessageStats(conversationId).refresh(),
+		]);
 		const [conversationResult, statsResult, taskResult] = await Promise.all([
 			getConversation(conversationId),
 			getMessageStats(conversationId),
@@ -1629,7 +1651,8 @@
 		{:else}
 
 			<!-- Header: mobile/tablet only. Desktop uses the RecentChats sidebar panel. -->
-			<div class="flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 py-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4">
+			<!-- relative+z-20 lifts the header into its own stacking context so the ContextWindow dropdown can layer above the messages container below it. -->
+			<div class="relative z-20 flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 py-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4">
 				<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="Back to chats">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -1793,21 +1816,6 @@
 				onSubmit={resolveAskUser}
 				onClose={closeAskUserModal}
 				onSkipToChat={skipAskUserToChat}
-			/>
-
-			<RunHud
-				{streaming}
-				{conversationId}
-				runId={liveContextStats?.runId ?? null}
-				mode={conversationMode}
-				streamingBlocks={streamingBlocks}
-				pendingQuestion={!!pendingAskUser}
-				pendingApprovalCount={streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length}
-				tokenEstimate={liveContextStats?.tokenEstimate ?? 0}
-				contextWindow={liveContextStats?.contextWindow ?? 0}
-				didCompact={liveContextStats?.didCompact ?? false}
-				onCancel={stopStreaming}
-				onAnswerQuestion={() => { askUserModalOpen = true; }}
 			/>
 
 			<ChatInput
