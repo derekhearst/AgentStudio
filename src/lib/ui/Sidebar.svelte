@@ -122,12 +122,6 @@
 			<RunningSessionsDock />
 			<ul class="menu menu-sm w-full p-0">
 				<li>
-					<a href="/users" class:menu-active={isActive('/users')} onclick={onNavigate}>
-						<i class="mdi mdi-account-multiple-outline text-base shrink-0 opacity-60"></i>
-						Users
-					</a>
-				</li>
-				<li>
 					<a href="/audit" class:menu-active={isActive('/audit')} onclick={onNavigate}>
 						<i class="mdi mdi-shield-check-outline text-base shrink-0 opacity-60"></i>
 						Audit

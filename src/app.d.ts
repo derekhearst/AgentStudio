@@ -9,7 +9,6 @@ declare global {
 				id: string
 				name: string
 				username: string
-				role: 'admin' | 'user'
 			} | null
 		}
 		// interface PageData {}

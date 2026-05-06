@@ -74,7 +74,6 @@ const toolDescriptions: Record<ToolName, string> = {
 	update_agent: 'Update an existing agent fields such as name, role, model, or prompt.',
 	pause_agent: 'Pause an agent.',
 	resume_agent: 'Resume an agent.',
-	create_user: 'Create a user account (admin only).',
 	create_automation: 'Create a scheduled automation.',
 	list_automations: 'List scheduled automations.',
 	update_automation: 'Update an automation.',
@@ -315,15 +314,6 @@ function schemaToJsonSchema(name: ToolName) {
 			type: 'object',
 			properties: { agentId: { type: 'string' } },
 			required: ['agentId'],
-		},
-		create_user: {
-			type: 'object',
-			properties: {
-				username: { type: 'string' },
-				name: { type: 'string' },
-				role: { type: 'string', enum: ['admin', 'user'] },
-			},
-			required: ['username'],
 		},
 		create_automation: {
 			type: 'object',

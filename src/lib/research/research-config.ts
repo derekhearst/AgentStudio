@@ -18,6 +18,14 @@ export type ResolvedResearchConfig = {
 	maxSubQuestions: number
 	urlsPerQuestion: number
 	maxFetchChars: number
+	// Iterative reflection — how many reflect→search-gaps rounds the orchestrator runs after
+	// the initial fan-out. Each round asks the LLM what's still missing and runs a focused
+	// second/third/etc. pass on those gap queries. Stops early when reflection returns no
+	// gaps or when `maxTotalSources` is hit.
+	maxReflectionRounds: number
+	// Safety cap on total sources fetched across the entire run (initial + all reflection
+	// rounds). The reflection loop checks this before each new round to avoid runaway runs.
+	maxTotalSources: number
 }
 
 export const DEFAULT_RESEARCH_CONFIG: ResolvedResearchConfig = {
@@ -27,17 +35,21 @@ export const DEFAULT_RESEARCH_CONFIG: ResolvedResearchConfig = {
 	// `agents.config.research` still wins over these defaults but loses to the composer pick.
 	plannerModel: 'anthropic/claude-sonnet-4-6',
 	synthesizerModel: 'anthropic/claude-sonnet-4-6',
-	// Defaults bumped (Deep Research rebuild): 5→8, 2→4, 30k→50k. With these a default run
-	// visits ~32 sources (8 sub-questions × 4 URLs each) instead of the prior ~10. The reflect
-	// phase can add up to 4 follow-up queries × urlsPerQuestion more, so total source count for
-	// a default run lands in the 30-50 range — comparable to Claude Deep Research output.
+	// Defaults bumped (Deep Research rebuild): 5→8, 2→4, 30k→50k. Default initial pass
+	// visits 8×4 = 32 sources. With 3 reflection rounds × ~12 follow-up sources each, a
+	// typical default run lands in the 60-100 source range — Claude Advanced Research
+	// territory while still completing in a few minutes wall-clock.
 	maxSubQuestions: 8,
 	urlsPerQuestion: 4,
 	maxFetchChars: 50_000,
+	maxReflectionRounds: 3,
+	maxTotalSources: 150,
 }
 
 const MAX_SUB_QUESTIONS_HARDCAP = 12
 const MAX_URLS_PER_QUESTION_HARDCAP = 8
+const MAX_REFLECTION_ROUNDS_HARDCAP = 6
+const MAX_TOTAL_SOURCES_HARDCAP = 400
 
 /**
  * Read an agent's `config.research` field and merge with defaults. Returns a fully-resolved
@@ -75,6 +87,18 @@ export function resolveResearchConfig(agentConfig: Record<string, unknown> | nul
 			DEFAULT_RESEARCH_CONFIG.urlsPerQuestion,
 		),
 		maxFetchChars: clampInt(overrides.maxFetchChars, 5_000, 100_000, DEFAULT_RESEARCH_CONFIG.maxFetchChars),
+		maxReflectionRounds: clampInt(
+			overrides.maxReflectionRounds,
+			0,
+			MAX_REFLECTION_ROUNDS_HARDCAP,
+			DEFAULT_RESEARCH_CONFIG.maxReflectionRounds,
+		),
+		maxTotalSources: clampInt(
+			overrides.maxTotalSources,
+			10,
+			MAX_TOTAL_SOURCES_HARDCAP,
+			DEFAULT_RESEARCH_CONFIG.maxTotalSources,
+		),
 	}
 }
 

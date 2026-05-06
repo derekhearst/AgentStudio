@@ -164,25 +164,56 @@ export async function runResearchLoop(
 		await updateResearch(researchId, { status: 'searching' })
 		await runSearchAndFetchPass(researchId, planResult.subQuestions, config, checkCanceled)
 
-		// ─────────── PHASE 2.5: REFLECT — identify coverage gaps + run a second pass ───────────
-		await checkCanceled()
-		await updateResearch(researchId, { status: 'reflecting' })
-		const initialSources = await listSourcesForResearch(researchId)
-		const reflection = await runReflection(r, planResult.subQuestions, initialSources, config)
-		totalCost += reflection.costUsd
-		await addResearchStep({
-			researchId,
-			kind: 'plan', // reuse 'plan' kind (reflection is "what to plan next"); payload.phase distinguishes
-			payload: {
-				phase: 'reflect',
-				gaps: reflection.gaps,
-				rawResponse: reflection.raw.slice(0, 4000),
-			},
-			costUsd: reflection.costUsd,
-			finishedAt: new Date(),
-		})
+		// ─────────── PHASE 2.5: ITERATIVE REFLECTION ───────────
+		// Loop reflect → search-gaps until coverage saturates or we hit a cap. Each round asks
+		// the LLM what's still missing given everything fetched so far, then runs a focused
+		// search+fetch pass on those gap queries. Mirrors Claude Advanced Research's pattern of
+		// repeated reflect-and-extend cycles instead of a single one-shot reflection pass.
+		//
+		// Stops early on any of: empty gap list, max-rounds reached, or maxTotalSources hit.
+		// Each stop reason gets recorded as a 'plan' kind step with payload.phase = 'reflect-N'
+		// so the trace UI can show why the loop terminated.
+		for (let round = 1; round <= config.maxReflectionRounds; round++) {
+			await checkCanceled()
+			await updateResearch(researchId, { status: 'reflecting' })
+			const sourcesSoFar = await listSourcesForResearch(researchId)
 
-		if (reflection.gaps.length > 0) {
+			// Source-cap check: bail if we've already hit the safety ceiling. Reflection adds
+			// gaps × urlsPerQuestion sources, so we'd risk overshooting if we don't pre-check.
+			if (sourcesSoFar.length >= config.maxTotalSources) {
+				await addResearchStep({
+					researchId,
+					kind: 'plan',
+					payload: {
+						phase: `reflect-${round}`,
+						stopReason: 'maxTotalSources',
+						sourcesSoFar: sourcesSoFar.length,
+					},
+					finishedAt: new Date(),
+				})
+				break
+			}
+
+			const reflection = await runReflection(r, planResult.subQuestions, sourcesSoFar, config)
+			totalCost += reflection.costUsd
+			await addResearchStep({
+				researchId,
+				kind: 'plan',
+				payload: {
+					phase: `reflect-${round}`,
+					gaps: reflection.gaps,
+					rawResponse: reflection.raw.slice(0, 4000),
+					sourcesSoFar: sourcesSoFar.length,
+				},
+				costUsd: reflection.costUsd,
+				finishedAt: new Date(),
+			})
+
+			if (reflection.gaps.length === 0) {
+				// Coverage complete per the LLM — no more gaps worth chasing.
+				break
+			}
+
 			await checkCanceled()
 			await updateResearch(researchId, { status: 'searching' })
 			await runSearchAndFetchPass(researchId, reflection.gaps, config, checkCanceled)

@@ -51,9 +51,8 @@
 	},
 	"dependencies": {
 		"@mdi/font": "^7.4.47",
+		"@node-rs/argon2": "^2.0.2",
 		"@openrouter/sdk": "^0.11.2",
-		"@simplewebauthn/browser": "^13.3.0",
-		"@simplewebauthn/server": "^13.3.0",
 		"@tauri-apps/api": "^2.10.1",
 		"@tauri-apps/cli": "^2.10.1",
 		"@tauri-apps/plugin-notification": "^2.3.3",

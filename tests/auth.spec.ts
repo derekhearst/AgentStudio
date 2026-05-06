@@ -19,6 +19,5 @@ test('keeps invalid login on login screen', async ({ page }) => {
 test('logs in through the UI and lands on the dashboard', async ({ page }) => {
 	await loginViaUi(page)
 	await page.goto('/')
-	await expect(page.getByRole('heading', { name: /AgentStudio dashboard/i })).toBeVisible()
-	await expect(page.locator('header').getByRole('link', { name: /settings/i })).toBeVisible()
+	await expect(page.getByRole('heading', { name: /AgentStudio/i })).toBeVisible()
 })

@@ -13,11 +13,8 @@ import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
 
 async function getActiveAdminUserId() {
 	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null and role = 'admin'
-		order by created_at asc limit 1
-	`
-	if (!user) throw new Error('No active admin user found')
+	const [user] = await sql<{ id: string }[]>`select id from users limit 1`
+	if (!user) throw new Error('No user found')
 	return user.id
 }
 

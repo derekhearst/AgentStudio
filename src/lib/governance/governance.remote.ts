@@ -27,11 +27,7 @@ const listSchema = z
 	.default({})
 
 export const listAuditEventsQuery = query(listSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') {
-		// Non-admins see nothing — the page also gates render but this is the server-side enforcement.
-		return { events: [], adminOnly: true as const }
-	}
+	requireAuthenticatedRequestUser()
 
 	const filters = []
 	if (input.action) {
@@ -49,7 +45,6 @@ export const listAuditEventsQuery = query(listSchema, async (input) => {
 			actorUserId: auditEvents.actorUserId,
 			actorName: users.name,
 			actorUsername: users.username,
-			actorRole: users.role,
 			action: auditEvents.action,
 			targetType: auditEvents.targetType,
 			targetId: auditEvents.targetId,
@@ -66,5 +61,5 @@ export const listAuditEventsQuery = query(listSchema, async (input) => {
 		.orderBy(desc(auditEvents.createdAt))
 		.limit(input.limit ?? 200)
 
-	return { events: rows, adminOnly: false as const }
+	return { events: rows }
 })

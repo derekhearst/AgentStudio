@@ -151,11 +151,6 @@ export const toolSchemas = {
 	resume_agent: z.object({
 		agentId: z.string().uuid(),
 	}),
-	create_user: z.object({
-		username: z.string().min(3).max(32),
-		name: z.string().min(1).max(64).optional(),
-		role: z.enum(['admin', 'user']).default('user'),
-	}),
 	create_automation: z.object({
 		agentId: z.string().uuid().nullable().optional(),
 		description: z.string().min(1).max(200),
@@ -303,7 +298,6 @@ export const toolDescriptions: Record<ToolName, string> = {
 	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
 	pause_agent: 'Pause an agent so it is not used for delegations.',
 	resume_agent: 'Resume a paused agent and mark it active again.',
-	create_user: 'Create a user account (admin-only tool).',
 	create_automation: 'Create a recurring automation that triggers an agent prompt on a cron schedule.',
 	list_automations: 'List automations for the current user.',
 	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',

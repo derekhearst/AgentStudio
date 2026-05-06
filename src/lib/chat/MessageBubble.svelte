@@ -46,10 +46,12 @@
 		message,
 		onEdit,
 		onRegenerate,
+		canRegenerate = false,
 	} = $props<{
 		message: MessageRow;
 		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
+		canRegenerate?: boolean;
 	}>();
 
 	let editing = $state(false);
@@ -466,6 +468,11 @@
 				<button class="btn btn-ghost btn-xs btn-circle" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
 					<i class="mdi mdi-pencil-outline text-sm" aria-hidden="true"></i>
 				</button>
+				{#if canRegenerate}
+					<button class="btn btn-ghost btn-xs rounded-md px-2" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
+						<i class="mdi mdi-refresh text-sm" aria-hidden="true"></i>
+					</button>
+				{/if}
 			{/if}
 			{#if isAssistant}
 				<button
@@ -480,9 +487,6 @@
 					{:else}
 						<i class="mdi mdi-content-copy text-sm" aria-hidden="true"></i>
 					{/if}
-				</button>
-				<button class="btn btn-ghost btn-xs rounded-md px-2" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
-					<i class="mdi mdi-refresh text-sm" aria-hidden="true"></i>
 				</button>
 				<div class="dropdown dropdown-top">
 					<button tabindex="0" class="btn btn-ghost btn-xs btn-circle" type="button" title="Message stats" aria-label="Message stats">

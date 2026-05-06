@@ -25,10 +25,7 @@ const listSchema = z
 	.default({})
 
 export const listJobsQuery = query(listSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') {
-		return { jobs: [], summary: [], adminOnly: true as const }
-	}
+	requireAuthenticatedRequestUser()
 
 	const filters = []
 	if (input.status) filters.push(eq(jobs.status, input.status))

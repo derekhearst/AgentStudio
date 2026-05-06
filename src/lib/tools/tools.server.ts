@@ -29,8 +29,6 @@ import { stat } from 'node:fs/promises'
 const execFileAsync = promisify(execFile)
 import { db } from '$lib/db.server'
 import { eq } from 'drizzle-orm'
-import { requireAdminRequestUser, normalizeUsername } from '$lib/auth/auth.server'
-import { users } from '$lib/auth/auth.schema'
 import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
 import { safePathWithin } from '$lib/workspace/workspace.server'
 import { logToolUsage } from '$lib/costs/usage'
@@ -1467,28 +1465,6 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result: { id: updated.id, status: updated.status },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'create_user') {
-				const input = toolSchemas.create_user.parse(call.arguments)
-				requireAdminRequestUser()
-				const username = normalizeUsername(input.username)
-				const [created] = await db
-					.insert(users)
-					.values({
-						username,
-						name: input.name?.trim() || username,
-						role: input.role,
-						isActive: true,
-					})
-					.returning({ id: users.id, username: users.username, role: users.role })
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: created,
 					executionMs: Date.now() - startedAt,
 				}
 			}

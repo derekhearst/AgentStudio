@@ -72,11 +72,35 @@ test.describe('research/config — pure resolver', () => {
 				maxSubQuestions: 'eight' as unknown as number,
 				urlsPerQuestion: NaN,
 				maxFetchChars: Infinity,
+				maxReflectionRounds: 'three' as unknown as number,
+				maxTotalSources: NaN,
 			},
 		})
 		expect(out.maxSubQuestions).toBe(DEFAULT_RESEARCH_CONFIG.maxSubQuestions)
 		expect(out.urlsPerQuestion).toBe(DEFAULT_RESEARCH_CONFIG.urlsPerQuestion)
 		expect(out.maxFetchChars).toBe(DEFAULT_RESEARCH_CONFIG.maxFetchChars)
+		expect(out.maxReflectionRounds).toBe(DEFAULT_RESEARCH_CONFIG.maxReflectionRounds)
+		expect(out.maxTotalSources).toBe(DEFAULT_RESEARCH_CONFIG.maxTotalSources)
+	})
+
+	test('maxReflectionRounds clamps to [0, 6]', async () => {
+		// 0 disables reflection entirely (single-pass, like the pre-rebuild orchestrator).
+		// Hardcap 6 is the upper bound on iterative reflect→search-gaps cycles; combined with
+		// urlsPerQuestion this caps total source count below the maxTotalSources safety ceiling.
+		const { resolveResearchConfig } = await import('../src/lib/research/research-config')
+		expect(resolveResearchConfig({ research: { maxReflectionRounds: 99 } }).maxReflectionRounds).toBe(6)
+		expect(resolveResearchConfig({ research: { maxReflectionRounds: 0 } }).maxReflectionRounds).toBe(0)
+		expect(resolveResearchConfig({ research: { maxReflectionRounds: -3 } }).maxReflectionRounds).toBe(0)
+		expect(resolveResearchConfig({ research: { maxReflectionRounds: 4 } }).maxReflectionRounds).toBe(4)
+	})
+
+	test('maxTotalSources clamps to [10, 400]', async () => {
+		// 10 is the minimum that lets at least an initial pass complete; 400 is the absolute
+		// safety cap to prevent runaway runs (would take 30+ minutes wall-clock at that size).
+		const { resolveResearchConfig } = await import('../src/lib/research/research-config')
+		expect(resolveResearchConfig({ research: { maxTotalSources: 10_000 } }).maxTotalSources).toBe(400)
+		expect(resolveResearchConfig({ research: { maxTotalSources: 1 } }).maxTotalSources).toBe(10)
+		expect(resolveResearchConfig({ research: { maxTotalSources: 200 } }).maxTotalSources).toBe(200)
 	})
 
 	test('empty-string model overrides fall back to defaults', async () => {

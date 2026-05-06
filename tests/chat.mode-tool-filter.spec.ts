@@ -40,7 +40,6 @@ test.describe('chat/mode-tool-filter — research mode', () => {
 			MOCK_TOOL('edit_artifact'),
 			MOCK_TOOL('create_skill'),
 			MOCK_TOOL('update_agent'),
-			MOCK_TOOL('create_user'),
 			MOCK_TOOL('create_automation'),
 		]
 		const filtered = filterToolsByMode(tools, 'research')

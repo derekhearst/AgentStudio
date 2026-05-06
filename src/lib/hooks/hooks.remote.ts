@@ -28,10 +28,7 @@ const listSchema = z
 	.default({})
 
 export const listHookInvocationsQuery = query(listSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') {
-		return { invocations: [], summary: [], adminOnly: true as const }
-	}
+	requireAuthenticatedRequestUser()
 
 	const filters = []
 	if (input.event) filters.push(eq(hookInvocations.event, input.event))

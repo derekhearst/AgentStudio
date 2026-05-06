@@ -1,6 +1,6 @@
 import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit'
 import { and, arrayContains, sql } from 'drizzle-orm'
-import { ensureAuthBootstrap, getSessionUser } from '$lib/auth/auth.server'
+import { getSessionUser, isProvisioned } from '$lib/auth/auth.server'
 import { db, ensureDatabaseReady } from '$lib/db.server'
 import { skills } from '$lib/skills/skills.schema'
 
@@ -22,8 +22,7 @@ async function cleanupLegacyCapabilitySkills() {
 // `/api/webhooks` is unauthenticated by design — third-party providers (GitHub, …) POST
 // here without session cookies. The handlers verify provider signatures themselves so the
 // path-level skip is safe; never broaden this prefix without an explicit signature check.
-const PUBLIC_PATH_PREFIXES = ['/login', '/demo', '/api/webhooks']
-const ADMIN_PATH_PREFIXES = ['/users']
+const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks']
 
 function isPublicPath(pathname: string) {
 	if (pathname.startsWith('/_app') || pathname.startsWith('/favicon')) {
@@ -36,25 +35,31 @@ function isPublicPath(pathname: string) {
 export const handle: Handle = async ({ event, resolve }) => {
 	await ensureDatabaseReady()
 	await cleanupLegacyCapabilitySkills()
-	await ensureAuthBootstrap(event.url.origin)
 
 	const user = await getSessionUser(event.cookies)
 	event.locals.user = user
 	event.locals.authenticated = user !== null
+
+	const provisioned = await isProvisioned()
+
+	// Setup gate: until a password is set, every request lands on /setup.
+	if (!provisioned) {
+		if (event.url.pathname !== '/setup' && !event.url.pathname.startsWith('/_app') && !event.url.pathname.startsWith('/favicon')) {
+			throw redirect(303, '/setup')
+		}
+		return resolve(event)
+	}
+
+	// Once provisioned, /setup is no longer reachable.
+	if (event.url.pathname === '/setup') {
+		throw redirect(303, event.locals.authenticated ? '/' : '/login')
+	}
 
 	if (!event.locals.authenticated && !isPublicPath(event.url.pathname)) {
 		throw redirect(303, '/login')
 	}
 
 	if (event.locals.authenticated && event.url.pathname === '/login') {
-		throw redirect(303, '/')
-	}
-
-	if (
-		event.locals.authenticated &&
-		event.locals.user?.role !== 'admin' &&
-		ADMIN_PATH_PREFIXES.some((prefix) => event.url.pathname === prefix || event.url.pathname.startsWith(`${prefix}/`))
-	) {
 		throw redirect(303, '/')
 	}
 

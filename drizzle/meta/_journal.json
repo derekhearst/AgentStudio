@@ -351,6 +351,13 @@
       "when": 1778100100000,
       "tag": "0049_mode_skills_refresh",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1778200000000,
+      "tag": "0050_single_user_auth",
+      "breakpoints": true
     }
   ]
 }

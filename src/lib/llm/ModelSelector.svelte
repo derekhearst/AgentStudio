@@ -266,7 +266,7 @@
 {#snippet capPill(cap: string, active: boolean, onclick: () => void)}
 	<button
 		type="button"
-		class="rounded-full border px-2 py-0.5 text-xs transition {active ? 'border-primary bg-primary/15 text-primary' : 'border-base-300 hover:bg-base-200'}"
+		class="badge badge-sm cursor-pointer transition {active ? 'badge-primary' : 'badge-outline hover:bg-base-200'}"
 		{onclick}
 	>
 		{cap}
@@ -276,36 +276,28 @@
 {#snippet modelCard(m: ModelInfo)}
 	<button
 		type="button"
-		class="card card-compact card-border bg-base-200/60 hover:border-primary/50 hover:bg-base-200 flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden p-2 text-left transition sm:gap-2 sm:p-3 {m.id ===
+		title={m.description || ''}
+		class="hover:border-primary/40 hover:bg-base-200 flex min-w-0 cursor-pointer flex-col gap-0.5 overflow-hidden rounded-lg border bg-base-100 px-2.5 py-1.5 text-left transition {m.id ===
 		value
-			? 'ring-primary/40 border-primary/60 ring-2'
+			? 'ring-primary/50 border-primary/60 ring-2'
 			: 'border-base-300'}"
 		onclick={() => selectModel(m.id)}
 	>
-		<div class="flex min-w-0 items-center justify-between gap-1.5">
-			<span class="truncate text-xs font-semibold sm:text-sm">{m.name}</span>
-			<span class="badge badge-outline badge-xs shrink-0 whitespace-nowrap">{formatContextLabel(m.contextLength)}</span>
-		</div>
-
-		<div class="truncate text-[10px] opacity-50 sm:text-xs">{m.id}</div>
-
-		<div class="line-clamp-2 text-[11px] leading-snug opacity-70 sm:text-xs">
-			{m.description || 'No description available.'}
-		</div>
-
-		<div class="flex flex-wrap items-center gap-1 pt-0.5 text-[10px] sm:text-xs">
-			{#if m.modality}
-				<span class="badge badge-ghost badge-xs">{m.modality}</span>
-			{/if}
-			{#if m.instructType}
-				<span class="badge badge-ghost badge-xs">{m.instructType}</span>
-			{/if}
-			{#if m.isModerated !== null && m.isModerated !== undefined}
-				<span class="badge badge-ghost badge-xs">{m.isModerated ? 'moderated' : 'unmoderated'}</span>
-			{/if}
-			<span class="ml-auto shrink-0 font-mono opacity-60" title="Price per 1M tokens: input / output">
-				{formatPrice(m.promptPrice)}<span class="opacity-50">/M in</span> · {formatPrice(m.completionPrice)}<span class="opacity-50">/M out</span>
+		<div class="flex min-w-0 items-center justify-between gap-2">
+			<span class="truncate text-sm font-semibold">{m.name}</span>
+			<span class="shrink-0 whitespace-nowrap font-mono text-xs opacity-60" title="Price per 1M tokens: input · output">
+				{formatPrice(m.promptPrice)} · {formatPrice(m.completionPrice)}
 			</span>
+		</div>
+
+		<div class="flex min-w-0 items-center gap-2 text-xs opacity-60">
+			<span class="truncate">{m.id}</span>
+			<span class="opacity-50">·</span>
+			<span class="shrink-0 whitespace-nowrap">{formatTokens(m.contextLength)}</span>
+			{#if m.modality}
+				<span class="opacity-50">·</span>
+				<span class="shrink-0 whitespace-nowrap">{m.modality}</span>
+			{/if}
 		</div>
 	</button>
 {/snippet}
@@ -339,118 +331,116 @@
 			></button>
 
 			<div
-				class="modal-box bg-base-100 text-base-content border-base-300 relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden p-0 shadow-2xl sm:mt-[8vh] sm:h-[78vh] sm:w-[80vw] sm:max-w-3xl sm:rounded-2xl sm:border"
+				class="bg-base-100 text-base-content border-base-300 relative mx-auto flex max-h-[85dvh] w-[95vw] flex-col overflow-hidden rounded-2xl border p-0 shadow-2xl sm:max-h-[70vh] sm:w-full sm:max-w-2xl"
 			>
-				<!-- Top bar: search + settings + count + close -->
-				<div class="border-base-300 bg-base-100 flex items-center gap-2 border-b px-3 py-2 sm:px-4 sm:py-2.5">
-					<h2 class="hidden text-sm font-bold sm:block sm:text-base">Models</h2>
-					<input
-						bind:this={inputEl}
-						class="input input-bordered input-xs flex-1 sm:input-sm"
-						type="text"
-						placeholder="Search models..."
-						bind:value={search}
-					/>
+				<!-- Top bar: search + settings + close -->
+				<div class="border-base-300 bg-base-100 flex items-center gap-2 border-b px-3 py-2">
+					<div class="join flex-1">
+						<input
+							bind:this={inputEl}
+							class="input input-bordered input-sm join-item flex-1"
+							type="text"
+							placeholder={models.length > 0 ? `Search ${filtered.length} of ${models.length} models…` : 'Search models…'}
+							bind:value={search}
+						/>
 
-					<!-- Settings button -->
-					<div class="relative" bind:this={settingsRef}>
+						<!-- Settings button -->
+						<div class="dropdown dropdown-end" bind:this={settingsRef}>
+							<button
+								type="button"
+								class="btn btn-sm btn-ghost join-item border-base-300 border relative"
+								title="Sort & Filter"
+								onclick={() => (settingsOpen = !settingsOpen)}
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+									<path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3 4a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm3 4a1 1 0 011-1h0a1 1 0 110 2h0a1 1 0 01-1-1z" clip-rule="evenodd" />
+								</svg>
+								{#if activeFilterCount > 0}
+									<span class="badge badge-primary badge-xs absolute -right-1 -top-1">{activeFilterCount}</span>
+								{/if}
+							</button>
+
+							{#if settingsOpen}
+								<div
+									class="bg-base-100 border-base-300 absolute right-0 top-full z-50 mt-1 w-64 rounded-box border p-2.5 shadow-xl"
+								>
+									<!-- Sort -->
+									<div class="mb-2.5">
+										<div class="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-50">Sort</div>
+										<select
+											class="select select-bordered select-xs w-full"
+											bind:value={sortBy}
+										>
+											<option value="name">A → Z</option>
+											<option value="price">Price: Low → High</option>
+											<option value="context">Context: Largest</option>
+											<option value="newest">Newest First</option>
+											<option value="oldest">Oldest First</option>
+										</select>
+									</div>
+
+									<!-- Input modalities -->
+									<div class="mb-2.5">
+										<div class="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-50">Input</div>
+										<div class="flex flex-wrap gap-1">
+											{#each availableInputMods as cap}
+												{@render capPill(cap, selectedInputMods.has(cap), () => toggleIn(cap))}
+											{/each}
+										</div>
+									</div>
+
+									<!-- Output modalities -->
+									<div class="mb-2.5">
+										<div class="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-50">Output</div>
+										<div class="flex flex-wrap gap-1">
+											{#each availableOutputMods as cap}
+												{@render capPill(cap, selectedOutputMods.has(cap), () => toggleOut(cap))}
+											{/each}
+										</div>
+									</div>
+
+									<!-- Group toggle -->
+									<div class="border-base-300 flex items-center justify-between border-t pt-2">
+										<label class="flex cursor-pointer items-center gap-2 text-xs">
+											<input type="checkbox" class="toggle toggle-xs" bind:checked={groupByCreator} />
+											Group by creator
+										</label>
+										{#if activeFilterCount > 0}
+											<button
+												type="button"
+												class="text-error text-xs hover:underline"
+												onclick={clearFilters}
+											>
+												Reset
+											</button>
+										{/if}
+									</div>
+								</div>
+							{/if}
+						</div>
+
 						<button
 							type="button"
-							class="btn btn-ghost btn-xs relative sm:btn-sm"
-							title="Sort & Filter"
-							onclick={() => (settingsOpen = !settingsOpen)}
+							class="btn btn-sm btn-ghost join-item border-base-300 border"
+							aria-label="Close"
+							onclick={closeModal}
 						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-								<path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3 4a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm3 4a1 1 0 011-1h0a1 1 0 110 2h0a1 1 0 01-1-1z" clip-rule="evenodd" />
-							</svg>
-							{#if activeFilterCount > 0}
-								<span class="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-content">{activeFilterCount}</span>
-							{/if}
+							✕
 						</button>
-
-						{#if settingsOpen}
-							<div
-								class="card card-compact bg-base-100 border-base-300 absolute right-0 top-full z-50 mt-1 w-64 border p-3 shadow-xl sm:w-72"
-							>
-								<!-- Sort -->
-								<div class="mb-3">
-									<div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-50">Sort</div>
-									<select
-										class="select select-bordered select-xs w-full"
-										bind:value={sortBy}
-									>
-										<option value="name">A → Z</option>
-										<option value="price">Price: Low → High</option>
-										<option value="context">Context: Largest</option>
-										<option value="newest">Newest First</option>
-										<option value="oldest">Oldest First</option>
-									</select>
-								</div>
-
-								<!-- Input modalities -->
-								<div class="mb-3">
-									<div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-50">Input</div>
-									<div class="flex flex-wrap gap-1">
-										{#each availableInputMods as cap}
-											{@render capPill(cap, selectedInputMods.has(cap), () => toggleIn(cap))}
-										{/each}
-									</div>
-								</div>
-
-								<!-- Output modalities -->
-								<div class="mb-3">
-									<div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide opacity-50">Output</div>
-									<div class="flex flex-wrap gap-1">
-										{#each availableOutputMods as cap}
-											{@render capPill(cap, selectedOutputMods.has(cap), () => toggleOut(cap))}
-										{/each}
-									</div>
-								</div>
-
-								<!-- Group toggle -->
-								<div class="flex items-center justify-between border-t border-base-300 pt-2.5">
-									<label class="flex cursor-pointer items-center gap-2 text-xs">
-										<input type="checkbox" class="toggle toggle-xs" bind:checked={groupByCreator} />
-										Group by creator
-									</label>
-									{#if activeFilterCount > 0}
-										<button
-											type="button"
-											class="text-xs text-error hover:underline"
-											onclick={clearFilters}
-										>
-											Reset
-										</button>
-									{/if}
-								</div>
-							</div>
-						{/if}
 					</div>
-
-					<span class="hidden text-xs text-base-content/55 sm:inline">
-						{filtered.length}
-					</span>
-
-					<button
-						type="button"
-						class="btn btn-ghost btn-xs sm:btn-sm"
-						onclick={closeModal}
-					>
-						✕
-					</button>
 				</div>
 
-				<!-- Model grid -->
-				<div class="bg-base-100 min-h-0 flex-1 overflow-y-auto p-2 sm:p-4">
+				<!-- Model list -->
+				<div class="bg-base-100 min-h-0 flex-1 overflow-y-auto p-2">
 					{#if filtered.length === 0 && ready}
-						<div class="rounded-xl border border-dashed border-base-300 p-4 text-center text-sm text-base-content/55 sm:p-6 sm:text-base">
+						<div class="border-base-300 text-base-content/55 rounded-xl border border-dashed p-4 text-center text-sm">
 							No models found for that search.
 						</div>
 					{:else if grouped && ready}
 						{#each grouped as group (group.creator)}
-							<div class="mb-4">
-								<h3 class="mb-2 px-1 text-sm font-semibold capitalize text-base-content/70 sm:text-base">{group.creator}</h3>
-								<div class="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 {gridSizeClass}">
+							<div class="mb-3">
+								<h3 class="text-base-content/50 mb-1 px-1 text-xs font-semibold uppercase tracking-wide">{group.creator}</h3>
+								<div class="flex flex-col gap-1 {gridSizeClass}">
 									{#each group.models as m (m.id)}
 										{@render modelCard(m)}
 									{/each}
@@ -458,7 +448,7 @@
 							</div>
 						{/each}
 					{:else if ready}
-						<div class="grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-2 {gridSizeClass}">
+						<div class="flex flex-col gap-1 {gridSizeClass}">
 							{#each sorted as m (m.id)}
 								{@render modelCard(m)}
 							{/each}

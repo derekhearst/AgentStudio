@@ -13,39 +13,17 @@ try {
 } catch {
 	// $app/server not resolvable — auth-context-required functions throw at call time below.
 }
-import { and, eq, gt, isNull } from 'drizzle-orm'
+import { and, eq, gt, isNotNull } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { authSessions, bootstrapClaims, users, userRoleEnum } from '$lib/auth/auth.schema'
+import { authSessions, users } from '$lib/auth/auth.schema'
 
 const SESSION_COOKIE = 'AgentStudio_session'
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-const BOOTSTRAP_CLAIM_TTL_MS = 1000 * 60 * 30
-
-type UserRole = (typeof userRoleEnum.enumValues)[number]
-
-type PgErrorLike = {
-	code?: string
-	message?: string
-	cause?: unknown
-}
 
 export type AuthenticatedUser = {
 	id: string
 	name: string
 	username: string
-	role: UserRole
-}
-
-let bootstrapPromise: Promise<void> | null = null
-
-function isMissingBootstrapClaimsTable(error: unknown): boolean {
-	const candidate = (error ?? {}) as PgErrorLike
-	const cause = (candidate.cause ?? {}) as PgErrorLike
-	const messageText = `${candidate.message ?? ''} ${cause.message ?? ''} ${String(error ?? '')}`
-	if (candidate.code === '42P01' || cause.code === '42P01') {
-		return messageText.includes('bootstrap_claims') || messageText.includes('relation')
-	}
-	return messageText.includes('bootstrap_claims') && messageText.includes('does not exist')
 }
 
 function hashToken(token: string) {
@@ -68,118 +46,26 @@ export function validateUsername(input: string) {
 	return normalized
 }
 
-async function ensureBootstrapClaimExists(baseUrl?: string) {
-	const adminUsername = process.env.USER_NAME
-	const claimKey = process.env.CLAIM_KEY
-	if (!adminUsername || !claimKey) {
-		console.warn('[auth] USER_NAME and CLAIM_KEY env vars are required for bootstrap. Skipping.')
-		return
-	}
-
-	const [admin] = await db.select().from(users).where(eq(users.username, adminUsername)).limit(1)
-
-	const adminUser =
-		admin ??
-		(
-			await db
-				.insert(users)
-				.values({
-					name: adminUsername,
-					username: adminUsername,
-					role: 'admin',
-					isActive: true,
-				})
-				.returning()
-		)[0]
-
-	if (adminUser.claimedAt) return
-
-	try {
-		const now = new Date()
-		const [activeClaim] = await db
-			.select({ id: bootstrapClaims.id })
-			.from(bootstrapClaims)
-			.where(and(isNull(bootstrapClaims.usedAt), gt(bootstrapClaims.expiresAt, now)))
-			.limit(1)
-
-		if (activeClaim) return
-
-		const tokenHash = hashToken(claimKey)
-		const expiresAt = new Date(Date.now() + BOOTSTRAP_CLAIM_TTL_MS)
-		const [existingTokenClaim] = await db
-			.select({ id: bootstrapClaims.id })
-			.from(bootstrapClaims)
-			.where(eq(bootstrapClaims.tokenHash, tokenHash))
-			.limit(1)
-
-		if (existingTokenClaim) {
-			await db
-				.update(bootstrapClaims)
-				.set({ expiresAt, usedAt: null })
-				.where(eq(bootstrapClaims.id, existingTokenClaim.id))
-			return
-		}
-
-		await db.insert(bootstrapClaims).values({ tokenHash, expiresAt })
-
-		const hintUrl = baseUrl ? `${baseUrl}/login?claim=${encodeURIComponent(claimKey)}` : '(login URL unavailable)'
-		console.log('[auth] Initial admin bootstrap created.')
-		console.log(`[auth] Visit: ${hintUrl}`)
-	} catch (error) {
-		if (isMissingBootstrapClaimsTable(error)) {
-			console.warn('[auth] bootstrap_claims table missing. Skipping bootstrap claim creation.')
-			return
-		}
-		console.warn('[auth] Failed to create bootstrap claim. Continuing without bootstrap claim.', error)
-		return
-	}
+export async function getProvisionedUser() {
+	const [row] = await db
+		.select({ id: users.id, passwordHash: users.passwordHash })
+		.from(users)
+		.limit(1)
+	return row ?? null
 }
 
-export async function ensureAuthBootstrap(baseUrl?: string) {
-	if (!bootstrapPromise) {
-		bootstrapPromise = ensureBootstrapClaimExists(baseUrl).finally(() => {
-			bootstrapPromise = null
-		})
-	}
-	await bootstrapPromise
+export async function isProvisioned() {
+	const row = await getProvisionedUser()
+	return row !== null && row.passwordHash !== null
 }
 
-async function findActiveBootstrapClaim(claimKey: string) {
-	const tokenHash = hashToken(claimKey)
-	const now = new Date()
-
-	try {
-		const [claim] = await db
-			.select()
-			.from(bootstrapClaims)
-			.where(
-				and(
-					eq(bootstrapClaims.tokenHash, tokenHash),
-					isNull(bootstrapClaims.usedAt),
-					gt(bootstrapClaims.expiresAt, now),
-				),
-			)
-			.limit(1)
-
-		return claim ?? null
-	} catch (error) {
-		if (isMissingBootstrapClaimsTable(error)) return null
-		throw error
-	}
-}
-
-export async function validateBootstrapClaim(claimKey: string) {
-	const claim = await findActiveBootstrapClaim(claimKey)
-	return claim !== null
-}
-
-export async function consumeBootstrapClaim(claimKey: string) {
-	const claim = await findActiveBootstrapClaim(claimKey)
-	if (!claim) return false
-
-	const now = new Date()
-	await db.update(bootstrapClaims).set({ usedAt: now }).where(eq(bootstrapClaims.id, claim.id))
-	return true
+export async function findUserForLogin() {
+	const [row] = await db
+		.select({ id: users.id, name: users.name, username: users.username, passwordHash: users.passwordHash })
+		.from(users)
+		.where(isNotNull(users.passwordHash))
+		.limit(1)
+	return row ?? null
 }
 
 export async function createSessionForUser(cookies: Cookies, userId: string) {
@@ -222,19 +108,10 @@ export async function getSessionUser(cookies: Cookies): Promise<AuthenticatedUse
 			id: users.id,
 			name: users.name,
 			username: users.username,
-			role: users.role,
-			sessionId: authSessions.id,
 		})
 		.from(authSessions)
 		.innerJoin(users, eq(users.id, authSessions.userId))
-		.where(
-			and(
-				eq(authSessions.tokenHash, tokenHash),
-				gt(authSessions.expiresAt, now),
-				eq(users.isActive, true),
-				isNull(users.deletedAt),
-			),
-		)
+		.where(and(eq(authSessions.tokenHash, tokenHash), gt(authSessions.expiresAt, now)))
 		.limit(1)
 
 	if (!row) return null
@@ -243,7 +120,6 @@ export async function getSessionUser(cookies: Cookies): Promise<AuthenticatedUse
 		id: row.id,
 		name: row.name,
 		username: row.username,
-		role: row.role,
 	}
 }
 
@@ -265,12 +141,4 @@ export function requireAuthenticatedRequestUser() {
 		throw error(401, 'Not authenticated')
 	}
 	return event.locals.user
-}
-
-export function requireAdminRequestUser() {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') {
-		throw error(403, 'Admin access required')
-	}
-	return user
 }

@@ -1,29 +1,18 @@
 import { command, getRequestEvent, query } from '$app/server'
 import { z } from 'zod'
-import { clearSessionCookie } from '$lib/auth/auth.server'
+import { eq } from 'drizzle-orm'
+import { db } from '$lib/db.server'
+import { users } from '$lib/auth/auth.schema'
 import {
-	beginPasskeyLogin,
-	beginPasskeyRegistration,
-	finishPasskeyLogin,
-	finishPasskeyRegistration,
-	listLoginUsers,
-} from '$lib/auth/passkey.server'
-
-const startChallengeSchema = z.object({
-	userId: z.string().uuid(),
-	claimKey: z.string().trim().min(1).optional(),
-})
-
-const finishRegistrationSchema = z.object({
-	challengeId: z.string().uuid(),
-	response: z.unknown(),
-	claimKey: z.string().trim().min(1).optional(),
-})
-
-const finishLoginSchema = z.object({
-	challengeId: z.string().uuid(),
-	response: z.unknown(),
-})
+	clearSessionCookie,
+	createSessionForUser,
+	findUserForLogin,
+	getProvisionedUser,
+	isProvisioned,
+	touchUserLastLogin,
+	validateUsername,
+} from '$lib/auth/auth.server'
+import { hashPassword, verifyPassword } from '$lib/auth/password.server'
 
 export const getSession = query(async () => {
 	const event = getRequestEvent()
@@ -34,58 +23,66 @@ export const getSession = query(async () => {
 	}
 })
 
-export const listLoginUsersQuery = query(async () => {
-	const users = await listLoginUsers()
-	return users.map((user) => ({
-		id: user.id,
-		username: user.username,
-		name: user.name,
-		claimed: Boolean(user.claimed),
-	}))
+export const isProvisionedQuery = query(async () => {
+	return { provisioned: await isProvisioned() }
 })
 
-export const startPasskeyRegistration = command(startChallengeSchema, async ({ userId, claimKey }) => {
-	const event = getRequestEvent()
-	return beginPasskeyRegistration({
-		userId,
-		rpID: event.url.hostname,
-		origin: event.url.origin,
-		claimKey,
-	})
+const loginSchema = z.object({
+	password: z.string().min(1).max(512),
 })
 
-export const finishPasskeyRegistrationCommand = command(
-	finishRegistrationSchema,
-	async ({ challengeId, response, claimKey }) => {
-		const event = getRequestEvent()
-		return finishPasskeyRegistration({
-			challengeId,
-			response: response as unknown as import('@simplewebauthn/server').RegistrationResponseJSON,
-			rpID: event.url.hostname,
-			origin: event.url.origin,
-			claimKey,
-			cookies: event.cookies,
-		})
-	},
-)
-
-export const startPasskeyLogin = command(startChallengeSchema.pick({ userId: true }), async ({ userId }) => {
+export const loginCommand = command(loginSchema, async ({ password }) => {
 	const event = getRequestEvent()
-	return beginPasskeyLogin({
-		userId,
-		rpID: event.url.hostname,
-	})
+	const user = await findUserForLogin()
+	if (!user || !user.passwordHash) {
+		throw new Error('Invalid password')
+	}
+
+	const ok = await verifyPassword(password, user.passwordHash)
+	if (!ok) {
+		throw new Error('Invalid password')
+	}
+
+	await createSessionForUser(event.cookies, user.id)
+	await touchUserLastLogin(user.id)
+	return { success: true as const }
 })
 
-export const finishPasskeyLoginCommand = command(finishLoginSchema, async ({ challengeId, response }) => {
+const setupSchema = z.object({
+	name: z.string().trim().min(1).max(64),
+	username: z.string().trim().min(3).max(32),
+	password: z.string().min(8).max(512),
+})
+
+export const setupCommand = command(setupSchema, async (input) => {
 	const event = getRequestEvent()
-	return finishPasskeyLogin({
-		challengeId,
-		response: response as unknown as import('@simplewebauthn/server').AuthenticationResponseJSON,
-		rpID: event.url.hostname,
-		origin: event.url.origin,
-		cookies: event.cookies,
-	})
+
+	if (await isProvisioned()) {
+		throw new Error('Setup already completed')
+	}
+
+	const username = validateUsername(input.username)
+	const passwordHash = await hashPassword(input.password)
+	const existing = await getProvisionedUser()
+
+	let userId: string
+	if (existing) {
+		await db
+			.update(users)
+			.set({ name: input.name, username, passwordHash })
+			.where(eq(users.id, existing.id))
+		userId = existing.id
+	} else {
+		const [created] = await db
+			.insert(users)
+			.values({ name: input.name, username, passwordHash })
+			.returning({ id: users.id })
+		userId = created.id
+	}
+
+	await createSessionForUser(event.cookies, userId)
+	await touchUserLastLogin(userId)
+	return { success: true as const }
 })
 
 export const logout = command(async () => {
@@ -93,4 +90,3 @@ export const logout = command(async () => {
 	await clearSessionCookie(event.cookies)
 	return { success: true }
 })
-

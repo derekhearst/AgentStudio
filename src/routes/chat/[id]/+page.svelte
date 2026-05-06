@@ -643,6 +643,13 @@
 		return combined;
 	});
 
+	const lastUserMessageId = $derived.by(() => {
+		for (let i = displayedMessages.length - 1; i >= 0; i -= 1) {
+			if (displayedMessages[i].role === 'user') return displayedMessages[i].id;
+		}
+		return null;
+	});
+
 	const activeContextLimit = $derived.by(() => {
 		const selected = availableModels.find((candidate) => candidate.id === model);
 		return selected?.contextLength && selected.contextLength > 0 ? selected.contextLength : 128000;
@@ -1648,7 +1655,12 @@
 				{/if}
 
 				{#each displayedMessages as message (message.id)}
-					<MessageBubble {message} onEdit={handleEdit} onRegenerate={handleRegenerate} />
+					<MessageBubble
+						{message}
+						onEdit={handleEdit}
+						onRegenerate={handleRegenerate}
+						canRegenerate={!streaming && message.id === lastUserMessageId}
+					/>
 				{/each}
 
 				{#if waitingForFirstToken && streaming && streamingBlocks.length === 0}

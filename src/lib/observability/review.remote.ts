@@ -47,10 +47,7 @@ const listSchema = z
 	.default({})
 
 export const listReviewItemsQuery = query(listSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') {
-		return { items: [], rollup: [], adminOnly: true as const }
-	}
+	requireAuthenticatedRequestUser()
 	const items = input.openOnly
 		? await listOpenReviewItems(input.limit)
 		: await listReviewItems({
@@ -64,8 +61,7 @@ export const listReviewItemsQuery = query(listSchema, async (input) => {
 })
 
 export const getReviewItemQuery = query(z.string().uuid(), async (itemId) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') return null
+	requireAuthenticatedRequestUser()
 	return getReviewItemById(itemId)
 })
 
@@ -78,7 +74,6 @@ const resolveSchema = z.object({
 
 export const resolveReviewItemCommand = command(resolveSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') throw new Error('Not authorized')
 	return resolveReviewItem({
 		itemId: input.itemId,
 		resolvedBy: user.id,
@@ -94,8 +89,7 @@ const assignSchema = z.object({
 })
 
 export const assignReviewItemCommand = command(assignSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') throw new Error('Not authorized')
+	requireAuthenticatedRequestUser()
 	return assignReviewItem(input.itemId, input.userId)
 })
 
@@ -107,8 +101,7 @@ export const assignReviewItemCommand = command(assignSchema, async (input) => {
  * decides how to render each kind.
  */
 export const getRunTraceQuery = query(z.string().uuid(), async (runId) => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') return { trace: null, adminOnly: true as const }
+	requireAuthenticatedRequestUser()
 	const row = await getRunTraceByRunId(runId)
 	return { trace: row, adminOnly: false as const }
 })
@@ -121,8 +114,7 @@ export const getRunTraceQuery = query(z.string().uuid(), async (runId) => {
  * round-trip. Inbox rollup is bundled so the page renders in one shot.
  */
 export const getOperationalSnapshotQuery = query(async () => {
-	const user = requireAuthenticatedRequestUser()
-	if (user.role !== 'admin') return { entries: [], rollup: [], adminOnly: true as const }
+	requireAuthenticatedRequestUser()
 	const [entries, rollup] = await Promise.all([listMetricSnapshotsWithSeries(24), reviewInboxRollup()])
 	return { entries, rollup, adminOnly: false as const }
 })

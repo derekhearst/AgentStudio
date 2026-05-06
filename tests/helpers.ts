@@ -56,33 +56,44 @@ function createSessionToken() {
 	return randomBytes(32).toString('base64url')
 }
 
+async function ensureSeededUser(): Promise<string> {
+	const sql = getSql()
+	const [existing] = await sql<{ id: string; password_hash: string | null }[]>`
+		select id, password_hash from users limit 1
+	`
+	if (existing?.id && existing.password_hash) return existing.id
+
+	// Single-user singleton: insert if missing, otherwise update with a hash from AUTH_PASSWORD.
+	const password = readEnvVar('AUTH_PASSWORD')
+	if (!password) throw new Error('AUTH_PASSWORD must be set in .env for E2E user seeding')
+
+	const { hash } = await import('@node-rs/argon2')
+	const passwordHash = await hash(password, {
+		memoryCost: 65536,
+		timeCost: 3,
+		parallelism: 1,
+	})
+
+	if (existing?.id) {
+		await sql`update users set password_hash = ${passwordHash} where id = ${existing.id}`
+		return existing.id
+	}
+
+	const [created] = await sql<{ id: string }[]>`
+		insert into users (name, username, password_hash)
+		values ('E2E Admin', ${`e2e_admin_${Date.now()}`}, ${passwordHash})
+		returning id
+	`
+	if (!created?.id) throw new Error('Failed to seed singleton user for E2E authentication')
+	return created.id
+}
+
 export async function authenticateContext(context: BrowserContext) {
 	const token = createSessionToken()
 	const tokenHash = createHash('sha256').update(token).digest('base64url')
 	const sql = getSql()
 
-	const [user] = await sql<{ id: string }[]>`
-		select id
-		from users
-		where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-
-	let userId = user?.id
-	if (!userId) {
-		const seededUsername = `e2e_admin_${Date.now()}`
-		const [created] = await sql<{ id: string }[]>`
-			insert into users (name, username, role, is_active)
-			values ('E2E Admin', ${seededUsername}, 'admin', true)
-			returning id
-		`
-		userId = created?.id
-	}
-
-	if (!userId) {
-		throw new Error('No active user found for E2E authentication')
-	}
+	const userId = await ensureSeededUser()
 
 	const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 	await sql`
@@ -222,7 +233,6 @@ export async function seedConversation(
 	overrides?: { title?: string; userMessage?: string; assistantMessage?: string; userId?: string },
 ) {
 	const sql = getSql()
-	// Default to the active admin so chat-stream auth (which checks ownership) accepts it.
 	const userId = overrides?.userId ?? (await getActiveAdminUserId())
 	const [conversation] = await sql<{ id: string; title: string }[]>`
 		insert into conversations (user_id, title, model, total_tokens, total_cost)
@@ -263,16 +273,13 @@ export async function seedNotification(prefix: string, overrides?: { title?: str
  * ──────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Returns the id of the active admin user. Used by every CRUD spec — the
- * authenticateContext helper picks this same user for the cookie.
+ * Returns the id of the singleton user. Single-user mode — there is exactly one row
+ * (or none on a brand-new instance, in which case authenticateContext seeds it).
  */
 export async function getActiveAdminUserId(): Promise<string> {
 	const sql = getSql()
-	const [u] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc limit 1
-	`
-	if (!u) throw new Error('No active admin user found for CRUD test')
+	const [u] = await sql<{ id: string }[]>`select id from users limit 1`
+	if (!u) throw new Error('No user found for CRUD test')
 	return u.id
 }
 
@@ -636,11 +643,7 @@ export async function cleanupExtendedPrefix(prefix: string): Promise<void> {
 		await sql`delete from review_items where summary like ${`${prefix}%`}`
 	}
 
-	// Users — only those created via the test (username prefix match).
-	if (await tableExists('users')) {
-		const usernameFragment = prefix.toLowerCase().replace(/[^a-z0-9_-]+/g, '_')
-		await sql`delete from users where username like ${`%${usernameFragment}%`} and role = 'user'`
-	}
+	// Users — singleton enforcement means we never delete the lone user row from tests.
 
 	// Then run the legacy cleanup for the older domains (agents/conversations/messages/etc).
 	await cleanupPrefixedRecords(prefix)

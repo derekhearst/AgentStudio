@@ -24,9 +24,6 @@
 		{ value: 'budget_limit.updated', label: 'Budget limit updated' },
 		{ value: 'budget_limit.deleted', label: 'Budget limit deleted' },
 		{ value: 'skill.deleted', label: 'Skill deleted' },
-		{ value: 'user.created', label: 'User created' },
-		{ value: 'user.deactivated', label: 'User deactivated' },
-		{ value: 'user.role.changed', label: 'User role changed' },
 	];
 
 	const TARGET_TYPES: Array<{ value: string; label: string }> = [
@@ -35,7 +32,6 @@
 		{ value: 'agent', label: 'Agent' },
 		{ value: 'budget_limit', label: 'Budget limit' },
 		{ value: 'skill', label: 'Skill' },
-		{ value: 'user', label: 'User' },
 	];
 
 	onMount(() => void load());
@@ -112,11 +108,6 @@
 		<div class="flex justify-center py-20">
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
-	{:else if result.adminOnly}
-		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
-			<p class="text-sm font-medium">Admin only</p>
-			<p class="mt-1 text-xs opacity-70">The audit log is visible only to users with the <code>admin</code> role.</p>
-		</div>
 	{:else if result.events.length === 0}
 		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 			No audit events match the current filters.
@@ -151,10 +142,10 @@
 											<p class="font-mono">{evt.targetType}{evt.targetId ? ` / ${evt.targetId}` : ''}</p>
 										</div>
 									{/if}
-									{#if evt.actorRole}
+									{#if evt.actorUsername}
 										<div>
 											<p class="font-semibold uppercase tracking-wide opacity-50">Actor</p>
-											<p>{evt.actorUsername ?? '(unknown)'} <span class="badge badge-xs badge-ghost ml-1">{evt.actorRole}</span></p>
+											<p>{evt.actorUsername}</p>
 										</div>
 									{/if}
 								</div>

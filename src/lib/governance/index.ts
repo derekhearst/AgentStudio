@@ -7,9 +7,6 @@ export {
 	auditBudgetLimitChange,
 	auditAgentStatusChanged,
 	auditSkillDeleted,
-	auditUserCreated,
-	auditUserDeactivated,
-	auditUserRoleChanged,
 	type RecordAuditEventInput,
 } from './governance.server'
 export { listAuditEventsQuery } from './governance.remote'
