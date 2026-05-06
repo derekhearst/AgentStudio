@@ -16,6 +16,8 @@
 	import { BUILTIN_TOOLS, capabilityGroups } from '$lib/tools/tools';
 	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import SettingsNav from '$lib/settings/SettingsNav.svelte';
+	import ToolToggleChip from '$lib/settings/ToolToggleChip.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -38,24 +40,53 @@
 	let statusMessage = $state('');
 	let settings = $state<SettingsRow | null>(null);
 	let searchQuery = $state('');
+	let scrollRoot = $state<HTMLDivElement | null>(null);
+	let activeSection = $state('model');
 
 	const searchLower = $derived(searchQuery.toLowerCase().trim());
 
 	const sections = [
-		{ id: 'model', keywords: 'model ai default transcription voice audio tool approval' },
-		{ id: 'context', keywords: 'context window reserved response compact threshold compaction model tools' },
-		{ id: 'tools', keywords: 'tools sandbox coding skills agents media image generation disabled enabled toggle' },
-		{ id: 'memory', keywords: 'memory palace recall mining embeddings rerank topk wings rooms drawers' },
-		{ id: 'notifications', keywords: 'notification task completed needs input agent errors' },
-		{ id: 'budget', keywords: 'budget daily monthly limit cost' },
-		{ id: 'app', keywords: 'app push install pwa notifications subscribe' },
-		{ id: 'devtools', keywords: 'developer tools test notification feed debug' },
+		{ id: 'model', label: 'Model & AI', color: 'primary', keywords: 'model ai default transcription voice audio' },
+		{ id: 'context', label: 'Context Window', color: 'secondary', keywords: 'context window reserved response compact threshold compaction' },
+		{ id: 'tools', label: 'Tool Approval', color: 'secondary', keywords: 'tools sandbox coding skills agents image generation toggle approval' },
+		{ id: 'memory', label: 'Memory Palace', color: 'accent', keywords: 'memory palace recall mining embeddings rerank topk' },
+		{ id: 'notifications', label: 'Notifications', color: 'accent', keywords: 'notification task completed needs input agent errors' },
+		{ id: 'budget', label: 'Budget', color: 'warning', keywords: 'budget daily monthly limit cost' },
+		{ id: 'app', label: 'App & Push', color: 'info', keywords: 'app push install pwa subscribe' },
+		{ id: 'devtools', label: 'Developer Tools', color: 'error', keywords: 'developer tools test notification feed debug' },
 	] as const;
 
-	function isVisible(id: (typeof sections)[number]['id']) {
+	type SectionId = (typeof sections)[number]['id'];
+
+	const toolsByGroup = Object.entries(capabilityGroups)
+		.map(([groupKey, group]) => ({
+			groupKey,
+			group,
+			tools: BUILTIN_TOOLS.filter((tool) => tool.group === groupKey),
+		}))
+		.filter((entry) => entry.tools.length > 0);
+
+	const filteredToolsByGroup = $derived.by(() => {
+		if (!searchLower) return toolsByGroup;
+		return toolsByGroup
+			.map((g) => ({
+				...g,
+				tools: g.tools.filter(
+					(t) =>
+						t.name.toLowerCase().includes(searchLower) ||
+						t.description.toLowerCase().includes(searchLower),
+				),
+			}))
+			.filter((g) => g.tools.length > 0);
+	});
+
+	function isVisible(id: string) {
 		if (!searchLower) return true;
 		const section = sections.find((s) => s.id === id);
-		return section ? section.keywords.includes(searchLower) : true;
+		const keywordMatch = section ? section.keywords.includes(searchLower) : false;
+		// Tool Approval is also visible when the search matches any tool name/description
+		if (id === 'tools') return keywordMatch || filteredToolsByGroup.length > 0;
+		return keywordMatch;
 	}
 
 	onMount(() => {
@@ -68,8 +99,40 @@
 		};
 
 		window.addEventListener('beforeinstallprompt', onInstallPrompt);
-		return () => window.removeEventListener('beforeinstallprompt', onInstallPrompt);
+
+		// Scrollspy: track which section is in view inside the scroll container.
+		let observer: IntersectionObserver | null = null;
+		const attachObserver = () => {
+			if (!scrollRoot) return;
+			observer?.disconnect();
+			observer = new IntersectionObserver(
+				(entries) => {
+					for (const e of entries) {
+						if (e.isIntersecting) {
+							activeSection = (e.target as HTMLElement).id.replace('sec-', '');
+						}
+					}
+				},
+				{ root: scrollRoot, rootMargin: '-20% 0px -70% 0px', threshold: 0 },
+			);
+			document
+				.querySelectorAll<HTMLElement>('[data-settings-section]')
+				.forEach((el) => observer?.observe(el));
+		};
+		// Defer so DOM nodes from the {#if settings} block are mounted before observing.
+		const t = setTimeout(attachObserver, 50);
+
+		return () => {
+			window.removeEventListener('beforeinstallprompt', onInstallPrompt);
+			clearTimeout(t);
+			observer?.disconnect();
+		};
 	});
+
+	function scrollToSection(id: string) {
+		document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		activeSection = id;
+	}
 
 	async function refresh() {
 		const [feed, subs, appSettings] = await Promise.all([
@@ -247,12 +310,6 @@
 		installPromptEvent = null;
 	}
 
-	const toolsByGroup = Object.entries(capabilityGroups).map(([groupKey, group]) => ({
-		groupKey,
-		group,
-		tools: BUILTIN_TOOLS.filter((tool) => tool.group === groupKey),
-	}));
-
 	function isToolApprovalRequired(toolName: string): boolean {
 		const requiredTools = settings?.toolConfig?.approvalRequiredTools ?? [];
 		return requiredTools.includes('*') || requiredTools.includes(toolName);
@@ -284,6 +341,19 @@
 		const current = settings.toolConfig?.approvalRequiredTools ?? [];
 		const without = current.filter((name) => name !== '*');
 		const next = value ? [...without, '*'] : without;
+		settings = {
+			...settings,
+			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
+		};
+	}
+
+	function setGroupApproval(groupKey: string, required: boolean) {
+		if (!settings || isWildcardApproval) return;
+		const group = capabilityGroups[groupKey as keyof typeof capabilityGroups];
+		if (!group || group.alwaysOn) return;
+		const base = settings.toolConfig?.approvalRequiredTools ?? [];
+		let next = base.filter((n) => !(group.tools as readonly string[]).includes(n));
+		if (required) next = [...new Set([...next, ...group.tools])];
 		settings = {
 			...settings,
 			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
@@ -327,438 +397,482 @@
 		/>
 	</div>
 
-	<!-- ─── Scrollable Settings ─── -->
-	<div class="mt-2 min-h-0 flex-1 overflow-y-auto">
-	<div class="mx-auto max-w-6xl px-1 pb-6 sm:px-0">
+	<!-- ─── Scrollable two-column shell ─── -->
+	<div class="mt-2 min-h-0 flex-1 overflow-y-auto" bind:this={scrollRoot}>
+		<div class="mx-auto grid w-full max-w-screen-2xl gap-6 px-1 pb-6 sm:px-4 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8 lg:px-6">
+			<SettingsNav {sections} activeId={activeSection} {isVisible} onnavigate={scrollToSection} />
 
-	<div class="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-	{#if settings}
-		<!-- ════════════════════════════════════════════════
-		     MODEL & AI
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('model')}
-		<ContentPanel>
-			{#snippet header()}
-				<h2 class="flex items-center gap-2 text-base font-semibold">
-					<span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
-					Model & AI
-				</h2>
-			{/snippet}
-			<div class="divide-y divide-base-300/50">
-				<!-- Default Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 first:pt-0">
-					<div>
-						<p class="text-sm font-medium">Default Model</p>
-						<p class="mt-0.5 text-xs text-base-content/55">Primary model for new conversations</p>
-					</div>
-					<div class="w-full sm:w-64">
-						<ModelSelector
-							value={settings.defaultModel}
-							showChevron={false}
-							showBrowseBadge={false}
-							onchange={(id: string) => {
-								if (settings) settings.defaultModel = id;
-							}}
-						/>
-					</div>
-				</div>
+			<div class="flex min-w-0 flex-col gap-4">
+				{#if settings}
+					<!-- ════════════════════════════════════════════════
+					     MODEL & AI
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('model')}
+						<div id="sec-model" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<h2 class="flex items-center gap-2 text-base font-semibold">
+										<span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
+										Model & AI
+									</h2>
+								{/snippet}
+								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 xl:grid-cols-2 xl:divide-y-0">
+									<!-- Default Model -->
+									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 first:pt-0 xl:py-3.5">
+										<div>
+											<p class="text-sm font-medium">Default Model</p>
+											<p class="mt-0.5 text-xs text-base-content/55">Primary model for new conversations</p>
+										</div>
+										<div class="w-full sm:w-64">
+											<ModelSelector
+												value={settings.defaultModel}
+												showChevron={false}
+												showBrowseBadge={false}
+												onchange={(id: string) => {
+													if (settings) settings.defaultModel = id;
+												}}
+											/>
+										</div>
+									</div>
 
-				<!-- Transcription Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0">
-					<div>
-						<p class="text-sm font-medium">Transcription Model</p>
-						<p class="mt-0.5 text-xs text-base-content/55">Model for voice-to-text (must support audio input)</p>
-					</div>
-					<div class="w-full sm:w-64">
-						<ModelSelector
-							value={settings.transcriptionModel}
-							showChevron={false}
-							showBrowseBadge={false}
-							requireInputModality="audio"
-							onchange={(id: string) => {
-								if (settings) settings.transcriptionModel = id;
-							}}
-						/>
-					</div>
-				</div>
-			</div>
-		</ContentPanel>
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
-		     CONTEXT WINDOW
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('context')}
-		<ContentPanel>
-			{#snippet header()}
-				<h2 class="flex items-center gap-2 text-base font-semibold">
-					<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
-					Context Window
-				</h2>
-			{/snippet}
-			<div class="divide-y divide-base-300/50">
-				<!-- Reserved Response -->
-				<div class="py-3.5 first:pt-0">
-					<div class="flex items-center justify-between">
-						<p class="text-sm font-medium">Reserved Response</p>
-						<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.reservedResponsePct.toFixed(0)}%</span>
-					</div>
-					<input
-						type="range"
-						min="10"
-						max="40"
-						step="1"
-						class="range range-secondary range-xs mt-3"
-						bind:value={settings.contextConfig.reservedResponsePct}
-					/>
-					<p class="mt-1.5 text-xs text-base-content/55">Size of the striped reserved segment in the context bar</p>
-				</div>
-
-				<!-- Auto-Compact Threshold -->
-				<div class="py-3.5">
-					<div class="flex items-center justify-between">
-						<p class="text-sm font-medium">Auto-Compact Threshold</p>
-						<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.autoCompactThresholdPct.toFixed(0)}%</span>
-					</div>
-					<input
-						type="range"
-						min="40"
-						max="95"
-						step="1"
-						class="range range-secondary range-xs mt-3"
-						bind:value={settings.contextConfig.autoCompactThresholdPct}
-					/>
-					<p class="mt-1.5 text-xs text-base-content/55">Auto-compaction triggers when a model switch would exceed this</p>
-				</div>
-
-				<!-- Compaction Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0">
-					<div>
-						<p class="text-sm font-medium">Compaction Model</p>
-						<p class="mt-0.5 text-xs text-base-content/55">Model used to summarize conversations during auto-compaction</p>
-					</div>
-					<div class="w-full sm:w-64">
-						<ModelSelector
-							value={settings.contextConfig.compactionModel}
-							showChevron={false}
-							showBrowseBadge={false}
-							onchange={(id: string) => {
-								if (settings) settings.contextConfig.compactionModel = id;
-							}}
-						/>
-					</div>
-				</div>
-			</div>
-		</ContentPanel>
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
-		     TOOL APPROVAL
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('tools')}
-		<ContentPanel>
-			{#snippet header()}
-				<h2 class="flex items-center gap-2 text-base font-semibold">
-					<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
-					Tool Approval
-				</h2>
-			{/snippet}
-			<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
-				<span>
-					<span class="block text-sm font-medium">Require approval for all tools</span>
-					<span class="block text-xs text-base-content/60">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
-				</span>
-				<input
-					type="checkbox"
-					class="checkbox checkbox-sm checkbox-warning mt-0.5"
-					checked={isWildcardApproval}
-					onchange={(e) => setWildcardApproval((e.currentTarget as HTMLInputElement).checked)}
-				/>
-			</label>
-			<div class="divide-y divide-base-300/50" class:opacity-60={isWildcardApproval} class:pointer-events-none={isWildcardApproval} aria-disabled={isWildcardApproval}>
-				{#each toolsByGroup as groupEntry (groupEntry.groupKey)}
-					<div class="py-3 sm:py-3.5 first:pt-0 last:pb-0">
-						<div>
-							<p class="text-sm font-medium">{groupEntry.group.label}</p>
-							<p class="mt-0.5 text-xs text-base-content/55">{groupEntry.group.description}</p>
+									<!-- Transcription Model -->
+									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0 xl:py-3.5">
+										<div>
+											<p class="text-sm font-medium">Transcription Model</p>
+											<p class="mt-0.5 text-xs text-base-content/55">Model for voice-to-text (must support audio input)</p>
+										</div>
+										<div class="w-full sm:w-64">
+											<ModelSelector
+												value={settings.transcriptionModel}
+												showChevron={false}
+												showBrowseBadge={false}
+												requireInputModality="audio"
+												onchange={(id: string) => {
+													if (settings) settings.transcriptionModel = id;
+												}}
+											/>
+										</div>
+									</div>
+								</div>
+							</ContentPanel>
 						</div>
-						<div class="mt-3 space-y-2">
-							{#each groupEntry.tools as tool (tool.name)}
-								<label class="flex items-start justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     CONTEXT WINDOW
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('context')}
+						<div id="sec-context" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<h2 class="flex items-center gap-2 text-base font-semibold">
+										<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
+										Context Window
+									</h2>
+								{/snippet}
+								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 xl:grid-cols-2 xl:divide-y-0">
+									<!-- Reserved Response -->
+									<div class="py-3.5 first:pt-0 xl:py-3.5">
+										<div class="flex items-center justify-between">
+											<p class="text-sm font-medium">Reserved Response</p>
+											<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.reservedResponsePct.toFixed(0)}%</span>
+										</div>
+										<input
+											type="range"
+											min="10"
+											max="40"
+											step="1"
+											class="range range-secondary range-xs mt-3"
+											bind:value={settings.contextConfig.reservedResponsePct}
+										/>
+										<p class="mt-1.5 text-xs text-base-content/55">Size of the striped reserved segment in the context bar</p>
+									</div>
+
+									<!-- Auto-Compact Threshold -->
+									<div class="py-3.5 xl:py-3.5">
+										<div class="flex items-center justify-between">
+											<p class="text-sm font-medium">Auto-Compact Threshold</p>
+											<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.autoCompactThresholdPct.toFixed(0)}%</span>
+										</div>
+										<input
+											type="range"
+											min="40"
+											max="95"
+											step="1"
+											class="range range-secondary range-xs mt-3"
+											bind:value={settings.contextConfig.autoCompactThresholdPct}
+										/>
+										<p class="mt-1.5 text-xs text-base-content/55">Auto-compaction triggers when a model switch would exceed this</p>
+									</div>
+
+									<!-- Compaction Model -->
+									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0 xl:col-span-2 xl:py-3.5">
+										<div>
+											<p class="text-sm font-medium">Compaction Model</p>
+											<p class="mt-0.5 text-xs text-base-content/55">Model used to summarize conversations during auto-compaction</p>
+										</div>
+										<div class="w-full sm:w-64">
+											<ModelSelector
+												value={settings.contextConfig.compactionModel}
+												showChevron={false}
+												showBrowseBadge={false}
+												onchange={(id: string) => {
+													if (settings) settings.contextConfig.compactionModel = id;
+												}}
+											/>
+										</div>
+									</div>
+								</div>
+							</ContentPanel>
+						</div>
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     TOOL APPROVAL
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('tools')}
+						<div id="sec-tools" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<h2 class="flex items-center gap-2 text-base font-semibold">
+										<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
+										Tool Approval
+									</h2>
+								{/snippet}
+								<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
 									<span>
-										<span class="block text-sm font-medium">{tool.name}</span>
-										<span class="block text-xs text-base-content/55">{tool.description}</span>
+										<span class="block text-sm font-medium">Require approval for all tools</span>
+										<span class="block text-xs text-base-content/60">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
 									</span>
 									<input
 										type="checkbox"
-										class="checkbox checkbox-sm checkbox-secondary mt-0.5"
-										checked={isToolApprovalRequired(tool.name)}
-										onchange={(e) => toggleToolApproval(tool.name, (e.currentTarget as HTMLInputElement).checked)}
+										class="checkbox checkbox-sm checkbox-warning mt-0.5"
+										checked={isWildcardApproval}
+										onchange={(e) => setWildcardApproval((e.currentTarget as HTMLInputElement).checked)}
 									/>
 								</label>
-							{/each}
-						</div>
-					</div>
-				{/each}
-			</div>
-		</ContentPanel>
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
-		     MEMORY PALACE
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('memory') && settings?.memoryConfig}
-		<ContentPanel>
-			{#snippet header()}
-				<h2 class="flex items-center gap-2 text-base font-semibold">
-					<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
-					Memory Palace
-				</h2>
-			{/snippet}
-			<div class="space-y-2">
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span>
-						<span class="block text-sm font-medium">Enable memory recall</span>
-						<span class="block text-xs text-base-content/55">Inject relevant past memories into chat as context.</span>
-					</span>
-					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.enabled} />
-				</label>
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span>
-						<span class="block text-sm font-medium">Auto-mine conversations</span>
-						<span class="block text-xs text-base-content/55">Mine each conversation into the palace after completion.</span>
-					</span>
-					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.autoMine} />
-				</label>
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span>
-						<span class="block text-sm font-medium">Use LLM reranker</span>
-						<span class="block text-xs text-base-content/55">Slower but typically improves retrieval precision.</span>
-					</span>
-					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.useRerank} />
-				</label>
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span class="block text-sm font-medium">Top-K results</span>
-					<input
-						type="number"
-						min="1"
-						max="20"
-						class="input input-sm input-bordered w-20"
-						value={settings.memoryConfig.topK}
-						oninput={(e) => {
-							if (!settings) return;
-							const raw = Number((e.currentTarget as HTMLInputElement).value);
-							const topK = Number.isFinite(raw) && raw >= 1 ? Math.min(20, Math.max(1, Math.round(raw))) : 1;
-							settings = { ...settings, memoryConfig: { ...settings.memoryConfig, topK } };
-						}}
-					/>
-				</label>
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span class="block text-sm font-medium">Rerank model</span>
-					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.rerankModel} />
-				</label>
-				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-					<span class="block text-sm font-medium">Embedding model</span>
-					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.embeddingModel} />
-				</label>
-				<p class="text-xs text-base-content/55 pt-1">
-					Browse and search your palace at <a href="/memory" class="link link-accent">/memory</a>.
-				</p>
-			</div>
-		</ContentPanel>
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
-		     NOTIFICATIONS
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('notifications')}
-		<ContentPanel>
-			{#snippet header()}
-				<h2 class="flex items-center gap-2 text-base font-semibold">
-					<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
-					Notifications
-				</h2>
-			{/snippet}
-			<div class="divide-y divide-base-300/50">
-				<div class="flex items-center justify-between gap-4 py-3 first:pt-0">
-					<p class="text-sm font-medium">Task completed</p>
-					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.taskCompleted} />
-				</div>
-				<div class="flex items-center justify-between gap-4 py-3">
-					<p class="text-sm font-medium">Needs input</p>
-					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.needsInput} />
-				</div>
-				<div class="flex items-center justify-between gap-4 py-3 last:pb-0">
-					<p class="text-sm font-medium">Agent errors</p>
-					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.agentErrors} />
-				</div>
-			</div>
-		</ContentPanel>
-		{/if}
-
-		<!-- ════════════════════════════════════════════════
-		     BUDGET
-		     ════════════════════════════════════════════════ -->
-		{#if isVisible('budget')}
-		<ContentPanel>
-			{#snippet header()}
-				<div>
-					<h2 class="flex items-center gap-2 text-base font-semibold">
-						<span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
-						Budget
-					</h2>
-					<p class="mt-0.5 text-xs text-base-content/55">Alerts trigger at 80% and 100%</p>
-				</div>
-			{/snippet}
-			<div class="divide-y divide-base-300/50">
-				<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0">
-					<p class="text-sm font-medium">Daily limit</p>
-					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-base-content/50">$</span>
-						<input
-							type="number"
-							class="input input-bordered input-sm w-28 text-right font-mono"
-							min="0"
-							step="0.01"
-							placeholder="No limit"
-							value={settings.budgetConfig?.dailyLimit ?? ''}
-							oninput={(e) => {
-								if (!settings) return;
-								const raw = (e.currentTarget as HTMLInputElement).value.trim();
-								const parsed = raw === '' ? null : Math.max(0, Number(raw));
-								const dailyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
-								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit } };
-							}}
-						/>
-					</div>
-				</div>
-				<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0">
-					<p class="text-sm font-medium">Monthly limit</p>
-					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-base-content/50">$</span>
-						<input
-							type="number"
-							class="input input-bordered input-sm w-28 text-right font-mono"
-							min="0"
-							step="0.01"
-							placeholder="No limit"
-							value={settings.budgetConfig?.monthlyLimit ?? ''}
-							oninput={(e) => {
-								if (!settings) return;
-								const raw = (e.currentTarget as HTMLInputElement).value.trim();
-								const parsed = raw === '' ? null : Math.max(0, Number(raw));
-								const monthlyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
-								settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit } };
-							}}
-						/>
-					</div>
-				</div>
-			</div>
-		</ContentPanel>
-		{/if}
-	{/if}
-
-	<!-- ════════════════════════════════════════════════
-	     APP & PUSH
-	     ════════════════════════════════════════════════ -->
-	{#if isVisible('app')}
-	<ContentPanel class="mt-4 lg:mt-0">
-		{#snippet header()}
-			<h2 class="flex items-center gap-2 text-base font-semibold">
-				<span class="h-1.5 w-1.5 rounded-full bg-info"></span>
-				App & Push
-			</h2>
-		{/snippet}
-		<div class="divide-y divide-base-300/50">
-			<!-- Install -->
-			<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0">
-				<div>
-					<p class="text-sm font-medium">Install App</p>
-					<p class="mt-0.5 text-xs text-base-content/55">Standalone desktop & mobile app</p>
-				</div>
-				<button
-					class="btn btn-primary btn-sm btn-outline"
-					type="button"
-					onclick={promptInstall}
-					disabled={!installAvailable}
-				>
-					{installAvailable ? 'Install' : 'Installed'}
-				</button>
-			</div>
-
-			<!-- Push -->
-			<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0">
-				<div>
-					<p class="text-sm font-medium">Push Notifications</p>
-					<p class="mt-0.5 text-xs text-base-content/55">
-						{pushEnabled ? 'Enabled' : 'Disabled'} &middot; {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
-					</p>
-				</div>
-				<div class="flex gap-1.5">
-					{#if pushEnabled}
-						<button class="btn btn-ghost btn-sm" type="button" onclick={disablePush} disabled={busy}>Disable</button>
-					{:else}
-						<button class="btn btn-success btn-sm" type="button" onclick={enablePush} disabled={busy}>Enable</button>
-					{/if}
-				</div>
-			</div>
-		</div>
-	</ContentPanel>
-	{/if}
-
-	<!-- ════════════════════════════════════════════════
-	     DEVELOPER TOOLS
-	     ════════════════════════════════════════════════ -->
-	{#if isVisible('devtools')}
-	<ContentPanel class="mt-4">
-		{#snippet header()}
-			<h2 class="flex items-center gap-2 text-base font-semibold">
-				<span class="h-1.5 w-1.5 rounded-full bg-error"></span>
-				Developer Tools
-			</h2>
-		{/snippet}
-		<div class="space-y-3">
-			<!-- Test Notification -->
-			<div class="rounded-md bg-base-200/40 px-4 py-3.5">
-				<p class="mb-2.5 text-sm font-medium">Send Test Notification</p>
-				<div class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-					<input class="input input-bordered input-sm" bind:value={testTitle} placeholder="Title" />
-					<input class="input input-bordered input-sm" bind:value={testBody} placeholder="Body" />
-					<button class="btn btn-secondary btn-sm" type="button" onclick={sendTest} disabled={busy}>Send</button>
-				</div>
-			</div>
-
-			<!-- Notification Feed -->
-			<div class="rounded-md bg-base-200/40 px-4 py-3.5">
-				<p class="mb-2 text-sm font-medium">Notification Feed</p>
-				{#if notifications.length === 0}
-					<p class="text-xs text-base-content/55">No notifications recorded yet.</p>
-				{:else}
-					<div class="space-y-1.5">
-						{#each notifications as item (item.id)}
-							<div class="flex items-start justify-between gap-3 rounded-md bg-base-300/30 px-3 py-2">
-								<div class="min-w-0">
-									<p class="truncate text-sm font-medium">{item.title}</p>
-									<p class="truncate text-xs text-base-content/60">{item.body}</p>
-									<p class="mt-0.5 text-[10px] text-base-content/45">{new Date(item.createdAt).toLocaleString()}</p>
+								<div
+									class="flex flex-col gap-5"
+									class:opacity-60={isWildcardApproval}
+									class:pointer-events-none={isWildcardApproval}
+									aria-disabled={isWildcardApproval}
+								>
+									{#each filteredToolsByGroup as groupEntry (groupEntry.groupKey)}
+										{@const alwaysOn = groupEntry.group.alwaysOn}
+										<div>
+											<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+												<div class="min-w-0">
+													<p class="flex items-center gap-2 text-sm font-medium">
+														{groupEntry.group.label}
+														{#if alwaysOn}
+															<span class="badge badge-success badge-xs">Always on</span>
+														{/if}
+													</p>
+													<p class="mt-0.5 text-xs text-base-content/55">{groupEntry.group.description}</p>
+												</div>
+												{#if !alwaysOn}
+													<div class="flex shrink-0 items-center gap-1">
+														<button
+															type="button"
+															class="btn btn-ghost btn-xs"
+															onclick={() => setGroupApproval(groupEntry.groupKey, true)}
+															disabled={isWildcardApproval}
+														>All</button>
+														<button
+															type="button"
+															class="btn btn-ghost btn-xs"
+															onclick={() => setGroupApproval(groupEntry.groupKey, false)}
+															disabled={isWildcardApproval}
+														>None</button>
+													</div>
+												{/if}
+											</div>
+											<div
+												class="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
+												class:opacity-60={alwaysOn}
+												class:pointer-events-none={alwaysOn}
+											>
+												{#each groupEntry.tools as tool (tool.name)}
+													<ToolToggleChip
+														name={tool.name}
+														description={tool.description}
+														checked={isToolApprovalRequired(tool.name)}
+														disabled={alwaysOn}
+														onchange={(value) => toggleToolApproval(tool.name, value)}
+													/>
+												{/each}
+											</div>
+										</div>
+									{:else}
+										<p class="text-sm text-base-content/55">No tools match “{searchQuery}”.</p>
+									{/each}
 								</div>
-								{#if item.read}
-									<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, false)}>Unread</button>
-								{:else}
-									<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, true)}>Read</button>
-								{/if}
+							</ContentPanel>
+						</div>
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     MEMORY PALACE
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('memory') && settings?.memoryConfig}
+						<div id="sec-memory" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<h2 class="flex items-center gap-2 text-base font-semibold">
+										<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+										Memory Palace
+									</h2>
+								{/snippet}
+								<div class="grid gap-2 xl:grid-cols-2">
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
+										<span>
+											<span class="block text-sm font-medium">Enable memory recall</span>
+											<span class="block text-xs text-base-content/55">Inject relevant past memories into chat as context.</span>
+										</span>
+										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.enabled} />
+									</label>
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
+										<span>
+											<span class="block text-sm font-medium">Auto-mine conversations</span>
+											<span class="block text-xs text-base-content/55">Mine each conversation into the palace after completion.</span>
+										</span>
+										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.autoMine} />
+									</label>
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
+										<span>
+											<span class="block text-sm font-medium">Use LLM reranker</span>
+											<span class="block text-xs text-base-content/55">Slower but typically improves retrieval precision.</span>
+										</span>
+										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.useRerank} />
+									</label>
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
+										<span class="block text-sm font-medium">Top-K results</span>
+										<input
+											type="number"
+											min="1"
+											max="20"
+											class="input input-sm input-bordered w-20"
+											value={settings.memoryConfig.topK}
+											oninput={(e) => {
+												if (!settings) return;
+												const raw = Number((e.currentTarget as HTMLInputElement).value);
+												const topK = Number.isFinite(raw) && raw >= 1 ? Math.min(20, Math.max(1, Math.round(raw))) : 1;
+												settings = { ...settings, memoryConfig: { ...settings.memoryConfig, topK } };
+											}}
+										/>
+									</label>
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2 xl:col-span-2">
+										<span class="block text-sm font-medium">Rerank model</span>
+										<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.rerankModel} />
+									</label>
+									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2 xl:col-span-2">
+										<span class="block text-sm font-medium">Embedding model</span>
+										<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.embeddingModel} />
+									</label>
+								</div>
+								<p class="text-xs text-base-content/55 pt-2">
+									Browse and search your palace at <a href="/memory" class="link link-accent">/memory</a>.
+								</p>
+							</ContentPanel>
+						</div>
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     NOTIFICATIONS
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('notifications')}
+						<div id="sec-notifications" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<h2 class="flex items-center gap-2 text-base font-semibold">
+										<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+										Notifications
+									</h2>
+								{/snippet}
+								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-3 sm:divide-y-0">
+									<div class="flex items-center justify-between gap-4 py-3 first:pt-0 sm:py-2">
+										<p class="text-sm font-medium">Task completed</p>
+										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.taskCompleted} />
+									</div>
+									<div class="flex items-center justify-between gap-4 py-3 sm:py-2">
+										<p class="text-sm font-medium">Needs input</p>
+										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.needsInput} />
+									</div>
+									<div class="flex items-center justify-between gap-4 py-3 last:pb-0 sm:py-2">
+										<p class="text-sm font-medium">Agent errors</p>
+										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.agentErrors} />
+									</div>
+								</div>
+							</ContentPanel>
+						</div>
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     BUDGET
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('budget')}
+						<div id="sec-budget" data-settings-section class="scroll-mt-4">
+							<ContentPanel>
+								{#snippet header()}
+									<div>
+										<h2 class="flex items-center gap-2 text-base font-semibold">
+											<span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
+											Budget
+										</h2>
+										<p class="mt-0.5 text-xs text-base-content/55">Alerts trigger at 80% and 100%</p>
+									</div>
+								{/snippet}
+								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-2 sm:divide-y-0">
+									<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0 sm:py-2">
+										<p class="text-sm font-medium">Daily limit</p>
+										<div class="flex items-center gap-1.5">
+											<span class="text-xs text-base-content/50">$</span>
+											<input
+												type="number"
+												class="input input-bordered input-sm w-28 text-right font-mono"
+												min="0"
+												step="0.01"
+												placeholder="No limit"
+												value={settings.budgetConfig?.dailyLimit ?? ''}
+												oninput={(e) => {
+													if (!settings) return;
+													const raw = (e.currentTarget as HTMLInputElement).value.trim();
+													const parsed = raw === '' ? null : Math.max(0, Number(raw));
+													const dailyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
+													settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit } };
+												}}
+											/>
+										</div>
+									</div>
+									<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0 sm:py-2">
+										<p class="text-sm font-medium">Monthly limit</p>
+										<div class="flex items-center gap-1.5">
+											<span class="text-xs text-base-content/50">$</span>
+											<input
+												type="number"
+												class="input input-bordered input-sm w-28 text-right font-mono"
+												min="0"
+												step="0.01"
+												placeholder="No limit"
+												value={settings.budgetConfig?.monthlyLimit ?? ''}
+												oninput={(e) => {
+													if (!settings) return;
+													const raw = (e.currentTarget as HTMLInputElement).value.trim();
+													const parsed = raw === '' ? null : Math.max(0, Number(raw));
+													const monthlyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
+													settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit } };
+												}}
+											/>
+										</div>
+									</div>
+								</div>
+							</ContentPanel>
+						</div>
+					{/if}
+				{/if}
+
+				<!-- ════════════════════════════════════════════════
+				     APP & PUSH
+				     ════════════════════════════════════════════════ -->
+				{#if isVisible('app')}
+					<div id="sec-app" data-settings-section class="scroll-mt-4">
+						<ContentPanel>
+							{#snippet header()}
+								<h2 class="flex items-center gap-2 text-base font-semibold">
+									<span class="h-1.5 w-1.5 rounded-full bg-info"></span>
+									App & Push
+								</h2>
+							{/snippet}
+							<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-2 sm:divide-y-0">
+								<!-- Install -->
+								<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0 sm:py-2">
+									<div>
+										<p class="text-sm font-medium">Install App</p>
+										<p class="mt-0.5 text-xs text-base-content/55">Standalone desktop & mobile app</p>
+									</div>
+									<button
+										class="btn btn-primary btn-sm btn-outline"
+										type="button"
+										onclick={promptInstall}
+										disabled={!installAvailable}
+									>
+										{installAvailable ? 'Install' : 'Installed'}
+									</button>
+								</div>
+
+								<!-- Push -->
+								<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0 sm:py-2">
+									<div>
+										<p class="text-sm font-medium">Push Notifications</p>
+										<p class="mt-0.5 text-xs text-base-content/55">
+											{pushEnabled ? 'Enabled' : 'Disabled'} &middot; {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
+										</p>
+									</div>
+									<div class="flex gap-1.5">
+										{#if pushEnabled}
+											<button class="btn btn-ghost btn-sm" type="button" onclick={disablePush} disabled={busy}>Disable</button>
+										{:else}
+											<button class="btn btn-success btn-sm" type="button" onclick={enablePush} disabled={busy}>Enable</button>
+										{/if}
+									</div>
+								</div>
 							</div>
-						{/each}
+						</ContentPanel>
+					</div>
+				{/if}
+
+				<!-- ════════════════════════════════════════════════
+				     DEVELOPER TOOLS
+				     ════════════════════════════════════════════════ -->
+				{#if isVisible('devtools')}
+					<div id="sec-devtools" data-settings-section class="scroll-mt-4">
+						<ContentPanel>
+							{#snippet header()}
+								<h2 class="flex items-center gap-2 text-base font-semibold">
+									<span class="h-1.5 w-1.5 rounded-full bg-error"></span>
+									Developer Tools
+								</h2>
+							{/snippet}
+							<div class="space-y-3">
+								<!-- Test Notification -->
+								<div class="rounded-md bg-base-200/40 px-4 py-3.5">
+									<p class="mb-2.5 text-sm font-medium">Send Test Notification</p>
+									<div class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+										<input class="input input-bordered input-sm" bind:value={testTitle} placeholder="Title" />
+										<input class="input input-bordered input-sm" bind:value={testBody} placeholder="Body" />
+										<button class="btn btn-secondary btn-sm" type="button" onclick={sendTest} disabled={busy}>Send</button>
+									</div>
+								</div>
+
+								<!-- Notification Feed -->
+								<div class="rounded-md bg-base-200/40 px-4 py-3.5">
+									<p class="mb-2 text-sm font-medium">Notification Feed</p>
+									{#if notifications.length === 0}
+										<p class="text-xs text-base-content/55">No notifications recorded yet.</p>
+									{:else}
+										<div class="space-y-1.5">
+											{#each notifications as item (item.id)}
+												<div class="flex items-start justify-between gap-3 rounded-md bg-base-300/30 px-3 py-2">
+													<div class="min-w-0">
+														<p class="truncate text-sm font-medium">{item.title}</p>
+														<p class="truncate text-xs text-base-content/60">{item.body}</p>
+														<p class="mt-0.5 text-[10px] text-base-content/45">{new Date(item.createdAt).toLocaleString()}</p>
+													</div>
+													{#if item.read}
+														<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, false)}>Unread</button>
+													{:else}
+														<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, true)}>Read</button>
+													{/if}
+												</div>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							</div>
+						</ContentPanel>
 					</div>
 				{/if}
 			</div>
 		</div>
-	</ContentPanel>
-	{/if}
 	</div>
-
-	</div><!-- end max-w-6xl -->
-	</div><!-- end scroll -->
 </section>
-
-

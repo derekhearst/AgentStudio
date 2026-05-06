@@ -981,6 +981,26 @@ export async function executeTool(
 			if (call.name === 'image_generate') {
 				const input = toolSchemas.image_generate.parse(call.arguments)
 				const result = await generateImage(input.prompt, input.model, input.size)
+				// Record the generated image so it appears in the /artifacts feed.
+				// Best-effort: failures here must NOT bubble up — the image was generated
+				// successfully and the model needs to see the URL even if our audit insert
+				// fails (DB hiccup, transient issue, …).
+				try {
+					const { recordGeneratedImage } = await import('$lib/images/images.server')
+					const conversationId = await resolveConversationFromRunId(runId ?? null)
+					await recordGeneratedImage({
+						userId,
+						conversationId,
+						runId: runId ?? null,
+						prompt: result.prompt,
+						model: result.model,
+						size: result.size,
+						url: result.url,
+						costUsd: result.cost,
+					})
+				} catch (err) {
+					console.warn('[tools] recordGeneratedImage failed (non-fatal)', err)
+				}
 				return {
 					success: true,
 					tool: call.name,

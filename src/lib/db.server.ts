@@ -53,6 +53,7 @@ import * as evaluationsSchema from '$lib/evaluations/evaluations.schema'
 import * as projectsSchema from '$lib/projects/projects.schema'
 import * as jobsSchema from '$lib/jobs/jobs.schema'
 import * as researchSchema from '$lib/research/research.schema'
+import * as imagesSchema from '$lib/images/images.schema'
 import * as observabilitySchema from '$lib/observability/observability.schema'
 import * as sourceControlSchema from '$lib/source-control/source-control.schema'
 import { readMigrationFiles } from 'drizzle-orm/migrator'
@@ -84,6 +85,7 @@ const schema = {
 	...projectsSchema,
 	...jobsSchema,
 	...researchSchema,
+	...imagesSchema,
 	...observabilitySchema,
 	...sourceControlSchema,
 }

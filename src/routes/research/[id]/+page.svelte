@@ -114,7 +114,7 @@
 	{@const r = detail.research}
 	{@const inFlight = isInFlight(r.status)}
 	<section class="space-y-3 sm:space-y-4">
-		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/research">← All research</a>
+		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/artifacts">← All artifacts</a>
 
 		<ContentPanel>
 			{#snippet header()}

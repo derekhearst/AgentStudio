@@ -110,9 +110,9 @@
 				</a>
 			</li>
 			<li>
-				<a href="/research" class:menu-active={isActive('/research')} onclick={onNavigate}>
-					<i class="mdi mdi-magnify text-base shrink-0 opacity-60"></i>
-					Research
+				<a href="/artifacts" class:menu-active={isActive('/artifacts')} onclick={onNavigate}>
+					<i class="mdi mdi-folder-multiple-outline text-base shrink-0 opacity-60"></i>
+					Artifacts
 				</a>
 			</li>
 		</ul>
