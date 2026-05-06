@@ -14,13 +14,25 @@
 		{ href: '/activity', label: 'Activity' },
 		{ href: '/skills', label: 'Skills' },
 		{ href: '/automations', label: 'Automations' },
-		{ href: '/cost', label: 'Cost' },
-		{ href: '/settings', label: 'Settings' }
+		{ href: '/cost', label: 'Cost' }
 	] as const;
 
-	let moreLabel = $derived(moreItems.find((m) => activePath.startsWith(m.href))?.label);
+	let moreActive = $derived(moreItems.some((m) => activePath.startsWith(m.href)));
 
 	let moreOpen = $state(false);
+
+	$effect(() => {
+		if (!moreOpen) return;
+		const handler = (event: MouseEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (!target?.closest('.dock .dropdown')) moreOpen = false;
+		};
+		const t = setTimeout(() => window.addEventListener('click', handler), 0);
+		return () => {
+			clearTimeout(t);
+			window.removeEventListener('click', handler);
+		};
+	});
 </script>
 
 <nav
@@ -49,18 +61,28 @@
 			<span class="dock-label">Agents</span>
 		</a>
 
+		<a
+			href="/settings"
+			class:dock-active={isActive('/settings')}
+			onclick={onNavigate}
+			aria-label="Settings"
+		>
+			<i class="mdi mdi-cog-outline text-xl"></i>
+			<span class="dock-label">Settings</span>
+		</a>
+
 		<!-- More menu — DaisyUI dropdown opening upward -->
 		<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={moreOpen}>
 			<button
 				type="button"
-				class:dock-active={!!moreLabel || moreOpen}
+				class:dock-active={moreActive || moreOpen}
 				onclick={() => (moreOpen = !moreOpen)}
 				aria-label="More"
 				aria-haspopup="true"
 				aria-expanded={moreOpen}
 			>
-				<i class="mdi mdi-dots-vertical text-xl"></i>
-				<span class="dock-label">{moreLabel ?? 'More'}</span>
+				<i class="mdi mdi-view-grid-outline text-xl"></i>
+				<span class="dock-label">More</span>
 			</button>
 			{#if moreOpen}
 				<ul
@@ -89,6 +111,34 @@
 <style>
 	.safe-bottom {
 		padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+	}
+
+	:global(.dock .dock-active) {
+		background-color: color-mix(in oklch, var(--color-primary) 14%, transparent);
+		color: var(--color-primary);
+		border-radius: 1rem;
+	}
+
+	:global(.dock .dock-active::before),
+	:global(.dock .dock-active::after) {
+		display: none;
+	}
+
+	:global(.dock > .dropdown) {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+	}
+
+	:global(.dock > .dropdown > button) {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		width: 100%;
+		height: 100%;
+		gap: 1px;
 	}
 
 	.mobile-nav-slide-off {
