@@ -1,7 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit'
 import { listActiveChatRunsForUser } from '$lib/runs'
-
-const encoder = new TextEncoder()
+import { encodeSseData } from '$lib/runtime/sse-codec'
 
 export const GET: RequestHandler = ({ request, locals }) => {
 	if (!locals.user) {
@@ -15,9 +14,8 @@ export const GET: RequestHandler = ({ request, locals }) => {
 		start(controller) {
 			const emitSnapshot = async () => {
 				const runs = await listActiveChatRunsForUser(userId)
-				const payload = encoder.encode(`data: ${JSON.stringify(runs)}\n\n`)
 				try {
-					controller.enqueue(payload)
+					controller.enqueue(encodeSseData(runs))
 				} catch {
 					if (intervalId) clearInterval(intervalId)
 				}

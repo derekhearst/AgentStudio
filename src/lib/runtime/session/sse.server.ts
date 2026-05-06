@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
 import { appendRunEvent } from '$lib/runs/events.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { encodeSseFrame } from '../sse-codec'
 import type { RunPatch, Session } from '../types'
 
 /**
@@ -18,12 +19,6 @@ import type { RunPatch, Session } from '../types'
  */
 
 const NON_PERSISTED_EVENTS = new Set(['delta', 'reasoning'])
-const encoder = new TextEncoder()
-
-function encodeSse(name: string, payload: unknown, seq?: number): Uint8Array {
-	const idLine = seq === undefined ? '' : `id: ${seq}\n`
-	return encoder.encode(`${idLine}event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
-}
 
 export type SseSessionOptions = {
 	runId: string
@@ -84,7 +79,7 @@ export function createSseSession(opts: SseSessionOptions): Session & {
 					})
 				}
 			}
-			safeEnqueue(encodeSse(eventName, payload, seq))
+			safeEnqueue(encodeSseFrame(eventName, payload, seq))
 		},
 		async updateRun(patch: RunPatch) {
 			const now = Date.now()

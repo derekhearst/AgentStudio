@@ -3,16 +3,8 @@ import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, runEvents } from '$lib/runs/runs.schema'
 import { ACTIVE_CHAT_RUN_STATES } from '$lib/runs/runs.server'
-
-const TERMINAL_STATES = ['completed', 'failed', 'canceled'] as const
-const POLL_INTERVAL_MS = 500
-
-const encoder = new TextEncoder()
-
-function sse(name: string, payload: unknown, seq?: number) {
-	const idLine = seq === undefined ? '' : `id: ${seq}\n`
-	return encoder.encode(`${idLine}event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
-}
+import { encodeSseFrame } from '$lib/runtime/sse-codec'
+import { POLL_INTERVAL_MS } from '$lib/runtime/constants'
 
 export const GET: RequestHandler = async ({ params, url, locals }) => {
 	if (!locals.user) {
@@ -67,7 +59,7 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 					.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
 					.orderBy(asc(runEvents.seq))
 				for (const ev of replay) {
-					enqueue(sse(ev.type, ev.payload, ev.seq))
+					enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
 					lastSeq = ev.seq
 				}
 			} catch (err) {
@@ -75,14 +67,14 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 					runId,
 					error: err instanceof Error ? err.message : String(err),
 				})
-				enqueue(sse('done', { error: 'Resume replay failed' }))
+				enqueue(encodeSseFrame('done', { error: 'Resume replay failed' }))
 				if (clientConnected) controller.close()
 				return
 			}
 
 			// If the run was already terminal when we started, send a synthetic done and close.
 			if (!isActive) {
-				enqueue(sse('done', { resumed: true, terminal: true }))
+				enqueue(encodeSseFrame('done', { resumed: true, terminal: true }))
 				if (clientConnected) controller.close()
 				return
 			}
@@ -95,7 +87,7 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 					.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
 					.orderBy(asc(runEvents.seq))
 				for (const ev of tail) {
-					enqueue(sse(ev.type, ev.payload, ev.seq))
+					enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
 					lastSeq = ev.seq
 				}
 
@@ -107,7 +99,7 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 						.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
 						.orderBy(asc(runEvents.seq))
 					for (const ev of final) {
-						enqueue(sse(ev.type, ev.payload, ev.seq))
+						enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
 						lastSeq = ev.seq
 					}
 					break

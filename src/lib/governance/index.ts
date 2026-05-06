@@ -10,7 +10,6 @@ export {
 	auditUserCreated,
 	auditUserDeactivated,
 	auditUserRoleChanged,
-	diffTopLevelKeys,
 	type RecordAuditEventInput,
 } from './governance.server'
 export { listAuditEventsQuery } from './governance.remote'

@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
 import { appendRunEvent } from '$lib/runs/events.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { encodeSseFrame } from '../sse-codec'
 import type { RunPatch, Session } from '../types'
 
 /**
@@ -21,11 +22,6 @@ import type { RunPatch, Session } from '../types'
  */
 
 const NON_PERSISTED_EVENTS = new Set(['delta', 'reasoning'])
-const encoder = new TextEncoder()
-
-function encodeSse(name: string, payload: unknown): Uint8Array {
-	return encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
-}
 
 /**
  * How the forwarded Session translates the canonical loop event names into sub-agent-prefixed
@@ -102,7 +98,7 @@ export function createForwardedSession(opts: ForwardedSessionOptions): Session &
 			// Translate + forward to the parent stream, if the event is in the forward map.
 			const forwardedName = eventName in map ? map[eventName] : `subagent_${eventName}`
 			if (forwardedName) {
-				safeEnqueue(encodeSse(forwardedName, payload))
+				safeEnqueue(encodeSseFrame(forwardedName, payload))
 			}
 		},
 		async updateRun(patch: RunPatch) {

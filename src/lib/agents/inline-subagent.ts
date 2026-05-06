@@ -6,13 +6,8 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import type { LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { buildAgentDefinition, createForwardedSession, runChatLoop } from '$lib/runtime'
+import { encodeSseFrame } from '$lib/runtime/sse-codec'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
-
-const encoder = new TextEncoder()
-
-function sse(name: string, payload: unknown) {
-	return encoder.encode(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
-}
 
 export type SubagentStep = {
 	agentId: string
@@ -86,7 +81,7 @@ export async function runInlineSubagent(
 
 	// Subagent-specific lifecycle event: announce the start to the parent UI.
 	controller.enqueue(
-		sse('subagent_start', {
+		encodeSseFrame('subagent_start', {
 			agentId: agent.id,
 			agentName: agent.name,
 			conversationId: subConversation.id,
@@ -169,7 +164,7 @@ export async function runInlineSubagent(
 		})
 
 		controller.enqueue(
-			sse('subagent_done', {
+			encodeSseFrame('subagent_done', {
 				agentId: agent.id,
 				agentName: agent.name,
 				conversationId: subConversation.id,

@@ -2,8 +2,6 @@ import { db } from '$lib/db.server'
 import { auditEvents, type AuditAction, type AuditEventRow } from './governance.schema'
 import { diffTopLevelKeys } from './diff'
 
-export { diffTopLevelKeys } from './diff'
-
 /**
  * Wave 3 #12 phase 1 — audit event recorder.
  *

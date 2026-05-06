@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, type PendingApprovalEntry } from '$lib/runs/runs.schema'
+import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 
-export const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
-const POLL_INTERVAL_MS = 500
+export const APPROVAL_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
 type EnqueueInput = Omit<PendingApprovalEntry, 'decision' | 'decidedAt'>
 

@@ -22,8 +22,7 @@ import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { filterToolsByMode, getModePostureContent } from '$lib/chat/mode.server'
 import { runChatLoop, createSseSession } from '$lib/runtime'
-
-const encoder = new TextEncoder()
+import { encodeSseFrame } from '$lib/runtime/sse-codec'
 
 const DREAMING_ONLY_TOOLS = new Set<string>()
 
@@ -75,10 +74,7 @@ function extractReasoningFragment(details: ReasoningDetail[] | undefined) {
 		.join('\n\n')
 }
 
-function sse(name: string, payload: unknown, seq?: number) {
-	const idLine = seq === undefined ? '' : `id: ${seq}\n`
-	return encoder.encode(`${idLine}event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`)
-}
+const sse = encodeSseFrame
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) {
@@ -772,14 +768,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 
 				if (isFirstExchange && body.content) {
-					void generateTitle([
-						{ role: 'user', content: body.content.trim() },
-						{ role: 'assistant', content: allTextContent },
-					])
-						.then((title) => db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId)))
-						.catch(() => {
+					const userContent = body.content.trim()
+					void (async () => {
+						try {
+							const title = await generateTitle([
+								{ role: 'user', content: userContent },
+								{ role: 'assistant', content: allTextContent },
+							])
+							await db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId))
+						} catch {
 							// Non-critical — title stays as default
-						})
+						}
+					})()
 				}
 
 				await session.updateRun({
