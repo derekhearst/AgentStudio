@@ -67,22 +67,22 @@
 	{/snippet}
 
 	<!-- Summary stats -->
-	<div class="grid grid-cols-2 gap-2">
-		<div class="rounded-lg bg-base-200/60 px-3 py-2 text-center">
-			<p class="text-lg font-bold">{totalSkills}</p>
-			<p class="text-[11px] text-base-content/50">Total Skills</p>
+	<div class="stats stats-vertical bg-base-200/60 grid w-full grid-cols-2 shadow-sm">
+		<div class="stat place-items-center px-3 py-2">
+			<div class="stat-value text-lg">{totalSkills}</div>
+			<div class="stat-title text-base-content/50 text-[11px]">Total Skills</div>
 		</div>
-		<div class="rounded-lg bg-base-200/60 px-3 py-2 text-center">
-			<p class="text-lg font-bold">{enabledCount}</p>
-			<p class="text-[11px] text-base-content/50">Enabled</p>
+		<div class="stat place-items-center px-3 py-2">
+			<div class="stat-value text-lg">{enabledCount}</div>
+			<div class="stat-title text-base-content/50 text-[11px]">Enabled</div>
 		</div>
-		<div class="rounded-lg bg-base-200/60 px-3 py-2 text-center">
-			<p class="text-lg font-bold">{totalReads}</p>
-			<p class="text-[11px] text-base-content/50">Total Reads</p>
+		<div class="stat place-items-center px-3 py-2">
+			<div class="stat-value text-lg">{totalReads}</div>
+			<div class="stat-title text-base-content/50 text-[11px]">Total Reads</div>
 		</div>
-		<div class="rounded-lg bg-base-200/60 px-3 py-2 text-center">
-			<p class="text-lg font-bold">{totalFiles}</p>
-			<p class="text-[11px] text-base-content/50">Total Files</p>
+		<div class="stat place-items-center px-3 py-2">
+			<div class="stat-value text-lg">{totalFiles}</div>
+			<div class="stat-title text-base-content/50 text-[11px]">Total Files</div>
 		</div>
 	</div>
 

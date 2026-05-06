@@ -51,7 +51,7 @@
 	</div>
 
 	<div tabindex="-1" class="dropdown-content z-30 w-72 px-2 pt-2">
-		<div class="rounded-xl border border-base-300 bg-base-100/95 p-3 text-sm shadow-xl backdrop-blur">
+		<div class="card card-compact bg-base-100/95 border-base-300 rounded-xl border p-3 text-sm shadow-xl backdrop-blur">
 		<h3 class="mb-1 text-base font-semibold">Context Window</h3>
 		<p class="font-mono text-xs opacity-80">{usedK}K / {totalK}K tokens</p>
 

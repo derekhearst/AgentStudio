@@ -282,7 +282,7 @@
 	{#if attachments.length > 0}
 		<div class="flex flex-wrap gap-2 px-1">
 			{#each attachments as attachment (attachment.id)}
-				<div class="flex items-center gap-2 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-xs">
+				<div class="badge badge-outline badge-lg gap-2 bg-base-100">
 					<span class="max-w-44 truncate" title={attachment.filename}>{attachment.filename}</span>
 					<span class="text-base-content/60">{formatBytes(attachment.size)}</span>
 					<button

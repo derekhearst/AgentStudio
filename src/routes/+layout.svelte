@@ -58,9 +58,7 @@
 	onMount(() => {
 		if (!browser) return;
 
-		document.documentElement.setAttribute('data-theme', 'AgentStudio-night');
-		localStorage.setItem('AgentStudio-theme', 'AgentStudio-night');
-
+		// Theme is initialized synchronously in app.html (no FOUC) and mutated by ThemeToggle.
 		const root = document.documentElement;
 		let rafId = 0;
 		let pulseTimer: ReturnType<typeof setTimeout> | null = null;

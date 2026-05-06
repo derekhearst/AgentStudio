@@ -470,18 +470,18 @@
 		<div class="modal-box max-w-2xl">
 			<h3 class="mb-4 text-lg font-bold">Add File</h3>
 			<form onsubmit={(e) => { e.preventDefault(); handleAddFile(); }} class="space-y-3">
-				<div class="form-control">
-					<label class="label" for="file-name"><span class="label-text">File Name</span></label>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend"><label for="file-name">File Name</label></legend>
 					<input id="file-name" type="text" class="input input-bordered input-sm" placeholder="e.g. forms.md" bind:value={newFileName} required />
-				</div>
-				<div class="form-control">
-					<label class="label" for="file-desc"><span class="label-text">Description</span></label>
+				</fieldset>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend"><label for="file-desc">Description</label></legend>
 					<input id="file-desc" type="text" class="input input-bordered input-sm" placeholder="Short summary of this file's content" bind:value={newFileDesc} />
-				</div>
-				<div class="form-control">
-					<label class="label" for="file-content"><span class="label-text">Content (Markdown)</span></label>
+				</fieldset>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend"><label for="file-content">Content (Markdown)</label></legend>
 					<textarea id="file-content" class="textarea textarea-bordered min-h-48 text-sm" placeholder="File content..." bind:value={newFileContent} required></textarea>
-				</div>
+				</fieldset>
 				<div class="modal-action">
 					<button type="button" class="btn btn-ghost btn-sm" onclick={() => { showAddFile = false; addFileDialogEl?.close(); }}>Cancel</button>
 					<button type="submit" class="btn btn-primary btn-sm" disabled={busy || !newFileName.trim() || !newFileContent.trim()}>

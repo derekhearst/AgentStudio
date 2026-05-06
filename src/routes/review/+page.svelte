@@ -143,7 +143,7 @@
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
 	{:else if result.adminOnly}
-		<div class="rounded-2xl border border-warning/40 bg-warning/10 p-6 text-center">
+		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
 			<p class="text-sm font-medium">Admin only</p>
 			<p class="mt-1 text-xs opacity-70">The Review Inbox is visible only to users with the <code>admin</code> role.</p>
 		</div>
@@ -168,7 +168,7 @@
 		{/if}
 
 		{#if result.items.length === 0}
-			<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
+			<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 				No review items match the current filters.
 			</div>
 		{:else}
@@ -182,7 +182,7 @@
 				<ul class="space-y-1.5">
 					{#each result.items as item (item.id)}
 						{@const isOpen = expanded.has(item.id)}
-						<li class="rounded-xl border border-base-300/60 bg-base-100">
+						<li class="card card-body bg-base-100 border-base-300/60 rounded-xl border">
 							<button
 								type="button"
 								class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"

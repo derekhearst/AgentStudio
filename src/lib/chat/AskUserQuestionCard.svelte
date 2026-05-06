@@ -46,11 +46,9 @@
 			{#each question.options as option (option.label)}
 				<button
 					type="button"
-					class={`w-full rounded-xl border px-3 py-2 text-left transition-colors duration-150 ${
-						value === option.label
-							? 'border-primary/60 bg-primary/15 text-base-content ring-1 ring-primary/25'
-							: 'border-base-300/70 bg-base-200/35 text-base-content/95 hover:border-base-300 hover:bg-base-200/55'
-					}`}
+					class="card card-compact card-border w-full cursor-pointer p-3 text-left transition-colors duration-150 {value === option.label
+						? 'border-primary bg-primary/15 ring-primary/25 ring-1'
+						: 'border-base-300/70 bg-base-200/35 hover:border-base-300 hover:bg-base-200/55'}"
 					onclick={() => selectOption(option.label)}
 				>
 					<span class="block text-sm leading-tight">{option.label}</span>
@@ -58,7 +56,7 @@
 						<span class="mt-1 block text-[11px] leading-tight opacity-70">{option.description}</span>
 					{/if}
 					{#if option.recommended}
-						<span class="badge badge-xs mt-1 w-fit">Recommended</span>
+						<span class="badge badge-xs badge-primary mt-1 w-fit">Recommended</span>
 					{/if}
 				</button>
 			{/each}
@@ -66,14 +64,14 @@
 	{/if}
 
 	{#if question.allowFreeformInput ?? true}
-		<div class="mt-1">
+		<fieldset class="fieldset mt-1 p-0">
 			<textarea
-				class="min-h-16 w-full resize-y rounded-xl border border-base-300/70 bg-base-100 px-3 py-2 text-sm text-base-content transition-colors duration-150 placeholder:text-base-content/45 focus:border-primary/70 focus:outline-none focus:ring-2 focus:ring-primary/25"
+				class="textarea textarea-bordered min-h-16 w-full resize-y"
 				placeholder="Or write your own answer"
 				value={isCustomValue ? value : ''}
 				onfocus={handleCustomFocus}
 				oninput={(event) => updateCustomAnswer((event.currentTarget as HTMLTextAreaElement).value)}
 			></textarea>
-		</div>
+		</fieldset>
 	{/if}
 </div>

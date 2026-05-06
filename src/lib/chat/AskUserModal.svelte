@@ -83,8 +83,8 @@
 </script>
 
 {#if open}
-	<div class="relative mb-2 rounded-2xl border border-base-300 bg-base-200/95 shadow-xl">
-		<header class="flex items-center gap-2 border-b border-base-300 px-3 py-2.5">
+	<div class="card border-base-300 bg-base-200/95 relative mb-2 rounded-2xl border shadow-xl">
+		<header class="border-base-300 flex items-center gap-2 border-b px-3 py-2.5">
 			<p class="line-clamp-1 text-sm font-semibold">{activeQuestion?.question ?? 'Question'}</p>
 			<p class="ml-2 text-xs font-medium text-base-content/70">{Math.min(clampedQuestionIndex + 1, totalQuestions)} / {totalQuestions || 1}</p>
 			<div class="ml-auto flex items-center gap-1">
@@ -113,7 +113,7 @@
 				{/if}
 			</div>
 
-			<footer class="flex items-center gap-2 border-t border-base-300 bg-base-100/60 px-3 py-2.5">
+			<footer class="card-actions border-base-300 bg-base-100/60 flex items-center gap-2 border-t px-3 py-2.5">
 				<div class="flex items-center gap-1">
 					<button
 						class="btn btn-ghost btn-xs"

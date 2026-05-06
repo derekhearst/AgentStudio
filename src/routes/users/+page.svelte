@@ -143,21 +143,21 @@
 		<h3 class="text-lg font-semibold">Create account</h3>
 		<p class="mt-1 text-sm opacity-70">Usernames will be claimed on first passkey registration.</p>
 		<div class="mt-4 space-y-3">
-			<label class="form-control">
-				<span class="label-text">Username</span>
+			<fieldset class="fieldset">
+				<legend class="fieldset-legend">Username</legend>
 				<input class="input input-bordered" bind:value={username} placeholder="jane" />
-			</label>
-			<label class="form-control">
-				<span class="label-text">Display name</span>
+			</fieldset>
+			<fieldset class="fieldset">
+				<legend class="fieldset-legend">Display name</legend>
 				<input class="input input-bordered" bind:value={name} placeholder="Jane" />
-			</label>
-			<label class="form-control">
-				<span class="label-text">Role</span>
+			</fieldset>
+			<fieldset class="fieldset">
+				<legend class="fieldset-legend">Role</legend>
 				<select class="select select-bordered" bind:value={role}>
 					<option value="user">user</option>
 					<option value="admin">admin</option>
 				</select>
-			</label>
+			</fieldset>
 		</div>
 		<div class="modal-action">
 			<button class="btn" type="button" onclick={() => (showCreate = false)}>Cancel</button>

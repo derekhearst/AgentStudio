@@ -5,9 +5,9 @@
 	let { name, size = 'md' }: Props = $props();
 
 	const sizeClassMap = {
-		sm: 'h-8 w-8 text-xs',
-		md: 'h-10 w-10 text-sm',
-		lg: 'h-14 w-14 text-lg'
+		sm: 'w-8 text-xs',
+		md: 'w-10 text-sm',
+		lg: 'w-14 text-lg'
 	} as const;
 
 	function toHue(input: string) {
@@ -30,10 +30,26 @@
 	const hue = $derived(toHue(name));
 </script>
 
-<div
-	class={`grid place-content-center rounded-2xl font-semibold text-white shadow-sm ${sizeClassMap[size]}`}
-	style={`background: linear-gradient(140deg, hsl(${hue} 75% 52%), hsl(${(hue + 50) % 360} 82% 46%));`}
-	aria-label={`Avatar for ${name}`}
->
-	{initials}
+<div class="avatar avatar-placeholder" aria-label={`Avatar for ${name}`} style={`--avatar-hue: ${hue};`}>
+	<div class={`avatar-tint text-primary-content rounded-2xl font-semibold shadow-sm ${sizeClassMap[size]}`}>
+		<span>{initials}</span>
+	</div>
 </div>
+
+<style>
+	.avatar-tint {
+		background: linear-gradient(
+			140deg,
+			oklch(60% 0.18 var(--avatar-hue)),
+			oklch(54% 0.20 calc(var(--avatar-hue) + 50))
+		);
+	}
+
+	:global([data-theme='AgentStudio']) .avatar-tint {
+		background: linear-gradient(
+			140deg,
+			oklch(54% 0.16 var(--avatar-hue)),
+			oklch(48% 0.18 calc(var(--avatar-hue) + 50))
+		);
+	}
+</style>

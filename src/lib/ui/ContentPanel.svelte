@@ -25,7 +25,9 @@
 </script>
 
 <section
-	class="{bare ? 'flex h-full flex-col' : `rounded-xl border border-base-300 bg-base-100 sm:rounded-2xl ${compact ? 'p-2 sm:p-3' : 'p-2.5 sm:p-4'}`} {className}"
+	class="{bare
+		? 'flex h-full flex-col'
+		: `card bg-base-100 border-base-300 rounded-xl border sm:rounded-2xl ${compact ? 'p-2 sm:p-3' : 'p-2.5 sm:p-4'}`} {className}"
 >
 	{#if hasBar}
 		<div class="flex flex-wrap items-center justify-between gap-2">

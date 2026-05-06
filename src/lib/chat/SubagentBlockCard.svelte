@@ -36,8 +36,8 @@
 	const completedTools = $derived(toolCalls.filter((t: { name: string; success?: boolean }) => t.success !== undefined).length);
 </script>
 
-<details class={`subagent-block rounded-xl border ${colorClass} transition-all duration-300`} open={expanded}>
-	<summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium select-none">
+<details class={`collapse collapse-arrow subagent-block rounded-xl border ${colorClass} transition-all duration-300`} open={expanded}>
+	<summary class="collapse-title flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium select-none min-h-0">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			{#if isRunning}
 				<svg class="h-4 w-4 shrink-0 animate-spin text-primary" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -72,19 +72,9 @@
 			{/if}
 		</div>
 
-		<svg
-			class="h-4 w-4 shrink-0 transition-transform duration-200"
-			class:rotate-180={expanded}
-			viewBox="0 0 24 24"
-			fill="none"
-			stroke="currentColor"
-			stroke-width="2"
-		>
-			<path d="m6 9 6 6 6-6" />
-		</svg>
 	</summary>
 
-	<div class="space-y-2 px-3 pb-3">
+	<div class="collapse-content space-y-2 px-3 pb-3">
 		<p class="text-xs text-base-content/50 italic">{task}</p>
 
 		{#if toolCalls.length > 0}

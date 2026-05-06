@@ -27,8 +27,8 @@
 	);
 </script>
 
-<details class="thinking-card rounded-xl border border-info/50 bg-info/10 transition-all duration-300" open={expanded}>
-	<summary class="flex cursor-pointer items-center gap-3 px-4 py-3 select-none">
+<details class="collapse collapse-arrow thinking-card border-info/50 bg-info/10 rounded-xl border transition-all duration-300" open={expanded}>
+	<summary class="collapse-title flex cursor-pointer items-center gap-3 px-4 py-3 select-none min-h-0">
 		<div class="flex h-7 w-7 shrink-0 items-center justify-center text-info">
 			{#if live && !content.trim()}
 				<span class="loading loading-spinner loading-xs"></span>
@@ -55,12 +55,9 @@
 			</div>
 			<p class="truncate text-xs text-base-content/60">{preview}</p>
 		</div>
-		<svg class="thinking-chevron h-4 w-4 shrink-0 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-			<polyline points="6 9 12 15 18 9" />
-		</svg>
 	</summary>
 
-	<div class="px-4 pb-4">
+	<div class="collapse-content px-4 pb-4">
 		{#if content.trim()}
 			<div class="markdown-body rounded-xl border border-base-300/65 bg-base-100/85 px-3 py-3 text-sm leading-6 text-base-content/85">{@html renderMarkdown(content)}</div>
 		{:else}
@@ -72,12 +69,3 @@
 	</div>
 </details>
 
-<style>
-	details .thinking-chevron {
-		transition: transform 180ms ease;
-	}
-
-	details[open] .thinking-chevron {
-		transform: rotate(180deg);
-	}
-</style>

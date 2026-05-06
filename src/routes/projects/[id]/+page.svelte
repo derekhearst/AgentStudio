@@ -120,8 +120,8 @@
 			{#if formOpen}
 				<form class="mt-3 grid gap-2 rounded-xl border border-base-300/60 bg-base-200/40 p-3 text-sm" onsubmit={submitCreate}>
 					<div class="grid gap-2 sm:grid-cols-[2fr_1fr]">
-						<label class="form-control">
-							<span class="label-text text-xs">Name</span>
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend text-xs">Name</legend>
 							<input
 								type="text"
 								class="input input-sm input-bordered"
@@ -130,25 +130,25 @@
 								maxlength="160"
 								required
 							/>
-						</label>
-						<label class="form-control">
-							<span class="label-text text-xs">Content type</span>
+						</fieldset>
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend text-xs">Content type</legend>
 							<select class="select select-sm select-bordered" bind:value={formContentType}>
 								{#each CONTENT_TYPES as t (t.value)}
 									<option value={t.value}>{t.label}</option>
 								{/each}
 							</select>
-						</label>
+						</fieldset>
 					</div>
-					<label class="form-control">
-						<span class="label-text text-xs">Initial content (will be saved as v1)</span>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Initial content (will be saved as v1)</legend>
 						<textarea
 							class="textarea textarea-bordered font-mono text-xs"
 							bind:value={formContent}
 							placeholder="Type or paste content here…"
 							rows="8"
 						></textarea>
-					</label>
+					</fieldset>
 					{#if formError}
 						<div class="alert alert-error py-2 text-xs">{formError}</div>
 					{/if}

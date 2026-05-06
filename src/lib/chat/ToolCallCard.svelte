@@ -86,8 +86,8 @@
 	});
 </script>
 
-<details class={`tool-call-card rounded-xl border ${colorClass} transition-all duration-300`} open={isOpen}>
-	<summary class="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium select-none">
+<details class={`collapse collapse-arrow tool-call-card rounded-xl border ${colorClass} transition-all duration-300`} open={isOpen}>
+	<summary class="collapse-title flex cursor-pointer items-center gap-2 px-3 py-2 text-sm font-medium select-none min-h-0">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			{#if statusIcon === 'pending'}
 				<svg class="h-4 w-4 shrink-0 text-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -152,13 +152,10 @@
 			{:else if isFailed}
 				<span class="text-xs text-error/70">failed</span>
 			{/if}
-			<svg class="tool-chevron h-4 w-4 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-				<polyline points="6 9 12 15 18 9" />
-			</svg>
 		</div>
 	</summary>
 
-	<div class="space-y-2 px-3 pb-3">
+	<div class="collapse-content space-y-2 px-3 pb-3">
 		{#if argumentsText}
 			<pre class="overflow-x-auto rounded-lg bg-base-100 p-2 text-xs">{argumentsText}</pre>
 		{/if}
@@ -195,12 +192,3 @@
 	</div>
 </details>
 
-<style>
-	details .tool-chevron {
-		transition: transform 180ms ease;
-	}
-
-	details[open] .tool-chevron {
-		transform: rotate(180deg);
-	}
-</style>

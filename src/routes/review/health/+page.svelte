@@ -133,7 +133,7 @@
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
 	{:else if result.adminOnly}
-		<div class="rounded-2xl border border-warning/40 bg-warning/10 p-6 text-center">
+		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
 			<p class="text-sm font-medium">Admin only</p>
 			<p class="mt-1 text-xs opacity-70">
 				Platform Health is visible only to users with the <code>admin</code> role.
@@ -160,7 +160,7 @@
 		{/if}
 
 		{#if result.entries.length === 0}
-			<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
+			<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 				No metric samples yet. The 5-minute sampler runs after the first scheduled tick — wait
 				up to ~5 minutes for the first row, or trigger an enqueue manually via
 				<code>metrics_sample</code> in the jobs admin.

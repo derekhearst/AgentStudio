@@ -272,7 +272,7 @@
 	<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
 		<div>
 			{#if loading}
-				<div class="flex justify-center rounded-2xl border border-base-300 bg-base-100 py-16">
+				<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">
 					<span class="loading loading-spinner loading-lg text-primary"></span>
 				</div>
 			{:else if sortedRows.length === 0}
@@ -382,25 +382,25 @@
 						void createAutomation();
 					}}
 				>
-					<label class="form-control">
-						<div class="label"><span class="label-text text-xs">Description</span></div>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Description</legend>
 						<input
 							class="input input-bordered"
 							placeholder="Daily customer sentiment scan"
 							bind:value={description}
 							oninput={clearCreateMessage}
 						/>
-					</label>
+					</fieldset>
 
-					<label class="form-control">
-						<div class="label"><span class="label-text text-xs">Agent</span></div>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Agent</legend>
 						<select class="select select-bordered" bind:value={selectedAgentId} oninput={clearCreateMessage}>
 							<option value="orchestrator">Orchestrator (default)</option>
 							{#each agents as agent (agent.id)}
 								<option value={agent.id}>{agent.name} ({agent.status})</option>
 							{/each}
 						</select>
-					</label>
+					</fieldset>
 
 					<div class="space-y-2">
 						<div class="flex items-center justify-between">
@@ -501,15 +501,15 @@
 						{/if}
 					</div>
 
-					<label class="form-control">
-						<div class="label"><span class="label-text text-xs">Prompt</span></div>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Prompt</legend>
 						<textarea
 							class="textarea textarea-bordered min-h-28"
 							placeholder="What should this automation do every run?"
 							bind:value={prompt}
 							oninput={clearCreateMessage}
 						></textarea>
-					</label>
+					</fieldset>
 
 					<label class="label cursor-pointer justify-start gap-2 rounded-lg border border-base-300/70 bg-base-200/20 px-3 py-2">
 						<input class="toggle toggle-success toggle-sm" type="checkbox" bind:checked={enabled} />

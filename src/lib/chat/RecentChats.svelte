@@ -259,33 +259,35 @@
 		{:else}
 			{#each grouped as group (group.label)}
 				<div>
-					<p class="mb-2 text-xs font-semibold uppercase tracking-wider text-base-content/50">{group.label}</p>
-					<div class="space-y-1">
+					<p class="text-base-content/50 mb-2 text-xs font-semibold uppercase tracking-wider">{group.label}</p>
+					<ul class="list bg-transparent p-0">
 						{#each group.items as conversation (conversation.id)}
 							{@const run = runFor(conversation)}
-							<a
-								href={`/chat/${conversation.id}`}
-								class="block rounded-xl px-2.5 py-2 text-sm transition-colors hover:bg-base-200"
-							>
-								<span class="flex items-center gap-2">
-									{#if run}
-										<span
-											class="inline-flex h-2.5 w-2.5 shrink-0 rounded-full {run.state === 'running' || run.state === 'queued' ? 'animate-pulse bg-info' : 'bg-warning'}"
-											aria-label={runLabel(run)}
-										></span>
-									{/if}
-									<span class="line-clamp-1 font-medium">{conversation.title}</span>
-								</span>
-								<span class="mt-0.5 line-clamp-1 text-xs text-base-content/50">
-									{#if run}
-										{runLabel(run)}
-									{:else}
-										{conversation.lastMessage ?? 'No messages yet'}
-									{/if}
-								</span>
-							</a>
+							<li class="chat-list-item p-0">
+								<a
+									href={`/chat/${conversation.id}`}
+									class="hover:bg-base-200 block rounded-xl px-2.5 py-2 text-sm transition-colors"
+								>
+									<span class="flex items-center gap-2">
+										{#if run}
+											<span
+												class="status status-md {run.state === 'running' || run.state === 'queued' ? 'status-info animate-pulse' : 'status-warning'}"
+												aria-label={runLabel(run)}
+											></span>
+										{/if}
+										<span class="line-clamp-1 font-medium">{conversation.title}</span>
+									</span>
+									<span class="text-base-content/50 mt-0.5 line-clamp-1 text-xs">
+										{#if run}
+											{runLabel(run)}
+										{:else}
+											{conversation.lastMessage ?? 'No messages yet'}
+										{/if}
+									</span>
+								</a>
+							</li>
 						{/each}
-					</div>
+					</ul>
 				</div>
 			{/each}
 		{/if}
@@ -303,7 +305,7 @@
 				<div
 					tabindex="0"
 					role="button"
-					class="w-full cursor-default space-y-1.5 rounded-xl border border-base-300/60 bg-base-100/70 p-2.5"
+					class="card card-compact bg-base-100/70 border-base-300/60 w-full cursor-default space-y-1.5 rounded-xl border p-2.5"
 					aria-label={`Context window ${sidebarContext.label}`}
 				>
 					<div class="flex items-center justify-between text-[11px] font-medium uppercase tracking-wide text-base-content/60">
@@ -320,7 +322,7 @@
 				</div>
 
 				<div tabindex="-1" class="dropdown-content z-30 mb-2 w-full">
-					<div class="rounded-xl border border-base-300 bg-base-100/95 p-3 text-sm shadow-xl backdrop-blur">
+					<div class="card card-compact bg-base-100/95 border-base-300 rounded-xl border p-3 text-sm shadow-xl backdrop-blur">
 						<h3 class="mb-1 text-base font-semibold">Context Window</h3>
 						<p class="font-mono text-xs opacity-80">{usedK}K / {totalK}K tokens</p>
 

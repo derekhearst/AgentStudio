@@ -81,7 +81,7 @@
 </script>
 
 <article class="plan-proposal-card chat chat-start w-full">
-	<div class={`w-full max-w-full rounded-2xl border ${containerClass} px-4 py-3`}>
+	<div class={`card card-body w-full max-w-full rounded-2xl border ${containerClass} px-4 py-3`}>
 		<header class="mb-3 flex items-center gap-2 text-sm">
 			<span class={`badge badge-sm ${isDenied ? 'badge-error' : isApproved ? 'badge-success' : 'badge-warning'}`}>
 				{headerLabel}

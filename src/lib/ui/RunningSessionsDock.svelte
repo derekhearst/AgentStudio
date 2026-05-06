@@ -36,14 +36,14 @@
 	function stateChipClass(state: LiveRun['state']): string {
 		switch (state) {
 			case 'running':
-				return 'bg-success/20 text-success';
+				return 'badge badge-success badge-soft badge-xs';
 			case 'queued':
-				return 'bg-base-300/50 text-base-content/60';
+				return 'badge badge-ghost badge-xs';
 			case 'waiting_tool_approval':
 			case 'waiting_user_input':
-				return 'bg-warning/20 text-warning';
+				return 'badge badge-warning badge-soft badge-xs';
 			default:
-				return 'bg-base-300/50 text-base-content/60';
+				return 'badge badge-ghost badge-xs';
 		}
 	}
 
@@ -83,11 +83,11 @@
 </script>
 
 {#if runs.length > 0}
-	<div class="mx-2 mb-3 rounded-xl border border-base-300/50 bg-base-200/30 p-2">
+	<div class="card bg-base-200/30 border-base-300/50 mx-2 mb-3 rounded-xl border p-2">
 		<div class="mb-1.5 flex items-center justify-between px-0.5">
 			<p class="text-[10px] font-semibold uppercase tracking-widest opacity-40">Running</p>
 			{#if pendingCount > 0}
-				<span class="rounded-full bg-warning/25 px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+				<span class="badge badge-warning badge-soft badge-xs">
 					{pendingCount} pending
 				</span>
 			{/if}
@@ -95,41 +95,39 @@
 
 		<div class="space-y-0.5">
 			{#each runs.slice(0, 5) as run (run.id)}
-				<div class="group/run flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors hover:bg-base-200/60">
+				<div
+					class="group/run hover:bg-base-200/60 flex min-w-0 items-center gap-1 rounded-lg pr-1 transition-colors"
+				>
 					<a
 						href="/chat/{run.conversationId}"
 						class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-xs"
 					>
-						<!-- pulse dot for running state -->
+						<!-- status indicator -->
 						{#if run.state === 'running'}
-							<span class="relative flex size-2 shrink-0">
-								<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60"></span>
-								<span class="relative inline-flex size-2 rounded-full bg-success"></span>
-							</span>
+							<span class="status status-success status-md animate-pulse"></span>
+						{:else if run.state === 'waiting_tool_approval' || run.state === 'waiting_user_input'}
+							<span class="status status-warning status-md"></span>
 						{:else}
-							<span class="size-2 shrink-0 rounded-full {run.state === 'waiting_tool_approval' || run.state === 'waiting_user_input' ? 'bg-warning' : 'bg-base-300'}"></span>
+							<span class="status status-md"></span>
 						{/if}
 
 						<span class="min-w-0 flex-1 truncate opacity-80">
 							{run.label?.trim() || 'Chat'}
 						</span>
 
-						<span class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] {stateChipClass(run.state)}">
+						<span class={stateChipClass(run.state)}>
 							{stateLabel(run.state)}
 						</span>
 					</a>
 					<button
 						type="button"
-						class="shrink-0 rounded-md p-1 opacity-40 hover:bg-error/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
+						class="btn btn-ghost btn-xs btn-square opacity-40 hover:opacity-100"
 						title="Dismiss this run"
 						aria-label="Dismiss run"
 						disabled={!!dismissingId}
 						onclick={(e) => handleDismiss(e, run.id)}
 					>
-						<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-							<line x1="18" y1="6" x2="6" y2="18" />
-							<line x1="6" y1="6" x2="18" y2="18" />
-						</svg>
+						<i class="mdi mdi-close text-xs" aria-hidden="true"></i>
 					</button>
 				</div>
 			{/each}

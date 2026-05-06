@@ -117,8 +117,8 @@
 
 		{#if formOpen}
 			<form class="mt-3 grid gap-2 rounded-xl border border-base-300/60 bg-base-200/40 p-3 text-sm" onsubmit={submitStart}>
-				<label class="form-control">
-					<span class="label-text text-xs">What do you want to research?</span>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend text-xs">What do you want to research?</legend>
 					<textarea
 						class="textarea textarea-bordered text-sm"
 						bind:value={formQuery}
@@ -127,7 +127,7 @@
 						maxlength="2000"
 						required
 					></textarea>
-				</label>
+				</fieldset>
 				{#if formError}
 					<div class="alert alert-error py-2 text-xs">{formError}</div>
 				{/if}
@@ -150,7 +150,7 @@
 	{:else if error}
 		<div class="alert alert-error text-sm">{error}</div>
 	{:else if runs.length === 0}
-		<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
+		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 			No research runs yet. Start one above to investigate a topic across multiple sources.
 		</div>
 	{:else}

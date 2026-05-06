@@ -33,22 +33,22 @@ test.describe('mobile — navigation + layout', () => {
 		})
 	})
 
-	test('More popover: secondary nav links reachable', async ({ page, context }) => {
+	test('More dropdown: secondary nav links reachable', async ({ page, context }) => {
 		await authenticateContext(context)
 		await withErrorCapture(page, async () => {
 			await page.goto('/')
 			await page.waitForLoadState('domcontentloaded')
 
-			// Open the More popover
+			// Open the More dropdown
 			await page.locator('nav.z-20').getByRole('button', { name: /More/ }).click()
 
-			// Each link in the popover should be visible
-			const popover = page.locator('#mobile-more-menu')
-			await expect(popover).toBeVisible({ timeout: 3_000 })
-			await expect(popover.getByRole('link', { name: 'Activity' })).toBeVisible()
-			await expect(popover.getByRole('link', { name: 'Skills' })).toBeVisible()
-			await expect(popover.getByRole('link', { name: 'Cost' })).toBeVisible()
-			await expect(popover.getByRole('link', { name: 'Settings' })).toBeVisible()
+			// Each link in the DaisyUI dropdown content should be visible
+			const dropdown = page.locator('nav.z-20 .dropdown-content')
+			await expect(dropdown).toBeVisible({ timeout: 3_000 })
+			await expect(dropdown.getByRole('link', { name: 'Activity' })).toBeVisible()
+			await expect(dropdown.getByRole('link', { name: 'Skills' })).toBeVisible()
+			await expect(dropdown.getByRole('link', { name: 'Cost' })).toBeVisible()
+			await expect(dropdown.getByRole('link', { name: 'Settings' })).toBeVisible()
 		})
 	})
 

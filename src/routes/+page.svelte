@@ -377,7 +377,7 @@
 	<!-- Scrim -->
 	<button
 		type="button"
-		class="chat-tray-scrim fixed inset-0 z-10"
+		class="bottom-sheet-scrim fixed inset-0 z-10"
 		onclick={closeChatList}
 		aria-label="Close chat list"
 		transition:fade={{ duration: 200 }}
@@ -386,7 +386,7 @@
 	<!-- Tray panel -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="chat-tray fixed inset-x-0 bottom-0 z-20 flex max-h-[80vh] flex-col rounded-t-2xl border-t border-base-300 bg-base-100/95 pb-14 shadow-2xl backdrop-blur-xl tablet:rounded-t-3xl desktop:pb-0 tablet:hidden"
+		class="bottom-sheet fixed inset-x-0 bottom-0 z-20 flex max-h-[80vh] flex-col rounded-t-2xl border-t border-base-300 bg-base-100/95 pb-14 shadow-2xl backdrop-blur-xl tablet:rounded-t-3xl desktop:pb-0 tablet:hidden"
 		style="transform: translateY({trayDragging && trayDragY > 0 ? trayDragY + 'px' : '0'}); transition: {trayDragging ? 'none' : 'transform 200ms ease-out'};"
 		transition:fly={{ y: 400, duration: 380, easing: cubicOut }}
 		ontouchstart={onTrayTouchStart}
@@ -446,7 +446,7 @@
 	<div class="fixed inset-0 z-20 hidden px-5 py-8 tablet:flex desktop:hidden" transition:fade={{ duration: 180 }}>
 		<div class="mx-auto flex h-full w-full max-w-4xl items-stretch">
 			<div
-				class="flex w-full min-h-0 flex-col overflow-hidden rounded-3xl border border-base-300 bg-base-100/95 shadow-2xl backdrop-blur-xl"
+				class="flex w-full min-h-0 flex-col overflow-hidden card card-body bg-base-100/95 border-base-300 rounded-3xl border shadow-2xl backdrop-blur-xl"
 				transition:scale={{ duration: 220, start: 0.96, easing: cubicOut }}
 			>
 				<div class="shrink-0 border-b border-base-300/70 px-6 py-5">

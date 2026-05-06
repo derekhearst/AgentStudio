@@ -31,10 +31,8 @@
 	})
 	let search = $state('')
 	let open = $state(false)
-	let closing = $state(false)
 	let ready = $state(false)
 	let settingsOpen = $state(false)
-	let settingsClosing = $state(false)
 	let inputEl: HTMLInputElement | undefined = $state()
 	let settingsRef: HTMLDivElement | undefined = $state()
 
@@ -47,23 +45,13 @@
 	}
 
 	function closeModal() {
-		if (closing) return
-		closing = true
-		setTimeout(() => {
-			open = false
-			closing = false
-			ready = false
-			search = ''
-		}, 150)
+		open = false
+		ready = false
+		search = ''
 	}
 
 	function closeSettings() {
-		if (settingsClosing) return
-		settingsClosing = true
-		setTimeout(() => {
-			settingsOpen = false
-			settingsClosing = false
-		}, 120)
+		settingsOpen = false
 	}
 
 	type SortKey = 'name' | 'price' | 'context' | 'newest' | 'oldest'
@@ -91,7 +79,6 @@
 	$effect(() => {
 		if (!open) {
 			settingsOpen = false
-			settingsClosing = false
 			return
 		}
 
@@ -106,7 +93,7 @@
 		}
 
 		const handleClickOutside = (e: MouseEvent) => {
-			if (settingsOpen && !settingsClosing && settingsRef && !settingsRef.contains(e.target as Node)) {
+			if (settingsOpen && settingsRef && !settingsRef.contains(e.target as Node)) {
 				closeSettings()
 			}
 		}
@@ -286,8 +273,10 @@
 {#snippet modelCard(m: ModelInfo)}
 	<button
 		type="button"
-		class="flex min-w-0 flex-col gap-1.5 overflow-hidden rounded-lg border border-base-300 p-2 text-left transition hover:border-primary/50 hover:bg-base-200/60 sm:gap-2 sm:rounded-xl sm:p-3 {m.id === value ? 'ring-2 ring-primary/40 border-primary/60' : ''}"
-		style="background-color: color-mix(in srgb, Canvas 92%, CanvasText 8%)"
+		class="card card-compact card-border bg-base-200/60 hover:border-primary/50 hover:bg-base-200 flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden p-2 text-left transition sm:gap-2 sm:p-3 {m.id ===
+		value
+			? 'ring-primary/40 border-primary/60 ring-2'
+			: 'border-base-300'}"
 		onclick={() => selectModel(m.id)}
 	>
 		<div class="flex min-w-0 items-center justify-between gap-1.5">
@@ -321,10 +310,9 @@
 <div class="relative {className}">
 	<button
 		type="button"
-		class="{isInline
-			? `inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-base-content/85 hover:bg-base-200 ${size === 'xs' ? 'text-xs' : ''}`
-			: `input input-bordered flex w-full items-center justify-between gap-2 text-left ${sizeClass}`
-		}"
+		class={isInline
+			? `btn btn-ghost ${size === 'xs' ? 'btn-xs' : 'btn-sm'} gap-1 font-normal`
+			: `input input-bordered flex w-full items-center justify-between gap-2 text-left ${sizeClass}`}
 		onclick={() => {
 			openModal()
 		}}
@@ -339,22 +327,19 @@
 	</button>
 
 	{#if open}
-		<div class="fixed inset-0 z-1000 overflow-hidden">
+		<div class="modal modal-open z-[1000]">
 			<button
 				type="button"
-				class="modal-backdrop absolute inset-0 bg-black/65"
-				class:modal-backdrop-closing={closing}
+				class="modal-backdrop bg-neutral/60 absolute inset-0 backdrop-blur-sm"
 				aria-label="Close model selector"
 				onclick={closeModal}
 			></button>
 
 			<div
-				class="modal-panel relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden bg-base-100 shadow-2xl sm:mt-[8vh] sm:h-[78vh] sm:w-[80vw] sm:max-w-3xl sm:rounded-2xl sm:border sm:border-base-300"
-				class:modal-panel-closing={closing}
-				style="background-color: Canvas; color: CanvasText; opacity: 1"
+				class="modal-box bg-base-100 text-base-content border-base-300 relative mx-auto flex h-dvh w-full max-w-full flex-col overflow-hidden p-0 shadow-2xl sm:mt-[8vh] sm:h-[78vh] sm:w-[80vw] sm:max-w-3xl sm:rounded-2xl sm:border"
 			>
 				<!-- Top bar: search + settings + count + close -->
-				<div class="flex items-center gap-2 border-b border-base-300 px-3 py-2 sm:px-4 sm:py-2.5" style="background-color: Canvas">
+				<div class="border-base-300 bg-base-100 flex items-center gap-2 border-b px-3 py-2 sm:px-4 sm:py-2.5">
 					<h2 class="hidden text-sm font-bold sm:block sm:text-base">Models</h2>
 					<input
 						bind:this={inputEl}
@@ -382,9 +367,7 @@
 
 						{#if settingsOpen}
 							<div
-								class="settings-dropdown absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-base-300 bg-base-100 p-3 shadow-xl sm:w-72"
-								class:settings-dropdown-closing={settingsClosing}
-								style="background-color: Canvas"
+								class="card card-compact bg-base-100 border-base-300 absolute right-0 top-full z-50 mt-1 w-64 border p-3 shadow-xl sm:w-72"
 							>
 								<!-- Sort -->
 								<div class="mb-3">
@@ -455,10 +438,7 @@
 				</div>
 
 				<!-- Model grid -->
-				<div
-					class="min-h-0 flex-1 overflow-y-auto p-2 sm:p-4"
-					style="background-color: Canvas"
-				>
+				<div class="bg-base-100 min-h-0 flex-1 overflow-y-auto p-2 sm:p-4">
 					{#if filtered.length === 0 && ready}
 						<div class="rounded-xl border border-dashed border-base-300 p-4 text-center text-sm text-base-content/55 sm:p-6 sm:text-base">
 							No models found for that search.
@@ -486,73 +466,4 @@
 		</div>
 	{/if}
 </div>
-
-<style>
-	.modal-backdrop {
-		animation: fadeIn 150ms ease-out;
-		will-change: opacity;
-	}
-	.modal-backdrop-closing {
-		animation: fadeOut 150ms ease-in forwards;
-		will-change: opacity;
-	}
-	.modal-panel {
-		animation: slideUp 200ms ease-out;
-		will-change: transform, opacity;
-	}
-	.modal-panel-closing {
-		animation: slideDown 150ms ease-in forwards;
-		will-change: transform, opacity;
-	}
-	@media (min-width: 48rem) {
-		.modal-panel {
-			animation: scaleIn 200ms ease-out;
-		}
-		.modal-panel-closing {
-			animation: scaleOut 150ms ease-in forwards;
-		}
-	}
-	.settings-dropdown {
-		animation: dropIn 150ms ease-out;
-		transform-origin: top right;
-		will-change: transform, opacity;
-	}
-	.settings-dropdown-closing {
-		animation: dropOut 120ms ease-in forwards;
-		transform-origin: top right;
-		will-change: transform, opacity;
-	}
-	@keyframes fadeIn {
-		from { opacity: 0; }
-		to { opacity: 1; }
-	}
-	@keyframes fadeOut {
-		from { opacity: 1; }
-		to { opacity: 0; }
-	}
-	@keyframes scaleIn {
-		from { opacity: 0; transform: scale(0.95); }
-		to { opacity: 1; transform: scale(1); }
-	}
-	@keyframes scaleOut {
-		from { opacity: 1; transform: scale(1); }
-		to { opacity: 0; transform: scale(0.95); }
-	}
-	@keyframes slideUp {
-		from { opacity: 0; transform: translateY(100%); }
-		to { opacity: 1; transform: translateY(0); }
-	}
-	@keyframes slideDown {
-		from { opacity: 1; transform: translateY(0); }
-		to { opacity: 0; transform: translateY(100%); }
-	}
-	@keyframes dropIn {
-		from { opacity: 0; transform: scale(0.9) translateY(-4px); }
-		to { opacity: 1; transform: scale(1) translateY(0); }
-	}
-	@keyframes dropOut {
-		from { opacity: 1; transform: scale(1) translateY(0); }
-		to { opacity: 0; transform: scale(0.9) translateY(-4px); }
-	}
-</style>
 

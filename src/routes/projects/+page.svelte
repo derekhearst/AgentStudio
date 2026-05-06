@@ -114,8 +114,8 @@
 		{#if formOpen}
 			<form class="mt-3 grid gap-2 rounded-xl border border-base-300/60 bg-base-200/40 p-3 text-sm" onsubmit={submitCreate}>
 				<div class="grid gap-2 sm:grid-cols-2">
-					<label class="form-control">
-						<span class="label-text text-xs">Name</span>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Name</legend>
 						<input
 							type="text"
 							class="input input-sm input-bordered"
@@ -124,18 +124,18 @@
 							maxlength="120"
 							required
 						/>
-					</label>
-					<label class="form-control">
-						<span class="label-text text-xs">Kind</span>
+					</fieldset>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend text-xs">Kind</legend>
 						<select class="select select-sm select-bordered" bind:value={formKind}>
 							{#each KINDS as k (k.value)}
 								<option value={k.value}>{k.label}</option>
 							{/each}
 						</select>
-					</label>
+					</fieldset>
 				</div>
-				<label class="form-control">
-					<span class="label-text text-xs">Description (optional)</span>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend text-xs">Description (optional)</legend>
 					<textarea
 						class="textarea textarea-bordered textarea-sm"
 						bind:value={formDescription}
@@ -143,7 +143,7 @@
 						maxlength="1000"
 						rows="2"
 					></textarea>
-				</label>
+				</fieldset>
 				{#if formError}
 					<div class="alert alert-error py-2 text-xs">{formError}</div>
 				{/if}
@@ -166,7 +166,7 @@
 	{:else if error}
 		<div class="alert alert-error text-sm">{error}</div>
 	{:else if projects.length === 0}
-		<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
+		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 			No projects yet. Create one to start grouping artifacts with version history.
 		</div>
 	{:else}

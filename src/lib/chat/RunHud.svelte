@@ -73,7 +73,7 @@
 </script>
 
 {#if visible}
-	<div class="run-hud mb-2 rounded-2xl border border-base-300 bg-base-100/95 px-3 py-2 text-sm shadow-sm">
+	<div class="run-hud mb-2 card card-body bg-base-100/95 border-base-300 rounded-2xl border px-3 py-2 text-sm shadow-sm">
 		<div class="flex items-center gap-2">
 			<span class="badge badge-sm {statusColor}">{statusLabel}</span>
 			{#if mode !== 'chat'}

@@ -91,7 +91,7 @@
 		<!-- Budget Alerts -->
 		{#if budgetData}
 			<div class="grid gap-3 sm:grid-cols-2">
-				<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+				<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 					<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Daily Spend</h3>
 					<p class="mt-1 text-2xl font-bold">{fmt(budgetData.dailySpend)}</p>
 					{#if budgetConfig.dailyLimit}
@@ -107,7 +107,7 @@
 						></progress>
 					{/if}
 				</div>
-				<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+				<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 					<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Monthly Spend</h3>
 					<p class="mt-1 text-2xl font-bold">{fmt(budgetData.monthlySpend)}</p>
 					{#if budgetConfig.monthlyLimit}
@@ -128,16 +128,16 @@
 
 		<!-- Summary Cards -->
 		<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Total Spend</h3>
 				<p class="mt-1 text-2xl font-bold">{fmt(costData.totalSpend)}</p>
 				<p class="text-xs text-base-content/70">{costData.callCount} LLM calls</p>
 			</div>
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Tokens In</h3>
 				<p class="mt-1 text-2xl font-bold">{costData.totalTokensIn.toLocaleString()}</p>
 			</div>
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<h3 class="text-sm font-semibold uppercase tracking-wide text-base-content/55">Tokens Out</h3>
 				<p class="mt-1 text-2xl font-bold">{costData.totalTokensOut.toLocaleString()}</p>
 			</div>

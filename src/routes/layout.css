@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import '@mdi/font/css/materialdesignicons.css';
 @plugin 'daisyui';
 
 @theme {
@@ -13,27 +14,71 @@
 	--breakpoint-xl: var(--breakpoint-desktop);
 }
 
+/* ─────────────────────────────────────────────────────────────────
+ * Light theme — primary keyed on Tailwind lime-600 (#65a30d)
+ * ───────────────────────────────────────────────────────────────── */
+@plugin 'daisyui/theme' {
+	name: 'AgentStudio';
+	default: true;
+	prefersdark: false;
+	color-scheme: light;
+	--color-base-100: oklch(98% 0.005 120);
+	--color-base-200: oklch(95% 0.008 120);
+	--color-base-300: oklch(90% 0.012 120);
+	--color-base-content: oklch(22% 0.02 250);
+	--color-primary: oklch(64% 0.18 131);
+	--color-primary-content: oklch(98% 0.01 131);
+	--color-secondary: oklch(52% 0.14 155);
+	--color-secondary-content: oklch(98% 0.01 155);
+	--color-accent: oklch(70% 0.13 195);
+	--color-accent-content: oklch(18% 0.04 195);
+	--color-neutral: oklch(28% 0.02 250);
+	--color-neutral-content: oklch(96% 0.01 90);
+	--color-info: oklch(65% 0.14 238);
+	--color-info-content: oklch(98% 0.01 238);
+	--color-success: oklch(60% 0.18 145);
+	--color-success-content: oklch(98% 0.01 145);
+	--color-warning: oklch(75% 0.16 84);
+	--color-warning-content: oklch(20% 0.05 84);
+	--color-error: oklch(60% 0.22 24);
+	--color-error-content: oklch(98% 0.01 24);
+	--radius-selector: 0.9rem;
+	--radius-field: 0.75rem;
+	--radius-box: 1.1rem;
+	--size-selector: 0.24rem;
+	--size-field: 0.24rem;
+	--border: 1px;
+	--depth: 1;
+	--noise: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Dark theme — primary brightened to lime-400-ish for contrast
+ * ───────────────────────────────────────────────────────────────── */
 @plugin 'daisyui/theme' {
 	name: 'AgentStudio-night';
-	default: true;
 	prefersdark: true;
 	color-scheme: dark;
 	--color-base-100: oklch(18% 0.02 250);
 	--color-base-200: oklch(22% 0.03 250);
 	--color-base-300: oklch(28% 0.03 250);
 	--color-base-content: oklch(93% 0.02 120);
-	--color-primary: oklch(76% 0.24 135);
-	--color-primary-content: oklch(19% 0.04 135);
-	--color-secondary: oklch(70% 0.2 150);
-	--color-secondary-content: oklch(18% 0.04 150);
-	--color-accent: oklch(68% 0.21 165);
-	--color-accent-content: oklch(18% 0.04 165);
+	--color-primary: oklch(78% 0.20 131);
+	--color-primary-content: oklch(20% 0.05 131);
+	--color-secondary: oklch(70% 0.16 155);
+	--color-secondary-content: oklch(18% 0.04 155);
+	--color-accent: oklch(72% 0.13 195);
+	--color-accent-content: oklch(18% 0.04 195);
 	--color-neutral: oklch(30% 0.02 260);
 	--color-neutral-content: oklch(92% 0.02 90);
 	--color-info: oklch(73% 0.15 238);
-	--color-success: oklch(74% 0.2 140);
+	--color-info-content: oklch(18% 0.04 238);
+	--color-success: oklch(74% 0.20 140);
+	--color-success-content: oklch(18% 0.04 140);
 	--color-warning: oklch(81% 0.14 84);
+	--color-warning-content: oklch(20% 0.05 84);
 	--color-error: oklch(68% 0.21 24);
+	--color-error-content: oklch(18% 0.04 24);
 	--radius-selector: 0.9rem;
 	--radius-field: 0.75rem;
 	--radius-box: 1.1rem;
@@ -119,6 +164,39 @@ body::after {
 	background-size: 200px 200px;
 	opacity: 0.025;
 	mix-blend-mode: overlay;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * Light-theme overrides — soften FX coupled to dark assumptions
+ * ───────────────────────────────────────────────────────────────── */
+[data-theme='AgentStudio'] body::before {
+	background:
+		radial-gradient(
+			circle 220px at var(--cursor-x) var(--cursor-y),
+			color-mix(in oklab, var(--color-primary) 18%, transparent) 0%,
+			color-mix(in oklab, var(--color-primary) 16%, transparent) 8%,
+			color-mix(in oklab, var(--color-primary) 14%, transparent) 16%,
+			color-mix(in oklab, var(--color-primary) 12%, transparent) 24%,
+			color-mix(in oklab, var(--color-primary) 10%, transparent) 32%,
+			color-mix(in oklab, var(--color-primary) 8%, transparent) 42%,
+			color-mix(in oklab, var(--color-primary) 6%, transparent) 52%,
+			color-mix(in oklab, var(--color-primary) 4%, transparent) 64%,
+			color-mix(in oklab, var(--color-primary) 2%, transparent) 78%,
+			color-mix(in oklab, var(--color-primary) 1%, transparent) 90%,
+			transparent 100%
+		),
+		radial-gradient(
+			circle 500px at var(--cursor-x) var(--cursor-y),
+			color-mix(in oklab, var(--color-accent) 5%, transparent) 0%,
+			color-mix(in oklab, var(--color-accent) 4%, transparent) 30%,
+			color-mix(in oklab, var(--color-accent) 2%, transparent) 60%,
+			transparent 100%
+		);
+	opacity: calc(var(--cursor-energy) * 0.5);
+}
+
+[data-theme='AgentStudio'] body::after {
+	opacity: 0.015;
 }
 
 .chat-composer-transition {
@@ -252,19 +330,55 @@ body::after {
 	letter-spacing: 0.02em;
 }
 
-/* Chat tray scrim */
-.chat-tray-scrim {
+/* Bottom-sheet scrim (dark default) — used by mobile drawer/SidePanel overlay */
+.bottom-sheet-scrim {
 	background: oklch(0% 0 0 / 0.35);
 	backdrop-filter: blur(2px);
 	cursor: default;
 	border: none;
 }
 
-/* Chat tray panel */
-.chat-tray {
+/* Bottom-sheet panel (dark default) */
+.bottom-sheet {
 	box-shadow:
 		0 -8px 32px oklch(0% 0 0 / 0.3),
 		0 -2px 8px oklch(0% 0 0 / 0.15);
+}
+
+/* Lighter scrim + shadow on the light theme */
+[data-theme='AgentStudio'] .bottom-sheet-scrim {
+	background: oklch(20% 0 0 / 0.25);
+}
+
+[data-theme='AgentStudio'] .bottom-sheet {
+	box-shadow:
+		0 -8px 32px oklch(20% 0 0 / 0.15),
+		0 -2px 8px oklch(20% 0 0 / 0.08);
+}
+
+/* Light-theme overrides for highlight.js syntax colors (defaults are tuned for dark) */
+[data-theme='AgentStudio'] .markdown-body .hljs-keyword,
+[data-theme='AgentStudio'] .markdown-body .hljs-selector-tag,
+[data-theme='AgentStudio'] .markdown-body .hljs-literal,
+[data-theme='AgentStudio'] .markdown-body .hljs-doctag {
+	color: oklch(40% 0.18 280);
+}
+
+[data-theme='AgentStudio'] .markdown-body .hljs-string,
+[data-theme='AgentStudio'] .markdown-body .hljs-attr,
+[data-theme='AgentStudio'] .markdown-body .hljs-template-tag {
+	color: oklch(40% 0.18 145);
+}
+
+[data-theme='AgentStudio'] .markdown-body .hljs-number,
+[data-theme='AgentStudio'] .markdown-body .hljs-symbol,
+[data-theme='AgentStudio'] .markdown-body .hljs-bullet {
+	color: oklch(45% 0.20 45);
+}
+
+[data-theme='AgentStudio'] .markdown-body .hljs-title,
+[data-theme='AgentStudio'] .markdown-body .hljs-function {
+	color: oklch(35% 0.18 250);
 }
 
 @keyframes ambient-shift {

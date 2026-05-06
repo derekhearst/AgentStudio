@@ -1751,7 +1751,7 @@
 							/>
 						{:else if block.kind === 'text' && block.content}
 							<article class="chat chat-start">
-								<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3"><div class="markdown-body">{@html renderMarkdown(block.content)}</div></div>
+								<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border"><div class="markdown-body">{@html renderMarkdown(block.content)}</div></div>
 							</article>
 						{/if}
 					{/each}

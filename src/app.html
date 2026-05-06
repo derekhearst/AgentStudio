@@ -4,9 +4,26 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
-		<meta name="theme-color" content="#1a2e05" />
+		<meta name="theme-color" content="#f7fdf0" media="(prefers-color-scheme: light)" />
+		<meta name="theme-color" content="#1a2e05" media="(prefers-color-scheme: dark)" />
 		<link rel="manifest" href="/manifest.json" />
 		<link rel="apple-touch-icon" href="/icon.svg" />
+		<script>
+			(function () {
+				try {
+					var saved = localStorage.getItem('AgentStudio-theme');
+					var theme =
+						saved === 'AgentStudio' || saved === 'AgentStudio-night'
+							? saved
+							: window.matchMedia('(prefers-color-scheme: dark)').matches
+								? 'AgentStudio-night'
+								: 'AgentStudio';
+					document.documentElement.setAttribute('data-theme', theme);
+				} catch (e) {
+					document.documentElement.setAttribute('data-theme', 'AgentStudio-night');
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

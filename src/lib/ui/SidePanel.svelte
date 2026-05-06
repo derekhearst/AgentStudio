@@ -70,23 +70,25 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Desktop: inline sidebar column -->
-<aside class="hidden overflow-y-auto rounded-3xl border border-base-300 bg-base-100/80 p-4 shadow-sm desktop:block {className}">
+<!-- Desktop: inline DaisyUI card column -->
+<aside
+	class="card bg-base-100/80 border-base-300 hidden overflow-y-auto rounded-3xl border p-4 shadow-sm desktop:block {className}"
+>
 	{#if children}{@render children()}{/if}
 </aside>
 
-<!-- Mobile/tablet: bottom sheet overlay -->
+<!-- Mobile/tablet: bottom sheet overlay (bottom-sheet-scrim is theme-aware via layout.css) -->
 {#if open}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
-		class="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm tablet:hidden"
+		class="bottom-sheet-scrim fixed inset-0 z-40 tablet:hidden"
 		onclick={handleOverlayClick}
 		onkeydown={handleKeydown}
 	></div>
 {/if}
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <aside
-	class="fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-2xl border-t border-base-300 bg-base-100 shadow-lg tablet:hidden {className}"
+	class="bottom-sheet bg-base-100 border-base-300 fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-2xl border-t tablet:hidden {className}"
 	style="transform: {mobilePanelTransform}; transition: {mobilePanelTransition};"
 	ontouchstart={onTouchStart}
 	ontouchmove={onTouchMove}
@@ -94,7 +96,7 @@
 >
 	<!-- Drag handle -->
 	<div class="flex shrink-0 items-center justify-center pb-1 pt-3">
-		<div class="h-1 w-10 rounded-full bg-base-content/20"></div>
+		<div class="bg-base-content/20 h-1 w-10 rounded-full"></div>
 	</div>
 	<div bind:this={scrollEl} class="flex-1 overflow-y-auto overscroll-none px-4 pb-4">
 		{#if children}{@render children()}{/if}

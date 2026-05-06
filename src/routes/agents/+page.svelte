@@ -162,7 +162,7 @@
 				{@const streaming = streamForAgent(agent.id)}
 				{@const isStreaming = !!streaming}
 				<article
-					class="group relative flex flex-col overflow-hidden rounded-2xl border border-base-300 bg-base-100 transition-all duration-200 hover:border-base-content/20 hover:shadow-xl hover:shadow-base-content/5"
+					class="group relative flex flex-col overflow-hidden bg-base-100 border-base-300 rounded-2xl border transition-all duration-200 hover:border-base-content/20 hover:shadow-xl hover:shadow-base-content/5"
 				>
 					<!-- Animated top accent bar -->
 					<div class="relative h-[3px] w-full overflow-hidden {isStreaming ? 'bg-primary/30' : 'bg-base-300/50'}">

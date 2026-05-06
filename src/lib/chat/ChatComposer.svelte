@@ -87,11 +87,16 @@
 	}
 </script>
 
-<form onsubmit={submit} class="rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm sm:rounded-3xl sm:p-3 {className}">
+<form
+	onsubmit={submit}
+	class="card bg-base-100 border-base-300 rounded-2xl border p-2 shadow-sm sm:rounded-3xl sm:p-3 {className}"
+>
+	<label class="sr-only" for="chat-composer-textarea">Message</label>
 	<textarea
-		class="w-full resize-none border-none bg-transparent px-1.5 py-1 text-base leading-6 outline-none focus:outline-none sm:px-2"
+		id="chat-composer-textarea"
+		class="textarea textarea-ghost w-full resize-none bg-transparent px-1.5 py-1 text-base leading-6 focus:outline-none sm:px-2"
 		rows="2"
-		placeholder={placeholder}
+		{placeholder}
 		bind:value
 		onkeydown={handleKeydown}
 		disabled={busy}
@@ -127,10 +132,10 @@
 					onchange={(id: string) => onModelChange?.(id)}
 				/>
 			</div>
-			<div class="dropdown dropdown-top dropdown-end">
+			<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={reasoningMenuOpen}>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-base-content/85 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+					class="btn btn-ghost btn-xs gap-1"
 					title="Reasoning effort"
 					aria-label="Reasoning effort"
 					aria-expanded={reasoningMenuOpen}
@@ -143,12 +148,14 @@
 					<span class="opacity-70">▾</span>
 				</button>
 				{#if reasoningMenuOpen}
-					<ul class="menu dropdown-content z-30 mb-2 w-40 rounded-box border border-base-300 bg-base-100 p-1 shadow-xl">
+					<ul
+						class="menu dropdown-content bg-base-100 border-base-300 rounded-box z-30 mb-2 w-40 border p-1 shadow-xl"
+					>
 						{#each REASONING_OPTIONS as option (option.value)}
 							<li>
 								<button
 									type="button"
-									class:active={option.value === reasoningEffort}
+									class:menu-active={option.value === reasoningEffort}
 									onclick={() => {
 										reasoningMenuOpen = false
 										onReasoningEffortChange?.(option.value)

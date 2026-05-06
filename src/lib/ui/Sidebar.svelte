@@ -1,6 +1,7 @@
 <script lang="ts">
 	import favicon from '$lib/assets/favicon.svg';
 	import RunningSessionsDock from '$lib/ui/RunningSessionsDock.svelte';
+	import ThemeToggle from '$lib/ui/ThemeToggle.svelte';
 
 	let {
 		activePath = '/',
@@ -13,232 +14,150 @@
 	}
 </script>
 
-<aside class="flex h-full w-48 flex-col rounded-2xl border border-base-300/50 bg-base-100/85 shadow-lg shadow-black/20 backdrop-blur-sm desktop:w-56">
-	<!-- Brand / user header -->
-	<div class="brand-row flex items-center gap-2.5 border-b border-base-300/50 px-3 py-3 rounded-t-2xl">
-		<img src={favicon} alt="Agent Studio" class="size-8 shrink-0" />
-		<div class="brand-copy min-w-0">
-			<p class="truncate text-sm leading-tight"><span class="font-light tracking-wide">Agent</span><span class="font-bold">Studio</span></p>
-			<p class="hidden truncate text-[10px] opacity-50 desktop:block">Autonomous Agent Console</p>
+<aside
+	class="bg-base-100/85 border-base-300/50 flex h-full w-48 flex-col rounded-2xl border shadow-lg shadow-black/20 backdrop-blur-sm desktop:w-56"
+>
+	<!-- Brand / user header — DaisyUI navbar -->
+	<div class="navbar border-base-300/50 rounded-t-2xl border-b px-3 py-3 min-h-0">
+		<div class="flex w-full items-center gap-2.5">
+			<img src={favicon} alt="Agent Studio" class="size-8 shrink-0" />
+			<div class="min-w-0 flex-1">
+				<p class="truncate text-sm leading-tight">
+					<span class="font-light tracking-wide">Agent</span><span class="font-bold">Studio</span>
+				</p>
+				<p class="hidden truncate text-[10px] opacity-50 desktop:block">Autonomous Agent Console</p>
+			</div>
+			<ThemeToggle />
 		</div>
 	</div>
 
-	<nav class="nav-group flex flex-1 flex-col overflow-y-auto px-2 py-3 text-sm">
-
+	<div class="flex flex-1 flex-col overflow-y-auto px-2 py-3">
 		<!-- Chat — pinned top, prominent -->
-		<a
-			href="/"
-			class="nav-link mb-3 flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 font-semibold transition-colors"
-			class:bg-primary={isActive('/')}
-			class:text-primary-content={isActive('/')}
-			class:hover:bg-primary={isActive('/')}
-			class:hover:bg-base-200={!isActive('/')}
-			class:text-base-content={!isActive('/')}
-			onclick={onNavigate}
-		>
-			<!-- chat-bubble-left-right -->
-			<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
-				<circle cx="8" cy="11" r="1"/><circle cx="12" cy="11" r="1"/><circle cx="16" cy="11" r="1"/>
-			</svg>
-			Chat
-		</a>
+		<ul class="menu menu-md w-full p-0 mb-3">
+			<li>
+				<a
+					href="/"
+					class:menu-active={isActive('/')}
+					class="font-semibold"
+					onclick={onNavigate}
+				>
+					<i class="mdi mdi-message-text-outline text-base shrink-0"></i>
+					Chat
+				</a>
+			</li>
+		</ul>
 
 		<!-- Work group -->
-		<p class="nav-section-title mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest opacity-40">Work</p>
-		<div class="mb-4 space-y-0.5">
-			<a href="/agents"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/agents')} class:font-medium={isActive('/agents')} class:text-primary={isActive('/agents')}
-				onclick={onNavigate}>
-				<!-- cpu chip -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="7" y="7" width="10" height="10" rx="1"/>
-					<path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3"/>
-				</svg>
-				Agents
-			</a>
-			<a href="/skills"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/skills')} class:font-medium={isActive('/skills')} class:text-primary={isActive('/skills')}
-				onclick={onNavigate}>
-				<!-- academic-cap / skill -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
-					<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
-				</svg>
-				Skills
-			</a>
-			<a href="/automations"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/automations')} class:font-medium={isActive('/automations')} class:text-primary={isActive('/automations')}
-				onclick={onNavigate}>
-				<!-- refresh/cycle -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-				</svg>
-				Automations
-			</a>
-			<a href="/tasks"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/tasks')} class:font-medium={isActive('/tasks')} class:text-primary={isActive('/tasks')}
-				onclick={onNavigate}>
-				<!-- clipboard with check / tasks -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="8" y="2" width="8" height="4" rx="1"/>
-					<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-					<path d="m9 14 2 2 4-4"/>
-				</svg>
-				Tasks
-			</a>
-			<a href="/projects"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/projects')} class:font-medium={isActive('/projects')} class:text-primary={isActive('/projects')}
-				onclick={onNavigate}>
-				<!-- folder open / projects -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/>
-					<path d="m3 9 1.6 9.2A2 2 0 0 0 6.6 20h10.8a2 2 0 0 0 2-1.8L21 9z"/>
-				</svg>
-				Projects
-			</a>
-			<a href="/source-control"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/source-control')} class:font-medium={isActive('/source-control')} class:text-primary={isActive('/source-control')}
-				onclick={onNavigate}>
-				<!-- git-branch -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<line x1="6" y1="3" x2="6" y2="15"/>
-					<circle cx="18" cy="6" r="3"/>
-					<circle cx="6" cy="18" r="3"/>
-					<path d="M18 9a9 9 0 0 1-9 9"/>
-				</svg>
-				Source control
-			</a>
-		</div>
+		<ul class="menu menu-sm w-full p-0 mb-4">
+			<li class="menu-title">Work</li>
+			<li>
+				<a href="/agents" class:menu-active={isActive('/agents')} onclick={onNavigate}>
+					<i class="mdi mdi-chip text-base shrink-0 opacity-60"></i>
+					Agents
+				</a>
+			</li>
+			<li>
+				<a href="/skills" class:menu-active={isActive('/skills')} onclick={onNavigate}>
+					<i class="mdi mdi-school-outline text-base shrink-0 opacity-60"></i>
+					Skills
+				</a>
+			</li>
+			<li>
+				<a href="/automations" class:menu-active={isActive('/automations')} onclick={onNavigate}>
+					<i class="mdi mdi-sync text-base shrink-0 opacity-60"></i>
+					Automations
+				</a>
+			</li>
+			<li>
+				<a href="/tasks" class:menu-active={isActive('/tasks')} onclick={onNavigate}>
+					<i class="mdi mdi-clipboard-check-outline text-base shrink-0 opacity-60"></i>
+					Tasks
+				</a>
+			</li>
+			<li>
+				<a href="/projects" class:menu-active={isActive('/projects')} onclick={onNavigate}>
+					<i class="mdi mdi-folder-outline text-base shrink-0 opacity-60"></i>
+					Projects
+				</a>
+			</li>
+			<li>
+				<a href="/source-control" class:menu-active={isActive('/source-control')} onclick={onNavigate}>
+					<i class="mdi mdi-source-branch text-base shrink-0 opacity-60"></i>
+					Source control
+				</a>
+			</li>
+		</ul>
 
 		<!-- Insights group -->
-		<p class="nav-section-title mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-widest opacity-40">Insights</p>
-		<div class="mb-4 space-y-0.5">
-			<a href="/activity"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/activity')} class:font-medium={isActive('/activity')} class:text-primary={isActive('/activity')}
-				onclick={onNavigate}>
-				<!-- bolt / activity -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-				</svg>
-				Activity
-			</a>
-			<a href="/cost"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/cost')} class:font-medium={isActive('/cost')} class:text-primary={isActive('/cost')}
-				onclick={onNavigate}>
-				<!-- currency dollar -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-				</svg>
-				Cost
-			</a>
-			<a href="/memory"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/memory')} class:font-medium={isActive('/memory')} class:text-primary={isActive('/memory')}
-				onclick={onNavigate}>
-				<!-- archive / drawers -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="3" y="3" width="18" height="6" rx="1"/>
-					<rect x="3" y="9" width="18" height="6" rx="1"/>
-					<rect x="3" y="15" width="18" height="6" rx="1"/>
-					<line x1="10" y1="6" x2="14" y2="6"/>
-					<line x1="10" y1="12" x2="14" y2="12"/>
-					<line x1="10" y1="18" x2="14" y2="18"/>
-				</svg>
-				Memory
-			</a>
-			<a href="/research"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/research')} class:font-medium={isActive('/research')} class:text-primary={isActive('/research')}
-				onclick={onNavigate}>
-				<!-- magnifying-glass / research -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<circle cx="11" cy="11" r="7"/>
-					<path d="M21 21l-4.35-4.35"/>
-				</svg>
-				Research
-			</a>
-		</div>
+		<ul class="menu menu-sm w-full p-0 mb-4">
+			<li class="menu-title">Insights</li>
+			<li>
+				<a href="/activity" class:menu-active={isActive('/activity')} onclick={onNavigate}>
+					<i class="mdi mdi-lightning-bolt-outline text-base shrink-0 opacity-60"></i>
+					Activity
+				</a>
+			</li>
+			<li>
+				<a href="/cost" class:menu-active={isActive('/cost')} onclick={onNavigate}>
+					<i class="mdi mdi-currency-usd text-base shrink-0 opacity-60"></i>
+					Cost
+				</a>
+			</li>
+			<li>
+				<a href="/memory" class:menu-active={isActive('/memory')} onclick={onNavigate}>
+					<i class="mdi mdi-database-outline text-base shrink-0 opacity-60"></i>
+					Memory
+				</a>
+			</li>
+			<li>
+				<a href="/research" class:menu-active={isActive('/research')} onclick={onNavigate}>
+					<i class="mdi mdi-magnify text-base shrink-0 opacity-60"></i>
+					Research
+				</a>
+			</li>
+		</ul>
 
 		<!-- Settings — pinned bottom -->
 		<div class="mt-auto">
 			<RunningSessionsDock />
-			<a href="/users"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/users')} class:font-medium={isActive('/users')} class:text-primary={isActive('/users')}
-				onclick={onNavigate}>
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-					<circle cx="9" cy="7" r="4"/>
-					<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-					<path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-				</svg>
-				Users
-			</a>
-			<a href="/audit"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/audit')} class:font-medium={isActive('/audit')} class:text-primary={isActive('/audit')}
-				onclick={onNavigate}>
-				<!-- shield-check / audit -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-					<polyline points="9 12 11 14 15 10"/>
-				</svg>
-				Audit
-			</a>
-			<a href="/settings/hooks"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/settings/hooks')} class:font-medium={isActive('/settings/hooks')} class:text-primary={isActive('/settings/hooks')}
-				onclick={onNavigate}>
-				<!-- arrow-trending-down / hooks -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M4 4v6c0 4 4 8 8 8h8"/>
-					<polyline points="16 14 20 18 16 22"/>
-				</svg>
-				Hooks
-			</a>
-			<a href="/settings/jobs"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/settings/jobs')} class:font-medium={isActive('/settings/jobs')} class:text-primary={isActive('/settings/jobs')}
-				onclick={onNavigate}>
-				<!-- queue / jobs -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<rect x="3" y="4" width="18" height="3" rx="1"/>
-					<rect x="3" y="10.5" width="18" height="3" rx="1"/>
-					<rect x="3" y="17" width="18" height="3" rx="1"/>
-				</svg>
-				Jobs
-			</a>
-			<a href="/review"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={isActive('/review')} class:font-medium={isActive('/review')} class:text-primary={isActive('/review')}
-				onclick={onNavigate}>
-				<!-- inbox / review -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M22 12h-6l-2 3h-4l-2-3H2"/>
-					<path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-				</svg>
-				Review
-			</a>
-			<a href="/settings"
-				class="nav-link flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-base-200"
-				class:bg-base-200={activePath === '/settings'} class:font-medium={activePath === '/settings'} class:text-primary={activePath === '/settings'}
-				onclick={onNavigate}>
-				<!-- cog-6-tooth -->
-				<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<circle cx="12" cy="12" r="3"/>
-					<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-				</svg>
-				Settings
-			</a>
+			<ul class="menu menu-sm w-full p-0">
+				<li>
+					<a href="/users" class:menu-active={isActive('/users')} onclick={onNavigate}>
+						<i class="mdi mdi-account-multiple-outline text-base shrink-0 opacity-60"></i>
+						Users
+					</a>
+				</li>
+				<li>
+					<a href="/audit" class:menu-active={isActive('/audit')} onclick={onNavigate}>
+						<i class="mdi mdi-shield-check-outline text-base shrink-0 opacity-60"></i>
+						Audit
+					</a>
+				</li>
+				<li>
+					<a href="/settings/hooks" class:menu-active={isActive('/settings/hooks')} onclick={onNavigate}>
+						<i class="mdi mdi-hook text-base shrink-0 opacity-60"></i>
+						Hooks
+					</a>
+				</li>
+				<li>
+					<a href="/settings/jobs" class:menu-active={isActive('/settings/jobs')} onclick={onNavigate}>
+						<i class="mdi mdi-format-list-bulleted text-base shrink-0 opacity-60"></i>
+						Jobs
+					</a>
+				</li>
+				<li>
+					<a href="/review" class:menu-active={isActive('/review')} onclick={onNavigate}>
+						<i class="mdi mdi-inbox-outline text-base shrink-0 opacity-60"></i>
+						Review
+					</a>
+				</li>
+				<li>
+					<a href="/settings" class:menu-active={activePath === '/settings'} onclick={onNavigate}>
+						<i class="mdi mdi-cog-outline text-base shrink-0 opacity-60"></i>
+						Settings
+					</a>
+				</li>
+			</ul>
 		</div>
-	</nav>
+	</div>
 </aside>

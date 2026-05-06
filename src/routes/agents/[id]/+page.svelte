@@ -367,7 +367,7 @@
 
 		<!-- ── Live session banner ───────────────────────────────────── -->
 		{#if live}
-			<div class="rounded-2xl border border-primary/30 bg-primary/8 p-4">
+			<div class="card card-body bg-primary/8 border-primary/30 rounded-2xl border p-4">
 				<div class="mb-2 flex items-center justify-between gap-2">
 					<div class="flex items-center gap-2">
 						<span class="inline-block h-2 w-2 animate-pulse rounded-full bg-primary"></span>
@@ -385,7 +385,7 @@
 		<!-- ── Stats grid ────────────────────────────────────────────── -->
 		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
 			<!-- Sessions -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -396,7 +396,7 @@
 			</div>
 
 			<!-- Total cost -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-success/15 text-success">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<circle cx="12" cy="12" r="10"/><path d="M12 6v12M9 9h4.5a1.5 1.5 0 0 1 0 3H9m0 3h4.5a1.5 1.5 0 0 1 0 3H9"/>
@@ -407,7 +407,7 @@
 			</div>
 
 			<!-- Total tokens -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-info/15 text-info">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -418,7 +418,7 @@
 			</div>
 
 			<!-- Avg cost/session -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-warning/15 text-warning">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
@@ -429,7 +429,7 @@
 			</div>
 
 			<!-- Avg first token -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-secondary/15 text-secondary">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -442,7 +442,7 @@
 			</div>
 
 			<!-- Last active -->
-			<div class="rounded-2xl border border-base-300 bg-base-100 p-4">
+			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-accent/15 text-accent">
 					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 						<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>

@@ -28,10 +28,10 @@
 	}
 </script>
 
-<div class="dropdown dropdown-top">
+<div class="dropdown dropdown-top" class:dropdown-open={menuOpen}>
 	<button
 		type="button"
-		class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-base-content/85 hover:bg-base-200 disabled:cursor-not-allowed disabled:opacity-50"
+		class="btn btn-ghost btn-xs gap-1"
 		title={`Mode: ${selected.label} — ${selected.description}`}
 		aria-label="Conversation mode"
 		aria-expanded={menuOpen}
@@ -44,17 +44,19 @@
 		<span class="opacity-70">▾</span>
 	</button>
 	{#if menuOpen}
-		<ul class="menu dropdown-content z-30 mb-2 w-56 rounded-box border border-base-300 bg-base-100 p-1 shadow-xl">
+		<ul
+			class="menu dropdown-content bg-base-100 border-base-300 rounded-box z-30 mb-2 w-56 border p-1 shadow-xl"
+		>
 			{#each MODE_OPTIONS as option (option.value)}
 				<li>
 					<button
 						type="button"
-						class:active={option.value === mode}
+						class:menu-active={option.value === mode}
 						class="flex flex-col items-start gap-0.5"
 						onclick={() => pick(option.value)}
 					>
 						<span class="text-sm font-medium">{option.label}</span>
-						<span class="text-xs text-base-content/60">{option.description}</span>
+						<span class="text-base-content/60 text-xs">{option.description}</span>
 					</button>
 				</li>
 			{/each}

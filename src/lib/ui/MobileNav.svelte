@@ -16,105 +16,75 @@
 		{ href: '/automations', label: 'Automations' },
 		{ href: '/cost', label: 'Cost' },
 		{ href: '/settings', label: 'Settings' }
-	];
+	] as const;
+
 	let moreLabel = $derived(moreItems.find((m) => activePath.startsWith(m.href))?.label);
 
-	const navItems = [
-		{
-			href: '/',
-			label: 'Chat',
-			icon: 'M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z'
-		},
-		{
-			href: '/agents',
-			label: 'Agents',
-			// cpu
-			paths: ['M7 7h10v10H7z', 'M7 9H4 M7 12H4 M7 15H4 M17 9h3 M17 12h3 M17 15h3 M9 7V4 M12 7V4 M15 7V4 M9 17v3 M12 17v3 M15 17v3']
-		}
-	] as const;
+	let moreOpen = $state(false);
 </script>
 
-<nav class="z-20 mx-auto flex w-full max-w-400 justify-center px-3 py-2 tablet:hidden safe-bottom {slideOff ? 'mobile-nav-slide-off' : ''}">
-	<div class="flex w-full items-center justify-around rounded-2xl border border-base-300/50 bg-base-100/80 px-1 py-1 shadow-lg shadow-black/20 backdrop-blur-xl">
-		{#each navItems as item (item.href)}
-			<a
-				href={item.href}
-				class="flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] transition-colors {isActive(item.href) ? 'font-semibold text-primary' : 'text-base-content/50'}"
-				onclick={onNavigate}
-			>
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-5 w-5 shrink-0"
-					viewBox="0 0 24 24"
-					fill="none"
-					stroke="currentColor"
-					stroke-width={isActive(item.href) ? 2.5 : 1.8}
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				>
-					{#if item.href === '/'}
-						<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/>
-					{:else if item.href === '/agents'}
-						<rect x="7" y="7" width="10" height="10" rx="1"/>
-						<path d="M7 9H4M7 12H4M7 15H4M17 9h3M17 12h3M17 15h3M9 7V4M12 7V4M15 7V4M9 17v3M12 17v3M15 17v3"/>
-					{/if}
-				</svg>
-				<span class="truncate">{item.label}</span>
-			</a>
-		{/each}
-
-		<!-- More menu trigger -->
-		<button
-			type="button"
-			class="flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] transition-colors {moreLabel ? 'font-semibold text-primary' : 'text-base-content/50'}"
-			popoverTarget="mobile-more-menu"
+<nav
+	class="z-20 mx-auto flex w-full max-w-400 justify-center px-3 py-2 tablet:hidden safe-bottom {slideOff
+		? 'mobile-nav-slide-off'
+		: ''}"
+>
+	<div class="dock dock-md bg-base-100/80 border-base-300/50 rounded-2xl border shadow-lg shadow-black/20 backdrop-blur-xl static w-full">
+		<a
+			href="/"
+			class:dock-active={isActive('/')}
+			onclick={onNavigate}
+			aria-label="Chat"
 		>
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width={moreLabel ? 2.5 : 1.8} stroke-linecap="round" stroke-linejoin="round">
-				<circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
-			</svg>
-			<span class="truncate">{moreLabel ?? 'More'}</span>
-		</button>
+			<i class="mdi mdi-message-text-outline text-xl"></i>
+			<span class="dock-label">Chat</span>
+		</a>
+
+		<a
+			href="/agents"
+			class:dock-active={isActive('/agents')}
+			onclick={onNavigate}
+			aria-label="Agents"
+		>
+			<i class="mdi mdi-chip text-xl"></i>
+			<span class="dock-label">Agents</span>
+		</a>
+
+		<!-- More menu — DaisyUI dropdown opening upward -->
+		<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={moreOpen}>
+			<button
+				type="button"
+				class:dock-active={!!moreLabel || moreOpen}
+				onclick={() => (moreOpen = !moreOpen)}
+				aria-label="More"
+				aria-haspopup="true"
+				aria-expanded={moreOpen}
+			>
+				<i class="mdi mdi-dots-vertical text-xl"></i>
+				<span class="dock-label">{moreLabel ?? 'More'}</span>
+			</button>
+			{#if moreOpen}
+				<ul
+					class="menu dropdown-content bg-base-100 border-base-300 rounded-box z-50 mb-2 w-56 border p-2 shadow-lg"
+				>
+					{#each moreItems as item (item.href)}
+						<li>
+							<a
+								href={item.href}
+								class:menu-active={isActive(item.href)}
+								onclick={() => {
+									moreOpen = false;
+									onNavigate?.();
+								}}
+							>
+								{item.label}
+							</a>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 	</div>
 </nav>
-
-<!-- More menu popover -->
-<div id="mobile-more-menu" popover class="mobile-more-popover">
-	<div class="grid grid-cols-3 gap-1 p-3">
-		{#each [
-			{ href: '/activity', label: 'Activity', icon: 'activity' },
-			{ href: '/skills', label: 'Skills', icon: 'cap' },
-			{ href: '/automations', label: 'Automations', icon: 'cycle' },
-			{ href: '/cost', label: 'Cost', icon: 'dollar' },
-			{ href: '/settings', label: 'Settings', icon: 'cog' }
-		] as item (item.href)}
-			<a
-				href={item.href}
-				class="flex flex-col items-center gap-1 rounded-xl p-3 text-xs transition-colors hover:bg-base-200 {isActive(item.href) ? 'font-semibold text-primary' : 'text-base-content/70'}"
-				onclick={() => {
-					document.getElementById('mobile-more-menu')?.hidePopover();
-					onNavigate?.();
-				}}
-			>
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-					{#if item.icon === 'activity'}
-						<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-					{:else if item.icon === 'cap'}
-						<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
-						<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
-					{:else if item.icon === 'cycle'}
-						<path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-					{:else if item.icon === 'dollar'}
-						<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-					{:else if item.icon === 'cog'}
-						<circle cx="12" cy="12" r="3"/>
-						<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-					{/if}
-				</svg>
-				<span>{item.label}</span>
-			</a>
-		{/each}
-	</div>
-</div>
 
 <style>
 	.safe-bottom {
@@ -137,42 +107,6 @@
 		to {
 			opacity: 0;
 			transform: translateY(-140%);
-		}
-	}
-
-	.mobile-more-popover {
-		position: fixed;
-		inset: auto 0.5rem 5.5rem;
-		margin: 0;
-		border: 1px solid var(--color-base-300);
-		border-radius: 1rem;
-		background: var(--color-base-100);
-		box-shadow: 0 -4px 24px rgb(0 0 0 / 0.3);
-		padding: 0;
-		max-width: 400px;
-		width: calc(100% - 1rem);
-		left: 50%;
-		transform: translateX(-50%);
-
-		/* popover animation */
-		opacity: 0;
-		transition:
-			opacity 150ms ease,
-			transform 150ms ease,
-			overlay 150ms ease allow-discrete,
-			display 150ms ease allow-discrete;
-		transform: translateX(-50%) translateY(8px);
-	}
-
-	.mobile-more-popover:popover-open {
-		opacity: 1;
-		transform: translateX(-50%) translateY(0);
-	}
-
-	@starting-style {
-		.mobile-more-popover:popover-open {
-			opacity: 0;
-			transform: translateX(-50%) translateY(8px);
 		}
 	}
 </style>

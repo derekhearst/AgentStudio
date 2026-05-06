@@ -109,7 +109,7 @@
 		<div class="space-y-2">
 			{#each events as event (event.id)}
 				{@const link = entityLink(event)}
-				<div class="flex items-start gap-3 rounded-2xl border border-base-300 bg-base-100 p-4">
+				<div class="flex items-start gap-3 card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
 					<span class="badge badge-sm {badgeColor[event.type] ?? ''} mt-0.5">{event.type.replace(/_/g, ' ')}</span>
 					<div class="flex-1">
 						<p class="text-sm">{event.summary}</p>

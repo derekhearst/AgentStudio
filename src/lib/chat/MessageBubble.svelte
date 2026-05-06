@@ -312,31 +312,31 @@
 </script>
 
 {#if hasRenderableContent}
-<article class={`chat-message w-full ${isUser ? 'chat chat-end' : ''}`}>
+<article class={`chat-message w-full ${isUser ? 'chat chat-end' : 'chat chat-start'}`}>
 	{#if isUser}
-		<div class={`max-w-[90%] ${editing ? '' : 'rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3'}`}>
-			{#if editing}
-				<div bind:this={editorRoot} class="rounded-2xl border border-base-300 bg-base-100 p-2 shadow-sm sm:p-3">
-					<textarea
-						class="w-full resize-none border-none bg-transparent px-1.5 py-1 text-base leading-6 outline-none"
-						rows="3"
-						bind:value={draft}
-						onkeydown={handleEditorKeydown}
-						disabled={editingBusy}
-					></textarea>
-					<div class="mt-2 flex items-center justify-end gap-2 px-1">
-						<button class="btn btn-ghost btn-sm" type="button" onclick={cancelEditing} disabled={editingBusy}>
-							Cancel
-						</button>
-						<button class="btn btn-primary btn-sm" type="button" onclick={submitEdit} disabled={!draft.trim() || editingBusy}>
-							{editingBusy ? 'Updating…' : 'Save & regenerate'}
-						</button>
-					</div>
+		{#if editing}
+			<div bind:this={editorRoot} class="card bg-base-100 border-base-300 max-w-[90%] border p-2 shadow-sm sm:p-3">
+				<textarea
+					class="textarea textarea-ghost w-full resize-none px-1.5 py-1 text-base leading-6 focus:outline-none"
+					rows="3"
+					bind:value={draft}
+					onkeydown={handleEditorKeydown}
+					disabled={editingBusy}
+				></textarea>
+				<div class="mt-2 flex items-center justify-end gap-2 px-1">
+					<button class="btn btn-ghost btn-sm" type="button" onclick={cancelEditing} disabled={editingBusy}>
+						Cancel
+					</button>
+					<button class="btn btn-primary btn-sm" type="button" onclick={submitEdit} disabled={!draft.trim() || editingBusy}>
+						{editingBusy ? 'Updating…' : 'Save & regenerate'}
+					</button>
 				</div>
-			{:else}
+			</div>
+		{:else}
+			<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content max-w-[90%] border">
 				<p class="whitespace-pre-wrap">{message.content}</p>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	{:else if savedBlocks}
 		{#each savedBlocks as block, idx (`${message.id}-block-${idx}`)}
 			{#if block.kind === 'tool' && block.name === 'ask_user'}
@@ -344,14 +344,16 @@
 				{#if askQuestions.length > 0}
 					{#each askQuestions as q}
 						{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
-							<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+							<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
 								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 							</div>
 						{/if}
 						{@const answer = getAskUserAnswer(block.result, q.header)}
 						{#if answer}
-							<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
-								<p class="whitespace-pre-wrap">{answer}</p>
+							<div class="chat chat-end mb-1.5 ml-auto w-fit max-w-[90%]">
+								<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content border">
+									<p class="whitespace-pre-wrap">{answer}</p>
+								</div>
 							</div>
 						{/if}
 					{/each}
@@ -402,7 +404,7 @@
 					/>
 				</div>
 			{:else if block.kind === 'text' && block.content?.trim()}
-				<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+				<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
 					<div class="markdown-body">{@html renderMarkdown(block.content)}</div>
 				</div>
 			{/if}
@@ -416,14 +418,16 @@
 					{#if askQuestions.length > 0}
 						{#each askQuestions as q}
 							{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
-								<div class="assistant-message mb-1.5 rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+								<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
 									<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 								</div>
 							{/if}
 							{@const answer = getAskUserAnswer(call.result, q.header)}
 							{#if answer}
-								<div class="mb-1.5 ml-auto w-fit max-w-[90%] rounded-2xl border border-primary/25 bg-base-100/72 px-4 py-3">
-									<p class="whitespace-pre-wrap">{answer}</p>
+								<div class="chat chat-end mb-1.5 ml-auto w-fit max-w-[90%]">
+									<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content border">
+										<p class="whitespace-pre-wrap">{answer}</p>
+									</div>
 								</div>
 							{/if}
 						{/each}
@@ -450,7 +454,7 @@
 			</div>
 		{/if}
 		{#if message.content?.trim()}
-			<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+			<div class="assistant-message card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
 				<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
 			</div>
 		{/if}
@@ -460,10 +464,7 @@
 		<div class={`chat-footer mt-1 flex w-full items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`}>
 			{#if isUser}
 				<button class="btn btn-ghost btn-xs btn-circle" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
-					<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<path d="M12 20h9"></path>
-						<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
-					</svg>
+					<i class="mdi mdi-pencil-outline text-sm" aria-hidden="true"></i>
 				</button>
 			{/if}
 			{#if isAssistant}
@@ -475,33 +476,19 @@
 					aria-label="Copy response"
 				>
 					{#if copied}
-						<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							<polyline points="20 6 9 17 4 12"></polyline>
-						</svg>
+						<i class="mdi mdi-check text-sm text-success" aria-hidden="true"></i>
 					{:else}
-						<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-							<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-						</svg>
+						<i class="mdi mdi-content-copy text-sm" aria-hidden="true"></i>
 					{/if}
 				</button>
 				<button class="btn btn-ghost btn-xs rounded-md px-2" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
-					<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<polyline points="23 4 23 10 17 10"></polyline>
-						<polyline points="1 20 1 14 7 14"></polyline>
-						<path d="M3.5 9a9 9 0 0 1 14.1-3.4L23 10"></path>
-						<path d="M20.5 15a9 9 0 0 1-14.1 3.4L1 14"></path>
-					</svg>
+					<i class="mdi mdi-refresh text-sm" aria-hidden="true"></i>
 				</button>
 				<div class="dropdown dropdown-top">
-					<button class="btn btn-ghost btn-xs btn-circle" type="button" title="Message stats" aria-label="Message stats">
-						<svg viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							<circle cx="12" cy="12" r="10"></circle>
-							<path d="M12 16v-4"></path>
-							<path d="M12 8h.01"></path>
-						</svg>
+					<button tabindex="0" class="btn btn-ghost btn-xs btn-circle" type="button" title="Message stats" aria-label="Message stats">
+						<i class="mdi mdi-information-outline text-sm" aria-hidden="true"></i>
 					</button>
-					<div class="dropdown-content z-20 mt-2 w-72 rounded-xl border border-base-300 bg-base-100 p-3 text-xs shadow-xl">
+					<div tabindex="0" role="menu" class="dropdown-content card card-compact bg-base-100 border-base-300 z-20 mt-2 w-72 border p-3 text-xs shadow-xl">
 						<div class="grid grid-cols-2 gap-x-3 gap-y-2">
 							<span class="opacity-70">Model</span>
 							<span class="truncate text-right">{message.model ?? 'n/a'}</span>

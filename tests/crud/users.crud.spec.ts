@@ -49,14 +49,15 @@ test.describe('/users — admin CRUD lifecycle', () => {
 				// instead, and wait for the heading inside the box to appear.
 				const dialog = page.locator('.modal-box').filter({ has: page.getByRole('heading', { name: 'Create account' }) })
 				await expect(dialog).toBeVisible({ timeout: 5_000 })
-				// Locate fields by their preceding label-text spans. DaisyUI's <label class="form-control">
-				// pattern wraps the span + input but doesn't htmlFor, so getByLabel doesn't match.
+				// Locate fields by their <fieldset class="fieldset"> wrapper, scoped via the
+				// <legend class="fieldset-legend"> text. DaisyUI 5 replaced form-control with
+				// fieldset, and the <legend> has no `for` so getByLabel doesn't match.
 				const usernameInput = dialog
-					.locator('label.form-control')
+					.locator('fieldset.fieldset')
 					.filter({ has: page.getByText('Username', { exact: true }) })
 					.locator('input')
 				const nameInput = dialog
-					.locator('label.form-control')
+					.locator('fieldset.fieldset')
 					.filter({ has: page.getByText('Display name', { exact: true }) })
 					.locator('input')
 				await usernameInput.fill(username)

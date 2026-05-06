@@ -337,7 +337,7 @@
 		     MODEL & AI
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('model')}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-primary"></span>Model & AI
 			</p>
@@ -388,7 +388,7 @@
 		     CONTEXT WINDOW
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('context')}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Context Window
 			</p>
@@ -455,7 +455,7 @@
 		     TOOL APPROVAL
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('tools')}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Tool Approval
 			</p>
@@ -507,7 +507,7 @@
 		     MEMORY PALACE
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('memory') && settings?.memoryConfig}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>Memory Palace
 			</p>
@@ -568,7 +568,7 @@
 		     NOTIFICATIONS
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('notifications')}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>Notifications
 			</p>
@@ -596,7 +596,7 @@
 		     BUDGET
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('budget')}
-		<section class="rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
 			<p class="mb-1.5 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 				<span class="inline-block h-1.5 w-1.5 rounded-full bg-warning"></span>Budget
 			</p>
@@ -654,7 +654,7 @@
 	     APP & PUSH
 	     ════════════════════════════════════════════════ -->
 	{#if isVisible('app')}
-	<section class="mt-4 rounded-2xl border border-base-300/60 bg-base-100/60 p-4 lg:mt-0">
+	<section class="card card-body bg-base-100/60 border-base-300/60 mt-4 rounded-2xl border p-4 lg:mt-0">
 		<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 			<span class="inline-block h-1.5 w-1.5 rounded-full bg-info"></span>App & Push
 		</p>
@@ -701,7 +701,7 @@
 	     DEVELOPER TOOLS
 	     ════════════════════════════════════════════════ -->
 	{#if isVisible('devtools')}
-	<section class="mt-4 rounded-2xl border border-base-300/60 bg-base-100/60 p-4">
+	<section class="card card-body bg-base-100/60 border-base-300/60 mt-4 rounded-2xl border p-4">
 		<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
 			<span class="inline-block h-1.5 w-1.5 rounded-full bg-error"></span>Developer Tools
 		</p>

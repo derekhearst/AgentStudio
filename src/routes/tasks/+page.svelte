@@ -110,7 +110,7 @@
 		<div class="flex h-full min-w-max gap-3 px-1 pb-2">
 			{#each KANBAN_COLUMNS as column (column.key)}
 				{@const items = tasksFor(column.key)}
-				<div class="flex w-72 flex-col rounded-2xl border border-base-300/60 bg-base-200/30">
+				<div class="flex w-72 flex-col card card-body bg-base-200/30 border-base-300/60 rounded-2xl border">
 					<header class="flex shrink-0 items-center justify-between gap-2 border-b border-base-300/60 px-3 py-2">
 						<div class="flex items-center gap-2">
 							<span class="badge badge-sm {column.tone}">{column.label}</span>

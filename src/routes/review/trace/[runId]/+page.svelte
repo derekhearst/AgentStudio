@@ -129,18 +129,18 @@
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
 	{:else if result.adminOnly}
-		<div class="rounded-2xl border border-warning/40 bg-warning/10 p-6 text-center">
+		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
 			<p class="text-sm font-medium">Admin only</p>
 			<p class="mt-1 text-xs opacity-70">
 				The trace viewer is visible only to users with the <code>admin</code> role.
 			</p>
 		</div>
 	{:else if error}
-		<div class="rounded-2xl border border-error/40 bg-error/10 p-6 text-sm text-error">
+		<div class="alert alert-error alert-soft border-error/40 p-6 text-sm text-error">
 			{error}
 		</div>
 	{:else if !result.trace}
-		<div class="rounded-2xl border border-base-300/60 bg-base-200/30 p-12 text-center text-sm text-base-content/55">
+		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 			No trace recorded for this run. Run-trace recording is best-effort — older runs or
 			runs that failed before the first append won't have a trace row.
 		</div>
@@ -190,7 +190,7 @@
 					{#each spans as span, idx (span.seq ?? idx)}
 						{@const seq = typeof span.seq === 'number' ? span.seq : idx}
 						{@const isOpen = expanded.has(seq)}
-						<li class="rounded-xl border border-base-300/60 bg-base-100">
+						<li class="card card-body bg-base-100 border-base-300/60 rounded-xl border">
 							<button
 								type="button"
 								class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"

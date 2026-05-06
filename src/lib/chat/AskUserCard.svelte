@@ -77,13 +77,13 @@
 	{#if isAnswered}
 		{#each questions as question (question.header)}
 			<article class="chat chat-start">
-				<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3">
+				<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border">
 					<p class="text-sm font-medium leading-snug">{question.question}</p>
 				</div>
 			</article>
 			{#if (answers?.[question.header] ?? '').trim().length > 0}
 				<article class="chat chat-end">
-					<div class="user-message rounded-2xl border border-primary/45 bg-primary/15 px-4 py-3">
+					<div class="chat-bubble chat-bubble-primary user-message border-primary/45 bg-primary/15 text-base-content border">
 						<p class="text-sm leading-snug whitespace-pre-wrap">{answers?.[question.header]}</p>
 					</div>
 				</article>
@@ -91,7 +91,7 @@
 		{/each}
 	{:else if isWaiting}
 		<article class="chat chat-start">
-			<div class="assistant-message rounded-2xl border border-warning/40 bg-warning/5 px-4 py-3">
+			<div class="alert alert-warning alert-soft border-warning/40 max-w-full flex-col items-stretch px-4 py-3">
 				{#if activeQuestion}
 					<div class="mb-3 flex items-center gap-2 text-sm font-medium leading-snug">
 						<span class="badge badge-warning badge-sm">Question {Math.min(clampedIndex + 1, totalQuestions)}/{totalQuestions || 1}</span>
@@ -145,7 +145,7 @@
 		</article>
 	{:else}
 		<article class="chat chat-start">
-			<div class="assistant-message rounded-2xl border border-base-300/55 bg-base-100/36 px-4 py-3 text-sm opacity-70">
+			<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border text-sm opacity-70">
 				Question timed out without an answer.
 			</div>
 		</article>

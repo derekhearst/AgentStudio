@@ -138,19 +138,19 @@
 			{/if}
 
 			<div class="mt-4 space-y-4">
-				<label class="form-control">
-					<span class="label-text">User</span>
+				<fieldset class="fieldset">
+					<legend class="fieldset-legend">User</legend>
 					<select class="select select-bordered w-full" bind:value={selectedUserId} disabled={loading || users.length === 0}>
 						<option value="" disabled>Select a user</option>
 						{#each users as user (user.id)}
 							<option value={user.id}>{user.username} {user.claimed ? '(claimed)' : '(unclaimed)'}</option>
 						{/each}
 					</select>
-				</label>
+				</fieldset>
 
 				{#if selectedUser && !selectedUser.claimed}
-					<label class="form-control">
-						<span class="label-text">Bootstrap claim key (first admin login only)</span>
+					<fieldset class="fieldset">
+						<legend class="fieldset-legend">Bootstrap claim key (first admin login only)</legend>
 						<input
 							type="text"
 							class="input input-bordered w-full"
@@ -158,7 +158,7 @@
 							disabled={loading}
 							autocomplete="off"
 						/>
-					</label>
+					</fieldset>
 				{/if}
 
 				<button
