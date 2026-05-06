@@ -26,6 +26,16 @@
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import PlanProposalCard from '$lib/chat/PlanProposalCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
+	import {
+		parseJsonFallback,
+		getAskUserQuestionsFromTool,
+		getPlanProposalFromTool,
+		getAskUserAnswersFromTool,
+		type AskUserOption,
+		type AskUserQuestion,
+		type PlanStep,
+		type PlanProposal,
+	} from '$lib/chat/tool-block-helpers';
 
 	type ChatAttachment = {
 		id: string;
@@ -38,19 +48,6 @@
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
 	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-
-	type AskUserOption = {
-		label: string;
-		description?: string;
-		recommended?: boolean;
-	};
-
-	type AskUserQuestion = {
-		header: string;
-		question: string;
-		options: AskUserOption[];
-		allowFreeformInput?: boolean;
-	};
 
 	type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied';
 
@@ -424,99 +421,6 @@
 			);
 		}
 		currentThinkingTarget = '';
-	}
-
-	function parseJsonFallback(raw: string) {
-		try {
-			return JSON.parse(raw || '{}');
-		} catch {
-			return {};
-		}
-	}
-
-	function getAskUserQuestionsFromTool(block: ToolBlock): AskUserQuestion[] {
-		const args = parseJsonFallback(block.arguments) as Record<string, unknown>;
-		const result = block.result ? (parseJsonFallback(block.result) as Record<string, unknown>) : {};
-		const fromArgs = Array.isArray(args.questions) ? args.questions : [];
-		const fromResult = Array.isArray(result.questions) ? result.questions : [];
-		const source = fromArgs.length > 0 ? fromArgs : fromResult;
-
-		return source
-			.map((entry) => {
-				const row = (entry ?? {}) as Record<string, unknown>;
-				const header = typeof row.header === 'string' ? row.header : '';
-				const question = typeof row.question === 'string' ? row.question : header;
-				const options = Array.isArray(row.options)
-					? (row.options as Array<Record<string, unknown>>)
-							.map((opt) => ({
-								label: typeof opt.label === 'string' ? opt.label : '',
-								description: typeof opt.description === 'string' ? opt.description : undefined,
-								recommended: typeof opt.recommended === 'boolean' ? opt.recommended : undefined,
-							}))
-							.filter((opt) => opt.label.length > 0)
-					: [];
-				const allowFreeformInput =
-					typeof row.allowFreeformInput === 'boolean' ? row.allowFreeformInput : true;
-				return { header, question, options, allowFreeformInput };
-			})
-			.filter((row) => row.question.trim().length > 0);
-	}
-
-	type PlanStep = {
-		title: string;
-		detail?: string;
-		estimatedDurationMin?: number;
-		estimatedCostUsd?: number;
-		blastRadius?: 'local' | 'shared' | 'production';
-		reversible?: boolean;
-	};
-	type PlanProposal = {
-		summary: string;
-		steps: PlanStep[];
-		risks?: string[];
-		rollback?: string;
-		totalEstimatedCostUsd?: number;
-		totalEstimatedDurationMin?: number;
-	};
-
-	function getPlanProposalFromTool(block: ToolBlock): PlanProposal | null {
-		const args = parseJsonFallback(block.arguments) as Record<string, unknown>;
-		if (!args || typeof args !== 'object') return null;
-		if (typeof args.summary !== 'string' || !Array.isArray(args.steps)) return null;
-		const steps: PlanStep[] = (args.steps as Array<Record<string, unknown>>)
-			.map((s) => {
-				if (!s || typeof s !== 'object' || typeof s.title !== 'string') return null;
-				const step: PlanStep = { title: s.title };
-				if (typeof s.detail === 'string') step.detail = s.detail;
-				if (typeof s.estimatedDurationMin === 'number') step.estimatedDurationMin = s.estimatedDurationMin;
-				if (typeof s.estimatedCostUsd === 'number') step.estimatedCostUsd = s.estimatedCostUsd;
-				if (s.blastRadius === 'local' || s.blastRadius === 'shared' || s.blastRadius === 'production') {
-					step.blastRadius = s.blastRadius;
-				}
-				if (typeof s.reversible === 'boolean') step.reversible = s.reversible;
-				return step;
-			})
-			.filter((s): s is PlanStep => s !== null);
-		if (steps.length === 0) return null;
-		const plan: PlanProposal = { summary: args.summary, steps };
-		if (Array.isArray(args.risks)) plan.risks = args.risks.filter((r): r is string => typeof r === 'string');
-		if (typeof args.rollback === 'string') plan.rollback = args.rollback;
-		if (typeof args.totalEstimatedCostUsd === 'number') plan.totalEstimatedCostUsd = args.totalEstimatedCostUsd;
-		if (typeof args.totalEstimatedDurationMin === 'number') plan.totalEstimatedDurationMin = args.totalEstimatedDurationMin;
-		return plan;
-	}
-
-	function getAskUserAnswersFromTool(block: ToolBlock): Record<string, string> | null {
-		if (!block.result) return null;
-		const result = parseJsonFallback(block.result) as Record<string, unknown>;
-		if (!result || typeof result !== 'object') return null;
-		const answers = result.answers;
-		if (!answers || typeof answers !== 'object') return null;
-		const out: Record<string, string> = {};
-		for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
-			if (typeof v === 'string') out[k] = v;
-		}
-		return Object.keys(out).length > 0 ? out : null;
 	}
 
 	function getPartialTextFromBlocks() {
