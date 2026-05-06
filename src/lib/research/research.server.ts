@@ -24,6 +24,9 @@ export type CreateResearchInput = {
 	conversationId?: string | null
 	runId?: string | null
 	jobId?: string | null
+	// Composer-selected model. Stored on the research row so the orchestrator can override
+	// DEFAULT_RESEARCH_CONFIG.{plannerModel,synthesizerModel} for this specific run.
+	model?: string | null
 }
 
 export async function createResearch(input: CreateResearchInput): Promise<ResearchRow> {
@@ -35,6 +38,7 @@ export async function createResearch(input: CreateResearchInput): Promise<Resear
 			conversationId: input.conversationId ?? null,
 			runId: input.runId ?? null,
 			jobId: input.jobId ?? null,
+			model: input.model ?? null,
 			status: 'planning',
 		})
 		.returning()

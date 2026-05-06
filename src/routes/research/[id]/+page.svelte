@@ -33,7 +33,7 @@
 	});
 
 	function isInFlight(status: string): boolean {
-		return ['planning', 'searching', 'fetching', 'synthesizing'].includes(status);
+		return ['planning', 'searching', 'fetching', 'reflecting', 'synthesizing'].includes(status);
 	}
 
 	async function load() {
@@ -62,6 +62,7 @@
 			case 'planning':
 			case 'searching':
 			case 'fetching':
+			case 'reflecting':
 			case 'synthesizing':
 				return 'badge-info';
 			case 'complete':

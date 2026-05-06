@@ -2,9 +2,10 @@ import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
 
 // Plan-mode UUID was bumped c003 → c023 when the plan-mode skill content was rewritten to
-// require the `propose_plan` tool (Wave 1 #6 phase 4). The bump forces a clean re-seed
-// instead of preserving the old content via ON CONFLICT DO NOTHING. Source of truth:
-// src/lib/chat/mode-skills.server.ts.
+// require the `propose_plan` tool (Wave 1 #6 phase 4). The Deep Research rebuild updated all
+// four prompts in-place via migration 0048 (delete + reseed) instead of further UUID bumps,
+// since the seeder's no-target ON CONFLICT DO NOTHING would swallow name-uniqueness conflicts
+// and leave new rows uninserted. Source of truth: src/lib/chat/mode-skills.server.ts.
 const MODE_SKILL_IDS = {
 	chat: '00000000-0000-4000-8000-00000000c001',
 	research: '00000000-0000-4000-8000-00000000c002',

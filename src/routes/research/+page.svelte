@@ -8,6 +8,7 @@
 		startResearchCommand,
 	} from '$lib/research/research.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 
 	type ResearchRow = Awaited<ReturnType<typeof listResearchQuery>>[number];
 
@@ -18,6 +19,9 @@
 	let formQuery = $state('');
 	let formError = $state<string | null>(null);
 	let starting = $state(false);
+	// Defaults to Sonnet 4.6 (matches DEFAULT_RESEARCH_CONFIG and the chat composer default).
+	// Drives planner + reflection + synthesizer phases of the orchestrator for the new run.
+	let formModel = $state('anthropic/claude-sonnet-4-6');
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
@@ -34,7 +38,7 @@
 	});
 
 	function isInFlight(status: string): boolean {
-		return ['planning', 'searching', 'fetching', 'synthesizing'].includes(status);
+		return ['planning', 'searching', 'fetching', 'reflecting', 'synthesizing'].includes(status);
 	}
 
 	async function load() {
@@ -57,7 +61,7 @@
 		starting = true;
 		formError = null;
 		try {
-			const result = await startResearchCommand({ query: q });
+			const result = await startResearchCommand({ query: q, model: formModel });
 			formQuery = '';
 			formOpen = false;
 			await goto(`/research/${result.research.id}`);
@@ -73,6 +77,7 @@
 			case 'planning':
 			case 'searching':
 			case 'fetching':
+			case 'reflecting':
 			case 'synthesizing':
 				return 'badge-info';
 			case 'complete':
@@ -128,6 +133,19 @@
 						required
 					></textarea>
 				</fieldset>
+				<div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+					<div class="flex items-center gap-2">
+						<span class="text-base-content/60">Model:</span>
+						<ModelSelector
+							size="xs"
+							variant="inline"
+							value={formModel}
+							onchange={(id) => {
+								formModel = id;
+							}}
+						/>
+					</div>
+				</div>
 				{#if formError}
 					<div class="alert alert-error py-2 text-xs">{formError}</div>
 				{/if}

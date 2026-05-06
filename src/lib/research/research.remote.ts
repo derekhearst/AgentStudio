@@ -32,7 +32,7 @@ export const listResearchQuery = query(
 		.object({
 			limit: z.number().int().min(1).max(100).optional(),
 			status: z
-				.enum(['planning', 'searching', 'fetching', 'synthesizing', 'complete', 'failed', 'canceled'])
+				.enum(['planning', 'searching', 'fetching', 'reflecting', 'synthesizing', 'complete', 'failed', 'canceled'])
 				.optional(),
 		})
 		.default({}),
@@ -52,6 +52,9 @@ const startResearchSchema = z.object({
 	query: z.string().trim().min(8).max(2000),
 	conversationId: z.string().uuid().optional(),
 	runId: z.string().uuid().optional(),
+	// Composer-selected model. Drives both planner and synthesizer phases; falls back to
+	// per-agent config or DEFAULT_RESEARCH_CONFIG when omitted (e.g. automation-triggered runs).
+	model: z.string().trim().min(1).max(200).optional(),
 })
 
 export const startResearchCommand = command(startResearchSchema, async (input) => {
@@ -61,6 +64,7 @@ export const startResearchCommand = command(startResearchSchema, async (input) =
 		query: input.query,
 		conversationId: input.conversationId ?? null,
 		runId: input.runId ?? null,
+		model: input.model ?? null,
 	})
 	const job = await enqueueJob({
 		type: 'research_run',

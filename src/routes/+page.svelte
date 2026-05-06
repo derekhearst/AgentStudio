@@ -257,12 +257,14 @@
 
 	// Wave 4 #18 phase 4 — Deep Research from the home composer. No conversation context yet
 	// (the user is starting fresh) so we route directly into research without creating a chat.
+	// Model: pass through the composer's selected model so the orchestrator's planner +
+	// reflection + synthesizer phases all run on whatever the user picked.
 	async function handleNewResearch(query: string) {
 		if (busy) return;
 		busy = true;
 		try {
 			const { startResearchCommand } = await import('$lib/research/research.remote');
-			const result = await startResearchCommand({ query });
+			const result = await startResearchCommand({ query, model });
 			await goto(`/research/${result.research.id}`);
 		} finally {
 			busy = false;

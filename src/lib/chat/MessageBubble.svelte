@@ -333,7 +333,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content max-w-[90%] border">
+			<div class="user-bubble bg-base-200/80 text-base-content max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm">
 				<p class="whitespace-pre-wrap">{message.content}</p>
 			</div>
 		{/if}
@@ -344,14 +344,14 @@
 				{#if askQuestions.length > 0}
 					{#each askQuestions as q}
 						{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
-							<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
+							<div class="assistant-message mb-2">
 								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 							</div>
 						{/if}
 						{@const answer = getAskUserAnswer(block.result, q.header)}
 						{#if answer}
-							<div class="chat chat-end mb-1.5 ml-auto w-fit max-w-[90%]">
-								<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content border">
+							<div class="mb-2 ml-auto w-fit max-w-[85%]">
+								<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
 									<p class="whitespace-pre-wrap">{answer}</p>
 								</div>
 							</div>
@@ -404,7 +404,7 @@
 					/>
 				</div>
 			{:else if block.kind === 'text' && block.content?.trim()}
-				<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
+				<div class="assistant-message mb-2">
 					<div class="markdown-body">{@html renderMarkdown(block.content)}</div>
 				</div>
 			{/if}
@@ -418,14 +418,14 @@
 					{#if askQuestions.length > 0}
 						{#each askQuestions as q}
 							{#if !askQuestionAlreadyInMessage(q.question ?? q.header, savedBlocks)}
-								<div class="assistant-message mb-1.5 card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
+								<div class="assistant-message mb-2">
 									<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 								</div>
 							{/if}
 							{@const answer = getAskUserAnswer(call.result, q.header)}
 							{#if answer}
-								<div class="chat chat-end mb-1.5 ml-auto w-fit max-w-[90%]">
-									<div class="chat-bubble chat-bubble-primary border-primary/25 bg-base-100/72 text-base-content border">
+								<div class="mb-2 ml-auto w-fit max-w-[85%]">
+									<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
 										<p class="whitespace-pre-wrap">{answer}</p>
 									</div>
 								</div>
@@ -454,7 +454,7 @@
 			</div>
 		{/if}
 		{#if message.content?.trim()}
-			<div class="assistant-message card card-body bg-base-100/36 border-base-300/55 rounded-2xl border px-4 py-3">
+			<div class="assistant-message">
 				<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
 			</div>
 		{/if}

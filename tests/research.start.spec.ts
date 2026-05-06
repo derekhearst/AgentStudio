@@ -106,6 +106,54 @@ test.describe('research/start — row + job creation contract', () => {
 		}
 	})
 
+	test('composer-selected model round-trips through the research row', async () => {
+		// Deep Research rebuild — research.model column stores the composer's selected model so
+		// the orchestrator can override DEFAULT_RESEARCH_CONFIG.{plannerModel,synthesizerModel}
+		// for this specific run. Per-agent config still wins for runs without a composer pick
+		// (automation-triggered, etc.).
+		const prefix = uniquePrefix('research-model')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			const [r] = await sql<{ id: string; model: string | null }[]>`
+				insert into research (user_id, query, model)
+				values (${userId}, ${`${prefix} q`}, 'anthropic/claude-sonnet-4-6')
+				returning id, model
+			`
+			expect(r.model).toBe('anthropic/claude-sonnet-4-6')
+
+			// Defaulting to null when omitted (automation path).
+			const [r2] = await sql<{ id: string; model: string | null }[]>`
+				insert into research (user_id, query) values (${userId}, ${`${prefix} q2`})
+				returning id, model
+			`
+			expect(r2.model).toBeNull()
+		} finally {
+			await cleanupResearchPrefix(prefix)
+		}
+	})
+
+	test("'reflecting' status is a valid enum value (Deep Research rebuild)", async () => {
+		// The orchestrator transitions through 'reflecting' between fetching and synthesizing.
+		// This pins the migration that added the value to the research_status enum.
+		const prefix = uniquePrefix('research-reflecting')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			const [r] = await sql<{ id: string }[]>`
+				insert into research (user_id, query, status)
+				values (${userId}, ${`${prefix} q`}, 'reflecting'::research_status)
+				returning id
+			`
+			const [check] = await sql<{ status: string }[]>`
+				select status::text as status from research where id = ${r.id}
+			`
+			expect(check.status).toBe('reflecting')
+		} finally {
+			await cleanupResearchPrefix(prefix)
+		}
+	})
+
 	test('completed research has report + cited sources + finished_at', async () => {
 		const prefix = uniquePrefix('research-complete')
 		const userId = await getActiveUserId()

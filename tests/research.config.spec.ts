@@ -38,17 +38,20 @@ test.describe('research/config — pure resolver', () => {
 		expect(out.synthesizerModel).toBe('anthropic/claude-opus-4')
 	})
 
-	test('maxSubQuestions clamps to [1, 8]', async () => {
+	test('maxSubQuestions clamps to [1, 12]', async () => {
+		// Hardcap raised 8 → 12 in the Deep Research rebuild for runs that need wider planning.
 		const { resolveResearchConfig } = await import('../src/lib/research/research-config')
-		expect(resolveResearchConfig({ research: { maxSubQuestions: 100 } }).maxSubQuestions).toBe(8)
+		expect(resolveResearchConfig({ research: { maxSubQuestions: 100 } }).maxSubQuestions).toBe(12)
 		expect(resolveResearchConfig({ research: { maxSubQuestions: 0 } }).maxSubQuestions).toBe(1)
 		expect(resolveResearchConfig({ research: { maxSubQuestions: -5 } }).maxSubQuestions).toBe(1)
 		expect(resolveResearchConfig({ research: { maxSubQuestions: 7 } }).maxSubQuestions).toBe(7)
 	})
 
-	test('urlsPerQuestion clamps to [1, 5]', async () => {
+	test('urlsPerQuestion clamps to [1, 8]', async () => {
+		// Hardcap raised 5 → 8 in the Deep Research rebuild so the parallel fan-out can pull
+		// more sources per sub-question without changing the runner.
 		const { resolveResearchConfig } = await import('../src/lib/research/research-config')
-		expect(resolveResearchConfig({ research: { urlsPerQuestion: 99 } }).urlsPerQuestion).toBe(5)
+		expect(resolveResearchConfig({ research: { urlsPerQuestion: 99 } }).urlsPerQuestion).toBe(8)
 		expect(resolveResearchConfig({ research: { urlsPerQuestion: 0 } }).urlsPerQuestion).toBe(1)
 		expect(resolveResearchConfig({ research: { urlsPerQuestion: 3 } }).urlsPerQuestion).toBe(3)
 	})

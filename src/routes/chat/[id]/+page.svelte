@@ -1001,6 +1001,9 @@
 			const result = await startResearchCommand({
 				query: content,
 				conversationId: conversationId ?? undefined,
+				// Pass the composer's selected model so the orchestrator's planner + reflection +
+				// synthesizer all run on it (overrides DEFAULT_RESEARCH_CONFIG and per-agent config).
+				model,
 			});
 			await goto(`/research/${result.research.id}`);
 		} catch (error) {
@@ -1591,8 +1594,8 @@
 
 			<!-- Header: mobile/tablet only. Desktop uses the RecentChats sidebar panel. -->
 			<!-- relative+z-20 lifts the header into its own stacking context so the ContextWindow dropdown can layer above the messages container below it. -->
-			<div class="relative z-20 flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 py-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4">
-				<a href="/" class="btn btn-ghost btn-sm btn-square" aria-label="Back to chats">
+			<div class="relative z-20 flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4 tablet:pt-2">
+				<a href="/" class="btn btn-ghost btn-square min-h-10 h-10 w-10 tablet:min-h-9 tablet:h-9 tablet:w-9" aria-label="Back to chats">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
 					</svg>
@@ -1633,7 +1636,8 @@
 				</a>
 			{/if}
 
-			<div bind:this={messagesEl} class="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
+			<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
+				<div class="mx-auto w-full max-w-[78ch] desktop:max-w-[82ch] space-y-2">
 				{#if displayedMessages.length === 0 && !streaming && !waitingForFirstToken}
 					<div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-base-content/45">
 						<svg class="size-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1648,12 +1652,10 @@
 				{/each}
 
 				{#if waitingForFirstToken && streaming && streamingBlocks.length === 0}
-					<article class="chat chat-start">
-						<div class="flex items-center gap-3 px-4 py-3 text-sm text-base-content/70">
-							<span class="loading loading-spinner loading-md text-primary"></span>
-							<span class="sr-only">Assistant is generating a response</span>
-						</div>
-					</article>
+					<div class="flex items-center gap-3 px-1 py-2 text-sm text-base-content/65">
+						<span class="loading loading-spinner loading-md text-primary"></span>
+						<span class="sr-only">Assistant is generating a response</span>
+					</div>
 				{:else if streaming}
 					{#each streamingBlocks as block (block.id)}
 						{#if block.kind === 'tool' && block.name === 'ask_user'}
@@ -1712,12 +1714,13 @@
 								expanded={block.expanded}
 							/>
 						{:else if block.kind === 'text' && block.content}
-							<article class="chat chat-start">
-								<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border"><div class="markdown-body">{@html renderMarkdown(block.content)}</div></div>
-							</article>
+							<div class="assistant-message">
+								<div class="markdown-body">{@html renderMarkdown(block.content)}</div>
+							</div>
 						{/if}
 					{/each}
 				{/if}
+				</div>
 			</div>
 
 			{#if streamError}
@@ -1747,7 +1750,7 @@
 			{/if}
 		{/if}
 
-		<div class="chat-composer-transition px-2 pb-2 tablet:px-4 tablet:pb-4 desktop:px-0 desktop:pb-0">
+		<div class="chat-composer-transition mx-auto w-full max-w-[78ch] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] tablet:px-4 tablet:pb-4 desktop:max-w-[82ch] desktop:px-0 desktop:pb-0">
 
 			<AskUserModal
 				open={askUserModalOpen && !!pendingAskUser}

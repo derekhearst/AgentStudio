@@ -337,16 +337,19 @@
 		     MODEL & AI
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('model')}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-primary"></span>Model & AI
-			</p>
-			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4">
+		<ContentPanel>
+			{#snippet header()}
+				<h2 class="flex items-center gap-2 text-base font-semibold">
+					<span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
+					Model & AI
+				</h2>
+			{/snippet}
+			<div class="divide-y divide-base-300/50">
 				<!-- Default Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5">
+				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 first:pt-0">
 					<div>
 						<p class="text-sm font-medium">Default Model</p>
-						<p class="mt-0.5 text-xs text-base-content/40">Primary model for new conversations</p>
+						<p class="mt-0.5 text-xs text-base-content/55">Primary model for new conversations</p>
 					</div>
 					<div class="w-full sm:w-64">
 						<ModelSelector
@@ -359,13 +362,12 @@
 						/>
 					</div>
 				</div>
-				<div class="border-t border-base-content/6"></div>
 
 				<!-- Transcription Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5">
+				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0">
 					<div>
 						<p class="text-sm font-medium">Transcription Model</p>
-						<p class="mt-0.5 text-xs text-base-content/40">Model for voice-to-text (must support audio input)</p>
+						<p class="mt-0.5 text-xs text-base-content/55">Model for voice-to-text (must support audio input)</p>
 					</div>
 					<div class="w-full sm:w-64">
 						<ModelSelector
@@ -380,21 +382,23 @@
 					</div>
 				</div>
 			</div>
-		</section>
-
+		</ContentPanel>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
 		     CONTEXT WINDOW
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('context')}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Context Window
-			</p>
-			<div class="rounded-xl bg-base-200/40 px-4">
+		<ContentPanel>
+			{#snippet header()}
+				<h2 class="flex items-center gap-2 text-base font-semibold">
+					<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
+					Context Window
+				</h2>
+			{/snippet}
+			<div class="divide-y divide-base-300/50">
 				<!-- Reserved Response -->
-				<div class="py-3.5">
+				<div class="py-3.5 first:pt-0">
 					<div class="flex items-center justify-between">
 						<p class="text-sm font-medium">Reserved Response</p>
 						<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.reservedResponsePct.toFixed(0)}%</span>
@@ -407,9 +411,8 @@
 						class="range range-secondary range-xs mt-3"
 						bind:value={settings.contextConfig.reservedResponsePct}
 					/>
-					<p class="mt-1.5 text-xs text-base-content/35">Size of the striped reserved segment in the context bar</p>
+					<p class="mt-1.5 text-xs text-base-content/55">Size of the striped reserved segment in the context bar</p>
 				</div>
-				<div class="border-t border-base-content/6"></div>
 
 				<!-- Auto-Compact Threshold -->
 				<div class="py-3.5">
@@ -425,15 +428,14 @@
 						class="range range-secondary range-xs mt-3"
 						bind:value={settings.contextConfig.autoCompactThresholdPct}
 					/>
-					<p class="mt-1.5 text-xs text-base-content/35">Auto-compaction triggers when a model switch would exceed this</p>
+					<p class="mt-1.5 text-xs text-base-content/55">Auto-compaction triggers when a model switch would exceed this</p>
 				</div>
-				<div class="border-t border-base-content/6"></div>
 
 				<!-- Compaction Model -->
-				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5">
+				<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0">
 					<div>
 						<p class="text-sm font-medium">Compaction Model</p>
-						<p class="mt-0.5 text-xs text-base-content/40">Model used to summarize conversations during auto-compaction</p>
+						<p class="mt-0.5 text-xs text-base-content/55">Model used to summarize conversations during auto-compaction</p>
 					</div>
 					<div class="w-full sm:w-64">
 						<ModelSelector
@@ -447,22 +449,24 @@
 					</div>
 				</div>
 			</div>
-		</section>
-
+		</ContentPanel>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
 		     TOOL APPROVAL
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('tools')}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-secondary"></span>Tool Approval
-			</p>
-			<label class="mb-3 flex items-start justify-between gap-3 rounded-xl border border-warning/40 bg-warning/5 px-3 py-2.5">
+		<ContentPanel>
+			{#snippet header()}
+				<h2 class="flex items-center gap-2 text-base font-semibold">
+					<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
+					Tool Approval
+				</h2>
+			{/snippet}
+			<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
 				<span>
 					<span class="block text-sm font-medium">Require approval for all tools</span>
-					<span class="block text-xs text-base-content/55">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
+					<span class="block text-xs text-base-content/60">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
 				</span>
 				<input
 					type="checkbox"
@@ -471,22 +475,19 @@
 					onchange={(e) => setWildcardApproval((e.currentTarget as HTMLInputElement).checked)}
 				/>
 			</label>
-			<div class="rounded-xl bg-base-200/40 px-3 sm:px-4" class:opacity-60={isWildcardApproval} class:pointer-events-none={isWildcardApproval} aria-disabled={isWildcardApproval}>
-				{#each toolsByGroup as groupEntry, i (groupEntry.groupKey)}
-					{#if i > 0}
-						<div class="border-t border-base-content/6"></div>
-					{/if}
-					<div class="py-3 sm:py-3.5">
+			<div class="divide-y divide-base-300/50" class:opacity-60={isWildcardApproval} class:pointer-events-none={isWildcardApproval} aria-disabled={isWildcardApproval}>
+				{#each toolsByGroup as groupEntry (groupEntry.groupKey)}
+					<div class="py-3 sm:py-3.5 first:pt-0 last:pb-0">
 						<div>
 							<p class="text-sm font-medium">{groupEntry.group.label}</p>
-							<p class="mt-0.5 text-xs text-base-content/40">{groupEntry.group.description}</p>
+							<p class="mt-0.5 text-xs text-base-content/55">{groupEntry.group.description}</p>
 						</div>
 						<div class="mt-3 space-y-2">
 							{#each groupEntry.tools as tool (tool.name)}
-								<label class="flex items-start justify-between gap-3 rounded-lg bg-base-300/30 px-3 py-2">
+								<label class="flex items-start justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 									<span>
 										<span class="block text-sm font-medium">{tool.name}</span>
-										<span class="block text-xs text-base-content/45">{tool.description}</span>
+										<span class="block text-xs text-base-content/55">{tool.description}</span>
 									</span>
 									<input
 										type="checkbox"
@@ -500,40 +501,43 @@
 					</div>
 				{/each}
 			</div>
-		</section>
+		</ContentPanel>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
 		     MEMORY PALACE
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('memory') && settings?.memoryConfig}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>Memory Palace
-			</p>
-			<div class="space-y-3">
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+		<ContentPanel>
+			{#snippet header()}
+				<h2 class="flex items-center gap-2 text-base font-semibold">
+					<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+					Memory Palace
+				</h2>
+			{/snippet}
+			<div class="space-y-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span>
 						<span class="block text-sm font-medium">Enable memory recall</span>
-						<span class="block text-xs text-base-content/45">Inject relevant past memories into chat as context.</span>
+						<span class="block text-xs text-base-content/55">Inject relevant past memories into chat as context.</span>
 					</span>
 					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.enabled} />
 				</label>
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span>
 						<span class="block text-sm font-medium">Auto-mine conversations</span>
-						<span class="block text-xs text-base-content/45">Mine each conversation into the palace after completion.</span>
+						<span class="block text-xs text-base-content/55">Mine each conversation into the palace after completion.</span>
 					</span>
 					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.autoMine} />
 				</label>
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span>
 						<span class="block text-sm font-medium">Use LLM reranker</span>
-						<span class="block text-xs text-base-content/45">Slower but typically improves retrieval precision.</span>
+						<span class="block text-xs text-base-content/55">Slower but typically improves retrieval precision.</span>
 					</span>
 					<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.useRerank} />
 				</label>
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span class="block text-sm font-medium">Top-K results</span>
 					<input
 						type="number"
@@ -549,63 +553,68 @@
 						}}
 					/>
 				</label>
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span class="block text-sm font-medium">Rerank model</span>
 					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.rerankModel} />
 				</label>
-				<label class="flex items-center justify-between gap-3 rounded-lg bg-base-200/40 px-3 py-2">
+				<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
 					<span class="block text-sm font-medium">Embedding model</span>
 					<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.embeddingModel} />
 				</label>
-				<p class="text-xs text-base-content/45">
+				<p class="text-xs text-base-content/55 pt-1">
 					Browse and search your palace at <a href="/memory" class="link link-accent">/memory</a>.
 				</p>
 			</div>
-		</section>
+		</ContentPanel>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
 		     NOTIFICATIONS
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('notifications')}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>Notifications
-			</p>
-			<div class="rounded-xl bg-base-200/40 px-4">
-				<div class="flex items-center justify-between gap-4 py-3">
+		<ContentPanel>
+			{#snippet header()}
+				<h2 class="flex items-center gap-2 text-base font-semibold">
+					<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
+					Notifications
+				</h2>
+			{/snippet}
+			<div class="divide-y divide-base-300/50">
+				<div class="flex items-center justify-between gap-4 py-3 first:pt-0">
 					<p class="text-sm font-medium">Task completed</p>
 					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.taskCompleted} />
 				</div>
-				<div class="border-t border-base-content/6"></div>
 				<div class="flex items-center justify-between gap-4 py-3">
 					<p class="text-sm font-medium">Needs input</p>
 					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.needsInput} />
 				</div>
-				<div class="border-t border-base-content/6"></div>
-				<div class="flex items-center justify-between gap-4 py-3">
+				<div class="flex items-center justify-between gap-4 py-3 last:pb-0">
 					<p class="text-sm font-medium">Agent errors</p>
 					<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.agentErrors} />
 				</div>
 			</div>
-		</section>
-
+		</ContentPanel>
 		{/if}
 
 		<!-- ════════════════════════════════════════════════
 		     BUDGET
 		     ════════════════════════════════════════════════ -->
 		{#if isVisible('budget')}
-		<section class="card card-body bg-base-100/60 border-base-300/60 rounded-2xl border p-4">
-			<p class="mb-1.5 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-				<span class="inline-block h-1.5 w-1.5 rounded-full bg-warning"></span>Budget
-			</p>
-			<p class="mb-3 pl-4 text-xs text-base-content/35">Alerts trigger at 80 % and 100 %</p>
-			<div class="rounded-xl bg-base-200/40 px-4">
-				<div class="flex items-center justify-between gap-4 py-3.5">
+		<ContentPanel>
+			{#snippet header()}
+				<div>
+					<h2 class="flex items-center gap-2 text-base font-semibold">
+						<span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
+						Budget
+					</h2>
+					<p class="mt-0.5 text-xs text-base-content/55">Alerts trigger at 80% and 100%</p>
+				</div>
+			{/snippet}
+			<div class="divide-y divide-base-300/50">
+				<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0">
 					<p class="text-sm font-medium">Daily limit</p>
 					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-base-content/30">$</span>
+						<span class="text-xs text-base-content/50">$</span>
 						<input
 							type="number"
 							class="input input-bordered input-sm w-28 text-right font-mono"
@@ -623,11 +632,10 @@
 						/>
 					</div>
 				</div>
-				<div class="border-t border-base-content/6"></div>
-				<div class="flex items-center justify-between gap-4 py-3.5">
+				<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0">
 					<p class="text-sm font-medium">Monthly limit</p>
 					<div class="flex items-center gap-1.5">
-						<span class="text-xs text-base-content/30">$</span>
+						<span class="text-xs text-base-content/50">$</span>
 						<input
 							type="number"
 							class="input input-bordered input-sm w-28 text-right font-mono"
@@ -646,7 +654,7 @@
 					</div>
 				</div>
 			</div>
-		</section>
+		</ContentPanel>
 		{/if}
 	{/if}
 
@@ -654,16 +662,19 @@
 	     APP & PUSH
 	     ════════════════════════════════════════════════ -->
 	{#if isVisible('app')}
-	<section class="card card-body bg-base-100/60 border-base-300/60 mt-4 rounded-2xl border p-4 lg:mt-0">
-		<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-			<span class="inline-block h-1.5 w-1.5 rounded-full bg-info"></span>App & Push
-		</p>
-		<div class="rounded-xl bg-base-200/40 px-4">
+	<ContentPanel class="mt-4 lg:mt-0">
+		{#snippet header()}
+			<h2 class="flex items-center gap-2 text-base font-semibold">
+				<span class="h-1.5 w-1.5 rounded-full bg-info"></span>
+				App & Push
+			</h2>
+		{/snippet}
+		<div class="divide-y divide-base-300/50">
 			<!-- Install -->
-			<div class="flex items-center justify-between gap-4 py-3.5">
+			<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0">
 				<div>
 					<p class="text-sm font-medium">Install App</p>
-					<p class="mt-0.5 text-xs text-base-content/40">Standalone desktop & mobile app</p>
+					<p class="mt-0.5 text-xs text-base-content/55">Standalone desktop & mobile app</p>
 				</div>
 				<button
 					class="btn btn-primary btn-sm btn-outline"
@@ -674,13 +685,12 @@
 					{installAvailable ? 'Install' : 'Installed'}
 				</button>
 			</div>
-			<div class="border-t border-base-content/6"></div>
 
 			<!-- Push -->
-			<div class="flex items-center justify-between gap-4 py-3.5">
+			<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0">
 				<div>
 					<p class="text-sm font-medium">Push Notifications</p>
-					<p class="mt-0.5 text-xs text-base-content/40">
+					<p class="mt-0.5 text-xs text-base-content/55">
 						{pushEnabled ? 'Enabled' : 'Disabled'} &middot; {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
 					</p>
 				</div>
@@ -693,21 +703,23 @@
 				</div>
 			</div>
 		</div>
-	</section>
-
+	</ContentPanel>
 	{/if}
 
 	<!-- ════════════════════════════════════════════════
 	     DEVELOPER TOOLS
 	     ════════════════════════════════════════════════ -->
 	{#if isVisible('devtools')}
-	<section class="card card-body bg-base-100/60 border-base-300/60 mt-4 rounded-2xl border p-4">
-		<p class="mb-3 flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-widest text-base-content/40">
-			<span class="inline-block h-1.5 w-1.5 rounded-full bg-error"></span>Developer Tools
-		</p>
+	<ContentPanel class="mt-4">
+		{#snippet header()}
+			<h2 class="flex items-center gap-2 text-base font-semibold">
+				<span class="h-1.5 w-1.5 rounded-full bg-error"></span>
+				Developer Tools
+			</h2>
+		{/snippet}
 		<div class="space-y-3">
 			<!-- Test Notification -->
-			<div class="rounded-xl bg-base-200/40 px-4 py-3.5">
+			<div class="rounded-md bg-base-200/40 px-4 py-3.5">
 				<p class="mb-2.5 text-sm font-medium">Send Test Notification</p>
 				<div class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
 					<input class="input input-bordered input-sm" bind:value={testTitle} placeholder="Title" />
@@ -717,18 +729,18 @@
 			</div>
 
 			<!-- Notification Feed -->
-			<div class="rounded-xl bg-base-200/40 px-4 py-3.5">
+			<div class="rounded-md bg-base-200/40 px-4 py-3.5">
 				<p class="mb-2 text-sm font-medium">Notification Feed</p>
 				{#if notifications.length === 0}
-					<p class="text-xs text-base-content/40">No notifications recorded yet.</p>
+					<p class="text-xs text-base-content/55">No notifications recorded yet.</p>
 				{:else}
 					<div class="space-y-1.5">
 						{#each notifications as item (item.id)}
-							<div class="flex items-start justify-between gap-3 rounded-lg bg-base-300/30 px-3 py-2">
+							<div class="flex items-start justify-between gap-3 rounded-md bg-base-300/30 px-3 py-2">
 								<div class="min-w-0">
 									<p class="truncate text-sm font-medium">{item.title}</p>
-									<p class="truncate text-xs text-base-content/50">{item.body}</p>
-									<p class="mt-0.5 text-[10px] text-base-content/30">{new Date(item.createdAt).toLocaleString()}</p>
+									<p class="truncate text-xs text-base-content/60">{item.body}</p>
+									<p class="mt-0.5 text-[10px] text-base-content/45">{new Date(item.createdAt).toLocaleString()}</p>
 								</div>
 								{#if item.read}
 									<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, false)}>Unread</button>
@@ -741,7 +753,7 @@
 				{/if}
 			</div>
 		</div>
-	</section>
+	</ContentPanel>
 	{/if}
 	</div>
 

@@ -76,17 +76,15 @@
 <div class="ask-user-card w-full">
 	{#if isAnswered}
 		{#each questions as question (question.header)}
-			<article class="chat chat-start">
-				<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border">
-					<p class="text-sm font-medium leading-snug">{question.question}</p>
-				</div>
-			</article>
+			<div class="assistant-message mb-2">
+				<p class="text-sm font-medium leading-snug">{question.question}</p>
+			</div>
 			{#if (answers?.[question.header] ?? '').trim().length > 0}
-				<article class="chat chat-end">
-					<div class="chat-bubble chat-bubble-primary user-message border-primary/45 bg-primary/15 text-base-content border">
+				<div class="mb-2 ml-auto w-fit max-w-[85%]">
+					<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
 						<p class="text-sm leading-snug whitespace-pre-wrap">{answers?.[question.header]}</p>
 					</div>
-				</article>
+				</div>
 			{/if}
 		{/each}
 	{:else if isWaiting}
@@ -144,10 +142,8 @@
 			</div>
 		</article>
 	{:else}
-		<article class="chat chat-start">
-			<div class="chat-bubble assistant-message border-base-300/55 bg-base-100/36 text-base-content border text-sm opacity-70">
-				Question timed out without an answer.
-			</div>
-		</article>
+		<div class="assistant-message text-sm opacity-70">
+			Question timed out without an answer.
+		</div>
 	{/if}
 </div>

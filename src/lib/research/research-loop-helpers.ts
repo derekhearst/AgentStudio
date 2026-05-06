@@ -9,12 +9,16 @@ import type { ResearchSourceRow } from './research.schema'
  */
 
 /**
- * Parse a planning LLM response into a clean array of sub-questions.
- * The planner is instructed to return JSON `{"subQuestions": ["...", "..."]}` but real models
- * sometimes wrap in ```json fences or include preamble text. Falls back to extracting any
- * outer `{...}` substring + last-ditch sentence-split if no JSON found.
+ * Parse a JSON-shaped LLM response that should contain a string-array under `field`.
+ *
+ * Used by both the planner (`field: 'subQuestions'`) and the reflection step
+ * (`field: 'gaps'`). Real models sometimes wrap in ```json fences or include preamble text,
+ * so we try direct parse → fenced-block parse → outermost `{...}` substring → last-ditch
+ * line-split fallback.
+ *
+ * Pure helper, no I/O — easy to unit-test.
  */
-export function parsePlannerResponse(raw: string): string[] {
+function parseJsonStringArrayField(raw: string, field: string): string[] {
 	const trimmed = raw.trim()
 	if (!trimmed) return []
 
@@ -22,46 +26,90 @@ export function parsePlannerResponse(raw: string): string[] {
 	const candidate = fenced ? fenced[1].trim() : trimmed
 
 	// Try direct JSON parse first.
-	const parsed = tryParseJson(candidate)
-	if (parsed && Array.isArray(parsed.subQuestions)) {
-		return cleanSubQuestions(parsed.subQuestions)
-	}
+	const parsed = tryParseJsonField(candidate, field)
+	if (parsed) return cleanStringArray(parsed)
 
 	// Try outermost {...} substring.
 	const start = candidate.indexOf('{')
 	const end = candidate.lastIndexOf('}')
 	if (start >= 0 && end > start) {
 		const slice = candidate.slice(start, end + 1)
-		const reparsed = tryParseJson(slice)
-		if (reparsed && Array.isArray(reparsed.subQuestions)) {
-			return cleanSubQuestions(reparsed.subQuestions)
-		}
+		const reparsed = tryParseJsonField(slice, field)
+		if (reparsed) return cleanStringArray(reparsed)
 	}
 
-	// Last-ditch fallback: split on lines that look like numbered/bulleted questions.
+	// Last-ditch fallback: split on lines that look like numbered/bulleted entries.
 	const lines = candidate
 		.split('\n')
 		.map((l) => l.trim())
 		.filter((l) => l.length > 0)
 		.map((l) => l.replace(/^(?:[-*•]|\d+[.)])\s*/, '').trim())
 		.filter((l) => l.length >= 8 && l.length < 240)
-	return cleanSubQuestions(lines).slice(0, 5)
+	return cleanStringArray(lines).slice(0, 5)
 }
 
-function tryParseJson(s: string): { subQuestions?: unknown } | null {
+/**
+ * Parse a planning LLM response into a clean array of sub-questions.
+ * The planner is instructed to return JSON `{"subQuestions": ["...", "..."]}`.
+ */
+export function parsePlannerResponse(raw: string): string[] {
+	return parseJsonStringArrayField(raw, 'subQuestions')
+}
+
+/**
+ * Parse a reflection LLM response into a clean array of follow-up gap queries.
+ * The reflector is instructed to return JSON `{"gaps": ["...", "..."]}`. May be empty when
+ * coverage is genuinely complete.
+ */
+export function parseReflectionResponse(raw: string): string[] {
+	// Reflection caps at 4 follow-up queries (per the prompt) but we hard-cap at 6 here as a
+	// runaway-defense backstop, mirroring the planner's 8-cap.
+	return parseJsonStringArrayField(raw, 'gaps').slice(0, 6)
+}
+
+function tryParseJsonField(s: string, field: string): unknown[] | null {
 	try {
-		return JSON.parse(s) as { subQuestions?: unknown }
+		const parsed = JSON.parse(s) as Record<string, unknown>
+		const value = parsed?.[field]
+		return Array.isArray(value) ? value : null
 	} catch {
 		return null
 	}
 }
 
-function cleanSubQuestions(raw: unknown[]): string[] {
+function cleanStringArray(raw: unknown[]): string[] {
 	return raw
 		.filter((q): q is string => typeof q === 'string')
 		.map((q) => q.trim())
 		.filter((q) => q.length >= 4 && q.length < 240)
-		.slice(0, 8) // hard cap so a runaway planner can't generate 50 sub-questions
+		.slice(0, 8) // hard cap so a runaway model can't generate 50 entries
+}
+
+/**
+ * Bounded-concurrency mapper. Runs `fn(item)` over `items` with at most `limit` in flight at
+ * any time. Returns results in input order. Pure helper — no external dep on `p-limit` so we
+ * stay zero-dep for this rebuild.
+ *
+ * Used by the orchestrator to fan out per-sub-question search+fetch in parallel without
+ * hammering SearXNG / target sites with too many concurrent requests.
+ */
+export async function mapWithConcurrency<T, R>(
+	items: readonly T[],
+	limit: number,
+	fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+	const safeLimit = Math.max(1, Math.floor(limit))
+	const results: R[] = new Array(items.length)
+	let nextIndex = 0
+	const workers = Array.from({ length: Math.min(safeLimit, items.length) }, async () => {
+		while (true) {
+			const i = nextIndex++
+			if (i >= items.length) return
+			results[i] = await fn(items[i], i)
+		}
+	})
+	await Promise.all(workers)
+	return results
 }
 
 /**

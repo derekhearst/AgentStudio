@@ -17,49 +17,70 @@ import type { ResearchRow, ResearchSourceRow } from './research.schema'
 import {
 	buildSourcesPromptBlock,
 	extractCitedSourceIds,
+	mapWithConcurrency,
 	parsePlannerResponse,
+	parseReflectionResponse,
 	pickUrlsToFetch,
 	type SearchHit,
 } from './research-loop-helpers'
 import { DEFAULT_RESEARCH_CONFIG, resolveResearchConfig, type ResolvedResearchConfig } from './research-config'
 
 /**
- * Wave 4 #18 phase 2 — research orchestrator loop.
+ * Deep Research orchestrator loop (rebuilt).
  *
  * Drives a research run end-to-end:
- *   1. Plan: prompt cheap LLM for 2-5 sub-questions (saved into research.plan + a 'plan' step)
- *   2. Search + fetch: for each sub-question, web_search → score URLs → web_fetch top-K
- *      → store as researchSource rows + 'search'/'fetch' steps
- *   3. Synthesize: prompt LLM with all source content + sub-questions, generate markdown
- *      report with [N] citations → flip cited_in_report on referenced sources →
- *      store report on research.report + 'synthesize' step
- *   4. Mark complete + record finishedAt
+ *   1. Plan: prompt LLM for sub-questions (saved into research.plan + a 'plan' step)
+ *   2. Search + fetch IN PARALLEL: for each sub-question, web_search → score URLs →
+ *      web_fetch top-K, fanned out with bounded concurrency.
+ *   3. Reflect: prompt LLM with what was fetched and ask for follow-up gap queries.
+ *      If non-empty, run a second search+fetch pass over those queries.
+ *   4. Synthesize: prompt LLM with ALL source content (initial + gap-pass) + sub-questions,
+ *      produce a thorough cited markdown report → flip cited_in_report on referenced sources.
+ *   5. Mark complete + record finishedAt.
+ *
+ * Composer-selected model: when `research.model` is set (from startResearchCommand), that
+ * value overrides DEFAULT_RESEARCH_CONFIG.{plannerModel,synthesizerModel} and the per-agent
+ * resolved config. Used for both planner, reflection, and synthesizer phases.
  *
  * Failure paths transition status='failed' + write the error to research.error so the UI can
  * surface what went wrong. The runner never throws — every failure path is caught and
- * recorded so the calling job handler reports completion successfully (the failure shows up
- * in the research row, not in the job).
+ * recorded so the calling job handler reports completion successfully.
  */
 
-// Hardcoded constants moved to research-config.ts (DEFAULT_RESEARCH_CONFIG) so per-agent
-// overrides can take effect via `agents.config.research`. Wave 4 #18 phase 4.
+const PARALLEL_FETCH_CONCURRENCY = 4
 
-const PLANNER_SYSTEM = `You are a research planner. Given a user's research query, decompose it into 3-5 specific, googleable sub-questions that together answer the query.
+const PLANNER_SYSTEM = `You are a research planner. Given a user's research query, decompose it into 4-8 specific, googleable sub-questions that together answer the query thoroughly.
 
 Respond with ONLY a JSON object: {"subQuestions": ["question 1", "question 2", ...]}
 - Sub-questions should be concrete and answerable by reading 1-3 web pages each.
 - Avoid vague questions ("what is X?") in favor of specific ones ("what are the failure modes of X under condition Y?").
+- Cover different angles: definitions, mechanisms, comparisons, evidence, edge cases, recent developments.
 - No preamble, no markdown fences. Just the JSON object.`
 
-const SYNTHESIZER_SYSTEM = `You are a research synthesizer. Given a user's query, a list of sub-questions, and a numbered set of source extracts, produce a markdown report that answers the query using ONLY information from the sources.
+const REFLECTION_SYSTEM = `You are a research evaluator. You're given the user's original query, the sub-questions a planner decomposed it into, and the sources fetched so far (titles + URLs + a short excerpt each).
+
+Identify coverage gaps: claims that need more support, sub-questions thinly answered, perspectives missing, time-sensitive facts that need fresh sources, or contradictions worth resolving.
+
+Emit follow-up search queries. Be concrete and Google-friendly — not "more on X" but "X failure rate 2024 study" or "Y vs Z benchmark site:arxiv.org".
+
+Return ONLY a JSON object: {"gaps": ["query 1", "query 2", ...]}
+- 0-4 queries. Empty array if coverage is genuinely complete.
+- No preamble, no markdown fences.`
+
+const SYNTHESIZER_SYSTEM = `You are a research synthesizer. You produce a thorough, cited markdown report from the sources provided. The user wants depth, not a summary.
 
 Format:
-- Start with a 1-2 sentence executive summary.
-- Then a section per sub-question with cited findings.
-- Inline citations as [N] referring to the source numbers.
-- End with a "Sources" section listing each [N] you cited.
-- Do NOT make up facts not supported by the sources. If a sub-question can't be answered from the sources, say so explicitly.
-- Be concise — prefer 800-1500 words.`
+- Executive summary (3-5 sentences) at the top.
+- Then 4-8 thematic sections — organize by theme/argument, not strictly per sub-question. Cross-cutting analysis is the goal.
+- Inline citations as [N] for every factual claim. Multiple citations [1][3] are encouraged when sources triangulate.
+- Surface disagreement when sources contradict — don't flatten or pick silently. Quote briefly when the disagreement is sharp.
+- Structure substantive claims as: claim → evidence → confidence ("established" / "contested" / "speculative").
+- Call out gaps: what the sources couldn't answer, what fresh research would resolve.
+- End with a "Sources" section listing each [N] you cited with title + URL.
+
+Length: target 2000-4000 words for default-config runs. Don't pad — but don't truncate. The user picked Deep Research because they want a real report.
+
+Hard rule: cite every factual claim. Don't make up facts not in the sources. If a sub-question can't be answered from the sources, say so explicitly.`
 
 export type ResearchRunOutcome = {
 	researchId: string
@@ -138,23 +159,33 @@ export async function runResearchLoop(
 		}
 		await updateResearch(researchId, { plan: planResult.subQuestions })
 
-		// ─────────── PHASE 2: SEARCH + FETCH ───────────
+		// ─────────── PHASE 2: SEARCH + FETCH (parallel fan-out) ───────────
 		await checkCanceled()
 		await updateResearch(researchId, { status: 'searching' })
-		for (const subQuestion of planResult.subQuestions) {
+		await runSearchAndFetchPass(researchId, planResult.subQuestions, config, checkCanceled)
+
+		// ─────────── PHASE 2.5: REFLECT — identify coverage gaps + run a second pass ───────────
+		await checkCanceled()
+		await updateResearch(researchId, { status: 'reflecting' })
+		const initialSources = await listSourcesForResearch(researchId)
+		const reflection = await runReflection(r, planResult.subQuestions, initialSources, config)
+		totalCost += reflection.costUsd
+		await addResearchStep({
+			researchId,
+			kind: 'plan', // reuse 'plan' kind (reflection is "what to plan next"); payload.phase distinguishes
+			payload: {
+				phase: 'reflect',
+				gaps: reflection.gaps,
+				rawResponse: reflection.raw.slice(0, 4000),
+			},
+			costUsd: reflection.costUsd,
+			finishedAt: new Date(),
+		})
+
+		if (reflection.gaps.length > 0) {
 			await checkCanceled()
-			const hits = await runSearch(researchId, subQuestion).catch((err) => {
-				console.warn('[research] search failed', { researchId, subQuestion, err })
-				return [] as SearchHit[]
-			})
-			const picked = pickUrlsToFetch(hits, config.urlsPerQuestion)
-			await updateResearch(researchId, { status: 'fetching' })
-			for (const hit of picked) {
-				await checkCanceled()
-				await runFetch(researchId, subQuestion, hit, config).catch((err) => {
-					console.warn('[research] fetch failed', { researchId, url: hit.url, err })
-				})
-			}
+			await updateResearch(researchId, { status: 'searching' })
+			await runSearchAndFetchPass(researchId, reflection.gaps, config, checkCanceled)
 		}
 
 		// ─────────── PHASE 3: SYNTHESIZE ───────────
@@ -240,31 +271,74 @@ class CanceledError extends Error {
 // ─────────── Phase helpers ───────────
 
 /**
- * Wave 4 #18 phase 4 — resolve per-agent research config. The research row carries a
- * conversationId; if that conversation has an attached agentId, look up the agent's
- * `config.research` and merge with defaults. Falls back to DEFAULT_RESEARCH_CONFIG when
- * any link in the chain is missing.
+ * Resolve the effective config for a research run. Priority:
+ *   1. `research.model` from the composer (overrides planner+synthesizer model only)
+ *   2. Per-agent `agents.config.research` (planner/synthesizer model + caps)
+ *   3. DEFAULT_RESEARCH_CONFIG fallback
+ *
+ * The research row carries a conversationId; if that conversation has an attached agentId,
+ * look up the agent's `config.research` and merge with defaults. Then apply the composer
+ * model override if present.
  */
 async function resolveConfigForResearch(r: ResearchRow): Promise<ResolvedResearchConfig> {
-	if (!r.conversationId) return { ...DEFAULT_RESEARCH_CONFIG }
-	try {
-		const [conv] = await db
-			.select({ agentId: conversations.agentId })
-			.from(conversations)
-			.where(eq(conversations.id, r.conversationId))
-			.limit(1)
-		if (!conv?.agentId) return { ...DEFAULT_RESEARCH_CONFIG }
-		const [agent] = await db
-			.select({ config: agents.config })
-			.from(agents)
-			.where(eq(agents.id, conv.agentId))
-			.limit(1)
-		if (!agent) return { ...DEFAULT_RESEARCH_CONFIG }
-		return resolveResearchConfig(agent.config)
-	} catch (err) {
-		console.warn('[research] config lookup failed, using defaults', err)
-		return { ...DEFAULT_RESEARCH_CONFIG }
+	let resolved: ResolvedResearchConfig = { ...DEFAULT_RESEARCH_CONFIG }
+	if (r.conversationId) {
+		try {
+			const [conv] = await db
+				.select({ agentId: conversations.agentId })
+				.from(conversations)
+				.where(eq(conversations.id, r.conversationId))
+				.limit(1)
+			if (conv?.agentId) {
+				const [agent] = await db
+					.select({ config: agents.config })
+					.from(agents)
+					.where(eq(agents.id, conv.agentId))
+					.limit(1)
+				if (agent) resolved = resolveResearchConfig(agent.config)
+			}
+		} catch (err) {
+			console.warn('[research] config lookup failed, using defaults', err)
+		}
 	}
+	// Composer-selected model takes precedence over both per-agent config and defaults.
+	// Drives planner, reflection, AND synthesizer phases — single source of truth for the run.
+	if (r.model && r.model.trim().length > 0) {
+		resolved.plannerModel = r.model
+		resolved.synthesizerModel = r.model
+	}
+	return resolved
+}
+
+/**
+ * Run a single search+fetch pass over a list of queries. Used for both the initial planner-
+ * generated sub-questions and the reflection-generated gap queries. Fans out per-query work
+ * with bounded concurrency so wall-clock stays sane even at the 12-sub-question hardcap.
+ */
+async function runSearchAndFetchPass(
+	researchId: string,
+	queries: readonly string[],
+	config: ResolvedResearchConfig,
+	checkCanceled: () => Promise<void>,
+): Promise<void> {
+	await mapWithConcurrency(queries, PARALLEL_FETCH_CONCURRENCY, async (subQuestion) => {
+		await checkCanceled()
+		const hits = await runSearch(researchId, subQuestion).catch((err) => {
+			console.warn('[research] search failed', { researchId, subQuestion, err })
+			return [] as SearchHit[]
+		})
+		const picked = pickUrlsToFetch(hits, config.urlsPerQuestion)
+		// Within a sub-question, fetch URLs in parallel too — they're independent. Keeps total
+		// in-flight bounded by PARALLEL_FETCH_CONCURRENCY × urlsPerQuestion (default 4×4 = 16),
+		// well within Playwright's capacity.
+		await Promise.all(
+			picked.map((hit) =>
+				runFetch(researchId, subQuestion, hit, config).catch((err) => {
+					console.warn('[research] fetch failed', { researchId, url: hit.url, err })
+				}),
+			),
+		)
+	})
 }
 
 async function runPlanner(
@@ -330,6 +404,54 @@ async function runFetch(
 		finishedAt: new Date(),
 	})
 	return source
+}
+
+async function runReflection(
+	r: ResearchRow,
+	subQuestions: string[],
+	sources: ResearchSourceRow[],
+	config: ResolvedResearchConfig,
+): Promise<{ gaps: string[]; raw: string; costUsd: number }> {
+	if (sources.length === 0) {
+		return { gaps: [], raw: '', costUsd: 0 }
+	}
+	const subQuestionsBlock = subQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')
+	// Per-source budget kept short on purpose: reflection only needs to know what was covered,
+	// not the full content. 500 chars × ~32 sources ≈ 16k tokens of context — fits any model.
+	const sourcesBlock = sources
+		.map((src, i) => {
+			const excerpt = (src.extractedText ?? '').slice(0, 500).replace(/\s+/g, ' ').trim()
+			return `[${i + 1}] ${src.title ?? '(untitled)'} — ${src.url}\n    ${excerpt}`
+		})
+		.join('\n\n')
+
+	const userMessage = `User query: ${r.query.trim()}
+
+Sub-questions the planner decomposed it into:
+${subQuestionsBlock}
+
+Sources fetched so far (excerpt only):
+${sourcesBlock}
+
+What gaps remain? Return the JSON object now.`
+
+	const messages: LlmMessage[] = [
+		{ role: 'system', content: REFLECTION_SYSTEM },
+		{ role: 'user', content: userMessage },
+	]
+	const result = await chat(messages, config.synthesizerModel)
+	const cost = await logLlmUsage({
+		source: 'evaluator',
+		model: config.synthesizerModel,
+		tokensIn: result.usage?.promptTokens ?? 0,
+		tokensOut: result.usage?.completionTokens ?? 0,
+		userId: r.userId ?? null,
+		runId: r.runId ?? null,
+		metadata: { researchId: r.id, stage: 'reflect' },
+	}).catch(() => '0')
+
+	const gaps = parseReflectionResponse(result.content)
+	return { gaps, raw: result.content, costUsd: parseFloat(cost) || 0 }
 }
 
 async function runSynthesizer(

@@ -34,6 +34,7 @@ export const researchStatusEnum = pgEnum('research_status', [
 	'planning',
 	'searching',
 	'fetching',
+	'reflecting',
 	'synthesizing',
 	'complete',
 	'failed',
@@ -59,6 +60,10 @@ export const research = pgTable(
 		runId: uuid('run_id'),
 		jobId: uuid('job_id'),
 		query: text('query').notNull(),
+		// Composer-selected model that overrides DEFAULT_RESEARCH_CONFIG.plannerModel +
+		// synthesizerModel for this run. Null when the run was started without a composer pick
+		// (e.g. automation-triggered) — the orchestrator falls back to per-agent config or defaults.
+		model: text('model'),
 		status: researchStatusEnum('status').notNull().default('planning'),
 		// Sub-questions parsed from the user's query (one per planned investigation thread).
 		plan: jsonb('plan').$type<string[]>().notNull().default([]),

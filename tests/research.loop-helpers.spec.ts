@@ -73,6 +73,88 @@ test.describe('research/loop-helpers — parsePlannerResponse', () => {
 	})
 })
 
+test.describe('research/loop-helpers — parseReflectionResponse', () => {
+	test('parses clean JSON gaps response', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		const raw = JSON.stringify({ gaps: ['LFP failure rate 2024 study', 'efoil battery thermal runaway'] })
+		expect(parseReflectionResponse(raw)).toEqual([
+			'LFP failure rate 2024 study',
+			'efoil battery thermal runaway',
+		])
+	})
+
+	test('returns empty array when reflection finds no gaps', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		expect(parseReflectionResponse(JSON.stringify({ gaps: [] }))).toEqual([])
+	})
+
+	test('strips ```json fences', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		const raw = '```json\n{"gaps":["why does X fail under Y conditions"]}\n```'
+		expect(parseReflectionResponse(raw)).toEqual(['why does X fail under Y conditions'])
+	})
+
+	test('caps at 6 gap queries even when LLM returns more', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		const raw = JSON.stringify({
+			gaps: Array.from({ length: 20 }, (_, i) => `gap query number ${i + 1} something`),
+		})
+		const out = parseReflectionResponse(raw)
+		expect(out.length).toBe(6)
+	})
+
+	test('returns empty for empty input', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		expect(parseReflectionResponse('')).toEqual([])
+	})
+
+	test('extracts outermost JSON when prose precedes/follows', async () => {
+		const { parseReflectionResponse } = await import('../src/lib/research/research-loop-helpers')
+		const raw = 'After review, here are the gaps: {"gaps":["query alpha here","query beta here"]} Done.'
+		expect(parseReflectionResponse(raw)).toEqual(['query alpha here', 'query beta here'])
+	})
+})
+
+test.describe('research/loop-helpers — mapWithConcurrency', () => {
+	test('runs items in parallel up to the limit', async () => {
+		const { mapWithConcurrency } = await import('../src/lib/research/research-loop-helpers')
+		const items = [1, 2, 3, 4, 5, 6, 7, 8]
+		const start = Date.now()
+		const results = await mapWithConcurrency(items, 4, async (n) => {
+			await new Promise((resolve) => setTimeout(resolve, 50))
+			return n * 2
+		})
+		const elapsed = Date.now() - start
+		expect(results).toEqual([2, 4, 6, 8, 10, 12, 14, 16])
+		// 8 items × 50ms each, 4 in flight ≈ 100ms. Sequential would be 400ms. Big margin to
+		// keep the test stable on slow CI.
+		expect(elapsed).toBeLessThan(300)
+	})
+
+	test('preserves input order in results', async () => {
+		const { mapWithConcurrency } = await import('../src/lib/research/research-loop-helpers')
+		const items = ['a', 'b', 'c', 'd']
+		const results = await mapWithConcurrency(items, 2, async (s, i) => {
+			// Force out-of-order completion by inverting delays.
+			await new Promise((resolve) => setTimeout(resolve, (items.length - i) * 10))
+			return s.toUpperCase()
+		})
+		expect(results).toEqual(['A', 'B', 'C', 'D'])
+	})
+
+	test('handles empty input', async () => {
+		const { mapWithConcurrency } = await import('../src/lib/research/research-loop-helpers')
+		const results = await mapWithConcurrency([], 4, async () => 'never')
+		expect(results).toEqual([])
+	})
+
+	test('clamps limit to at least 1', async () => {
+		const { mapWithConcurrency } = await import('../src/lib/research/research-loop-helpers')
+		const results = await mapWithConcurrency([1, 2, 3], 0, async (n) => n + 10)
+		expect(results).toEqual([11, 12, 13])
+	})
+})
+
 test.describe('research/loop-helpers — pickUrlsToFetch', () => {
 	test('prefers .gov / .edu / .org over commercial sites', async () => {
 		const { pickUrlsToFetch } = await import('../src/lib/research/research-loop-helpers')

@@ -22,15 +22,22 @@ export type ResolvedResearchConfig = {
 
 export const DEFAULT_RESEARCH_CONFIG: ResolvedResearchConfig = {
 	enabled: true,
-	plannerModel: 'openai/gpt-4o-mini',
-	synthesizerModel: 'openai/gpt-4o-mini',
-	maxSubQuestions: 5,
-	urlsPerQuestion: 2,
-	maxFetchChars: 30_000,
+	// These two model fields are *fallbacks* — when a research run carries a composer-selected
+	// model on `research.model`, the orchestrator overrides both with that value. Per-agent
+	// `agents.config.research` still wins over these defaults but loses to the composer pick.
+	plannerModel: 'anthropic/claude-sonnet-4-6',
+	synthesizerModel: 'anthropic/claude-sonnet-4-6',
+	// Defaults bumped (Deep Research rebuild): 5→8, 2→4, 30k→50k. With these a default run
+	// visits ~32 sources (8 sub-questions × 4 URLs each) instead of the prior ~10. The reflect
+	// phase can add up to 4 follow-up queries × urlsPerQuestion more, so total source count for
+	// a default run lands in the 30-50 range — comparable to Claude Deep Research output.
+	maxSubQuestions: 8,
+	urlsPerQuestion: 4,
+	maxFetchChars: 50_000,
 }
 
-const MAX_SUB_QUESTIONS_HARDCAP = 8
-const MAX_URLS_PER_QUESTION_HARDCAP = 5
+const MAX_SUB_QUESTIONS_HARDCAP = 12
+const MAX_URLS_PER_QUESTION_HARDCAP = 8
 
 /**
  * Read an agent's `config.research` field and merge with defaults. Returns a fully-resolved
