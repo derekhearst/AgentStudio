@@ -361,6 +361,130 @@ body::after {
 		0 -2px 8px oklch(20% 0 0 / 0.08);
 }
 
+/* ─────────────────────────────────────────────────────────────────
+ * Markdown rendering — applied globally so chat bubbles, ask-user
+ * cards, thinking blocks, and any other component rendering
+ * `class="markdown-body"` get consistent typography.
+ * ───────────────────────────────────────────────────────────────── */
+.markdown-body {
+	line-height: 1.65;
+	word-break: break-word;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+	margin: 1rem 0 0.6rem;
+	font-weight: 650;
+	line-height: 1.25;
+}
+
+.markdown-body p {
+	margin: 0.65rem 0;
+}
+
+.markdown-body ul {
+	margin: 0.65rem 0;
+	padding-left: 1.25rem;
+	list-style-type: disc;
+}
+
+.markdown-body ol {
+	margin: 0.65rem 0;
+	padding-left: 1.25rem;
+	list-style-type: decimal;
+}
+
+.markdown-body li + li {
+	margin-top: 0.3rem;
+}
+
+.markdown-body blockquote {
+	margin: 0.8rem 0;
+	border-left: 3px solid color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300));
+	padding-left: 0.85rem;
+	opacity: 0.95;
+}
+
+.markdown-body a {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	color: color-mix(in oklab, var(--color-primary) 72%, var(--color-base-content));
+}
+
+.markdown-body code {
+	border: 1px solid var(--color-base-300);
+	border-radius: 0.45rem;
+	padding: 0.15rem 0.4rem;
+	font-family: 'Cascadia Code', 'Consolas', monospace;
+	font-size: 0.86em;
+	background: color-mix(in oklab, var(--color-base-200) 75%, white 5%);
+}
+
+.markdown-body pre {
+	margin: 0.9rem 0;
+	overflow-x: auto;
+	border: 1px solid color-mix(in oklab, var(--color-base-300) 88%, var(--color-primary));
+	border-radius: 0.9rem;
+	padding: 0.9rem 1rem;
+	background: linear-gradient(
+		180deg,
+		color-mix(in oklab, var(--color-base-200) 86%, white 4%),
+		color-mix(in oklab, var(--color-base-100) 95%, var(--color-base-300) 4%)
+	);
+}
+
+.markdown-body pre code {
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.markdown-body table {
+	display: block;
+	overflow-x: auto;
+	width: 100%;
+	border-collapse: collapse;
+	margin: 0.75rem 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+	border: 1px solid var(--color-base-300);
+	padding: 0.4rem 0.55rem;
+}
+
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-doctag {
+	color: oklch(45% 0.15 280);
+}
+
+.markdown-body .hljs-string,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-template-tag {
+	color: oklch(48% 0.18 145);
+}
+
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+	color: color-mix(in oklab, var(--color-base-content) 42%, var(--color-base-300));
+	font-style: italic;
+}
+
+.markdown-body .hljs-number,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet {
+	color: oklch(52% 0.2 45);
+}
+
+.markdown-body .hljs-title,
+.markdown-body .hljs-function {
+	color: oklch(40% 0.16 250);
+}
+
 /* Light-theme overrides for highlight.js syntax colors (defaults are tuned for dark) */
 [data-theme='AgentStudio'] .markdown-body .hljs-keyword,
 [data-theme='AgentStudio'] .markdown-body .hljs-selector-tag,

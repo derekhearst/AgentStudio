@@ -37,43 +37,6 @@ type StreamPayload = {
 
 type ChatRunState = (typeof chatRuns.$inferInsert)['state']
 
-type LoopMessage = LlmMessage & {
-	toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
-	toolCallId?: string
-}
-
-type ReasoningDetail = {
-	type?: string | null
-	text?: string | null
-	summary?: string | null
-	data?: string | null
-	[key: string]: unknown
-}
-
-function extractReasoningFragment(details: ReasoningDetail[] | undefined) {
-	if (!details?.length) return ''
-
-	return details
-		.map((detail) => {
-			switch (detail.type) {
-				case 'reasoning.text':
-					return typeof detail.text === 'string' ? detail.text : ''
-				case 'reasoning.summary':
-					return typeof detail.summary === 'string' ? detail.summary : ''
-				case 'reasoning.encrypted':
-					return '[Reasoning hidden by provider]'
-				default:
-					return typeof detail.text === 'string'
-						? detail.text
-						: typeof detail.summary === 'string'
-							? detail.summary
-							: ''
-			}
-		})
-		.filter(Boolean)
-		.join('\n\n')
-}
-
 const sse = encodeSseFrame
 
 export const POST: RequestHandler = async ({ request, locals }) => {
