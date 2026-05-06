@@ -14,6 +14,8 @@
 	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 
 	let {
+		value = $bindable(''),
+		placeholder = 'Message AgentStudio...',
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
 		reasoningEffort = 'none',
@@ -26,6 +28,8 @@
 		onCancelGeneration,
 		estimatedRemaining = 128000
 	} = $props<{
+		value?: string;
+		placeholder?: string;
 		busy?: boolean;
 		model?: string;
 		reasoningEffort?: ReasoningEffort;
@@ -40,8 +44,6 @@
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
 	}>();
-
-	let value = $state('');
 	let recording = $state(false);
 	let transcribing = $state(false);
 	let speechSupported = $state(false);
@@ -102,6 +104,17 @@
 			value = baseText + (interim ? (baseText && !baseText.endsWith(' ') ? ' ' : '') + interim : '');
 		};
 
+		// Flip to red instantly on click (perceived responsiveness). If onerror/onend
+		// fires immediately afterwards (e.g., permission denied), the state goes back
+		// to idle which still feels OK.
+		recording = true;
+
+		// `onstart` isn't in the lib.dom typings but is a real Web Speech API event.
+		// Cast through unknown to keep the type system happy.
+		(recognition as unknown as { onstart: () => void }).onstart = () => {
+			recording = true;
+		};
+
 		recognition.onend = () => {
 			recording = false;
 			recognition = null;
@@ -115,8 +128,14 @@
 			recognition = null;
 		};
 
-		recognition.start();
-		recording = true;
+		try {
+			recognition.start();
+		} catch (err) {
+			// Synchronous throw (already-started or invalid-state). Roll back instantly.
+			recording = false;
+			recognition = null;
+			console.warn('Speech recognition start failed:', err);
+		}
 	}
 
 	// --- MediaRecorder + server transcription (Firefox fallback) ---
@@ -264,7 +283,7 @@
 		{recording}
 		{transcribing}
 		{speechSupported}
-		placeholder="Message AgentStudio..."
+		{placeholder}
 		onSubmit={(content) => handleSubmit(content)}
 		onResearchSubmit={onResearchSubmit ? (content) => onResearchSubmit(content) : undefined}
 		onModelChange={(id) => onModelChange?.(id)}

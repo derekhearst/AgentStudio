@@ -107,11 +107,16 @@
 	min-height: 100%;
 }
 
+html,
+body {
+	height: 100vh;
+	overflow: hidden;
+}
+
 body {
 	font-family: 'Segoe UI Variable Text', 'Aptos', 'Trebuchet MS', sans-serif;
 	background: transparent;
 	color: var(--color-base-content);
-	min-height: 100vh;
 	animation: shell-fade 280ms ease-out;
 }
 

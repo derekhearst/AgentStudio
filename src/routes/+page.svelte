@@ -9,7 +9,7 @@
 	import { createConversation, getConversations } from '$lib/chat';
 	import { getAgentChoices } from '$lib/agents';
 	import { getSettings } from '$lib/settings';
-	import ChatComposer from '$lib/chat/ChatComposer.svelte';
+	import ChatInput from '$lib/chat/ChatInput.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
@@ -282,7 +282,7 @@
 
 		<!-- Input Area -->
 		<div class="chat-composer-transition">
-			<ChatComposer
+			<ChatInput
 				bind:value={prompt}
 				{busy}
 				{model}
@@ -290,6 +290,7 @@
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
 				onSubmit={(content) => handleComposerSubmit(content)}
+				onResearchSubmit={(content) => handleNewResearch(content)}
 				onModelChange={(id) => {
 					model = id;
 				}}

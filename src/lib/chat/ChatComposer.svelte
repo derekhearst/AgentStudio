@@ -128,7 +128,7 @@
 					value={model}
 					variant="inline"
 					size="xs"
-					showChevron={false}
+					showChevron={true}
 					onchange={(id: string) => onModelChange?.(id)}
 				/>
 			</div>
@@ -181,7 +181,7 @@
 					{/if}
 					<button
 						type="button"
-						class="btn btn-sm btn-circle relative z-10 transition-colors duration-200 {recording ? 'btn-error text-error-content mic-pulse' : transcribing ? 'btn-info text-info-content' : 'btn-ghost'}"
+						class="btn btn-sm btn-circle relative z-10 {recording ? 'btn-error text-error-content mic-pulse' : transcribing ? 'btn-info text-info-content' : 'btn-ghost'}"
 						aria-label={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
 						title={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
 						disabled={busy || transcribing}
@@ -209,24 +209,6 @@
 						<line x1="12" y1="17" x2="12" y2="22"></line>
 						<line x1="8" y1="22" x2="16" y2="22"></line>
 						<line x1="3" y1="3" x2="21" y2="21"></line>
-					</svg>
-				</button>
-			{/if}
-			{#if onResearchSubmit}
-				<!-- Wave 4 #18 phase 4 — Deep Research trigger. Clicks submit the textarea
-				     content as a research run instead of a chat message. Disabled when empty
-				     or busy; visually distinct from send so users don't confuse the two. -->
-				<button
-					type="button"
-					class="btn btn-sm btn-circle btn-ghost text-secondary hover:bg-secondary/15 hover:text-secondary"
-					aria-label="Start Deep Research"
-					title="Start Deep Research on this query (plan → search → fetch → synthesize)"
-					disabled={busy || value.trim().length === 0}
-					onclick={() => void submitResearch()}
-				>
-					<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<circle cx="11" cy="11" r="7"></circle>
-						<path d="M21 21l-4.35-4.35"></path>
 					</svg>
 				</button>
 			{/if}

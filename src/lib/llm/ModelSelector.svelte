@@ -222,7 +222,10 @@
 
 	const selectedLabel = $derived.by(() => {
 		const found = models.find((m) => m.id === value)
-		return found ? found.name : value
+		const fullName = found ? found.name : value
+		// Strip the "Provider: " prefix when in inline mode (composer toolbar) so the label is compact.
+		const colonIdx = fullName.indexOf(':')
+		return isInline && colonIdx >= 0 ? fullName.slice(colonIdx + 1).trim() : fullName
 	})
 
 	function selectModel(id: string) {
