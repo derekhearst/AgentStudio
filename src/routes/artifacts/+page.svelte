@@ -5,9 +5,9 @@
 	import {
 		listRecentArtifactsQuery,
 		type ArtifactFeedItem,
-		type ImageFeedItem,
 	} from '$lib/artifacts/artifacts-feed.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import { artifactDrawer } from '$lib/artifacts/artifact-drawer.svelte';
 
 	type FeedType = 'all' | 'research' | 'image' | 'document';
 
@@ -15,8 +15,6 @@
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let filter = $state<FeedType>('all');
-	let lightboxImage = $state<ImageFeedItem | null>(null);
-	let lightboxDialog: HTMLDialogElement | null = $state(null);
 
 	onMount(() => {
 		void load(filter);
@@ -71,14 +69,14 @@
 		return ['planning', 'searching', 'fetching', 'reflecting', 'synthesizing'].includes(status);
 	}
 
-	function openLightbox(item: ImageFeedItem) {
-		lightboxImage = item;
-		lightboxDialog?.showModal();
-	}
-
-	function closeLightbox() {
-		lightboxDialog?.close();
-		lightboxImage = null;
+	function openInDrawer(item: ArtifactFeedItem, event: MouseEvent | KeyboardEvent) {
+		// Allow ⌘/ctrl+click and middle-click to navigate normally.
+		if ('metaKey' in event && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
+		if ('button' in event && event.button === 1) return;
+		event.preventDefault();
+		if (item.kind === 'research') artifactDrawer.open({ kind: 'research', id: item.id });
+		else if (item.kind === 'document') artifactDrawer.open({ kind: 'document', artifactId: item.id });
+		else if (item.kind === 'image') artifactDrawer.open({ kind: 'image', id: item.id });
 	}
 
 	const FILTERS: Array<{ value: FeedType; label: string; icon: string }> = [
@@ -136,6 +134,7 @@
 					{#if item.kind === 'research'}
 						<a
 							href={item.href}
+							onclick={(e) => openInDrawer(item, e)}
 							class="flex h-full flex-col gap-1.5 rounded-xl border border-base-300/60 bg-base-100 p-3 transition-colors hover:bg-base-200/40"
 						>
 							<div class="flex items-start justify-between gap-2">
@@ -164,7 +163,7 @@
 						<button
 							type="button"
 							class="flex h-full w-full flex-col gap-1.5 rounded-xl border border-base-300/60 bg-base-100 p-3 text-left transition-colors hover:bg-base-200/40"
-							onclick={() => openLightbox(item)}
+							onclick={(e) => openInDrawer(item, e)}
 						>
 							<div class="flex items-center gap-1.5 text-xs uppercase tracking-wide text-base-content/50">
 								<i class="mdi mdi-image-outline text-sm"></i>
@@ -190,6 +189,7 @@
 					{:else}
 						<a
 							href={item.href}
+							onclick={(e) => openInDrawer(item, e)}
 							class="flex h-full flex-col gap-1.5 rounded-xl border border-base-300/60 bg-base-100 p-3 transition-colors hover:bg-base-200/40"
 						>
 							<div class="flex items-start justify-between gap-2">
@@ -215,42 +215,3 @@
 	{/if}
 </div>
 
-<!-- Lightbox for image preview -->
-<dialog bind:this={lightboxDialog} class="modal" onclose={() => (lightboxImage = null)}>
-	<div class="modal-box max-w-5xl bg-base-100">
-		{#if lightboxImage}
-			<div class="flex flex-col gap-3">
-				<div class="flex items-start justify-between gap-3">
-					<div class="min-w-0 flex-1">
-						<p class="text-xs uppercase tracking-wide text-base-content/50">Image prompt</p>
-						<p class="mt-0.5 text-sm">{lightboxImage.title}</p>
-					</div>
-					<button class="btn btn-sm btn-ghost btn-circle" onclick={closeLightbox} aria-label="Close">
-						<i class="mdi mdi-close"></i>
-					</button>
-				</div>
-				<div class="flex max-h-[70vh] items-center justify-center overflow-auto rounded-lg bg-base-200/40">
-					<img
-						src={lightboxImage.url}
-						alt={lightboxImage.title}
-						class="max-h-[70vh] w-auto object-contain"
-					/>
-				</div>
-				<div class="flex flex-wrap items-center gap-3 text-xs text-base-content/55">
-					<span>{lightboxImage.model}</span>
-					{#if lightboxImage.size}<span>· {lightboxImage.size}</span>{/if}
-					{#if lightboxImage.costUsd && parseFloat(lightboxImage.costUsd) > 0}
-						<span>· ${parseFloat(lightboxImage.costUsd).toFixed(4)}</span>
-					{/if}
-					<span>· {relativeTime(lightboxImage.createdAt)}</span>
-					<a class="link link-primary ml-auto" href={lightboxImage.url} target="_blank" rel="noreferrer noopener">
-						Open original
-					</a>
-				</div>
-			</div>
-		{/if}
-	</div>
-	<form method="dialog" class="modal-backdrop">
-		<button>close</button>
-	</form>
-</dialog>

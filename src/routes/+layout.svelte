@@ -11,6 +11,8 @@
 	import SidePanel from '$lib/ui/SidePanel.svelte';
 	import SkillStats from '$lib/skills/SkillStats.svelte';
 	import { skillsPanel } from '$lib/state.svelte';
+	import ArtifactDrawer from '$lib/artifacts/ArtifactDrawer.svelte';
+	import { artifactDrawer } from '$lib/artifacts/artifact-drawer.svelte';
 
 	let { children } = $props();
 	let chatPanelOpen = $state(false);
@@ -136,12 +138,21 @@
 				<MobileNav activePath={page.url.pathname} slideOff={true} />
 			{/if}
 
-			<div class="grid min-h-0 w-full flex-1 grid-rows-[1fr] gap-0 p-0 tablet:gap-3 tablet:p-3 desktop:p-3 {showAside ? 'desktop:grid-cols-[minmax(0,1fr)_320px]' : ''}">
+			<div
+				class="grid min-h-0 w-full flex-1 grid-rows-[1fr] gap-0 p-0 tablet:gap-3 tablet:p-3 desktop:p-3 {artifactDrawer.isOpen
+					? 'desktop:grid-cols-[minmax(0,1fr)_var(--artifact-drawer-w)]'
+					: showAside
+						? 'desktop:grid-cols-[minmax(0,1fr)_320px]'
+						: ''}"
+				style="--artifact-drawer-w: {artifactDrawer.widthPct}%"
+			>
 				<main class="relative flex min-h-0 flex-col overflow-y-auto {isChatDetailRoute ? 'p-0 tablet:rounded-3xl tablet:border tablet:border-base-300 tablet:bg-base-100/85 tablet:shadow-sm' : 'p-2 tablet:rounded-3xl tablet:border tablet:border-base-300 tablet:bg-base-100/85 tablet:px-4 tablet:pt-3 tablet:pb-4 tablet:shadow-sm'} desktop:px-6 desktop:pt-3 desktop:pb-6 {isChatOrHome && !isChatDetailRoute ? 'mobile-chat-main' : ''}">
 					{@render children()}
 				</main>
 
-				{#if showRecentChats}
+				{#if artifactDrawer.isOpen}
+					<ArtifactDrawer />
+				{:else if showRecentChats}
 					<SidePanel bind:open={chatPanelOpen}>
 						<RecentChats />
 					</SidePanel>

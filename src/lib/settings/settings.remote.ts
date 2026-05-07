@@ -34,6 +34,7 @@ const settingsUpdateSchema = z.object({
 	toolConfig: z
 		.object({
 			approvalRequiredTools: z.array(z.string()).optional(),
+			programmaticToolCallingEnabled: z.boolean().optional(),
 		})
 		.optional(),
 	memoryConfig: z

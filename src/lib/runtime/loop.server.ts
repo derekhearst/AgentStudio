@@ -468,6 +468,12 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			const toolResult = await executeTool(toolCall, input.userId, session.runId, {
 				persistentKey: input.persistentKey,
 				worktree: input.worktree,
+				runtime: {
+					approvalRequiredTools: input.approvalRequiredTools,
+					currentToolNames: () => tools.map((t) => t.function.name),
+					session,
+					isOrchestrator: input.isOrchestrator,
+				},
 			})
 
 			// Wave 3 #13 phase 1 — `after_tool` hook. Fail-isolated.

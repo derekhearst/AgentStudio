@@ -144,11 +144,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		| {
 				approvalRequiredTools?: string[]
 				approvalMode?: string
+				programmaticToolCallingEnabled?: boolean
 		  }
 		| undefined
 	const approvalRequiredTools = new Set(
 		toolConfig?.approvalRequiredTools ?? (toolConfig?.approvalMode === 'confirm' ? ['*'] : []),
 	)
+	const programmaticToolCallingEnabled = toolConfig?.programmaticToolCallingEnabled === true
 	// Wave 5 #19 phase 3 finish — destructive source-control tools (push_branch /
 	// create_pull_request) ALWAYS require operator approval, regardless of per-user
 	// settings. Refused outright in non-interactive runs at the tool execution layer.
@@ -464,14 +466,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	function computeToolsFor(enabledGroupNames: string[]) {
 		const all = getToolDefinitions()
 		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
-		let assembled: typeof askUserFiltered
+		// Programmatic tool calling is gated behind a global setting (Settings → Tool Approval).
+		// When off, `run_code` is hidden from the model entirely so it cannot be invoked.
+		const ptcFiltered = programmaticToolCallingEnabled
+			? askUserFiltered
+			: askUserFiltered.filter((tool) => tool.function.name !== 'run_code')
+		let assembled: typeof ptcFiltered
 		if (scopedAgentTools) {
-			assembled = askUserFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
+			assembled = ptcFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
 		} else if (!useProgressiveDisclosure) {
-			assembled = askUserFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
+			assembled = ptcFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 		} else {
 			const activeNames = new Set(expandGroupsToToolNames(enabledGroupNames))
-			assembled = askUserFiltered
+			assembled = ptcFiltered
 				.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 				.filter((tool) => activeNames.has(tool.function.name))
 		}

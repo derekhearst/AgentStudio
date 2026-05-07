@@ -88,7 +88,9 @@ const toolDescriptions: Record<ToolName, string> = {
 	git_log: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
 	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
 	propose_plan: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
+	propose_research_plan: 'Propose a Deep Research plan (sub-questions for the user to approve in the sidebar). On approve, a background research run produces a cited report.',
 	enable_capability: 'Enable a capability group (sandbox / skills / agents / media) so its tools become available next round.',
+	run_code: 'Run a JavaScript program in the sandbox; available tools are exposed as `await tools.<name>(args)`. Gated by the global Programmatic Tool Calling setting.',
 }
 
 function schemaToJsonSchema(name: ToolName) {

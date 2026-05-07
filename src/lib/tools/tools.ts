@@ -27,7 +27,7 @@ export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
 export const capabilityGroups = {
 	core: {
 		label: 'Core',
-		description: 'Always-on essentials: web search, ask_user, list_automations, propose_plan, propose_research_plan, enable_capability meta-tool',
+		description: 'Always-on essentials: web search, ask_user, list_automations, propose_plan, propose_research_plan, enable_capability meta-tool, run_code (programmatic tool calling, gated by global setting)',
 		tools: [
 			'web_search',
 			'ask_user',
@@ -35,6 +35,7 @@ export const capabilityGroups = {
 			'propose_plan',
 			'propose_research_plan',
 			'enable_capability',
+			'run_code',
 		] as ToolName[],
 		alwaysOn: true,
 	},
@@ -348,6 +349,11 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 	{
 		name: 'enable_capability',
 		description: 'Enable a capability group so its tools become available on the next round.',
+		group: 'core',
+	},
+	{
+		name: 'run_code',
+		description: 'Run a JavaScript program in the sandbox; available tools are exposed as `await tools.<name>(args)`. Gated by Settings → Programmatic Tool Calling.',
 		group: 'core',
 	},
 	{

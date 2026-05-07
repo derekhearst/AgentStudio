@@ -25,7 +25,7 @@
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import PlanProposalCard from '$lib/chat/PlanProposalCard.svelte';
-	import ResearchPlanSidebar from '$lib/research/ResearchPlanSidebar.svelte';
+	import ResearchInlineCard from '$lib/research/ResearchInlineCard.svelte';
 	import { listResearchForConversationQuery } from '$lib/research/research.remote';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
@@ -140,11 +140,10 @@
 	let pendingAskUser = $state<{ token: string; questions: AskUserQuestion[] } | null>(null);
 	let askUserModalOpen = $state(false);
 
-	// ── Research sidebar wiring ──────────────────────────────────────────────────────────
+	// ── Research inline card wiring ───────────────────────────────────────────────────
 	// activeResearchId tracks the most recent research run linked to this conversation.
 	// Refreshed on conversation load and after each propose_research_plan tool resolves.
 	let activeResearchId = $state<string | null>(null);
-	let researchSidebarOpen = $state(true);
 
 	async function refreshActiveResearch() {
 		if (!conversationId) return;
@@ -1780,8 +1779,14 @@
 								/>
 							{/if}
 						{:else if block.kind === 'tool' && block.name === 'propose_research_plan'}
-							<!-- Rendered in the right sidebar (ResearchPlanSidebar). Suppress inline
-							     so the user has one source of truth for the plan + approve/decline. -->
+							<ResearchInlineCard
+								pendingPlan={pendingResearchPlan}
+								pendingToken={pendingResearchToken}
+								pendingStatus={pendingResearchStatus}
+								{activeResearchId}
+								onApprove={approveToolCall}
+								onDeny={denyToolCall}
+							/>
 						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'propose_plan' && block.name !== 'propose_research_plan'}
 							<ToolCallCard
 								name={block.name}
@@ -1879,22 +1884,6 @@
 		</div>
 	</section>
 
-	<!-- Right sidebar: Deep Research panel. Visible (desktop+) when there's a pending plan
-	     awaiting approval, an in-flight research run, or a recently-completed run linked to
-	     this conversation. The sidebar component itself decides which state to render. -->
-	{#if researchSidebarOpen && (pendingResearchPlan || activeResearchId)}
-		<div class="hidden w-80 shrink-0 desktop:flex">
-			<ResearchPlanSidebar
-				pendingPlan={pendingResearchPlan}
-				pendingToken={pendingResearchToken}
-				pendingStatus={pendingResearchStatus}
-				{activeResearchId}
-				onApprove={approveToolCall}
-				onDeny={denyToolCall}
-				onClose={() => (researchSidebarOpen = false)}
-			/>
-		</div>
-	{/if}
 </div>
 
 

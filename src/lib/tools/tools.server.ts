@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { toolSchemas, toolDescriptions, allToolNames, type ToolName } from './tool-schemas'
+import { toolSchemas, toolDescriptions, allToolNames, normalizeToolName, type ToolName } from './tool-schemas'
 import {
 	toolUserContext,
 	getWorkspace,
@@ -21,6 +21,7 @@ import {
 	sandboxBrowserScreenshot,
 	browserClose,
 	type WorktreeStoreConfig,
+	type ToolRuntimeContext,
 } from './sandbox.server'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -521,17 +522,18 @@ export type ToolCallWithContext = ToolCall & {
 	messageId?: string | null
 }
 
-function normalizeToolName(name: string): ToolName | null {
-	const trimmed = name.trim()
-	if (trimmed in toolSchemas) return trimmed as ToolName
-	const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_')
-	if (normalized in toolSchemas) return normalized as ToolName
-	return null
-}
+// re-export for callers that previously imported from tools.server
+export { normalizeToolName }
 
 export type WorkspaceOptions = {
 	persistentKey?: string | null
 	worktree?: WorktreeStoreConfig | null
+	/**
+	 * Optional runtime hooks for tools that need to dispatch nested calls (currently `run_code`).
+	 * The loop populates this; standalone callers (MCP HTTP endpoint, automations) pass nothing
+	 * and run_code falls back to a no-session, empty-approval-set, all-tools-enabled mode.
+	 */
+	runtime?: ToolRuntimeContext | null
 }
 
 export async function executeTool(
@@ -546,6 +548,7 @@ export async function executeTool(
 			runId: runId ?? null,
 			persistentKey: workspace?.persistentKey ?? null,
 			worktree: workspace?.worktree ?? null,
+			runtime: workspace?.runtime ?? null,
 		},
 		async () => {
 		const startedAt = Date.now()
@@ -1989,6 +1992,35 @@ export async function executeTool(
 						success: false,
 						tool: call.name,
 						error: err instanceof Error ? err.message : 'Failed to start research run',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+			}
+
+			if (call.name === 'run_code') {
+				const input = toolSchemas.run_code.parse(call.arguments)
+				const { runCodeTool } = await import('./run-code.server')
+				try {
+					const result = await runCodeTool({ code: input.code, timeoutMs: input.timeoutMs })
+					return {
+						success: result.exitCode === 0 && !result.timedOut,
+						tool: call.name,
+						input,
+						result,
+						error:
+							result.timedOut
+								? `run_code timed out after ${result.durationMs}ms`
+								: result.exitCode !== 0
+									? `run_code exited with code ${result.exitCode}: ${result.stderr.slice(-1000) || 'no stderr'}`
+									: undefined,
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err) {
+					return {
+						success: false,
+						tool: call.name,
+						input,
+						error: err instanceof Error ? err.message : String(err),
 						executionMs: Date.now() - startedAt,
 					}
 				}

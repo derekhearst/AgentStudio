@@ -41,12 +41,38 @@ export type WorktreeStoreConfig = {
 	deleteBranchOnCleanup?: boolean
 }
 
+/**
+ * Per-tool-execution context. The required fields (userId / runId / persistentKey / worktree)
+ * resolve the workspace root. The optional `runtime` block is used by tools that need to dispatch
+ * nested tool calls — currently only `run_code`, which spawns a sandbox script and proxies tool
+ * calls from the script back through `executeToolWithApproval`. Setting it requires the caller to
+ * already be inside a chat-loop round (we need the live `Session` to emit `tool_pending` and the
+ * approval set to gate which calls require user confirmation).
+ */
 export const toolUserContext = new AsyncLocalStorage<{
 	userId: string
 	runId?: string | null
 	persistentKey?: string | null
 	worktree?: WorktreeStoreConfig | null
+	runtime?: ToolRuntimeContext | null
 }>()
+
+export type ToolRuntimeContext = {
+	/** Tool names approved-required for the current run (loop union of user setting + mandatory list). */
+	approvalRequiredTools: ReadonlySet<string>
+	/** Returns the names of tools currently exposed to the LLM this round. Used by run_code to list available tools to the script. */
+	currentToolNames: () => string[]
+	/** The live SSE session, when present, so nested tool calls can emit tool_pending / tool_result events. Null in detached/automation runs. */
+	session?:
+		| {
+				emit: (eventName: string, payload: unknown) => Promise<void>
+				updateRun: (patch: import('$lib/runtime/types').RunPatch) => Promise<void>
+				readonly runId: string
+		  }
+		| null
+	/** Whether this run is the orchestrator (controls run_subagent etc). */
+	isOrchestrator?: boolean
+}
 
 export function getWorkspace() {
 	const ctx = toolUserContext.getStore()

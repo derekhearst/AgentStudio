@@ -260,11 +260,29 @@ export const toolSchemas = {
 		subQuestions: z.array(z.string().trim().min(1).max(300)).min(2).max(12),
 		rationale: z.string().trim().max(800).optional(),
 	}),
+	run_code: z.object({
+		code: z.string().min(1).max(64_000),
+		timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
+	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
 
 export const allToolNames = Object.keys(toolSchemas) as ToolName[]
+
+/**
+ * Normalize a tool name from the model: trim, then case-insensitive snake_case match against the
+ * registry. Returns null when no canonical match exists. Shared by `executeTool` and the
+ * `run_code` HTTP RPC handler so a script saying `await tools.Web_Search({...})` resolves to the
+ * canonical `web_search`.
+ */
+export function normalizeToolName(name: string): ToolName | null {
+	const trimmed = name.trim()
+	if (trimmed in toolSchemas) return trimmed as ToolName
+	const normalized = trimmed.toLowerCase().replace(/[\s-]+/g, '_')
+	if (normalized in toolSchemas) return normalized as ToolName
+	return null
+}
 
 export const toolDescriptions: Record<ToolName, string> = {
 	web_search: 'Search the web for information.',
@@ -334,4 +352,6 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Propose a Deep Research plan to the user. Pass `summary` (1-2 sentence framing of what you intend to investigate), `subQuestions` (4-8 concrete, googleable sub-questions covering definitions, mechanisms, evidence, edge cases, and recent developments), and an optional `rationale` (why this decomposition). The user explicitly approves or denies in the right sidebar; on approve, a background research run starts (plan→search→fetch→reflect→synthesize, ~10-15 minutes) and the user is notified when the cited report is ready. On deny, the user will likely reply with feedback — call this tool again with a revised plan. Use ONLY when the user actually wants a deep, cited research run; for trivial lookups, use web_search/web_fetch directly.',
 	enable_capability:
 		'Enable a capability group (sandbox / skills / agents / media) so its tools become available on the next round. Use this when the task clearly needs filesystem operations, skill management, agent delegation, or image generation. The active surface starts with only the `core` group; expand on demand to keep the prompt slim.',
+	run_code:
+		'Run a JavaScript program in the sandboxed Bun runtime. Inside the script every tool currently available to you is callable as `await tools.<name>(args)` — same arguments and return shape as a direct tool call, same approvals, capabilities, and policies. Use this when you need to chain many tool calls, post-process their results, or branch on intermediate values without spending a round-trip per call. The script\'s working directory is the same persistent sandbox as the `shell` tool, so files persist across calls. `console.log` output is returned as `stdout`; throw to surface an error. The last expression\'s value (or an explicit `return` from the top-level wrapper) is captured as `returnValue` (must be JSON-serializable). Default timeout 60s, max 300s. Available tool names are listed in `tools.list()`. Cannot recursively call `run_code`. Example: `const files = await tools.search_files({ query: "TODO" }); console.log("found", files.length)`.',
 }

@@ -539,6 +539,25 @@
 										Tool Approval
 									</h2>
 								{/snippet}
+								<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-info/40 bg-info/5 px-3 py-2.5">
+									<span>
+										<span class="block text-sm font-medium">Programmatic tool calling</span>
+										<span class="block text-xs text-base-content/60">Expose <code>run_code</code> so the agent can write a JavaScript program that calls available tools as <code>await tools.&lt;name&gt;(args)</code>. Approvals and capability filtering still apply inside the script.</span>
+									</span>
+									<input
+										type="checkbox"
+										class="checkbox checkbox-sm checkbox-info mt-0.5"
+										checked={settings?.toolConfig?.programmaticToolCallingEnabled ?? false}
+										onchange={(e) => {
+											if (!settings) return;
+											const enabled = (e.currentTarget as HTMLInputElement).checked;
+											settings = {
+												...settings,
+												toolConfig: { ...settings.toolConfig, programmaticToolCallingEnabled: enabled },
+											};
+										}}
+									/>
+								</label>
 								<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
 									<span>
 										<span class="block text-sm font-medium">Require approval for all tools</span>
