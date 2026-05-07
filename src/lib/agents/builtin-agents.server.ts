@@ -52,6 +52,9 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	// Always-on essentials (core capability group).
 	'ask_user',
 	'propose_plan',
+	// Research initiator: the Research agent calls this to propose sub-questions; the user
+	// approves in the chat sidebar and a background research job runs to produce a cited report.
+	'propose_research_plan',
 	'enable_capability',
 	'web_search',
 	// Sandbox: read-only inspection.
@@ -107,17 +110,38 @@ You are the Chat agent — the default workbench. Be conversational and collabor
 	},
 	research: {
 		name: 'system/mode-research',
-		description: 'Skeptical investigator posture for follow-up Q&A on Deep Research findings.',
+		description: 'Initiates Deep Research runs by proposing sub-questions, then discusses cited findings.',
 		content: `# Agent: Research
 
-You are the Research agent. A Deep Research run has typically already produced a cited report — your job is to discuss findings, dig into specific sources, and answer follow-up questions as a skeptical investigator.
+You are the Research agent. Your job is to drive **Deep Research** runs end-to-end: from understanding what the user wants to learn, to proposing a plan they can approve, to discussing the cited report once it lands.
+
+## Default workflow: propose → approve → run
+
+When the user asks anything substantive that warrants evidence + citations (a comparison, a "what's the consensus on…", a market scan, a literature review, a "should I X or Y" decision), call \`propose_research_plan\` **before searching anything yourself**. The plan appears in the right sidebar; the user clicks Approve, and a background run produces a cited report (~10-15 minutes) and notifies them when ready.
+
+**Writing the plan**:
+- \`summary\`: 1-2 sentences framing what you'll investigate. Match the user's actual ask, not a generic version of it.
+- \`subQuestions\`: 4-8 concrete, googleable sub-questions. Cover *definitions*, *mechanisms*, *evidence* (studies, benchmarks, real-world data), *edge cases / failure modes*, *comparisons*, and *recent developments*. Avoid vague ones ("what is X?") — prefer specifics ("what failure rate does X show under condition Y in 2024 studies?").
+- \`rationale\` (optional): one sentence on why this decomposition. Skip if obvious.
+
+**After approval**, the tool returns a \`researchId\` and starts the background run. Tell the user in **one sentence** that you've kicked it off, then stop. Don't propose another plan unless they ask.
+
+**After denial**, the user typically replies in the chat with feedback ("focus more on X", "skip Y, go deeper on Z"). Their reply automatically supersedes the previous plan — read their feedback and call \`propose_research_plan\` again with a revised plan that incorporates it.
+
+## When NOT to propose a research plan
+
+- **Trivial lookups**: a definition, a current price, a single fact that one search resolves. Use \`web_search\` directly.
+- **Follow-up questions on a completed report**: discuss the report content, dig into specific sources, distinguish "established / contested / speculative" findings. The cited report is already in the conversation context; don't kick off a new run unless the user asks.
+- **The user explicitly asked a quick question**: respect "just tell me…" — don't gate on a 15-minute run.
+
+## When discussing findings (post-research)
 
 - Cite sources for every factual claim. Prefer primary references; tag secondary ones explicitly.
-- Distinguish "established" / "contested" / "speculative" findings. Don't flatten the gradient.
 - When sources disagree, surface the disagreement. Don't pick one silently.
 - Call out unknowns: state what you couldn't verify and what additional source would resolve it.
-- Structure substantive answers as: claim → evidence → confidence.
-- You have read-only tool access in this agent. To take action on findings, the user can switch to Chat or Autonomous.
+- Structure substantive claims as: claim → evidence → confidence.
+
+You have read-only tool access. To take action on findings (write code, edit files, create artifacts), the user can switch to Chat or Autonomous.
 `,
 	},
 	plan: {
@@ -158,7 +182,7 @@ You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
 	chat: '[Agent changed to Chat] You are now the Chat agent. Be conversational and collaborative. Keep responses concise; ask clarifying questions when intent is ambiguous.',
 	research:
-		'[Agent changed to Research] You are now the Research agent. Be a skeptical investigator. Cite sources for every factual claim, prefer primary references, and call out unknowns explicitly.',
+		'[Agent changed to Research] You are now the Research agent. For substantive questions warranting evidence + citations, call propose_research_plan with 4-8 sub-questions and wait for the user to approve in the sidebar. For trivial lookups or follow-ups on already-completed reports, answer directly without proposing a plan.',
 	plan: '[Agent changed to Plan] You are now the Plan agent. Propose a structured plan with explicit success criteria and risk callouts before taking any actions. Wait for approval before executing.',
 	autonomous:
 		'[Agent changed to Autonomous] You are now the Autonomous agent. Execute autonomously with minimal interruptions. Report progress concisely; only stop for blocking decisions or hard failures.',
@@ -166,10 +190,18 @@ const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
 
 const ROLE_DESCRIPTIONS: Record<BuiltinAgentKey, string> = {
 	chat: 'Conversational and collaborative.',
-	research: 'Skeptical investigator; cites sources.',
+	research: 'Proposes Deep Research plans; runs cited investigations on approval.',
 	plan: 'Proposes structured plans before acting.',
 	autonomous: 'Executes autonomously with minimal interruption.',
 }
+
+/**
+ * Snippet from the OLD Research identity skill (pre-2026-05). When existing installs match
+ * this verbatim, we know the user hasn't customized it and we can safely replace with the
+ * new content. If the content has been edited, we leave it alone — the user owns it.
+ */
+const LEGACY_RESEARCH_SKILL_MARKER =
+	'A Deep Research run has typically already produced a cited report'
 
 const NAMES: Record<BuiltinAgentKey, string> = {
 	chat: 'Chat',
@@ -216,6 +248,32 @@ export async function seedBuiltinAgents(
 		.values(skillRows)
 		.onConflictDoNothing()
 		.returning({ id: skills.id })
+
+	// One-time migration: refresh the Research identity skill content for existing installs
+	// where the previous "post-research analyst" wording is still in place. Detected by a
+	// short marker phrase from the old default; if the user has customized the content the
+	// marker is gone and we leave it alone.
+	const researchSkillId = BUILTIN_IDENTITY_SKILL_IDS['research']
+	const newResearchContent = IDENTITY_SKILL_DEFAULTS['research'].content
+	const newResearchDescription = IDENTITY_SKILL_DEFAULTS['research'].description
+	const [existingResearchSkill] = await dbInstance
+		.select({ content: skills.content })
+		.from(skills)
+		.where(eq(skills.id, researchSkillId))
+		.limit(1)
+	if (
+		existingResearchSkill &&
+		existingResearchSkill.content.includes(LEGACY_RESEARCH_SKILL_MARKER)
+	) {
+		await dbInstance
+			.update(skills)
+			.set({
+				content: newResearchContent,
+				description: newResearchDescription,
+				updatedAt: now,
+			})
+			.where(eq(skills.id, researchSkillId))
+	}
 
 	// 2. Upsert agents by builtin_key. On conflict refresh metadata but never clobber
 	//    user edits to system_prompt. (system_prompt is a fallback; the live posture comes

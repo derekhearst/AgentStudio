@@ -1912,6 +1912,88 @@ export async function executeTool(
 				}
 			}
 
+			if (call.name === 'propose_research_plan') {
+				const input = toolSchemas.propose_research_plan.parse(call.arguments)
+				// Like propose_plan, this tool runs through MANDATORY_APPROVAL_TOOLS — the stream
+				// handler emits tool_pending, blocks on the user's decision, and only invokes
+				// executeTool when the user approved in the sidebar. By the time we get here, the
+				// user has approved the sub-questions and we can spend LLM/web-fetch budget.
+				const ctx = toolUserContext.getStore()
+				if (!ctx?.userId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'propose_research_plan requires an authenticated userId in the tool execution context.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				// Resolve the conversationId from the run so the research is back-linked to this chat.
+				let conversationId: string | null = null
+				if (ctx.runId) {
+					try {
+						const { chatRuns } = await import('$lib/runs/runs.schema')
+						const [run] = await db
+							.select({ conversationId: chatRuns.conversationId })
+							.from(chatRuns)
+							.where(eq(chatRuns.id, ctx.runId))
+							.limit(1)
+						conversationId = run?.conversationId ?? null
+					} catch (err) {
+						logger.warn('[propose_research_plan] run lookup failed', { err })
+					}
+				}
+
+				try {
+					const { createResearch, updateResearch } = await import('$lib/research/research.server')
+					const { enqueueJob } = await import('$lib/jobs/jobs.server')
+					const research = await createResearch({
+						userId: ctx.userId,
+						query: input.summary,
+						conversationId,
+						runId: ctx.runId ?? null,
+						// Per-agent / DEFAULT_RESEARCH_CONFIG drives the model. The composer-selected
+						// model is applied later if/when a future entry-point passes it in.
+						model: null,
+					})
+					// Pre-seed the plan so the orchestrator skips its own Phase-1 planner LLM call
+					// (we already have user-approved sub-questions). Mark status='searching' so the
+					// detail page jumps straight to the searching state without flashing 'planning'.
+					await updateResearch(research.id, { plan: input.subQuestions })
+					const job = await enqueueJob({
+						type: 'research_run',
+						queue: 'default',
+						priority: 150,
+						payload: { researchId: research.id },
+						userId: ctx.userId,
+						runId: ctx.runId ?? null,
+					})
+					await updateResearch(research.id, { jobId: job.id })
+
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: {
+							researchId: research.id,
+							jobId: job.id,
+							status: 'queued',
+							subQuestionCount: input.subQuestions.length,
+							note: `Research run started (id ${research.id}). The user will be notified when the cited report is ready (~10-15 min). Tell the user concisely that you've kicked off the run; do not call propose_research_plan again unless the user asks for revisions.`,
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				} catch (err) {
+					logger.error('[propose_research_plan] failed to start research', { err })
+					return {
+						success: false,
+						tool: call.name,
+						error: err instanceof Error ? err.message : 'Failed to start research run',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+			}
+
 			if (call.name === 'git_status' || call.name === 'git_log' || call.name === 'git_diff') {
 				const ctx = toolUserContext.getStore()
 				if (!ctx?.worktree) {

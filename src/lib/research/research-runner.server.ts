@@ -144,26 +144,43 @@ export async function runResearchLoop(
 
 	try {
 		// ─────────── PHASE 1: PLAN ───────────
-		await checkCanceled()
-		await updateResearch(researchId, { status: 'planning' })
-		const planResult = await runPlanner(r, config)
-		totalCost += planResult.costUsd
-		await addResearchStep({
-			researchId,
-			kind: 'plan',
-			payload: { subQuestions: planResult.subQuestions, rawResponse: planResult.raw.slice(0, 4000) },
-			costUsd: planResult.costUsd,
-			finishedAt: new Date(),
-		})
-		if (planResult.subQuestions.length === 0) {
-			throw new Error('planner returned no sub-questions')
+		// Pre-seeded plan path: when the research row already has sub-questions (the user
+		// approved them via the propose_research_plan tool in the chat sidebar), skip the
+		// planner LLM call and use the seed directly. Records a 'plan' step with
+		// phase='preapproved' so the trace UI is honest about where the plan came from.
+		let subQuestions: string[]
+		if (Array.isArray(r.plan) && r.plan.length > 0) {
+			subQuestions = r.plan
+			await addResearchStep({
+				researchId,
+				kind: 'plan',
+				payload: { phase: 'preapproved', subQuestions, source: 'user_approved' },
+				costUsd: 0,
+				finishedAt: new Date(),
+			})
+		} else {
+			await checkCanceled()
+			await updateResearch(researchId, { status: 'planning' })
+			const planResult = await runPlanner(r, config)
+			totalCost += planResult.costUsd
+			await addResearchStep({
+				researchId,
+				kind: 'plan',
+				payload: { subQuestions: planResult.subQuestions, rawResponse: planResult.raw.slice(0, 4000) },
+				costUsd: planResult.costUsd,
+				finishedAt: new Date(),
+			})
+			if (planResult.subQuestions.length === 0) {
+				throw new Error('planner returned no sub-questions')
+			}
+			await updateResearch(researchId, { plan: planResult.subQuestions })
+			subQuestions = planResult.subQuestions
 		}
-		await updateResearch(researchId, { plan: planResult.subQuestions })
 
 		// ─────────── PHASE 2: SEARCH + FETCH (parallel fan-out) ───────────
 		await checkCanceled()
 		await updateResearch(researchId, { status: 'searching' })
-		await runSearchAndFetchPass(researchId, planResult.subQuestions, config, checkCanceled)
+		await runSearchAndFetchPass(researchId, subQuestions, config, checkCanceled)
 
 		// ─────────── PHASE 2.5: ITERATIVE REFLECTION ───────────
 		// Loop reflect → search-gaps until coverage saturates or we hit a cap. Each round asks
@@ -195,7 +212,7 @@ export async function runResearchLoop(
 				break
 			}
 
-			const reflection = await runReflection(r, planResult.subQuestions, sourcesSoFar, config)
+			const reflection = await runReflection(r, subQuestions, sourcesSoFar, config)
 			totalCost += reflection.costUsd
 			await addResearchStep({
 				researchId,
@@ -227,7 +244,7 @@ export async function runResearchLoop(
 		if (sources.length === 0) {
 			throw new Error('no sources fetched — cannot synthesize a report')
 		}
-		const synth = await runSynthesizer(r, planResult.subQuestions, sources, config)
+		const synth = await runSynthesizer(r, subQuestions, sources, config)
 		totalCost += synth.costUsd
 		const citedIds = extractCitedSourceIds(synth.report, synth.citationMap)
 		await markSourcesCited(researchId, citedIds)

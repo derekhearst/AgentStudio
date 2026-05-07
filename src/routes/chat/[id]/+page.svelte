@@ -25,16 +25,21 @@
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import PlanProposalCard from '$lib/chat/PlanProposalCard.svelte';
+	import ResearchPlanSidebar from '$lib/research/ResearchPlanSidebar.svelte';
+	import { listResearchForConversationQuery } from '$lib/research/research.remote';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
 		getPlanProposalFromTool,
+		getResearchPlanFromTool,
+		getResearchPlanResultFromTool,
 		getAskUserAnswersFromTool,
 		type AskUserOption,
 		type AskUserQuestion,
 		type PlanStep,
 		type PlanProposal,
+		type ResearchPlanProposal,
 	} from '$lib/chat/tool-block-helpers';
 
 	type ChatAttachment = {
@@ -134,6 +139,28 @@
 	let currentThinkingTarget = $state('');
 	let pendingAskUser = $state<{ token: string; questions: AskUserQuestion[] } | null>(null);
 	let askUserModalOpen = $state(false);
+
+	// ── Research sidebar wiring ──────────────────────────────────────────────────────────
+	// activeResearchId tracks the most recent research run linked to this conversation.
+	// Refreshed on conversation load and after each propose_research_plan tool resolves.
+	let activeResearchId = $state<string | null>(null);
+	let researchSidebarOpen = $state(true);
+
+	async function refreshActiveResearch() {
+		if (!conversationId) return;
+		try {
+			const rows = await listResearchForConversationQuery({ conversationId, limit: 5 });
+			// Prefer the newest non-canceled / non-failed run; otherwise newest of any kind.
+			const inFlightOrComplete = rows.find((r) =>
+				['planning', 'searching', 'fetching', 'reflecting', 'synthesizing', 'complete'].includes(r.status),
+			);
+			activeResearchId = (inFlightOrComplete ?? rows[0])?.id ?? null;
+		} catch (err) {
+			logChatUi('warn', 'Active research refresh failed', {
+				error: err instanceof Error ? err.message : String(err),
+			});
+		}
+	}
 
 	type RetryIntent =
 		| {
@@ -658,6 +685,25 @@
 		return combined;
 	});
 
+	// Pending research plan: derived from the live streamingBlocks. A propose_research_plan
+	// tool block in 'pending' status means the user hasn't clicked Approve / Decline yet.
+	// The sidebar uses this to render the plan card with the approve/decline buttons.
+	const pendingResearchBlock = $derived.by(() => {
+		for (let i = streamingBlocks.length - 1; i >= 0; i -= 1) {
+			const b = streamingBlocks[i];
+			if (b.kind === 'tool' && b.name === 'propose_research_plan' && b.status === 'pending') {
+				return b;
+			}
+		}
+		return null;
+	});
+
+	const pendingResearchPlan = $derived<ResearchPlanProposal | null>(
+		pendingResearchBlock ? getResearchPlanFromTool(pendingResearchBlock) : null,
+	);
+	const pendingResearchToken = $derived<string | null>(pendingResearchBlock?.token ?? null);
+	const pendingResearchStatus = $derived<ToolStatus | null>(pendingResearchBlock?.status ?? null);
+
 	const lastUserMessageId = $derived.by(() => {
 		for (let i = displayedMessages.length - 1; i >= 0; i -= 1) {
 			if (displayedMessages[i].role === 'user') return displayedMessages[i].id;
@@ -879,6 +925,10 @@
 				}
 				: null;
 		}
+
+		// Refresh the conversation's active research so the sidebar reflects whatever the
+		// orchestrator has been doing while the page was closed.
+		await refreshActiveResearch();
 	}
 
 	async function refreshAll() {
@@ -999,6 +1049,21 @@
 				if (Object.keys(freeformAnswers).length === 0) return;
 				await resolveAskUser(freeformAnswers);
 				return;
+			}
+
+			// Refine-via-reply: when there's an unanswered research plan in the sidebar and
+			// the user types a normal chat message, treat the message as feedback. Decline
+			// the pending approval first so the runtime loop unblocks (the agent receives a
+			// "Tool execution was denied by user" tool-result), then ship the user's message
+			// as the next turn — the agent reads the feedback and proposes a revised plan.
+			if (pendingResearchToken) {
+				try {
+					await denyToolCall(pendingResearchToken);
+				} catch (err) {
+					logChatUi('warn', 'Auto-decline of pending research plan failed', {
+						error: err instanceof Error ? err.message : String(err),
+					});
+				}
 			}
 
 			await streamMessage(content, false, attachments);
@@ -1292,6 +1357,12 @@
 						if (payload.name === 'ask_user') {
 							pendingAskUser = null;
 							askUserModalOpen = false;
+						}
+						// propose_research_plan completed — its result carries the new researchId.
+						// Refresh the sidebar's active-research lookup so the running state appears
+						// as soon as the orchestrator job has been enqueued.
+						if (payload.name === 'propose_research_plan' && payload.success) {
+							void refreshActiveResearch();
 						}
 						const finalStatus = payload.success ? ('completed' as const) : ('failed' as const);
 						const resultText =
@@ -1708,7 +1779,10 @@
 									onDeny={denyToolCall}
 								/>
 							{/if}
-						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'propose_plan'}
+						{:else if block.kind === 'tool' && block.name === 'propose_research_plan'}
+							<!-- Rendered in the right sidebar (ResearchPlanSidebar). Suppress inline
+							     so the user has one source of truth for the plan + approve/decline. -->
+						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'propose_plan' && block.name !== 'propose_research_plan'}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}
@@ -1800,11 +1874,27 @@
 				}}
 				onAgentChange={handleAgentChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
-				onResearchSubmit={(content) => handleResearchSubmit(content)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
 			/>
 		</div>
 	</section>
+
+	<!-- Right sidebar: Deep Research panel. Visible (desktop+) when there's a pending plan
+	     awaiting approval, an in-flight research run, or a recently-completed run linked to
+	     this conversation. The sidebar component itself decides which state to render. -->
+	{#if researchSidebarOpen && (pendingResearchPlan || activeResearchId)}
+		<div class="hidden w-80 shrink-0 desktop:flex">
+			<ResearchPlanSidebar
+				pendingPlan={pendingResearchPlan}
+				pendingToken={pendingResearchToken}
+				pendingStatus={pendingResearchStatus}
+				{activeResearchId}
+				onApprove={approveToolCall}
+				onDeny={denyToolCall}
+				onClose={() => (researchSidebarOpen = false)}
+			/>
+		</div>
+	{/if}
 </div>
 
 

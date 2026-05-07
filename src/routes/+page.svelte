@@ -258,28 +258,12 @@
 	}
 
 	async function handleComposerSubmit(content: string) {
-		const selected = agentChoices.find((a) => a.id === agentId);
-		if (selected?.builtinKey === 'research') {
-			await handleNewResearch(content);
-			return;
-		}
+		// All agents — including Research — go through handleNewChat. The Research agent
+		// proposes a plan via the propose_research_plan tool inside the chat stream; the
+		// chat page renders the plan in the right sidebar with Approve / Decline buttons.
+		// (The legacy direct-research path is still available via the /research index page
+		// form for programmatic / ad-hoc creation without a chat.)
 		await handleNewChat(content);
-	}
-
-	// Wave 4 #18 phase 4 — Deep Research from the home composer. No conversation context yet
-	// (the user is starting fresh) so we route directly into research without creating a chat.
-	// Model: pass through the composer's selected model so the orchestrator's planner +
-	// reflection + synthesizer phases all run on whatever the user picked.
-	async function handleNewResearch(query: string) {
-		if (busy) return;
-		busy = true;
-		try {
-			const { startResearchCommand } = await import('$lib/research/research.remote');
-			const result = await startResearchCommand({ query, model });
-			await goto(`/research/${result.research.id}`);
-		} finally {
-			busy = false;
-		}
 	}
 </script>
 
@@ -304,7 +288,6 @@
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
 				onSubmit={(content) => handleComposerSubmit(content)}
-				onResearchSubmit={(content) => handleNewResearch(content)}
 				onModelChange={(id) => {
 					model = id;
 				}}

@@ -10,7 +10,14 @@ type ToolName = string
  * refuse when the run has no approval surface (e.g. detached automation runs), so the same
  * tool registered into an automation handler will fail-closed instead of silently pushing.
  */
-export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = ['push_branch', 'create_pull_request']
+export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
+	'push_branch',
+	'create_pull_request',
+	// Research plan approval — the user reviews the proposed sub-questions in the sidebar
+	// before the orchestrator burns LLM/web budget on a 10-15 minute background run. Always
+	// requires approval; in detached/automation runs the tool fails closed.
+	'propose_research_plan',
+]
 
 /**
  * Capability groups that organize tools into logical bundles.
@@ -20,12 +27,13 @@ export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = ['push_branch', 'cr
 export const capabilityGroups = {
 	core: {
 		label: 'Core',
-		description: 'Always-on essentials: web search, ask_user, list_automations, propose_plan, enable_capability meta-tool',
+		description: 'Always-on essentials: web search, ask_user, list_automations, propose_plan, propose_research_plan, enable_capability meta-tool',
 		tools: [
 			'web_search',
 			'ask_user',
 			'list_automations',
 			'propose_plan',
+			'propose_research_plan',
 			'enable_capability',
 		] as ToolName[],
 		alwaysOn: true,
@@ -330,6 +338,11 @@ const toolDefinitions: Array<{ name: string; description: string; group: Builtin
 	{
 		name: 'propose_plan',
 		description: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
+		group: 'core',
+	},
+	{
+		name: 'propose_research_plan',
+		description: 'Propose a Deep Research plan (sub-questions for the user to approve in the sidebar). On approve, a background research run produces a cited report and notifies the user when complete.',
 		group: 'core',
 	},
 	{

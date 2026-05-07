@@ -107,6 +107,55 @@ export function getPlanProposalFromTool(block: ToolBlockLike): PlanProposal | nu
 	return plan
 }
 
+export type ResearchPlanProposal = {
+	summary: string
+	subQuestions: string[]
+	rationale?: string
+}
+
+export type ResearchPlanResult = {
+	researchId: string
+	jobId?: string
+	subQuestionCount?: number
+}
+
+/**
+ * Parse a `propose_research_plan` tool block. The schema validates `summary` + `subQuestions`,
+ * with an optional `rationale`. Returns null if the args are malformed (which is recoverable —
+ * the chat UI just won't show the sidebar plan card and the user can ask the agent to retry).
+ */
+export function getResearchPlanFromTool(block: ToolBlockLike): ResearchPlanProposal | null {
+	const args = parseJsonFallback(block.arguments)
+	if (!args || typeof args !== 'object') return null
+	if (typeof args.summary !== 'string' || !Array.isArray(args.subQuestions)) return null
+	const subQuestions = (args.subQuestions as unknown[])
+		.filter((q): q is string => typeof q === 'string')
+		.map((q) => q.trim())
+		.filter((q) => q.length > 0)
+	if (subQuestions.length < 1) return null
+	const proposal: ResearchPlanProposal = { summary: args.summary, subQuestions }
+	if (typeof args.rationale === 'string' && args.rationale.trim().length > 0) {
+		proposal.rationale = args.rationale.trim()
+	}
+	return proposal
+}
+
+/**
+ * Parse the result payload from a completed `propose_research_plan` tool call. The result
+ * carries the researchId so the sidebar can switch to the "running" state and start polling.
+ */
+export function getResearchPlanResultFromTool(block: ToolBlockLike): ResearchPlanResult | null {
+	if (!block.result) return null
+	const result = parseJsonFallback(block.result)
+	if (!result || typeof result !== 'object') return null
+	const researchId = typeof result.researchId === 'string' ? result.researchId : null
+	if (!researchId) return null
+	const out: ResearchPlanResult = { researchId }
+	if (typeof result.jobId === 'string') out.jobId = result.jobId
+	if (typeof result.subQuestionCount === 'number') out.subQuestionCount = result.subQuestionCount
+	return out
+}
+
 export function getAskUserAnswersFromTool(block: ToolBlockLike): Record<string, string> | null {
 	if (!block.result) return null
 	const result = parseJsonFallback(block.result)

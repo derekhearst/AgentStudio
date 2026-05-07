@@ -255,6 +255,11 @@ export const toolSchemas = {
 		totalEstimatedCostUsd: z.number().nonnegative().max(1000).optional(),
 		totalEstimatedDurationMin: z.number().int().positive().max(10_000).optional(),
 	}),
+	propose_research_plan: z.object({
+		summary: z.string().trim().min(1).max(500),
+		subQuestions: z.array(z.string().trim().min(1).max(300)).min(2).max(12),
+		rationale: z.string().trim().max(800).optional(),
+	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
@@ -325,6 +330,8 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
 	propose_plan:
 		'Propose a structured execution plan to the user with ordered steps, estimated cost/time, risks, and rollback. The user explicitly approves or denies before you call any non-readonly tool. Required in plan mode; should be called before taking any destructive or expensive action.',
+	propose_research_plan:
+		'Propose a Deep Research plan to the user. Pass `summary` (1-2 sentence framing of what you intend to investigate), `subQuestions` (4-8 concrete, googleable sub-questions covering definitions, mechanisms, evidence, edge cases, and recent developments), and an optional `rationale` (why this decomposition). The user explicitly approves or denies in the right sidebar; on approve, a background research run starts (plan→search→fetch→reflect→synthesize, ~10-15 minutes) and the user is notified when the cited report is ready. On deny, the user will likely reply with feedback — call this tool again with a revised plan. Use ONLY when the user actually wants a deep, cited research run; for trivial lookups, use web_search/web_fetch directly.',
 	enable_capability:
 		'Enable a capability group (sandbox / skills / agents / media) so its tools become available on the next round. Use this when the task clearly needs filesystem operations, skill management, agent delegation, or image generation. The active surface starts with only the `core` group; expand on demand to keep the prompt slim.',
 }

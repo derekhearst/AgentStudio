@@ -92,6 +92,24 @@ export async function listResearchForUser(
 		.limit(opts.limit ?? 50)
 }
 
+/**
+ * List research runs that originated from (or are linked to) a specific conversation. Used by
+ * the chat page sidebar to surface the active research run alongside the chat thread. Filters
+ * to runs owned by `userId` so a stale conversationId never leaks across users.
+ */
+export async function listResearchByConversation(
+	conversationId: string,
+	userId: string,
+	limit = 5,
+): Promise<ResearchRow[]> {
+	return db
+		.select()
+		.from(research)
+		.where(and(eq(research.conversationId, conversationId), eq(research.userId, userId)))
+		.orderBy(desc(research.createdAt))
+		.limit(limit)
+}
+
 export type AddResearchSourceInput = {
 	researchId: string
 	url: string

@@ -49,6 +49,24 @@ export const getResearchDetailQuery = query(z.string().uuid(), async (researchId
 	return getResearchDetail(researchId)
 })
 
+/**
+ * List research runs back-linked to a conversation (most recent first). Used by the chat
+ * page sidebar to show the active/recent research for the open chat — typically there's
+ * just one in-flight or recently-completed run, but listing supports the case where the
+ * user kicked off several sequentially.
+ */
+export const listResearchForConversationQuery = query(
+	z.object({
+		conversationId: z.string().uuid(),
+		limit: z.number().int().min(1).max(20).default(5),
+	}),
+	async (input) => {
+		const user = requireAuthenticatedRequestUser()
+		const { listResearchByConversation } = await import('./research.server')
+		return listResearchByConversation(input.conversationId, user.id, input.limit)
+	},
+)
+
 const startResearchSchema = z.object({
 	query: z.string().trim().min(8).max(2000),
 	conversationId: z.string().uuid().optional(),
