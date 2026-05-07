@@ -5,6 +5,7 @@ import { chat, type LlmMessage } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { hookInvocations } from './hooks.schema'
 import type { HookEvent, HookPayload } from './types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 3 #13 phase 3 — skill-based hook runner.
@@ -156,7 +157,7 @@ async function logSkillHookInvocation(input: {
 			error: input.error,
 		})
 	} catch (e) {
-		console.warn('[hooks/skill-runner] failed to log invocation', {
+		logger.warn('[hooks/skill-runner] failed to log invocation', {
 			event: input.event,
 			skillName: input.skillName,
 			error: e instanceof Error ? e.message : String(e),

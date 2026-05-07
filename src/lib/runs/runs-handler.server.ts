@@ -1,6 +1,7 @@
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
 import { reapStuckRuns } from './runs.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Registers the `runs_reap` job + 5-min schedule. See `reapStuckRuns` for behavior.
@@ -17,11 +18,11 @@ export function registerRunsJobHandlers(): void {
 		try {
 			const summary = await reapStuckRuns()
 			if (summary.reapedCount > 0) {
-				console.info(`[runs-reaper] reaped ${summary.reapedCount} stuck runs:`, summary.reapedIds)
+				logger.info(`[runs-reaper] reaped ${summary.reapedCount} stuck runs`, { reapedIds: summary.reapedIds })
 			}
 			return { reapedCount: summary.reapedCount, reapedAt: new Date().toISOString() }
 		} catch (err) {
-			console.warn('[runs-reaper] reap failed (non-fatal):', err)
+			logger.warn('[runs-reaper] reap failed (non-fatal)', { err })
 			return { reapedCount: 0, error: err instanceof Error ? err.message : String(err) }
 		}
 	})

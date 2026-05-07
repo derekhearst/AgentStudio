@@ -18,6 +18,7 @@ import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/mem
 import { getOrCreateCloset, getOrCreateRoom, getOrCreateWing, type WingKind } from '$lib/memory/palace.server'
 import { embed, toPgVector } from '$lib/memory/embeddings.server'
 import { encodeAaak, type AaakTags } from '$lib/memory/aaak.server'
+import { logger } from '$lib/observability/logger'
 
 export type MiningTurn = {
 	role: 'user' | 'assistant' | 'system'
@@ -136,9 +137,9 @@ async function extractSession(session: MiningSession): Promise<ExtractorOutput> 
 			}
 			return parsed
 		}
-		console.warn('[memory] extractor returned unusable JSON, using fallback')
+		logger.warn('[memory] extractor returned unusable JSON, using fallback')
 	} catch (error) {
-		console.warn('[memory] extractor call failed', error)
+		logger.warn('[memory] extractor call failed', { err: error })
 	}
 
 	return fallbackExtraction(session)

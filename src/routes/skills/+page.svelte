@@ -2,28 +2,70 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { listSkillsQuery } from '$lib/skills';
+	import { goto } from '$app/navigation';
+	import { listSkillsQuery, getCapabilityGroupsQuery, importSkillCommand } from '$lib/skills';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
+	type CapabilityGroup = Awaited<ReturnType<typeof getCapabilityGroupsQuery>>[number];
 
 	let search = $state('');
 	let skills = $state<SkillRow[]>([]);
 	let allSkills = $state<SkillRow[]>([]);
-	// Wave 2 #9 phase 2 — filter chip for "show only companions to <group>".
-	const ALL_GROUPS = ['sandbox', 'skills', 'agents', 'media'] as const;
-	type GroupName = (typeof ALL_GROUPS)[number];
-	let companionGroupFilter = $state<GroupName | null>(null);
+	let allGroups = $state<CapabilityGroup[]>([]);
+	let companionGroupFilter = $state<string | null>(null);
 
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
+	/* ── Import SKILL.md modal ───────────── */
+	let showImport = $state(false);
+	let importSource = $state('');
+	let importMode = $state<'create' | 'overwrite'>('create');
+	let importBusy = $state(false);
+	let importError = $state<string | null>(null);
+	let importDialogEl = $state<HTMLDialogElement | undefined>(undefined);
+
+	function openImportModal() {
+		importSource = '';
+		importMode = 'create';
+		importError = null;
+		showImport = true;
+		setTimeout(() => importDialogEl?.showModal(), 0);
+	}
+
+	function closeImportModal() {
+		showImport = false;
+		importDialogEl?.close();
+	}
+
+	async function handleImport() {
+		if (!importSource.trim() || importBusy) return;
+		importBusy = true;
+		importError = null;
+		try {
+			const result = await importSkillCommand({ source: importSource.trim(), mode: importMode });
+			closeImportModal();
+			await loadSkills();
+			void goto(`/skills/${result.id}`);
+		} catch (e) {
+			importError = e instanceof Error ? e.message : 'Import failed';
+		} finally {
+			importBusy = false;
+		}
+	}
+
 	onMount(() => {
 		void loadSkills();
+		void loadGroups();
 	});
 
 	async function loadSkills() {
 		allSkills = await listSkillsQuery({ limit: 200 });
 		filterLocally();
+	}
+
+	async function loadGroups() {
+		allGroups = await getCapabilityGroupsQuery();
 	}
 
 	function filterLocally() {
@@ -56,7 +98,7 @@
 		filterTimer = setTimeout(filterLocally, 150);
 	}
 
-	function selectCompanionFilter(group: GroupName | null) {
+	function selectCompanionFilter(group: string | null) {
 		companionGroupFilter = group;
 		filterLocally();
 	}
@@ -65,11 +107,17 @@
 <div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
 	<ContentPanel>
 		{#snippet header()}
-			<div>
-				<h1 class="text-xl font-bold sm:text-3xl">Skills</h1>
-				<p class="text-xs text-base-content/70 sm:text-sm">
-					{skills.length} {skills.length === 1 ? 'skill' : 'skills'} - Reusable instruction bundles for the LLM
-				</p>
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h1 class="text-xl font-bold sm:text-3xl">Skills</h1>
+					<p class="text-xs text-base-content/70 sm:text-sm">
+						{skills.length} {skills.length === 1 ? 'skill' : 'skills'} — Reusable instruction packages. Summaries auto-load; full bodies and resource files load on demand.
+					</p>
+				</div>
+				<button class="btn btn-ghost btn-sm gap-1" onclick={openImportModal} title="Import a SKILL.md package">
+					<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+					Import
+				</button>
 			</div>
 		{/snippet}
 	</ContentPanel>
@@ -84,20 +132,21 @@
 		/>
 	</div>
 
-	<!-- Companion-group filter chips -->
+	<!-- Companion-group filter chips: dynamic from capabilityGroups registry -->
 	<div class="flex shrink-0 flex-wrap items-center gap-1.5 text-xs">
-		<span class="text-base-content/55">Companion to:</span>
+		<span class="text-base-content/55" title="Skills attached to a capability group auto-load when that group is enabled in a chat.">Companion to:</span>
 		<button
 			type="button"
 			class="badge badge-sm cursor-pointer {companionGroupFilter === null ? 'badge-primary' : 'badge-ghost'}"
 			onclick={() => selectCompanionFilter(null)}
 		>any</button>
-		{#each ALL_GROUPS as group (group)}
+		{#each allGroups as group (group.name)}
 			<button
 				type="button"
-				class="badge badge-sm cursor-pointer font-mono {companionGroupFilter === group ? 'badge-primary' : 'badge-ghost'}"
-				onclick={() => selectCompanionFilter(group)}
-			>{group}</button>
+				class="badge badge-sm cursor-pointer font-mono {companionGroupFilter === group.name ? 'badge-primary' : 'badge-ghost'}"
+				title={group.description}
+				onclick={() => selectCompanionFilter(group.name)}
+			>{group.name}</button>
 		{/each}
 	</div>
 
@@ -117,6 +166,9 @@
 				<a href="/skills/{skill.id}" class="block rounded-xl border border-base-300 bg-base-100 p-4 transition-colors hover:border-base-content/20">
 					<div class="flex items-center gap-2">
 						<h3 class="font-semibold">{skill.name}</h3>
+						{#if skill.category}
+							<span class="badge badge-neutral badge-xs">{skill.category}</span>
+						{/if}
 						{#if skill.isSystem}
 							<span class="badge badge-primary badge-xs">built-in</span>
 						{/if}
@@ -147,3 +199,44 @@
 	</div>
 </div>
 
+<!-- Import SKILL.md dialog -->
+{#if showImport}
+	<dialog bind:this={importDialogEl} class="modal" onclose={() => (showImport = false)}>
+		<div class="modal-box max-w-3xl">
+			<h3 class="mb-3 text-lg font-bold">Import SKILL.md package</h3>
+			<p class="mb-3 text-xs leading-snug opacity-60">
+				Paste a SKILL.md document (frontmatter + body). Supported frontmatter keys:
+				<code class="font-mono">name</code>, <code class="font-mono">description</code> (required),
+				<code class="font-mono">category</code>, <code class="font-mono">tags</code>,
+				<code class="font-mono">companion_groups</code>, <code class="font-mono">companion_tools</code>,
+				<code class="font-mono">enabled</code>.
+			</p>
+			<textarea
+				class="textarea textarea-bordered min-h-72 w-full font-mono text-xs"
+				placeholder={"---\nname: tools/my-skill\ndescription: Short summary of what this skill teaches.\ntags: [example]\ncompanion_groups: [sandbox]\n---\n\n# Body of the skill\n\nInstructions go here…"}
+				bind:value={importSource}
+			></textarea>
+			<div class="mt-3 flex items-center gap-3 text-xs">
+				<span class="opacity-60">If a skill with the same name already exists:</span>
+				<label class="flex cursor-pointer items-center gap-1">
+					<input type="radio" class="radio radio-xs" name="import-mode" value="create" checked={importMode === 'create'} onchange={() => (importMode = 'create')} />
+					<span>Fail (create only)</span>
+				</label>
+				<label class="flex cursor-pointer items-center gap-1">
+					<input type="radio" class="radio radio-xs" name="import-mode" value="overwrite" checked={importMode === 'overwrite'} onchange={() => (importMode = 'overwrite')} />
+					<span>Overwrite</span>
+				</label>
+			</div>
+			{#if importError}
+				<div class="alert alert-error mt-3 text-sm">{importError}</div>
+			{/if}
+			<div class="modal-action">
+				<button type="button" class="btn btn-ghost btn-sm" onclick={closeImportModal}>Cancel</button>
+				<button type="button" class="btn btn-primary btn-sm" onclick={handleImport} disabled={importBusy || !importSource.trim()}>
+					{importBusy ? 'Importing…' : 'Import'}
+				</button>
+			</div>
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>close</button></form>
+	</dialog>
+{/if}

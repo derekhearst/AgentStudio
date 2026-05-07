@@ -76,12 +76,15 @@ cp .env.example .env
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
+- `AZURE_DEVOPS_OAUTH_CLIENT_ID`, `AZURE_DEVOPS_OAUTH_CLIENT_SECRET` (only needed if connecting Azure DevOps at `/source-control`)
+- `AZURE_DEVOPS_OAUTH_CALLBACK_URL` (optional override; only set when running behind a reverse proxy where `ORIGIN` does not match the externally-reachable callback URL)
 
 Database note:
 
 - `DATABASE_URL` should point at the final application database name even if that database does not exist yet.
 - The configured Postgres role must be able to create that database on first start and run `CREATE EXTENSION IF NOT EXISTS pgcrypto` and `CREATE EXTENSION IF NOT EXISTS vector`.
 - A database with existing AgentStudio schema objects but no Drizzle migration history will be reset on startup before migrations are applied.
+- To force a clean rebuild of a development database, run `bun run db:reset` — drops the target database and reruns the same ensure-exists → migrate → seed bootstrap the server runs at boot.
 
 4. Run the app:
 
@@ -180,4 +183,5 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/cost` Cost dashboard
 - `/agents` Agent management
 - `/automations` Scheduled automation workflows
+- `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration

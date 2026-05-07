@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { hookInvocations } from './hooks.schema'
 import type { HookEvent, HookHandler, HookPayload, RegisteredHook } from './types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 3 #13 phase 1 — HookBus.
@@ -85,7 +86,7 @@ export async function emitHook<E extends HookEvent>(
 				// match && !optInOnly → already firing globally, skip to avoid double-dispatch.
 			}
 		} catch (err) {
-			console.warn('[hooks/bus] failed to resolve per-agent hooks', {
+			logger.warn('[hooks/bus] failed to resolve per-agent hooks', {
 				event,
 				agentId,
 				error: err instanceof Error ? err.message : String(err),
@@ -106,7 +107,7 @@ export async function emitHook<E extends HookEvent>(
 					skillRefs.map((skillName) => runSkillHook({ event, skillName, payload })),
 				)
 			} catch (err) {
-				console.warn('[hooks/bus] failed to dispatch skill hooks', {
+				logger.warn('[hooks/bus] failed to dispatch skill hooks', {
 					event,
 					refs: skillRefs,
 					error: err instanceof Error ? err.message : String(err),
@@ -164,7 +165,7 @@ async function dispatchOne<E extends HookEvent>(
 			error: errorMessage,
 		})
 	} catch (logErr) {
-		console.warn('[hooks/bus] failed to log invocation', {
+		logger.warn('[hooks/bus] failed to log invocation', {
 			event,
 			hookName: hook.name,
 			error: logErr instanceof Error ? logErr.message : String(logErr),
@@ -189,7 +190,7 @@ async function dispatchOne<E extends HookEvent>(
 					dedupeKey,
 				})
 			} catch (err) {
-				console.warn('[hooks/bus] failed to open hook_failure review item', err)
+				logger.warn('[hooks/bus] failed to open hook_failure review item', { err })
 			}
 		})()
 	}

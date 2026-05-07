@@ -1,17 +1,20 @@
 import { command, query } from '$app/server'
-import { and, asc, desc, eq, gt, isNull, ne, or } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
-import { conversations, messages, CHAT_MODES, type ChatMode } from '$lib/sessions/sessions.schema'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { agents } from '$lib/agents/agents.schema'
 import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import {
 	getWorkbenchPreferences as readWorkbenchPreferences,
-	setDefaultMode as writeDefaultMode,
+	setDefaultAgent as writeDefaultAgent,
 	setShowRightPanel as writeShowRightPanel,
-	setConversationMode as writeConversationMode,
-} from '$lib/chat/mode.server'
+	setConversationAgent as writeConversationAgent,
+	resolveDefaultAgentId,
+} from '$lib/chat/agent-switch.server'
+import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 
 const updateConversationMetaSchema = z.object({
@@ -23,7 +26,7 @@ const updateConversationMetaSchema = z.object({
 const createConversationSchema = z.object({
 	title: z.string().trim().min(1).max(120),
 	model: z.string().trim().min(1).max(120).optional(),
-	mode: z.enum(CHAT_MODES).optional(),
+	agentId: z.string().uuid().optional(),
 })
 
 const conversationIdSchema = z.string().uuid()
@@ -170,13 +173,17 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 export const createConversation = command(createConversationSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const settings = await getOrCreateSettings(user.id)
+	const agentId = await resolveDefaultAgentId(user.id, input.agentId)
+	if (!agentId) {
+		throw new Error('No default agent configured. Re-run database bootstrap to seed built-in agents.')
+	}
 	const [created] = await db
 		.insert(conversations)
 		.values({
 			title: input.title,
 			userId: user.id,
+			agentId,
 			model: input.model ?? settings.defaultModel,
-			mode: input.mode ?? 'chat',
 		})
 		.returning()
 
@@ -342,15 +349,12 @@ export const updateConversationMeta = command(updateConversationMetaSchema, asyn
 	return { success: true as const }
 })
 
-
-const chatModeSchema = z.enum(["chat", "research", "plan", "agent"])
-
-const setConversationModeSchema = z.object({
+const setConversationAgentSchema = z.object({
 	conversationId: z.string().uuid(),
-	mode: chatModeSchema,
+	agentId: z.string().uuid(),
 })
 
-const setDefaultModeSchema = z.object({ mode: chatModeSchema })
+const setDefaultAgentSchema = z.object({ agentId: z.string().uuid() })
 
 const setShowRightPanelSchema = z.object({ showRightPanel: z.boolean() })
 
@@ -358,17 +362,17 @@ export const getWorkbenchPreferences = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	const prefs = await readWorkbenchPreferences(user.id)
 	return {
-		defaultMode: prefs.defaultMode,
+		defaultAgentId: prefs.defaultAgentId,
 		showRightPanel: prefs.showRightPanel,
 		panelLayout: prefs.panelLayout,
 		updatedAt: prefs.updatedAt,
 	}
 })
 
-export const setDefaultMode = command(setDefaultModeSchema, async ({ mode }) => {
+export const setDefaultAgent = command(setDefaultAgentSchema, async ({ agentId }) => {
 	const user = requireAuthenticatedRequestUser()
-	const prefs = await writeDefaultMode(user.id, mode)
-	return { success: true as const, defaultMode: prefs.defaultMode }
+	const prefs = await writeDefaultAgent(user.id, agentId)
+	return { success: true as const, defaultAgentId: prefs.defaultAgentId }
 })
 
 export const setShowRightPanel = command(setShowRightPanelSchema, async ({ showRightPanel }) => {
@@ -377,15 +381,38 @@ export const setShowRightPanel = command(setShowRightPanelSchema, async ({ showR
 	return { success: true as const, showRightPanel: prefs.showRightPanel }
 })
 
-export const setConversationMode = command(setConversationModeSchema, async ({ conversationId, mode }) => {
+export const setConversationAgent = command(setConversationAgentSchema, async ({ conversationId, agentId }) => {
 	const user = requireAuthenticatedRequestUser()
-	const result = await writeConversationMode(conversationId, mode, { userId: user.id })
+	const result = await writeConversationAgent(conversationId, agentId, { userId: user.id })
 	return {
 		success: true as const,
-		previousMode: result.previousMode,
-		mode: result.mode,
+		previousAgentId: result.previousAgentId,
+		agentId: result.agentId,
 		anchorMessageId: result.anchorMessageId,
 	}
 })
 
-export const listChatModes = query(async () => CHAT_MODES)
+/**
+ * Picker feed for the chat composer dropdown. Built-ins first (in BUILTIN_AGENT_KEYS order),
+ * then custom agents by createdAt asc. Selects only what the picker needs to render.
+ */
+export const listAgentsForPicker = query(async () => {
+	requireAuthenticatedRequestUser()
+	const builtinOrder = sql`CASE ${agents.builtinKey}
+		WHEN ${BUILTIN_AGENT_KEYS[0]} THEN 0
+		WHEN ${BUILTIN_AGENT_KEYS[1]} THEN 1
+		WHEN ${BUILTIN_AGENT_KEYS[2]} THEN 2
+		WHEN ${BUILTIN_AGENT_KEYS[3]} THEN 3
+		ELSE 99
+	END`
+	return db
+		.select({
+			id: agents.id,
+			name: agents.name,
+			role: agents.role,
+			builtinKey: agents.builtinKey,
+			status: agents.status,
+		})
+		.from(agents)
+		.orderBy(builtinOrder, asc(agents.createdAt))
+})

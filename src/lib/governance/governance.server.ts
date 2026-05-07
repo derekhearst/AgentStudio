@@ -1,6 +1,7 @@
 import { db } from '$lib/db.server'
 import { auditEvents, type AuditAction, type AuditEventRow } from './governance.schema'
 import { diffTopLevelKeys } from './diff'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 3 #12 phase 1 — audit event recorder.
@@ -43,7 +44,7 @@ export async function recordAuditEvent(input: RecordAuditEventInput): Promise<Au
 			.returning()
 		return row ?? null
 	} catch (err) {
-		console.warn('[governance/audit] insert failed; original write succeeds anyway', {
+		logger.warn('[governance/audit] insert failed; original write succeeds anyway', {
 			action: input.action,
 			targetId: input.targetId,
 			error: err instanceof Error ? err.message : String(err),

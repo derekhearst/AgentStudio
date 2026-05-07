@@ -21,6 +21,8 @@ export {
 export {
 	attachRepository,
 	listRepositories,
+	listImportedRepositories,
+	countLegacySyncedRepositories,
 	getRepositoryById,
 	upsertConnection,
 	markConnectionStatus,
@@ -41,7 +43,14 @@ export {
 } from './source-control.server'
 export {
 	getSourceControlOverviewQuery,
-	syncGithubReposCommand,
 	disconnectGithubCommand,
+	disconnectAzureCommand,
+	importRepositoryCommand,
+	pullRepositoryCommand,
+	detachRepositoryCommand,
+	getRepositoryDetailQuery,
+	listGithubImportCandidatesQuery,
+	listAzureImportCandidatesQuery,
 } from './source-control.remote'
 export { isGithubOAuthConfigured } from './github-oauth.server'
+export { isAzureDevOpsOAuthConfigured } from './azure-devops-oauth.server'

@@ -1,4 +1,5 @@
 import { enqueueJob, type EnqueueJobInput } from './jobs.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 4 #17 phase 4 — lightweight in-process job scheduler.
@@ -94,7 +95,7 @@ async function enqueueOnce(job: ScheduledJob): Promise<void> {
 		const input = job.enqueue()
 		await enqueueJob(input)
 	} catch (err) {
-		console.warn('[jobs/scheduler] enqueue failed', {
+		logger.warn('[jobs/scheduler] enqueue failed', {
 			name: job.name,
 			error: err instanceof Error ? err.message : String(err),
 		})

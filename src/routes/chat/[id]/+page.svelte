@@ -10,10 +10,10 @@
 		getConversation,
 		getMessageStats,
 	} from '$lib/chat';
-	import { savePartialAssistant, setConversationMode } from '$lib/chat/chat.remote';
+	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
 	import { getActiveTaskForConversationQuery } from '$lib/tasks/tasks.remote';
 
-	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
+	type AgentChoice = Awaited<ReturnType<typeof listAgentsForPicker>>[number];
 	import { getAvailableModels } from '$lib/llm';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
@@ -553,30 +553,45 @@
 		void loadConversationState();
 	});
 
+	$effect(() => {
+		void loadAgentChoices();
+	});
+
 	const messages = $derived(conversationData?.messages ?? []);
-	const conversationMode = $derived<ChatMode>(
-		(conversationData?.conversation.mode as ChatMode | undefined) ?? 'chat'
+	let agentChoices = $state<AgentChoice[]>([]);
+	const conversationAgentId = $derived<string | null>(
+		conversationData?.conversation.agentId ?? null,
 	);
 
-	async function handleModeChange(next: ChatMode) {
-		if (!conversationId || next === conversationMode) return;
+	async function loadAgentChoices() {
 		try {
-			await setConversationMode({ conversationId, mode: next });
-			// Optimistically reflect the new mode locally so the composer re-renders
+			agentChoices = await listAgentsForPicker();
+		} catch (error) {
+			logChatUi('warn', 'Agent picker load failed', {
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	async function handleAgentChange(nextAgentId: string) {
+		if (!conversationId || nextAgentId === conversationAgentId) return;
+		try {
+			await setConversationAgent({ conversationId, agentId: nextAgentId });
+			// Optimistically reflect the new agent locally so the composer re-renders
 			// immediately; loadConversationState refreshes the rest of the message list.
 			if (conversationData) {
 				conversationData = {
 					...conversationData,
-					conversation: { ...conversationData.conversation, mode: next },
+					conversation: { ...conversationData.conversation, agentId: nextAgentId },
 				};
 			}
 			await getConversation(conversationId).refresh();
 			await loadConversationState();
 		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Could not change mode'
-			logChatUi('error', 'Mode switch failed', { error: message });
+			const message = error instanceof Error ? error.message : 'Could not change agent'
+			logChatUi('error', 'Agent switch failed', { error: message });
 			// Surface the failure to the user instead of silently snapping the dropdown back.
-			setRecoverableError(message, null, { action: 'handleModeChange', next });
+			setRecoverableError(message, null, { action: 'handleAgentChange', nextAgentId });
 		}
 	}
 	const initialPrompt = $derived(page.url.searchParams.get('prompt')?.trim() ?? '');
@@ -1777,12 +1792,13 @@
 				onCancelGeneration={stopStreaming}
 				model={model}
 				reasoningEffort={reasoningEffort}
-				mode={conversationMode}
+				agentId={conversationAgentId}
+				agentChoices={agentChoices}
 				onModelChange={(next) => maybeCompactBeforeModelSwitch(next)}
 				onReasoningEffortChange={(next) => {
 					reasoningEffort = next;
 				}}
-				onModeChange={handleModeChange}
+				onAgentChange={handleAgentChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				onResearchSubmit={(content) => handleResearchSubmit(content)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}

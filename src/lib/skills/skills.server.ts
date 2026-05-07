@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { skillFiles, skills } from '$lib/skills/skills.schema'
 import { emitActivity } from '$lib/activity/activity.server'
 import { embed, embedOne, toPgVector } from '$lib/memory/embeddings.server'
+import { logger } from '$lib/observability/logger'
 
 const SYSTEM_SKILL_ID = '00000000-0000-4000-8000-000000000042'
 const SYSTEM_SKILL_NAME = 'drokbot-guide'
@@ -119,6 +120,8 @@ function buildSystemSkill() {
 		descriptionEmbeddedAt: null as Date | null,
 		companionGroups: [] as string[],
 		companionTools: [] as string[],
+		category: 'domain' as string | null,
+		sourceFile: null as string | null,
 		createdAt: SYSTEM_SKILL_CREATED_AT,
 		updatedAt: SYSTEM_SKILL_CREATED_AT,
 		isSystem: true,
@@ -149,10 +152,16 @@ function shouldIncludeSystemSkill(options?: { search?: string; enabled?: boolean
 
 /* ── Skills CRUD ────────────────────────────────────────────── */
 
-export async function createSkill(name: string, description: string, content: string, tags?: string[]) {
+export async function createSkill(
+	name: string,
+	description: string,
+	content: string,
+	tags?: string[],
+	category?: string | null,
+) {
 	const [skill] = await db
 		.insert(skills)
-		.values({ name, description, content, tags: tags ?? [] })
+		.values({ name, description, content, tags: tags ?? [], category: category ?? null })
 		.returning()
 	void emitActivity('skill_created', `Skill created: ${name}`, {
 		entityId: skill.id,
@@ -170,6 +179,7 @@ export async function updateSkill(
 		content?: string
 		tags?: string[]
 		enabled?: boolean
+		category?: string | null
 		// Wave 2 #9 phase 2 — companion mapping editable through the skills UI.
 		companionGroups?: string[]
 		companionTools?: string[]
@@ -196,6 +206,118 @@ export async function deleteSkill(id: string) {
 	}
 
 	await db.delete(skills).where(eq(skills.id, id))
+}
+
+/**
+ * Create-or-update a skill plus its resource files from a parsed SKILL.md package. Used by
+ * the import command (single-skill paste) and (later) the repo file boot loader.
+ *
+ * Match key: `skills.name`. When `mode: 'create'` and a row with the same name already exists,
+ * throws so the UI can prompt the user to switch to overwrite mode. When `mode: 'overwrite'`,
+ * updates the existing row in place — companionGroups/Tools and tags fully replace whatever was
+ * there. Resource files are reconciled (insert new, update by name, delete missing).
+ */
+export async function upsertSkillFromSource(input: {
+	mode: 'create' | 'overwrite'
+	name: string
+	description: string
+	content: string
+	category?: string
+	tags?: string[]
+	companionGroups?: string[]
+	companionTools?: string[]
+	enabled?: boolean
+	resources?: Array<{ name: string; description?: string; content: string }>
+	sourceFile?: string
+}): Promise<{ id: string; created: boolean; updated: boolean }> {
+	const [existing] = await db.select({ id: skills.id }).from(skills).where(eq(skills.name, input.name)).limit(1)
+
+	if (existing) {
+		if (isSystemSkillId(existing.id)) {
+			throw new Error('System skill is read-only')
+		}
+		if (input.mode === 'create') {
+			throw new Error(`A skill named "${input.name}" already exists. Use overwrite mode to replace it.`)
+		}
+	}
+
+	const baseFields = {
+		name: input.name,
+		description: input.description,
+		content: input.content,
+		tags: input.tags ?? [],
+		enabled: input.enabled ?? true,
+		companionGroups: input.companionGroups ?? [],
+		companionTools: input.companionTools ?? [],
+		category: input.category ?? null,
+		sourceFile: input.sourceFile ?? null,
+		updatedAt: new Date(),
+	}
+
+	let skillId: string
+	let created = false
+	let updated = false
+
+	if (existing) {
+		await db.update(skills).set(baseFields).where(eq(skills.id, existing.id))
+		skillId = existing.id
+		updated = true
+	} else {
+		const [row] = await db
+			.insert(skills)
+			.values({ ...baseFields })
+			.returning({ id: skills.id })
+		skillId = row.id
+		created = true
+		void emitActivity('skill_created', `Skill created from SKILL.md: ${input.name}`, {
+			entityId: skillId,
+			entityType: 'skill',
+		})
+	}
+
+	// Reconcile resource files: insert new, update by name, delete the rest. The DB has a
+	// unique (skill_id, name) constraint, so we match on filename — stable across re-imports.
+	if (input.resources) {
+		const incoming = input.resources
+		const incomingNames = new Set(incoming.map((r) => r.name))
+		const current = await db
+			.select({ id: skillFiles.id, name: skillFiles.name })
+			.from(skillFiles)
+			.where(eq(skillFiles.skillId, skillId))
+		const currentByName = new Map(current.map((c) => [c.name, c.id]))
+
+		for (let idx = 0; idx < incoming.length; idx++) {
+			const r = incoming[idx]
+			const existingId = currentByName.get(r.name)
+			if (existingId) {
+				await db
+					.update(skillFiles)
+					.set({
+						description: r.description ?? '',
+						content: r.content,
+						sortOrder: idx,
+						updatedAt: new Date(),
+					})
+					.where(eq(skillFiles.id, existingId))
+			} else {
+				await db.insert(skillFiles).values({
+					skillId,
+					name: r.name,
+					description: r.description ?? '',
+					content: r.content,
+					sortOrder: idx,
+				})
+			}
+		}
+
+		const toDelete = current.filter((c) => !incomingNames.has(c.name))
+		for (const c of toDelete) {
+			await db.delete(skillFiles).where(eq(skillFiles.id, c.id))
+		}
+	}
+
+	void refreshSkillEmbedding(skillId)
+	return { id: skillId, created, updated }
 }
 
 export async function getSkillById(id: string) {
@@ -427,7 +549,7 @@ export async function refreshSkillEmbedding(skillId: string): Promise<void> {
 			.set({ descriptionEmbedding: vector, descriptionEmbeddedAt: new Date() })
 			.where(eq(skills.id, skillId))
 	} catch (err) {
-		console.warn('[skills] refreshSkillEmbedding failed', err)
+		logger.warn('[skills] refreshSkillEmbedding failed', { err })
 	}
 }
 
@@ -457,7 +579,7 @@ export async function backfillSkillEmbeddings(limit = 50): Promise<{ embedded: n
 		}
 		return { embedded: vectors.filter(Boolean).length }
 	} catch (err) {
-		console.warn('[skills] backfillSkillEmbeddings failed', err)
+		logger.warn('[skills] backfillSkillEmbeddings failed', { err })
 		return { embedded: 0 }
 	}
 }
@@ -484,7 +606,7 @@ export async function listRelevantSkillSummaries(query: string, topK = 8): Promi
 	try {
 		queryVector = await embedOne(trimmed)
 	} catch (err) {
-		console.warn('[skills] listRelevantSkillSummaries embedding failed; falling back to all', err)
+		logger.warn('[skills] listRelevantSkillSummaries embedding failed; falling back to all', { err })
 		return listSkillSummaries()
 	}
 
@@ -507,9 +629,24 @@ export async function listRelevantSkillSummaries(query: string, topK = 8): Promi
 		.from(skills)
 		.where(and(eq(skills.enabled, true), drizzleSql`${skills.descriptionEmbedding} is null`))
 
-	const allIds = [...ranked.map((r) => r.id), ...unembedded.map((u) => u.id).filter((id) => !rankedIds.has(id))]
+	// Always-include set: identity/hook skills are load-bearing for posture and event handling
+	// — they must be in the prompt regardless of relevance score. The category column was
+	// backfilled in migration 0054 from the `name` namespace; the OR clause keeps name-prefix
+	// matching as a safety net for any row that hasn't been categorized yet.
+	const alwaysInclude = await db
+		.select({ id: skills.id, name: skills.name, description: skills.description })
+		.from(skills)
+		.where(
+			and(
+				eq(skills.enabled, true),
+				drizzleSql`(${skills.category} in ('identity', 'hook') or ${skills.name} like 'system/%' or ${skills.name} like 'hook/%')`,
+			),
+		)
+		.orderBy(asc(skills.name))
 
-	if (allIds.length === 0) return [buildSystemSkillSummary()]
+	if (ranked.length === 0 && unembedded.length === 0 && alwaysInclude.length === 0) {
+		return [buildSystemSkillSummary()]
+	}
 
 	const files = await db
 		.select({ skillId: skillFiles.skillId, name: skillFiles.name, description: skillFiles.description })
@@ -525,13 +662,20 @@ export async function listRelevantSkillSummaries(query: string, topK = 8): Promi
 		fileMap.set(f.skillId, arr)
 	}
 
-	const summaries = [
-		...ranked.map((r) => ({ id: r.id, name: r.name, description: r.description, files: fileMap.get(r.id) ?? [] })),
-		...unembedded
-			.filter((u) => !rankedIds.has(u.id))
-			.map((u) => ({ id: u.id, name: u.name, description: u.description, files: fileMap.get(u.id) ?? [] })),
-	]
-	return [...summaries, buildSystemSkillSummary()]
+	const seen = new Set<string>()
+	const merged: SkillSummary[] = []
+	const push = (row: { id: string; name: string; description: string }) => {
+		if (seen.has(row.id)) return
+		seen.add(row.id)
+		merged.push({ id: row.id, name: row.name, description: row.description, files: fileMap.get(row.id) ?? [] })
+	}
+	for (const r of ranked) push(r)
+	for (const u of unembedded) {
+		if (!rankedIds.has(u.id)) push(u)
+	}
+	for (const a of alwaysInclude) push(a)
+
+	return [...merged, buildSystemSkillSummary()]
 }
 
 function buildSystemSkillSummary(): SkillSummary {

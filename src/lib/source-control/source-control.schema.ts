@@ -36,6 +36,7 @@ export const sourceControlProviderEnum = pgEnum('source_control_provider', [
 	'gitlab',
 	'bitbucket',
 	'gitea',
+	'azure_devops',
 	'local',
 ])
 

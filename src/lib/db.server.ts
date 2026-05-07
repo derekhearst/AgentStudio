@@ -406,18 +406,23 @@ async function bootstrapDatabase() {
 			console.log('[db] Database ready')
 		}
 
-		// Seed mode-identity skills (idempotent: ON CONFLICT DO NOTHING preserves user edits).
+		// Seed built-in agents (chat / research / plan / autonomous) and their identity skills
+		// in a single idempotent operation. Replaces the prior `seedModeIdentitySkills` — the
+		// four "modes" are now first-class agent rows. Identity skill UUIDs are preserved
+		// (c001/c002/c023/c004) so user edits to those skills carry over to the new agents.
 		// Lazy-imported to avoid a require cycle and pass a fresh db handle, since the top-level
 		// `db` export of this file is evaluated AFTER `await databaseReadyPromise`.
 		try {
-			const { seedModeIdentitySkills } = await import('$lib/chat/mode-skills.server')
+			const { seedBuiltinAgents } = await import('$lib/agents/builtin-agents.server')
 			const seedDb = createDatabase(client)
-			const result = await seedModeIdentitySkills(seedDb)
-			if (result.inserted > 0) {
-				console.log(`[db] Seeded ${result.inserted} mode-identity skill(s)`)
+			const result = await seedBuiltinAgents(seedDb)
+			if (result.skillsInserted > 0 || result.agentsUpserted > 0) {
+				console.log(
+					`[db] Seeded ${result.agentsUpserted} built-in agent(s) and ${result.skillsInserted} identity skill(s)`,
+				)
 			}
 		} catch (err) {
-			console.warn('[db] Mode-identity skill seed failed (non-fatal):', err)
+			console.warn('[db] Built-in agents seed failed (non-fatal):', err)
 		}
 
 		// Wave 2 #9 Phase 1 — seed first-party companion skills (one per capability group). Same
@@ -493,6 +498,30 @@ async function bootstrapDatabase() {
 			console.warn('[db] AGENTS.md scan failed (non-fatal):', err)
 		}
 
+		// PR-4 — SKILL.md repo-file discovery. Mirror of the AGENTS.md scanner: scans
+		// `${SKILL_SOURCE_PATH}/skills/<slug>/SKILL.md` and upserts. Default priority is `db`
+		// (repo only inserts new), so the loader is silent on installs that don't use it.
+		try {
+			const { loadSkillSourcesAtBoot } = await import('$lib/skills/skill-source-loader.server')
+			const seedDb = createDatabase(client)
+			const result = await loadSkillSourcesAtBoot(seedDb)
+			if (result) {
+				const summary = [
+					result.inserted > 0 ? `${result.inserted} inserted` : null,
+					result.updated > 0 ? `${result.updated} updated` : null,
+					result.skipped > 0 ? `${result.skipped} skipped` : null,
+				].filter(Boolean).join(', ')
+				if (summary) {
+					console.log(`[db] SKILL.md scan: ${summary}`)
+				}
+				for (const err of result.errors) {
+					console.warn(`[db] SKILL.md scan: ${err}`)
+				}
+			}
+		} catch (err) {
+			console.warn('[db] SKILL.md scan failed (non-fatal):', err)
+		}
+
 		// Wave 4 #18 phase 3 — register the `research_run` job handler. Must happen BEFORE the
 		// worker starts so claimed research jobs find a handler.
 		try {
@@ -561,6 +590,15 @@ async function bootstrapDatabase() {
 			registerTaskJobHandlers()
 		} catch (err) {
 			console.warn('[db] Task handler registration failed (non-fatal):', err)
+		}
+
+		// App-log retention + DB sink enable — must come after migrations so app_logs exists
+		// before the logger's first flush.
+		try {
+			const { registerLogsJobHandlers } = await import('$lib/observability/logs-handler.server')
+			registerLogsJobHandlers()
+		} catch (err) {
+			console.warn('[db] Logs handler registration failed (non-fatal):', err)
 		}
 
 		// Wave 4 #17 phase 1 — start the in-process job worker. Opt-out via JOBS_WORKER_ENABLED=0

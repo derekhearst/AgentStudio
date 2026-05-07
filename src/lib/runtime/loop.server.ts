@@ -12,6 +12,7 @@ import type {
 	RunChatLoopResult,
 	ToolDefinition,
 } from './types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -78,7 +79,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			const { startRunTrace } = await import('$lib/observability/traces.server')
 			await startRunTrace({ runId: session.runId, sessionId: input.conversationId })
 		} catch (err) {
-			console.warn('[runtime] startRunTrace failed (non-fatal)', err)
+			logger.warn('[runtime] startRunTrace failed (non-fatal)', { err })
 		}
 	})()
 
@@ -494,7 +495,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 						toolName: tc.name,
 					})
 				} catch (err) {
-					console.warn('[runtime] appendTraceSpan failed (non-fatal)', err)
+					logger.warn('[runtime] appendTraceSpan failed (non-fatal)', { err })
 				}
 			})()
 
@@ -589,7 +590,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			const { finishRunTrace } = await import('$lib/observability/traces.server')
 			await finishRunTrace({ runId: session.runId, status: 'completed' })
 		} catch (err) {
-			console.warn('[runtime] finishRunTrace failed (non-fatal)', err)
+			logger.warn('[runtime] finishRunTrace failed (non-fatal)', { err })
 		}
 	})()
 

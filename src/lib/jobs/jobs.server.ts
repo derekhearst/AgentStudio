@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gte, lte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { jobLeases, jobPolicies, jobs, type JobRow, type JobStatus } from './jobs.schema'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 4 #17 phase 1 — durable job queue server helpers.
@@ -308,7 +309,7 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 					dedupeKey: `job:${row.id}`,
 				})
 			} catch (err) {
-				console.warn('[jobs] review item open failed (non-fatal)', err)
+				logger.warn('[jobs] review item open failed (non-fatal)', { err })
 			}
 		})()
 		void emitJobLifecycleMetric(row, 'failed')
@@ -344,7 +345,7 @@ async function emitJobLifecycleMetric(row: JobRow, status: 'completed' | 'failed
 			value: 1,
 		})
 	} catch (err) {
-		console.warn('[jobs] emitJobLifecycleMetric failed (non-fatal)', err)
+		logger.warn('[jobs] emitJobLifecycleMetric failed (non-fatal)', { err })
 	}
 }
 

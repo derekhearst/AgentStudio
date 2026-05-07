@@ -127,6 +127,27 @@ Review items with severity `critical` trigger a notification:
 - `operationalMetrics` rows are retained for 90 days by default (configurable per metric).
 - Dismissing a review item does not take the associated action — it only removes it from the open inbox. A dismissed approval request means the tool call is denied.
 
+### Logger
+
+`src/lib/observability/logger.ts` is the canonical sink for structured server-side log lines. Production code paths import `logger` from `$lib/observability/logger` (or via the domain barrel) and call `logger.debug | info | warn | error(message, context?)`. Each method takes a string message and an optional structured context object — never positional arguments.
+
+Verbosity is controlled by `LOG_LEVEL` (`debug`, `info`, `warn`, `error`); when unset it defaults to `debug` in development and `info` in production.
+
+The logger writes to two sinks:
+
+1. **Console** — always, with an ISO timestamp and level prefix. The dev server still surfaces logs in stdout.
+2. **`app_logs` table** — every server-side entry, batched. Writes flush every 2s (or every 50 entries; `error` flushes immediately). The `[domain]` prefix on the message is also lifted into a separate `source` column for fast per-domain filtering. Writes are best-effort: a failed insert falls back to console output and disables the sink for the rest of the process — the call site never blocks.
+
+Operators browse logs at `/observability/logs` (admin-only, mobile-friendly). Filters: min level, source, free-text search across message + JSON context, time-since, row limit. The sidebar shows row counts per source for the last 15min/1h/6h/24h so you can spot a noisy domain without scanning.
+
+A daily `app_logs_purge` job deletes rows older than `APP_LOGS_RETENTION_DAYS` (default `14`). The job is registered alongside the metrics handler at bootstrap.
+
+Intentional exceptions where `console.*` is preferred over `logger`:
+
+- Browser code (`*.svelte`, `*.client.ts`) — the browser console is the right destination and the logger module reads `process.env`. The DB sink is server-only; browser callers no-op past the console emit.
+- `src/lib/db.server.ts` — bootstrap diagnostics that run before request handling and must be readable directly from container stdout even on import errors. The `app_logs` table doesn't exist until migrations finish, so logging from here would race with bootstrap.
+- The logger's own implementation and other observability internals (`metrics.server.ts`, `traces.server.ts`, `review.server.ts`) — to avoid recursive logging if the destination changes later.
+
 ## Roles & Permissions
 
 | Action                              | Who can do it                    |

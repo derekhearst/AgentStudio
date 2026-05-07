@@ -7,6 +7,7 @@ import { recordEvaluation } from './evaluations.server'
 import type { RunEvaluationRow } from './evaluations.schema'
 import { DEFAULT_EVALUATOR_AGENT_ID } from './evaluators-seed.server'
 import { parseEvaluatorResponse, type ParsedEvaluatorResponse } from './evaluator-parse'
+import { logger } from '$lib/observability/logger'
 
 export { parseEvaluatorResponse, type ParsedEvaluatorResponse }
 
@@ -43,7 +44,7 @@ export async function runEvaluatorPass(input: RunEvaluatorPassInput): Promise<Ru
 	const evaluatorAgentId = input.evaluatorAgentId ?? DEFAULT_EVALUATOR_AGENT_ID
 	const [evaluator] = await db.select().from(agents).where(eq(agents.id, evaluatorAgentId)).limit(1)
 	if (!evaluator) {
-		console.warn('[evaluations] evaluator agent missing — skipping pass', { runId: input.runId, evaluatorAgentId })
+		logger.warn('[evaluations] evaluator agent missing — skipping pass', { runId: input.runId, evaluatorAgentId })
 		return null
 	}
 
@@ -125,7 +126,7 @@ export async function runEvaluatorPass(input: RunEvaluatorPassInput): Promise<Ru
 					dedupeKey: `eval:${input.runId}`,
 				})
 			} catch (err) {
-				console.warn('[evaluations] review item open failed (non-fatal)', err)
+				logger.warn('[evaluations] review item open failed (non-fatal)', { err })
 			}
 		})()
 	}

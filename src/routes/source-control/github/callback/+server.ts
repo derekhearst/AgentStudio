@@ -11,6 +11,7 @@ import {
 import { encryptSecret } from '$lib/source-control/encryption.server'
 import { upsertConnection } from '$lib/source-control/source-control.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 5 #19 phase 2 — GitHub OAuth callback.
@@ -66,7 +67,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 		ghUser = await fetchGithubUser(accessToken)
 	} catch (err) {
-		console.warn('[source-control/github/callback] fetchGithubUser failed', err)
+		logger.warn('[source-control/github/callback] fetchGithubUser failed', { err })
 		fail('user_lookup_failed')
 	}
 

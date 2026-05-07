@@ -5,6 +5,7 @@ import { appendRunEvent } from '$lib/runs/events.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import { encodeSseFrame } from '../sse-codec'
 import type { RunPatch, Session } from '../types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #10 phase 1 — SSE-backed Session.
@@ -72,7 +73,7 @@ export function createSseSession(opts: SseSessionOptions): Session & {
 				try {
 					seq = await appendRunEvent(opts.runId, eventName, payload)
 				} catch (err) {
-					console.error('[runtime/sse] failed to log run event', {
+					logger.error('[runtime/sse] failed to log run event', {
 						runId: opts.runId,
 						eventName,
 						error: err instanceof Error ? err.message : String(err),

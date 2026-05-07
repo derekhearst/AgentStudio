@@ -37,6 +37,12 @@ export type MaterializeMirrorInput = {
 	/** Optional default branch hint — `git clone` figures it out anyway, but accepting it
 	 * here lets the caller log "(default branch: main)" without an extra round-trip. */
 	defaultBranch?: string
+	/** Override the GitHub-only URL build. When set, used verbatim as the remote URL.
+	 * Required for non-GitHub providers (Azure DevOps, generic clones). */
+	cloneUrl?: string
+	/** Credential helper username. Defaults to `x-access-token` (GitHub OAuth). Use
+	 * `oauth2` for Azure DevOps OAuth, empty string for public/anonymous clones. */
+	credentialUsername?: string
 }
 
 export type MaterializeMirrorResult = {
@@ -107,7 +113,10 @@ export { buildCloneArgs, buildFetchArgs, buildHeadBranchArgs, buildMirrorPath } 
 
 export async function materializeRepoMirror(input: MaterializeMirrorInput): Promise<MaterializeMirrorResult> {
 	const targetPath = buildMirrorPath(input.mirrorRoot, input.owner, input.repo)
-	const remoteUrl = `https://github.com/${sanitizeRepoSegment(input.owner, 'owner')}/${sanitizeRepoSegment(input.repo, 'repo')}.git`
+	const remoteUrl =
+		input.cloneUrl ??
+		`https://github.com/${sanitizeRepoSegment(input.owner, 'owner')}/${sanitizeRepoSegment(input.repo, 'repo')}.git`
+	const credentialUsername = input.credentialUsername
 
 	const exists = await pathExists(targetPath)
 	const fresh = !exists || !(await isGitRepo(targetPath))
@@ -116,14 +125,20 @@ export async function materializeRepoMirror(input: MaterializeMirrorInput): Prom
 		// Make sure the parent dir exists. `git clone` creates the leaf.
 		await mkdir(dirname(targetPath), { recursive: true })
 
-		const cloneRes = await runGitCommand(buildCloneArgs({ remoteUrl, targetPath }), input.token)
+		const cloneRes = await runGitCommand(
+			buildCloneArgs({ remoteUrl, targetPath, credentialUsername }),
+			input.token,
+		)
 		if (cloneRes.code !== 0) {
 			throw new Error(
 				`git clone failed (exit ${cloneRes.code}): ${redact(cloneRes.stderr.trim() || cloneRes.stdout.trim(), input.token)}`,
 			)
 		}
 	} else {
-		const fetchRes = await runGitCommand(buildFetchArgs({ repoPath: targetPath, remoteUrl }), input.token)
+		const fetchRes = await runGitCommand(
+			buildFetchArgs({ repoPath: targetPath, remoteUrl, credentialUsername }),
+			input.token,
+		)
 		if (fetchRes.code !== 0) {
 			throw new Error(
 				`git fetch failed (exit ${fetchRes.code}): ${redact(fetchRes.stderr.trim() || fetchRes.stdout.trim(), input.token)}`,

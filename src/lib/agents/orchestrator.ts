@@ -7,6 +7,7 @@ import {
 	ORCHESTRATOR_IDENTITY_SKILL_ID,
 } from '$lib/agents/identity-seed.server'
 import { expandFragments } from '$lib/agents/fragment-expand'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Orchestrator identity — injected as system message for conversations
@@ -35,7 +36,7 @@ async function loadOrchestratorIdentity(): Promise<string> {
 			raw = skill.content
 		}
 	} catch (err) {
-		console.warn('[orchestrator] failed to load identity skill, using TS fallback', err)
+		logger.warn('[orchestrator] failed to load identity skill, using TS fallback', { err })
 	}
 	// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup
 	// failure leaves a `<!-- @import:missing ... -->` marker in the assembled prompt rather
@@ -43,7 +44,7 @@ async function loadOrchestratorIdentity(): Promise<string> {
 	try {
 		return await expandFragments(raw, lookupFragmentByName)
 	} catch (err) {
-		console.warn('[orchestrator] fragment expansion failed, using raw content', err)
+		logger.warn('[orchestrator] fragment expansion failed, using raw content', { err })
 		return raw
 	}
 }

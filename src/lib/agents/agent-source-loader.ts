@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { extractFrontmatter as sharedExtractFrontmatter } from '$lib/util/frontmatter'
 
 /**
  * Wave 5 #22 phase 4 — AGENTS.md repo-file discovery scanner.
@@ -16,6 +17,10 @@ import { join } from 'node:path'
  *
  * No DB writes here — see `agent-source-loader.server.ts` for the upsert side. Keeping the
  * file-system + parsing concerns pure lets unit tests pin the contract without a database.
+ *
+ * Frontmatter parsing was promoted to `src/lib/util/frontmatter.ts` so the skills source
+ * loader can share the same parser. `extractFrontmatter` is re-exported here for backwards
+ * compatibility with existing tests that import from this module.
  */
 
 export type AgentSourceFrontmatter = {
@@ -38,70 +43,14 @@ export type AgentSourcesScan = {
 	agents: AgentDefinitionSource[]
 }
 
-const FRONTMATTER_REGEX = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/
-
 /**
- * Parse the YAML-style frontmatter block at the top of a markdown file. Intentionally rigid:
- * supports `key: value`, inline arrays `key: [a, b]`, and indented dash-lists. Quoted strings
- * have their surrounding quotes stripped. Unknown shapes (nested maps, multi-line strings,
- * anchors) are not supported — the contract is "the four fields the agents domain cares about".
+ * Parse the YAML-style frontmatter block at the top of a markdown file.
  *
- * Returns `{ frontmatter: null, body: content }` when no frontmatter is present so callers
- * can treat the whole file as the body.
+ * Re-exports `extractFrontmatter` from `$lib/util/frontmatter`. Kept as a named export here so
+ * existing callers + tests (`agents.source-loader.spec.ts`) continue to import from this
+ * module without churn. New callers should import directly from `$lib/util/frontmatter`.
  */
-export function extractFrontmatter(content: string): {
-	frontmatter: Record<string, unknown> | null
-	body: string
-} {
-	const match = FRONTMATTER_REGEX.exec(content)
-	if (!match) {
-		return { frontmatter: null, body: content }
-	}
-	const yamlText = match[1] ?? ''
-	const body = (match[2] ?? '').replace(/^\r?\n+/, '')
-	const frontmatter: Record<string, unknown> = {}
-	const lines = yamlText.split(/\r?\n/)
-
-	let i = 0
-	while (i < lines.length) {
-		const line = lines[i]
-		if (!line.trim()) {
-			i++
-			continue
-		}
-		const kv = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.*)$/.exec(line)
-		if (!kv) {
-			i++
-			continue
-		}
-		const key = kv[1]
-		const rawValue = kv[2].trim()
-
-		if (rawValue === '') {
-			const items: string[] = []
-			i++
-			while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
-				items.push(lines[i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''))
-				i++
-			}
-			frontmatter[key] = items
-			continue
-		}
-
-		if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
-			const inner = rawValue.slice(1, -1)
-			frontmatter[key] = inner
-				.split(',')
-				.map((s) => s.trim().replace(/^["']|["']$/g, ''))
-				.filter(Boolean)
-		} else {
-			frontmatter[key] = rawValue.replace(/^["']|["']$/g, '')
-		}
-		i++
-	}
-
-	return { frontmatter, body }
-}
+export const extractFrontmatter = sharedExtractFrontmatter
 
 function coerceFrontmatter(raw: Record<string, unknown> | null): AgentSourceFrontmatter {
 	if (!raw) return {}

@@ -1,3 +1,5 @@
+import { logger } from '$lib/observability/logger'
+
 /**
  * Pure tool-output trimming + offload helpers. No node:* / SvelteKit imports — the offload sink
  * is supplied as a callback so unit tests can verify the truncation shape without touching disk.
@@ -121,7 +123,7 @@ export async function trimWithOffload(input: TrimWithOffloadInput): Promise<Trim
 			await input.offload(handle, input.content)
 		} catch (err) {
 			// Best-effort: if the sink fails, the model still gets head+tail (just no recoverable handle).
-			console.warn('[output-offload] sink failed; visible tail+head still returned', err)
+			logger.warn('[output-offload] sink failed; visible tail+head still returned', { err })
 		}
 	}
 

@@ -3,13 +3,18 @@ import { join } from 'node:path'
 import { defaultGitRunner, type GitRunner } from '$lib/workspace/worktree.server'
 import {
 	buildDiffStatArgs,
+	buildLogArgs,
 	buildStatusArgs,
 	parseGitDiffStatOutput,
+	parseGitLogOutput,
 	parseGitStatusOutput,
 	suggestCommitSubject,
+	type GitCommitSummary,
 	type GitDiffStatSummary,
 	type GitStatusSummary,
 } from './git-local'
+
+export type { GitCommitSummary }
 
 /**
  * Wave 5 #19 phase 3 — server-side wrappers for the `git_status` + `prepare_commit` agent
@@ -26,6 +31,22 @@ async function isGitRepository(absPath: string): Promise<boolean> {
 	} catch {
 		return false
 	}
+}
+
+/**
+ * Read recent commits from a local git clone. Used by the source-control page's repo
+ * detail panel — falls back to an empty array when the path isn't a git repo (the UI
+ * shows "Pull latest" in that state instead of an error toast).
+ */
+export async function listRecentCommits(
+	absPath: string,
+	opts: { limit: number } = { limit: 10 },
+	runner: GitRunner = defaultGitRunner,
+): Promise<GitCommitSummary[]> {
+	if (!(await isGitRepository(absPath))) return []
+	const result = await runner(buildLogArgs(absPath, opts))
+	if (result.code !== 0) return []
+	return parseGitLogOutput(result.stdout)
 }
 
 export async function gitStatusAt(

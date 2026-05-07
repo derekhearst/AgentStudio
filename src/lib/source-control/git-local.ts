@@ -166,6 +166,47 @@ export function parseGitDiffStatOutput(stdout: string): GitDiffStatSummary {
 	return summary
 }
 
+// `git log` argv + parser. Tab-separated fields keep parsing unambiguous: subjects can
+// contain just about any char except a literal tab.
+export function buildLogArgs(repoPath: string, opts: { limit: number }): string[] {
+	const limit = Math.max(1, Math.min(opts.limit, 500))
+	return [
+		'-C',
+		repoPath,
+		'log',
+		`--max-count=${limit}`,
+		'--pretty=format:%H%x09%an%x09%ae%x09%cI%x09%s',
+	]
+}
+
+export type GitCommitSummary = {
+	sha: string
+	authorName: string
+	authorEmail: string
+	isoDate: string
+	subject: string
+}
+
+export function parseGitLogOutput(stdout: string): GitCommitSummary[] {
+	if (!stdout) return []
+	const out: GitCommitSummary[] = []
+	const lines = stdout.split(/\r?\n/)
+	for (const raw of lines) {
+		if (raw.length === 0) continue
+		const parts = raw.split('\t')
+		if (parts.length < 5) continue
+		const [sha, authorName, authorEmail, isoDate, ...rest] = parts
+		out.push({
+			sha,
+			authorName,
+			authorEmail,
+			isoDate,
+			subject: rest.join('\t'),
+		})
+	}
+	return out
+}
+
 /**
  * Build a one-line conventional-commit-style suggestion from a diff-stat summary. Used by
  * `prepare_commit` so the agent gets a deterministic starting point that names the dominant

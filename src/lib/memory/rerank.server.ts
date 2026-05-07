@@ -8,6 +8,7 @@
 import { chat } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import type { RetrievedDrawer } from '$lib/memory/retrieval.server'
+import { logger } from '$lib/observability/logger'
 
 const DEFAULT_RERANK_MODEL = 'anthropic/claude-haiku-4.5'
 
@@ -91,7 +92,7 @@ export async function rerank(
 		}
 		return ordered.slice(0, keepTopK)
 	} catch (error) {
-		console.warn('[memory] rerank failed; returning original order', error)
+		logger.warn('[memory] rerank failed; returning original order', { err: error })
 		return candidates.slice(0, keepTopK)
 	}
 }

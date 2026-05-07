@@ -20,9 +20,15 @@ import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
-import { filterToolsByMode, getModePostureContent } from '$lib/chat/mode.server'
+import {
+	filterToolsByAgentPolicy,
+	resolveAgentToolPolicy,
+	loadAgentIdentityContent,
+} from '$lib/chat/agent-switch.server'
+import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { runChatLoop, createSseSession } from '$lib/runtime'
 import { encodeSseFrame } from '$lib/runtime/sse-codec'
+import { logger } from '$lib/observability/logger'
 
 const DREAMING_ONLY_TOOLS = new Set<string>()
 
@@ -181,20 +187,48 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// surface). When unset, the legacy back-compat path is preserved.
 	let agentCapabilityGroups: string[] | null = null
 
+	// Resolve the bound agent — conversations are always logically bound to one (the modes
+	// concept folded into agents) but the column is nullable at the DB layer for back-compat
+	// with raw test fixtures. Fall back to the built-in Chat agent when null. Built-in agents
+	// (chat / research / plan / autonomous) carry a `builtinKey` and drive the orchestrator
+	// path; custom agents drive the per-agent path.
+	let resolvedAgentId = conversation.agentId
+	if (!resolvedAgentId) {
+		const { getBuiltinAgentId } = await import('$lib/agents/builtin-agents.server')
+		resolvedAgentId = await getBuiltinAgentId(db, 'chat')
+		if (!resolvedAgentId) {
+			return json({ error: 'No default agent configured. Re-run database bootstrap.' }, { status: 500 })
+		}
+	}
+	const [agent] = await db
+		.select()
+		.from(agentsTable)
+		.where(eq(agentsTable.id, resolvedAgentId))
+		.limit(1)
+	if (!agent) {
+		return json({ error: 'Conversation agent not found' }, { status: 500 })
+	}
+	const agentToolPolicy = resolveAgentToolPolicy(agent.config as Parameters<typeof resolveAgentToolPolicy>[0])
+
 	// Wave 2 #8 phase 2 — pre-suggest capability groups from the user message so the model gets
 	// the right tools on round 0 without spending a round calling enable_capability. Computed
 	// here (before slot assembly) so the matching companion-skill summaries (Wave 2 #9 phase 3)
 	// can be added as a context slot in the same pass.
-	const isOrchestrator = !conversation.agentId
+	const isOrchestrator = agent.builtinKey != null
 	const { suggestCapabilityGroups } = await import('$lib/tools/suggest-capabilities')
 	const suggestedGroups = isOrchestrator && body.content ? suggestCapabilityGroups(body.content) : []
 
-	// --- Context Engineering: Mode Posture (chat workbench mode) ---
-	if (conversation.mode && conversation.mode !== 'chat') {
+	// --- Context Engineering: Built-in Agent Posture ---
+	// Built-in agents other than `chat` overlay their identity-skill content as a posture slot
+	// at priority 95 (under the orchestrator identity at 100). Replaces the prior mode posture
+	// slot — the chat built-in has no overlay because it IS the default orchestrator persona.
+	// Custom agents inject their identity via the identity slot below instead.
+	if (agent.builtinKey && agent.builtinKey !== 'chat') {
+		const posture = await loadAgentIdentityContent(agent)
 		contextSlots.push({
-			name: `mode_${conversation.mode}`,
+			name: `agent_${agent.builtinKey}`,
 			priority: 95,
-			content: await getModePostureContent(conversation.mode),
+			content: posture,
 		})
 	}
 
@@ -216,7 +250,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 			}
 		} catch (err) {
-			console.warn('[chat] project context slot lookup failed', err)
+			logger.warn('[chat] project context slot lookup failed', { err })
 		}
 	}
 
@@ -225,85 +259,64 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const orchestratorPrompt = await buildOrchestratorPrompt()
 		contextSlots.push({ name: 'identity', priority: 100, content: orchestratorPrompt })
 	} else {
-		// Agent conversation — load agent's own system prompt.
-		// Wave 5 #22 phase 2 — when agent.identitySkillId is set, prefer the skill's content
-		// so /skills edits hot-reload without a deploy. Fall back to systemPrompt otherwise.
-		const { agents: agentsTable } = await import('$lib/agents/agents.schema')
-		const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, conversation.agentId!)).limit(1)
-		if (agent) {
-			let identityContent = agent.systemPrompt
-			if (agent.identitySkillId) {
-				try {
-					const { skills: skillsTable } = await import('$lib/skills/skills.schema')
-					const [skill] = await db
-						.select({ content: skillsTable.content, enabled: skillsTable.enabled })
-						.from(skillsTable)
-						.where(eq(skillsTable.id, agent.identitySkillId))
-						.limit(1)
-					if (skill && skill.enabled && skill.content.trim().length > 0) {
-						identityContent = skill.content
+		// Custom agent — load identity from the linked skill (with systemPrompt fallback)
+		// and expand any `@import skill-name` fragments. Wave 5 #22 phases 2 + 5.
+		let identityContent = await loadAgentIdentityContent(agent)
+		try {
+			const { expandFragments } = await import('$lib/agents/fragment-expand')
+			const { skills: skillsTable } = await import('$lib/skills/skills.schema')
+			identityContent = await expandFragments(identityContent, async (name) => {
+				const [row] = await db
+					.select({ content: skillsTable.content, enabled: skillsTable.enabled })
+					.from(skillsTable)
+					.where(eq(skillsTable.name, name))
+					.limit(1)
+				if (!row || !row.enabled) return null
+				return row.content
+			})
+		} catch (err) {
+			logger.warn('[chat] fragment expansion failed, using raw identity content', { err })
+		}
+		contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
+		const config = agent.config as
+			| {
+					allowedTools?: string[]
+					capabilityGroups?: string[]
+					workspace?: {
+						mode?: string
+						key?: string
+						repoPath?: string
+						baseBranch?: string
+						deleteBranchOnCleanup?: boolean
 					}
-				} catch (err) {
-					console.warn('[chat] agent identity skill lookup failed, using systemPrompt fallback', err)
-				}
-			}
-			// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort.
-			try {
-				const { expandFragments } = await import('$lib/agents/fragment-expand')
-				const { skills: skillsTable } = await import('$lib/skills/skills.schema')
-				identityContent = await expandFragments(identityContent, async (name) => {
-					const [row] = await db
-						.select({ content: skillsTable.content, enabled: skillsTable.enabled })
-						.from(skillsTable)
-						.where(eq(skillsTable.name, name))
-						.limit(1)
-					if (!row || !row.enabled) return null
-					return row.content
-				})
-			} catch (err) {
-				console.warn('[chat] fragment expansion failed, using raw identity content', err)
-			}
-			contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
-			const config = agent.config as
-				| {
-						allowedTools?: string[]
-						capabilityGroups?: string[]
-						workspace?: {
-							mode?: string
-							key?: string
-							repoPath?: string
-							baseBranch?: string
-							deleteBranchOnCleanup?: boolean
-						}
-				  }
-				| null
-			if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
-				scopedAgentTools = config.allowedTools
-			}
-			if (Array.isArray(config?.capabilityGroups) && config.capabilityGroups.length > 0) {
-				agentCapabilityGroups = config.capabilityGroups
-			}
-			// Phase 2 of #7: opt-in persistent workspace per agent.
-			if (
-				config?.workspace?.mode === 'persistent' &&
-				typeof config.workspace.key === 'string' &&
-				config.workspace.key.length > 0
-			) {
-				persistentKey = config.workspace.key
-			}
-			// Phase 4 of #7: opt-in git-worktree workspace per agent. The agent config supplies
-			// the source repoPath; the worktree itself is created lazily on first tool use via
-			// ensureWorkspace, off a `run/<runId>` branch from `baseBranch` (default: repo HEAD).
-			if (
-				config?.workspace?.mode === 'worktree' &&
-				typeof config.workspace.repoPath === 'string' &&
-				config.workspace.repoPath.length > 0
-			) {
-				worktreeConfig = {
-					repoPath: config.workspace.repoPath,
-					baseBranch: config.workspace.baseBranch,
-					deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
-				}
+			  }
+			| null
+		if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
+			scopedAgentTools = config.allowedTools
+		}
+		if (Array.isArray(config?.capabilityGroups) && config.capabilityGroups.length > 0) {
+			agentCapabilityGroups = config.capabilityGroups
+		}
+		// Phase 2 of #7: opt-in persistent workspace per agent.
+		if (
+			config?.workspace?.mode === 'persistent' &&
+			typeof config.workspace.key === 'string' &&
+			config.workspace.key.length > 0
+		) {
+			persistentKey = config.workspace.key
+		}
+		// Phase 4 of #7: opt-in git-worktree workspace per agent. The agent config supplies
+		// the source repoPath; the worktree itself is created lazily on first tool use via
+		// ensureWorkspace, off a `run/<runId>` branch from `baseBranch` (default: repo HEAD).
+		if (
+			config?.workspace?.mode === 'worktree' &&
+			typeof config.workspace.repoPath === 'string' &&
+			config.workspace.repoPath.length > 0
+		) {
+			worktreeConfig = {
+				repoPath: config.workspace.repoPath,
+				baseBranch: config.workspace.baseBranch,
+				deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
 			}
 		}
 	}
@@ -369,7 +382,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 			}
 		} catch (err) {
-			console.warn('[skills] companion lookup for suggested groups failed', err)
+			logger.warn('[skills] companion lookup for suggested groups failed', { err })
 		}
 	}
 
@@ -398,7 +411,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 			}
 		} catch (err) {
-			console.warn('[memory] recall failed', err)
+			logger.warn('[memory] recall failed', { err })
 		}
 	}
 
@@ -462,11 +475,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 				.filter((tool) => activeNames.has(tool.function.name))
 		}
-		// Wave 5 #22 phase 7 — research + plan modes strip write tools so the model has to
-		// surface findings/proposals instead of silently taking action. Allow-list shape
-		// (see mode.server.ts) so newly added tools fail closed for research/plan until
-		// explicitly audited.
-		return filterToolsByMode(assembled, conversation.mode ?? 'chat')
+		// Built-in Research + Plan agents strip write tools so the model has to surface
+		// findings/proposals instead of silently taking action. Allow-list shape (see
+		// `agent-tool-filter.ts`) so newly added tools fail closed for those agents until
+		// explicitly audited. Chat / Autonomous / custom agents pass through unfiltered.
+		return filterToolsByAgentPolicy(assembled, agentToolPolicy)
 	}
 	const initialTools = computeToolsFor(initialEnabledGroups)
 	// No hard limit — loop exits when the model stops calling tools
@@ -483,7 +496,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		try {
 			await recordBudgetAlert({ limit: w.limit, triggerType: 'warn', spendUsd: w.spendUsd })
 		} catch (err) {
-			console.warn('[budget] warn alert insert failed', err)
+			logger.warn('[budget] warn alert insert failed', { err })
 		}
 	}
 	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
@@ -497,7 +510,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				spendUsd: parseFloat(blockedBy.limitUsd),
 			})
 		} catch (err) {
-			console.warn('[budget] block alert insert failed', err)
+			logger.warn('[budget] block alert insert failed', { err })
 		}
 		// Wave 5 #20 — surface the block as a policy_override_request in the review inbox so
 		// an operator can decide whether to lift the cap or hold it. Best-effort dynamic
@@ -524,7 +537,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					dedupeKey: `budget:${blockedBy.id}:${user.id}`,
 				})
 			} catch (err) {
-				console.warn('[budget] policy_override_request open failed', err)
+				logger.warn('[budget] policy_override_request open failed', { err })
 			}
 		})()
 		return json(
@@ -774,7 +787,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								sessionId: body.conversationId,
 							})
 						} catch (err) {
-							console.warn('[memory] enqueue mine job failed', err)
+							logger.warn('[memory] enqueue mine job failed', { err })
 						}
 					})()
 				}
@@ -809,7 +822,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								sessionId: body.conversationId,
 							})
 						} catch (err) {
-							console.warn('[evaluations] enqueue evaluation_run job failed', err)
+							logger.warn('[evaluations] enqueue evaluation_run job failed', { err })
 						}
 					})()
 				}

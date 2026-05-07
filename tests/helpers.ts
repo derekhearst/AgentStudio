@@ -228,15 +228,28 @@ export async function seedTask(
 	return row
 }
 
+/**
+ * Resolve the built-in Chat agent id. Conversations require a non-null agent_id after the
+ * modes-into-agents migration; tests that don't care about which agent the conversation is
+ * bound to fall back to this helper.
+ */
+export async function getBuiltinChatAgentId(): Promise<string> {
+	const sql = getSql()
+	const [row] = await sql<{ id: string }[]>`select id from agents where builtin_key = 'chat' limit 1`
+	if (!row) throw new Error('Built-in Chat agent not seeded — restart dev server to run seedBuiltinAgents()')
+	return row.id
+}
+
 export async function seedConversation(
 	prefix: string,
-	overrides?: { title?: string; userMessage?: string; assistantMessage?: string; userId?: string },
+	overrides?: { title?: string; userMessage?: string; assistantMessage?: string; userId?: string; agentId?: string },
 ) {
 	const sql = getSql()
 	const userId = overrides?.userId ?? (await getActiveAdminUserId())
+	const agentId = overrides?.agentId ?? (await getBuiltinChatAgentId())
 	const [conversation] = await sql<{ id: string; title: string }[]>`
-		insert into conversations (user_id, title, model, total_tokens, total_cost)
-		values (${userId}, ${overrides?.title ?? `${prefix} Conversation`}, ${'anthropic/claude-sonnet-4'}, 42, '0')
+		insert into conversations (user_id, agent_id, title, model, total_tokens, total_cost)
+		values (${userId}, ${agentId}, ${overrides?.title ?? `${prefix} Conversation`}, ${'anthropic/claude-sonnet-4'}, 42, '0')
 		returning id, title
 	`
 

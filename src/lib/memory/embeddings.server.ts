@@ -7,6 +7,7 @@
  */
 
 import { logLlmUsage } from '$lib/costs/usage'
+import { logger } from '$lib/observability/logger'
 
 export const EMBEDDING_DIM = 1536
 export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
@@ -97,7 +98,7 @@ export async function embed(texts: string[], options: EmbedOptions = {}): Promis
 			tokensOut: 0,
 			metadata: { batchSize: slice.length, ...(options.metadata ?? {}) },
 		}).catch((error) => {
-			console.warn('[memory] failed to log embedding usage', error)
+			logger.warn('[memory] failed to log embedding usage', { err: error })
 		})
 	}
 

@@ -19,6 +19,14 @@ export const skills = pgTable('skills', {
 	// When the run enables a matching group, the skill's summary is auto-loaded as a context slot.
 	companionGroups: text('companion_groups').array().notNull().default([]),
 	companionTools: text('companion_tools').array().notNull().default([]),
+	// PR-3 — skill category (tool/workflow/domain/policy/identity/hook). Nullable text
+	// rather than a Postgres enum so we can iterate the set via Zod without enum migrations.
+	// Backfilled from the `name` namespace in migration 0054.
+	category: text('category'),
+	// PR-3 — absolute path to the SKILL.md file that seeded this row, set by the repo file
+	// boot loader (PR-4). NULL means "originated from the UI / DB seed". Used to distinguish
+	// operator edits from disk-sourced rows.
+	sourceFile: text('source_file'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })

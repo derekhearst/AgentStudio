@@ -50,6 +50,7 @@ import {
 	deleteSkillFile as deleteSkillFileRecord,
 	bumpSkillAccess,
 } from '$lib/skills/skills.server'
+import { logger } from '$lib/observability/logger'
 
 type SearchResult = {
 	title: string
@@ -94,7 +95,7 @@ async function resolveConversationFromRunId(runId: string | null): Promise<strin
 			.limit(1)
 		return row?.conversationId ?? null
 	} catch (err) {
-		console.warn('[tools] resolveConversationFromRunId failed', err)
+		logger.warn('[tools] resolveConversationFromRunId failed', { err })
 		return null
 	}
 }
@@ -579,7 +580,7 @@ export async function executeTool(
 					userId: ctx?.userId ?? null,
 					runId: ctx?.runId ?? null,
 					metadata: { query: input.query.slice(0, 240), resultCount: result.length },
-				}).catch((err) => console.warn('[tool-usage] web_search log failed', err))
+				}).catch((err) => logger.warn('[tool-usage] web_search log failed', { err }))
 				return {
 					success: true,
 					tool: call.name,
@@ -999,7 +1000,7 @@ export async function executeTool(
 						costUsd: result.cost,
 					})
 				} catch (err) {
-					console.warn('[tools] recordGeneratedImage failed (non-fatal)', err)
+					logger.warn('[tools] recordGeneratedImage failed (non-fatal)', { err })
 				}
 				return {
 					success: true,
@@ -1014,7 +1015,7 @@ export async function executeTool(
 				const sourceControl = await import('$lib/source-control')
 				if (call.name === 'list_my_repos') {
 					const input = toolSchemas.list_my_repos.parse(call.arguments)
-					const repos = await sourceControl.listRepositories(userId)
+					const repos = await sourceControl.listImportedRepositories(userId)
 					const filter = input.search?.toLowerCase() ?? null
 					const filtered = filter
 						? repos.filter(
@@ -1218,7 +1219,7 @@ export async function executeTool(
 							recordedId = recorded.id
 						}
 					} catch (err) {
-						console.warn('[create_pull_request] recordPullRequest failed (non-fatal)', err)
+						logger.warn('[create_pull_request] recordPullRequest failed (non-fatal)', { err })
 					}
 					// Wave 5 #19 phase 4 — review-inbox handoff. Best-effort: a failed insert
 					// never blocks the agent's report-back to the user. DedupeKey ensures a single
@@ -1246,7 +1247,7 @@ export async function executeTool(
 								dedupeKey: `pull_request:${input.owner}/${input.repo}:${pr.number}`,
 							})
 						} catch (err) {
-							console.warn('[create_pull_request] review-inbox handoff failed (non-fatal)', err)
+							logger.warn('[create_pull_request] review-inbox handoff failed (non-fatal)', { err })
 						}
 					})()
 					return {
@@ -1794,7 +1795,7 @@ export async function executeTool(
 						const skills = await getCompanionSkillsForGroups([input.group])
 						companionSummaries = skills.map((s) => ({ name: s.name, description: s.description }))
 					} catch (err) {
-						console.warn('[enable_capability] companion skill lookup failed', err)
+						logger.warn('[enable_capability] companion skill lookup failed', { err })
 					}
 				}
 				return {
@@ -1890,7 +1891,7 @@ export async function executeTool(
 						// task badge / drill into the plan from the run trace.
 						await db.update(chatRuns).set({ taskId: parent.id }).where(eq(chatRuns.id, ctx.runId))
 					} catch (err) {
-						console.warn('[propose_plan] task persistence failed; orchestrator will proceed without task linkage', err)
+						logger.warn('[propose_plan] task persistence failed; orchestrator will proceed without task linkage', { err })
 						parentTaskId = null
 						childTaskIds.length = 0
 					}

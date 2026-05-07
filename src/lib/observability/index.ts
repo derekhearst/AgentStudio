@@ -2,17 +2,21 @@ export {
 	runTraces,
 	reviewItems,
 	operationalMetrics,
+	appLogs,
 	runTraceStatusEnum,
 	reviewItemTypeEnum,
 	reviewItemStatusEnum,
 	reviewItemSeverityEnum,
+	logLevelEnum,
 	type RunTraceRow,
 	type ReviewItemRow,
 	type OperationalMetricRow,
+	type AppLogRow,
 	type ReviewItemType,
 	type ReviewItemStatus,
 	type ReviewItemSeverity,
 	type RunTraceStatus,
+	type LogLevel,
 } from './observability.schema'
 export {
 	openReviewItem,
@@ -53,3 +57,15 @@ export {
 	type MetricSnapshotPoint,
 	type MetricSnapshotEntry,
 } from './metrics.server'
+export { logger, type Logger } from './logger'
+export {
+	insertAppLogBatch,
+	listAppLogs,
+	purgeOldLogs,
+	countLogsBySource,
+	extractSource,
+	type AppLogInsert,
+	type ListAppLogsFilters,
+} from './logs.server'
+export { listAppLogsQuery, countLogsBySourceQuery } from './logs.remote'
+export { registerLogsJobHandlers } from './logs-handler.server'

@@ -2,6 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit'
 import { checkAndRunAutomations } from '$lib/automations/engine'
 import { runWorkspaceGc } from '$lib/workspace/gc.server'
 import { backfillSkillEmbeddings } from '$lib/skills/skills.server'
+import { logger } from '$lib/observability/logger'
 
 function hasCronAccess(request: Request) {
 	const expected = process.env.CRON_SECRET?.trim()
@@ -28,7 +29,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		try {
 			workspace = await runWorkspaceGc({ sandboxRoot, now })
 		} catch (err) {
-			console.error('[cron] workspace GC failed', err)
+			logger.error('[cron] workspace GC failed', { err })
 		}
 	}
 
@@ -38,7 +39,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	try {
 		skillEmbeddings = await backfillSkillEmbeddings(50)
 	} catch (err) {
-		console.error('[cron] skill embedding backfill failed', err)
+		logger.error('[cron] skill embedding backfill failed', { err })
 	}
 
 	return json({ automations, workspace, skillEmbeddings })

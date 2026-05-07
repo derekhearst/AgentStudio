@@ -5,6 +5,7 @@ import { appendRunEvent } from '$lib/runs/events.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import { encodeSseFrame } from '../sse-codec'
 import type { RunPatch, Session } from '../types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #10 phase 5 — forwarded Session for sub-agents.
@@ -87,7 +88,7 @@ export function createForwardedSession(opts: ForwardedSessionOptions): Session &
 				try {
 					await appendRunEvent(opts.runId, eventName, payload)
 				} catch (err) {
-					console.error('[runtime/forwarded] failed to log run event', {
+					logger.error('[runtime/forwarded] failed to log run event', {
 						runId: opts.runId,
 						eventName,
 						error: err instanceof Error ? err.message : String(err),
@@ -156,7 +157,7 @@ export function createForwardedSession(opts: ForwardedSessionOptions): Session &
 							value: 1,
 						})
 					} catch (err) {
-						console.warn('[runtime/forwarded] run lifecycle metric failed (non-fatal)', err)
+						logger.warn('[runtime/forwarded] run lifecycle metric failed (non-fatal)', { err })
 					}
 				})()
 			}

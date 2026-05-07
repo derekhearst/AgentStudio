@@ -9,6 +9,7 @@ import {
 	listResearchForUser,
 	updateResearch,
 } from './research.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 4 #18 phase 3 — Research SvelteKit remote surface.
@@ -88,7 +89,7 @@ export const cancelResearchCommand = command(z.string().uuid(), async (researchI
 	await updateResearch(researchId, { status: 'canceled', finishedAt: new Date() })
 	if (research.jobId) {
 		await cancelJob(research.jobId, `Canceled by user ${user.id}`).catch((err) => {
-			console.warn('[research] failed to cancel underlying job', err)
+			logger.warn('[research] failed to cancel underlying job', { err })
 		})
 	}
 	return { canceled: true, jobCanceled: !!research.jobId }

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, type PendingApprovalEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
+import { logger } from '$lib/observability/logger'
 
 export const APPROVAL_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -54,7 +55,7 @@ export async function enqueuePendingApproval(
 				dedupeKey: `approval:${entry.token}`,
 			})
 		} catch (err) {
-			console.warn('[approvals] review item open failed (non-fatal)', err)
+			logger.warn('[approvals] review item open failed (non-fatal)', { err })
 		}
 	})()
 }

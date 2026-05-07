@@ -1,6 +1,7 @@
 export {
 	listSkillsQuery,
 	getSkillByIdQuery,
+	getCapabilityGroupsQuery,
 	createSkillCommand,
 	updateSkillCommand,
 	deleteSkillCommand,
@@ -8,4 +9,6 @@ export {
 	addSkillFileCommand,
 	updateSkillFileCommand,
 	deleteSkillFileCommand,
+	importSkillCommand,
+	exportSkillCommand,
 } from '$lib/skills/skills.remote'

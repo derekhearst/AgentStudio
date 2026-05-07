@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { recordQuestionAnswers } from '$lib/runs/questions.server'
+import { logger } from '$lib/observability/logger'
 
 const RESOLVABLE_STATES = ['running', 'waiting_user_input'] as const
 
@@ -22,7 +23,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 
 		const body = (await request.json()) as AskUserBody
 		if (!body.token || !body.answers || typeof body.answers !== 'object') {
-			console.warn('[chat/ask-user] Invalid request payload', {
+			logger.warn('[chat/ask-user] Invalid request payload', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				body,
@@ -37,7 +38,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		)
 
 		if (Object.keys(normalizedAnswers).length === 0) {
-			console.warn('[chat/ask-user] Empty normalized answers', {
+			logger.warn('[chat/ask-user] Empty normalized answers', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				token: body.token,
@@ -60,7 +61,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			.limit(1)
 
 		if (!run) {
-			console.warn('[chat/ask-user] ask_user token not found in any active run', {
+			logger.warn('[chat/ask-user] ask_user token not found in any active run', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				token: body.token,
@@ -71,7 +72,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 
 		const result = await recordQuestionAnswers(run.id, body.token, normalizedAnswers)
 		if (!result.resolved) {
-			console.warn('[chat/ask-user] ask_user already resolved or missing', {
+			logger.warn('[chat/ask-user] ask_user already resolved or missing', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				runId: run.id,
@@ -80,7 +81,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		}
 		return json({ resolved: result.resolved })
 	} catch (error) {
-		console.error('[chat/ask-user] Failed to resolve ask_user answers', {
+		logger.error('[chat/ask-user] Failed to resolve ask_user answers', {
 			conversationId: params.id,
 			userId: locals.user?.id ?? null,
 			error: error instanceof Error ? error.message : String(error),

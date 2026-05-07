@@ -13,6 +13,7 @@ import {
 	markSourcesCited,
 	updateResearch,
 } from './research.server'
+import { logger } from '$lib/observability/logger'
 import type { ResearchRow, ResearchSourceRow } from './research.schema'
 import {
 	buildSourcesPromptBlock,
@@ -329,7 +330,7 @@ async function resolveConfigForResearch(r: ResearchRow): Promise<ResolvedResearc
 				if (agent) resolved = resolveResearchConfig(agent.config)
 			}
 		} catch (err) {
-			console.warn('[research] config lookup failed, using defaults', err)
+			logger.warn('[research] config lookup failed, using defaults', { err })
 		}
 	}
 	// Composer-selected model takes precedence over both per-agent config and defaults.
@@ -355,7 +356,7 @@ async function runSearchAndFetchPass(
 	await mapWithConcurrency(queries, PARALLEL_FETCH_CONCURRENCY, async (subQuestion) => {
 		await checkCanceled()
 		const hits = await runSearch(researchId, subQuestion).catch((err) => {
-			console.warn('[research] search failed', { researchId, subQuestion, err })
+			logger.warn('[research] search failed', { researchId, subQuestion, err })
 			return [] as SearchHit[]
 		})
 		const picked = pickUrlsToFetch(hits, config.urlsPerQuestion)
@@ -365,7 +366,7 @@ async function runSearchAndFetchPass(
 		await Promise.all(
 			picked.map((hit) =>
 				runFetch(researchId, subQuestion, hit, config).catch((err) => {
-					console.warn('[research] fetch failed', { researchId, url: hit.url, err })
+					logger.warn('[research] fetch failed', { researchId, url: hit.url, err })
 				}),
 			),
 		)

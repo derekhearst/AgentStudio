@@ -6,16 +6,14 @@
 	import { onMount, tick } from 'svelte';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
-	import { createConversation, getConversations } from '$lib/chat';
-	import { getAgentChoices } from '$lib/agents';
+	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
 	let model = $state('anthropic/claude-sonnet-4');
-	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
-	let mode = $state<ChatMode>('chat');
+	let agentId = $state<string | null>(null);
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
 	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -28,7 +26,7 @@
 	let agentFilter = $state<'all' | 'orchestrator' | string>('all');
 
 	type Conversation = Awaited<ReturnType<typeof getConversations>>[number];
-	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
+	type AgentChoice = Awaited<ReturnType<typeof listAgentsForPicker>>[number];
 	type LiveRun = {
 		id: string;
 		conversationId: string;
@@ -74,7 +72,19 @@
 
 	async function loadRecent() {
 		recentChats = await getConversations();
-		agentChoices = await getAgentChoices();
+		agentChoices = await listAgentsForPicker();
+		// Pick the user's default agent (or the first built-in) once choices land.
+		if (agentId == null && agentChoices.length > 0) {
+			try {
+				const prefs = await getWorkbenchPreferences();
+				agentId =
+					(prefs.defaultAgentId && agentChoices.some((a) => a.id === prefs.defaultAgentId)
+						? prefs.defaultAgentId
+						: agentChoices.find((a) => a.builtinKey === 'chat')?.id ?? agentChoices[0]?.id) ?? null;
+			} catch {
+				agentId = agentChoices.find((a) => a.builtinKey === 'chat')?.id ?? agentChoices[0]?.id ?? null;
+			}
+		}
 	}
 
 	function runForConversation(conversation: Conversation): LiveRun | null {
@@ -236,7 +246,7 @@
 		try {
 			const trimmedPrompt = initialPrompt?.trim() ?? '';
 			const title = trimmedPrompt.slice(0, 80) || 'New conversation';
-			const created = await createConversation({ title, model, mode });
+			const created = await createConversation({ title, model, agentId: agentId ?? undefined });
 			if (trimmedPrompt) {
 				await goto(`/chat/${created.id}?prompt=${encodeURIComponent(trimmedPrompt)}`);
 			} else {
@@ -248,7 +258,8 @@
 	}
 
 	async function handleComposerSubmit(content: string) {
-		if (mode === 'research') {
+		const selected = agentChoices.find((a) => a.id === agentId);
+		if (selected?.builtinKey === 'research') {
 			await handleNewResearch(content);
 			return;
 		}
@@ -288,7 +299,8 @@
 				bind:value={prompt}
 				{busy}
 				{model}
-				{mode}
+				{agentId}
+				{agentChoices}
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
 				onSubmit={(content) => handleComposerSubmit(content)}
@@ -299,8 +311,8 @@
 				onReasoningEffortChange={(next) => {
 					reasoningEffort = next;
 				}}
-				onModeChange={(next) => {
-					mode = next;
+				onAgentChange={(next) => {
+					agentId = next;
 				}}
 			/>
 		</div>

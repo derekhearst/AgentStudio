@@ -1,9 +1,8 @@
 <script lang="ts">
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
-	import ModeSelector from '$lib/chat/ModeSelector.svelte'
+	import AgentSelector, { type AgentChoice } from '$lib/chat/AgentSelector.svelte'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
-	type ChatMode = 'chat' | 'research' | 'plan' | 'agent'
 
 	const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
 		{ value: 'none', label: 'Reasoning off' },
@@ -19,7 +18,8 @@
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
 		reasoningEffort = 'none',
-		mode = 'chat',
+		agentId = null,
+		agentChoices = [],
 		placeholder = 'Message AgentStudio...',
 		recording = false,
 		transcribing = false,
@@ -28,7 +28,7 @@
 		onResearchSubmit,
 		onModelChange,
 		onReasoningEffortChange,
-		onModeChange,
+		onAgentChange,
 		onCancelGeneration,
 		onAddFiles,
 		onMicClick,
@@ -38,7 +38,8 @@
 		busy?: boolean
 		model?: string
 		reasoningEffort?: ReasoningEffort
-		mode?: ChatMode
+		agentId?: string | null
+		agentChoices?: AgentChoice[]
 		placeholder?: string
 		recording?: boolean
 		transcribing?: boolean
@@ -50,7 +51,7 @@
 		onResearchSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined
-		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined
+		onAgentChange?: ((agentId: string) => Promise<void> | void) | undefined
 		onCancelGeneration?: (() => Promise<void> | void) | undefined
 		onAddFiles?: (() => Promise<void> | void) | undefined
 		onMicClick?: (() => Promise<void> | void) | undefined
@@ -118,10 +119,11 @@
 		</div>
 
 		<div class="flex items-center gap-1">
-			<ModeSelector
-				{mode}
+			<AgentSelector
+				{agentId}
+				{agentChoices}
 				{busy}
-				onModeChange={(next) => onModeChange?.(next)}
+				onAgentChange={(next) => onAgentChange?.(next)}
 			/>
 			<div>
 				<ModelSelector

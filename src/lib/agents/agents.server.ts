@@ -4,6 +4,7 @@ import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { automations } from '$lib/automations/automation.schema'
 import { computeNextRunAt } from '$lib/automations/engine'
+import { logger } from '$lib/observability/logger'
 
 export type AgentStatus = (typeof agents.$inferSelect)['status']
 
@@ -242,7 +243,7 @@ export async function setAgentStatus(agentId: string, status: AgentStatus) {
 					afterStatus: status,
 				})
 			} catch (err) {
-				console.warn('[agents] status-changed audit failed', err)
+				logger.warn('[agents] status-changed audit failed', { err })
 			}
 		})()
 	}

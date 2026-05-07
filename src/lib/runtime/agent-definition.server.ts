@@ -3,12 +3,13 @@ import { db } from '$lib/db.server'
 import type { agents } from '$lib/agents/agents.schema'
 import { skills } from '$lib/skills/skills.schema'
 import { getToolDefinitions } from '$lib/tools/tools.server'
-import { listSkillSummaries } from '$lib/skills/skills.server'
+import { listRelevantSkillSummaries, listSkillSummaries } from '$lib/skills/skills.server'
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
 import { expandFragments } from '$lib/agents/fragment-expand'
 import type { ToolDefinition } from './types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #10 phase 2 — formal AgentDefinition builder for non-chat callers.
@@ -45,6 +46,8 @@ export type BuildAgentDefinitionInput = {
 	toolPolicy: string
 	/** Override the per-call memory topK (defaults to settings.memoryConfig.topK ?? 5). */
 	memoryTopK?: number
+	/** Override the per-call skill topK for relevance-ranked summary injection (default 8). */
+	skillTopK?: number
 }
 
 export type AgentDefinition = {
@@ -114,7 +117,14 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 		{ name: 'tool_policy', priority: 90, content: input.toolPolicy },
 	]
 
-	const skillSummaries = await listSkillSummaries()
+	// Relevance-ranked top-K + always-include identity/hook skills, gated by RUNTIME_SKILL_FALLBACK_ALL
+	// for emergency rollback to legacy dump-everything behavior. The chat stream already does this;
+	// this block brings sub-agents, automations, and the task runner to parity so the system prompt
+	// stops growing linearly with installed skill count.
+	const fallbackAll = process.env.RUNTIME_SKILL_FALLBACK_ALL === '1'
+	const skillSummaries = fallbackAll
+		? await listSkillSummaries()
+		: await listRelevantSkillSummaries(input.intent ?? '', input.skillTopK ?? 8)
 	if (skillSummaries.length > 0) {
 		const text = skillSummaries
 			.map((s) => {
@@ -156,7 +166,7 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 				}
 			}
 		} catch (err) {
-			console.warn('[runtime/agent-definition] memory recall failed', err)
+			logger.warn('[runtime/agent-definition] memory recall failed', { err })
 		}
 	}
 
@@ -197,7 +207,7 @@ async function loadAgentIdentity(agent: AgentRecord): Promise<string> {
 				raw = skill.content
 			}
 		} catch (err) {
-			console.warn('[runtime] failed to load agent identity skill, using systemPrompt fallback', err)
+			logger.warn('[runtime] failed to load agent identity skill, using systemPrompt fallback', { err })
 		}
 	}
 	// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup
@@ -206,7 +216,7 @@ async function loadAgentIdentity(agent: AgentRecord): Promise<string> {
 	try {
 		return await expandFragments(raw, lookupFragmentByName)
 	} catch (err) {
-		console.warn('[runtime] fragment expansion failed, using raw content', err)
+		logger.warn('[runtime] fragment expansion failed, using raw content', { err })
 		return raw
 	}
 }

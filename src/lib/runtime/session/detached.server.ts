@@ -4,6 +4,7 @@ import { chatRuns, type StreamBlock } from '$lib/runs/runs.schema'
 import { appendRunEvent } from '$lib/runs/events.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import type { RunPatch, Session } from '../types'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #10 phase 6 — detached Session.
@@ -41,7 +42,7 @@ export function createDetachedSession(opts: DetachedSessionOptions): Session & {
 			try {
 				await appendRunEvent(opts.runId, eventName, payload)
 			} catch (err) {
-				console.error('[runtime/detached] failed to log run event', {
+				logger.error('[runtime/detached] failed to log run event', {
 					runId: opts.runId,
 					eventName,
 					error: err instanceof Error ? err.message : String(err),
@@ -104,7 +105,7 @@ export function createDetachedSession(opts: DetachedSessionOptions): Session & {
 							value: 1,
 						})
 					} catch (err) {
-						console.warn('[runtime/detached] run lifecycle metric failed (non-fatal)', err)
+						logger.warn('[runtime/detached] run lifecycle metric failed (non-fatal)', { err })
 					}
 				})()
 			}

@@ -5,6 +5,7 @@ import { chatRuns, runEvents } from '$lib/runs/runs.schema'
 import { ACTIVE_CHAT_RUN_STATES } from '$lib/runs/runs.server'
 import { encodeSseFrame } from '$lib/runtime/sse-codec'
 import { POLL_INTERVAL_MS } from '$lib/runtime/constants'
+import { logger } from '$lib/observability/logger'
 
 export const GET: RequestHandler = async ({ params, url, locals }) => {
 	if (!locals.user) {
@@ -63,7 +64,7 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 					lastSeq = ev.seq
 				}
 			} catch (err) {
-				console.error('[chat/stream/resume] replay failed', {
+				logger.error('[chat/stream/resume] replay failed', {
 					runId,
 					error: err instanceof Error ? err.message : String(err),
 				})

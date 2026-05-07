@@ -10,6 +10,7 @@ import { runEvaluatorPass } from '$lib/evaluations'
 import type { EvaluationVerdict, EvaluationFinding } from '$lib/evaluations/evaluations.schema'
 import { getTaskById, recordAttempt, setTaskStatus, updateAttempt } from './tasks.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 2 #11 phases 3 + 5 — execute one task once, end-to-end.
@@ -113,7 +114,7 @@ export async function executeTaskOnce(
 			})
 			provisionedWorktree = provisioned.worktree
 		} catch (err) {
-			console.warn('[task-runner] repo-backed workspace provisioning failed; falling back to agent workspace', {
+			logger.warn('[task-runner] repo-backed workspace provisioning failed; falling back to agent workspace', {
 				taskId,
 				repositoryId: task.repositoryId,
 				error: err instanceof Error ? err.message : String(err),
@@ -275,7 +276,7 @@ export async function executeTaskOnce(
 				generatorOutput: loopResult.finalText,
 				toolSummary,
 			}).catch((err) => {
-				console.warn('[tasks] evaluator pass failed', err)
+				logger.warn('[tasks] evaluator pass failed', { err })
 				return null
 			})
 			evaluationVerdict = evalRow?.verdict ?? null

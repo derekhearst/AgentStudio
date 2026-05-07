@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
+import { logger } from '$lib/observability/logger'
 
 export const QUESTION_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -57,7 +58,7 @@ export async function enqueuePendingQuestion(
 				dedupeKey: `question:${entry.token}`,
 			})
 		} catch (err) {
-			console.warn('[questions] review item open failed (non-fatal)', err)
+			logger.warn('[questions] review item open failed (non-fatal)', { err })
 		}
 	})()
 }

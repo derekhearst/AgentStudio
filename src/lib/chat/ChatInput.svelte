@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import ChatComposer from '$lib/chat/ChatComposer.svelte';
+	import type { AgentChoice } from '$lib/chat/AgentSelector.svelte';
 
 	type ChatAttachment = {
 		id: string;
@@ -11,7 +12,6 @@
 	};
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-	type ChatMode = 'chat' | 'research' | 'plan' | 'agent';
 
 	let {
 		value = $bindable(''),
@@ -19,12 +19,13 @@
 		busy = false,
 		model = 'anthropic/claude-sonnet-4',
 		reasoningEffort = 'none',
-		mode = 'chat',
+		agentId = null,
+		agentChoices = [],
 		onSubmit,
 		onResearchSubmit,
 		onModelChange,
 		onReasoningEffortChange,
-		onModeChange,
+		onAgentChange,
 		onCancelGeneration,
 		estimatedRemaining = 128000
 	} = $props<{
@@ -33,14 +34,15 @@
 		busy?: boolean;
 		model?: string;
 		reasoningEffort?: ReasoningEffort;
-		mode?: ChatMode;
+		agentId?: string | null;
+		agentChoices?: AgentChoice[];
 		onSubmit?: ((content: string, attachments: ChatAttachment[]) => Promise<void> | void) | undefined;
 		// Wave 4 #18 phase 4 — when present, the composer surfaces a Research button that
 		// routes the textarea content through this callback instead of onSubmit.
 		onResearchSubmit?: ((content: string) => Promise<void> | void) | undefined;
 		onModelChange?: ((model: string) => Promise<void> | void) | undefined;
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined;
-		onModeChange?: ((mode: ChatMode) => Promise<void> | void) | undefined;
+		onAgentChange?: ((agentId: string) => Promise<void> | void) | undefined;
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
 	}>();
@@ -279,7 +281,8 @@
 		busy={busy || uploadBusy}
 		{model}
 		{reasoningEffort}
-		{mode}
+		{agentId}
+		{agentChoices}
 		{recording}
 		{transcribing}
 		{speechSupported}
@@ -288,7 +291,7 @@
 		onResearchSubmit={onResearchSubmit ? (content) => onResearchSubmit(content) : undefined}
 		onModelChange={(id) => onModelChange?.(id)}
 		onReasoningEffortChange={(effort) => onReasoningEffortChange?.(effort)}
-		onModeChange={(next) => onModeChange?.(next)}
+		onAgentChange={(next) => onAgentChange?.(next)}
 		onCancelGeneration={() => onCancelGeneration?.()}
 		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}

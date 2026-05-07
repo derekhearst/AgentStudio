@@ -10,6 +10,7 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import { buildAgentDefinition, createDetachedSession, runChatLoop } from '$lib/runtime'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
+import { logger } from '$lib/observability/logger'
 
 function parseField(field: string, min: number, max: number) {
 	if (field === '*') {
@@ -93,12 +94,19 @@ async function getOrCreateAutomationConversation(automation: typeof automations.
 		if (existing) return existing
 	}
 
+	// Conversations require an agent (NOT NULL FK). Use the automation's bound agent if any,
+	// otherwise fall back to the user's default agent (and ultimately the built-in Chat agent).
+	const { resolveDefaultAgentId } = await import('$lib/chat/agent-switch.server')
+	const agentId = await resolveDefaultAgentId(automation.userId, automation.agentId)
+	if (!agentId) {
+		throw new Error('No default agent configured. Re-run database bootstrap to seed built-in agents.')
+	}
 	const [created] = await db
 		.insert(conversations)
 		.values({
 			title: automation.description,
 			userId: automation.userId,
-			agentId: automation.agentId ?? null,
+			agentId,
 			model: 'anthropic/claude-sonnet-4',
 		})
 		.returning()
@@ -188,7 +196,7 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 					value: 1,
 				})
 			} catch (err) {
-				console.warn('[automations] lifecycle metric failed (non-fatal)', err)
+				logger.warn('[automations] lifecycle metric failed (non-fatal)', { err })
 			}
 		})()
 	}
@@ -215,7 +223,7 @@ async function handleAutomationBudgetBlocked(
 			spendUsd: parseFloat(blockedBy.limitUsd),
 		})
 	} catch (err) {
-		console.warn('[automations] budget block alert insert failed', err)
+		logger.warn('[automations] budget block alert insert failed', { err })
 	}
 
 	void (async () => {
@@ -240,7 +248,7 @@ async function handleAutomationBudgetBlocked(
 				dedupeKey: `budget:${blockedBy.id}:${automation.userId}:${automation.id}`,
 			})
 		} catch (err) {
-			console.warn('[automations] policy_override_request open failed', err)
+			logger.warn('[automations] policy_override_request open failed', { err })
 		}
 	})()
 
@@ -265,7 +273,7 @@ async function handleAutomationBudgetBlocked(
 				value: 1,
 			})
 		} catch (err) {
-			console.warn('[automations] blocked lifecycle metric failed (non-fatal)', err)
+			logger.warn('[automations] blocked lifecycle metric failed (non-fatal)', { err })
 		}
 	})()
 
@@ -357,11 +365,11 @@ async function runCodeModeAutomation(
 	automation: typeof automations.$inferSelect,
 ): Promise<{ mode: 'code'; taskId: string; conversationId: null } | { mode: 'code'; taskId: null; conversationId: null }> {
 	if (!automation.agentId) {
-		console.warn('[automations] code mode automation has no agentId; skipping', { automationId: automation.id })
+		logger.warn('[automations] code mode automation has no agentId; skipping', { automationId: automation.id })
 		return { mode: 'code', taskId: null, conversationId: null }
 	}
 	if (!automation.repositoryId) {
-		console.warn('[automations] code mode automation has no repositoryId; skipping', { automationId: automation.id })
+		logger.warn('[automations] code mode automation has no repositoryId; skipping', { automationId: automation.id })
 		return { mode: 'code', taskId: null, conversationId: null }
 	}
 
@@ -419,7 +427,7 @@ async function runMaintenanceModeAutomation(
 
 	const fullSummary = (response.content ?? '').trim()
 	const route = await routeMaintenanceOutput(automation, fullSummary, model, now).catch((err) => {
-		console.warn('[automations] output routing failed (non-fatal)', err)
+		logger.warn('[automations] output routing failed (non-fatal)', { err })
 		return { target: 'none' as const }
 	})
 
@@ -502,7 +510,7 @@ async function routeMaintenanceOutput(
 	if (automation.outputTarget === 'artifact') {
 		const conversation = await getOrCreateAutomationConversation(automation)
 		if (!conversation.projectId) {
-			console.info('[automations] outputTarget=artifact but conversation has no project bound; skipping', {
+			logger.info('[automations] outputTarget=artifact but conversation has no project bound; skipping', {
 				automationId: automation.id,
 				conversationId: conversation.id,
 			})

@@ -10,6 +10,7 @@ import {
 } from '$lib/source-control/github-webhook'
 import { recordPullRequest, recordPullRequestCheck } from '$lib/source-control/source-control.server'
 import { openReviewItem } from '$lib/observability/review.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 5 #19 phase 5 — public GitHub webhook receiver.
@@ -32,7 +33,7 @@ import { openReviewItem } from '$lib/observability/review.server'
 export const POST: RequestHandler = async ({ request }) => {
 	const secret = process.env.GITHUB_WEBHOOK_SECRET
 	if (!secret) {
-		console.warn('[github-webhook] received delivery but GITHUB_WEBHOOK_SECRET is not configured — rejecting')
+		logger.warn('[github-webhook] received delivery but GITHUB_WEBHOOK_SECRET is not configured — rejecting')
 		return json({ error: 'webhook not configured' }, { status: 503 })
 	}
 
@@ -64,7 +65,7 @@ export const POST: RequestHandler = async ({ request }) => {
 			return json(result)
 		}
 	} catch (err) {
-		console.error('[github-webhook] handler failed', { eventName, error: err })
+		logger.error('[github-webhook] handler failed', { eventName, error: err })
 		// 200 with an error marker so GitHub doesn't disable the webhook on transient
 		// DB hiccups — the failure is logged for diagnostics.
 		return json({ ok: false, error: err instanceof Error ? err.message : String(err) })
@@ -126,7 +127,7 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 				source: 'github_webhook',
 			},
 			dedupeKey: `pull_request:${fields.owner}/${fields.repo}:${fields.prNumber}:${newStatus}`,
-		}).catch((err) => console.warn('[github-webhook] inbox handoff failed', err))
+		}).catch((err) => logger.warn('[github-webhook] inbox handoff failed', { err }))
 	}
 
 	return { ok: true, updated: updated > 0, status: newStatus ?? 'unchanged' }

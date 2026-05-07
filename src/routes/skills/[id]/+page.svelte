@@ -6,12 +6,14 @@
 	import { onMount } from 'svelte';
 	import {
 		getSkillByIdQuery,
+		getCapabilityGroupsQuery,
 		updateSkillCommand,
 		deleteSkillCommand,
 		addSkillFileCommand,
 		updateSkillFileCommand,
 		deleteSkillFileCommand,
-		toggleSkillEnabledCommand
+		toggleSkillEnabledCommand,
+		exportSkillCommand
 	} from '$lib/skills';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
@@ -19,6 +21,7 @@
 
 	type SkillDetail = NonNullable<Awaited<ReturnType<typeof getSkillByIdQuery>>>;
 	type SkillFile = SkillDetail['files'][number];
+	type CapabilityGroup = Awaited<ReturnType<typeof getCapabilityGroupsQuery>>[number];
 
 	let skill = $state<SkillDetail | null>(null);
 	let loading = $state(false);
@@ -29,21 +32,33 @@
 	let editingField = $state<'name' | 'description' | 'content' | 'tags' | 'companionTools' | null>(null);
 	let editValue = $state('');
 
-	/* ── Companion mapping editor (Wave 2 #9 phase 2) ──── */
-	const ALL_GROUPS = ['sandbox', 'skills', 'agents', 'media'] as const;
-	type GroupName = (typeof ALL_GROUPS)[number];
+	const CATEGORIES = ['tool', 'workflow', 'domain', 'policy', 'identity', 'hook'] as const;
+	type Category = (typeof CATEGORIES)[number];
+
+	async function changeCategory(next: string) {
+		if (!skill || skill.isSystem) return;
+		busy = true;
+		try {
+			const value = next === '' ? null : (next as Category);
+			await updateSkillCommand({ id: skill.id, category: value });
+			await refresh();
+		} finally {
+			busy = false;
+		}
+	}
+
+	/* ── Companion mapping editor — chips dynamic from capabilityGroups registry ── */
+	let allGroups = $state<CapabilityGroup[]>([]);
 	let editingCompanionGroups = $state(false);
-	let draftCompanionGroups = $state<GroupName[]>([]);
+	let draftCompanionGroups = $state<string[]>([]);
 
 	function startEditCompanionGroups() {
 		if (!skill || skill.isSystem) return;
-		draftCompanionGroups = (Array.isArray(skill.companionGroups) ? skill.companionGroups : []).filter(
-			(g): g is GroupName => (ALL_GROUPS as readonly string[]).includes(g),
-		);
+		draftCompanionGroups = Array.isArray(skill.companionGroups) ? [...skill.companionGroups] : [];
 		editingCompanionGroups = true;
 	}
 
-	function toggleCompanionGroup(g: GroupName) {
+	function toggleCompanionGroup(g: string) {
 		if (draftCompanionGroups.includes(g)) {
 			draftCompanionGroups = draftCompanionGroups.filter((x) => x !== g);
 		} else {
@@ -82,9 +97,60 @@
 	let addFileDialogEl = $state<HTMLDialogElement | undefined>(undefined);
 	const isSystemSkill = $derived(Boolean(skill?.isSystem));
 
+	/* ── SKILL.md export modal ───────────── */
+	let showExport = $state(false);
+	let exportSkillMd = $state('');
+	let exportResources = $state<Array<{ name: string; description?: string; content: string }>>([]);
+	let exportDialogEl = $state<HTMLDialogElement | undefined>(undefined);
+	let exportCopied = $state(false);
+
+	async function openExportModal() {
+		if (!skill) return;
+		busy = true;
+		try {
+			const out = await exportSkillCommand({ id: skill.id });
+			exportSkillMd = out.skillMd;
+			exportResources = out.resources;
+			showExport = true;
+			exportCopied = false;
+			setTimeout(() => exportDialogEl?.showModal(), 0);
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function copyExportText() {
+		const text = exportResources.length === 0
+			? exportSkillMd
+			: [
+				exportSkillMd,
+				'',
+				'---',
+				'',
+				...exportResources.map((r) => `## resources/${r.name}\n\n${r.content}`),
+			].join('\n');
+		try {
+			await navigator.clipboard.writeText(text);
+			exportCopied = true;
+			setTimeout(() => (exportCopied = false), 2000);
+		} catch {
+			// Clipboard API can fail in non-secure contexts; user can still select + copy manually.
+		}
+	}
+
+	function closeExportModal() {
+		showExport = false;
+		exportDialogEl?.close();
+	}
+
 	onMount(() => {
 		void refresh();
+		void loadGroups();
 	});
+
+	async function loadGroups() {
+		allGroups = await getCapabilityGroupsQuery();
+	}
 
 	async function refresh() {
 		loading = true;
@@ -269,6 +335,10 @@
 						{/if}
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
+						<button class="btn btn-ghost btn-xs gap-1" onclick={openExportModal} title="Export as SKILL.md package" disabled={busy}>
+							<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17V3m0 14-4-4m4 4 4-4M5 21h14"/></svg>
+							Export
+						</button>
 						{#if !isSystemSkill}
 							<input
 								type="checkbox"
@@ -287,29 +357,49 @@
 				</div>
 			{/snippet}
 
-			<!-- Tags -->
-			<div class="mb-4">
-				<div class="mb-1 text-xs font-semibold uppercase tracking-wider opacity-40">Tags</div>
-				{#if editingField === 'tags'}
-					<div class="flex items-center gap-2">
-						<input type="text" class="input input-bordered input-sm flex-1" placeholder="comma-separated" bind:value={editValue} />
-						<button class="btn btn-primary btn-xs" onclick={saveEdit} disabled={busy}>Save</button>
-						<button class="btn btn-ghost btn-xs" onclick={cancelEdit}>Cancel</button>
-					</div>
-				{:else}
-					<button class="flex flex-wrap gap-1 text-left hover:opacity-80" onclick={() => startEdit('tags')}>
-						{#if s.tags.length > 0}
-							{#each s.tags as tag}
-								<span class="badge badge-outline badge-sm">{tag}</span>
+			<!-- Tags + Category -->
+			<div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+				<div>
+					<div class="mb-1 text-xs font-semibold uppercase tracking-wider opacity-40">Tags</div>
+					{#if editingField === 'tags'}
+						<div class="flex items-center gap-2">
+							<input type="text" class="input input-bordered input-sm flex-1" placeholder="comma-separated" bind:value={editValue} />
+							<button class="btn btn-primary btn-xs" onclick={saveEdit} disabled={busy}>Save</button>
+							<button class="btn btn-ghost btn-xs" onclick={cancelEdit}>Cancel</button>
+						</div>
+					{:else}
+						<button class="flex flex-wrap gap-1 text-left hover:opacity-80" onclick={() => startEdit('tags')}>
+							{#if s.tags.length > 0}
+								{#each s.tags as tag}
+									<span class="badge badge-outline badge-sm">{tag}</span>
+								{/each}
+							{:else}
+								<span class="text-xs opacity-40">No tags — click to add</span>
+							{/if}
+						</button>
+					{/if}
+				</div>
+				<div>
+					<div class="mb-1 text-xs font-semibold uppercase tracking-wider opacity-40">Category</div>
+					{#if isSystemSkill}
+						<span class="badge badge-neutral badge-sm">{s.category ?? '—'}</span>
+					{:else}
+						<select
+							class="select select-bordered select-sm"
+							value={s.category ?? ''}
+							onchange={(e) => changeCategory((e.currentTarget as HTMLSelectElement).value)}
+							disabled={busy}
+						>
+							<option value="">— uncategorized —</option>
+							{#each CATEGORIES as c (c)}
+								<option value={c}>{c}</option>
 							{/each}
-						{:else}
-							<span class="text-xs opacity-40">No tags — click to add</span>
-						{/if}
-					</button>
-				{/if}
+						</select>
+					{/if}
+				</div>
 			</div>
 
-			<!-- Companion mapping (Wave 2 #9 phase 2) -->
+			<!-- Companion mapping — auto-load this skill's summary when its group enables -->
 			<div class="mb-4 space-y-3">
 				<div>
 					<div class="mb-1 flex items-center justify-between">
@@ -319,15 +409,15 @@
 						{/if}
 					</div>
 					<p class="mb-2 text-[11px] leading-snug opacity-55">
-						When a chat enables one of these groups (auto-suggest or <code class="font-mono">enable_capability</code>), this skill's summary is auto-loaded into context.
+						When the agent enables one of these groups (auto-suggest or <code class="font-mono">enable_capability</code>), this skill's summary is auto-injected into the system prompt so the model knows when and how to use the new tools.
 					</p>
 					{#if editingCompanionGroups}
 						<div class="flex flex-wrap gap-2">
-							{#each ALL_GROUPS as group (group)}
-								{@const checked = draftCompanionGroups.includes(group)}
-								<label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-colors {checked ? 'border-info/55 bg-info/10' : 'border-base-300/60 bg-base-200/30 hover:bg-base-200/55'}">
-									<input type="checkbox" class="checkbox checkbox-xs" {checked} onchange={() => toggleCompanionGroup(group)} />
-									<span class="font-mono">{group}</span>
+							{#each allGroups as group (group.name)}
+								{@const checked = draftCompanionGroups.includes(group.name)}
+								<label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-colors {checked ? 'border-info/55 bg-info/10' : 'border-base-300/60 bg-base-200/30 hover:bg-base-200/55'}" title={group.description}>
+									<input type="checkbox" class="checkbox checkbox-xs" {checked} onchange={() => toggleCompanionGroup(group.name)} />
+									<span class="font-mono">{group.name}</span>
 								</label>
 							{/each}
 						</div>
@@ -380,14 +470,17 @@
 				<span>Created: {new Date(s.createdAt).toLocaleDateString()}</span>
 			</div>
 
-			<!-- Main content -->
+			<!-- Primary instructions (SKILL.md body) -->
 			<div>
 				<div class="mb-1 flex items-center justify-between">
-					<span class="text-xs font-semibold uppercase tracking-wider opacity-40">Content</span>
+					<span class="text-xs font-semibold uppercase tracking-wider opacity-40">Primary instructions <code class="ml-1 normal-case opacity-70">SKILL.md</code></span>
 					{#if editingField !== 'content' && !isSystemSkill}
 						<button class="btn btn-ghost btn-xs" onclick={() => startEdit('content')}>Edit</button>
 					{/if}
 				</div>
+				<p class="mb-2 text-[11px] leading-snug opacity-55">
+					Loaded in full when the agent calls <code class="font-mono">read_skill</code>. Keep this body focused — under ~8&nbsp;KB. For long expansions, examples, or sub-topics, attach resource files below.
+				</p>
 				{#if editingField === 'content'}
 					<textarea class="textarea textarea-bordered min-h-64 w-full text-sm font-mono" bind:value={editValue}></textarea>
 					<div class="mt-2 flex gap-2">
@@ -400,19 +493,24 @@
 			</div>
 		</ContentPanel>
 
-		<!-- Files section -->
+		<!-- Resource files (loaded on demand via read_skill_file) -->
 		<ContentPanel>
 			{#snippet header()}
-				<div class="flex items-center justify-between">
-					<h2 class="text-lg font-semibold">Files ({s.files.length})</h2>
+				<div class="flex items-center justify-between gap-3">
+					<div class="min-w-0">
+						<h2 class="text-lg font-semibold">Resource files ({s.files.length})</h2>
+						<p class="mt-0.5 text-[11px] leading-snug opacity-55">
+							Loaded on demand via <code class="font-mono">read_skill_file({s.name}, &lt;file&gt;)</code>. Use for examples, sub-topics, or templates the model only needs sometimes.
+						</p>
+					</div>
 					{#if !isSystemSkill}
-						<button class="btn btn-primary btn-xs" onclick={openAddFileModal}>+ Add File</button>
+						<button class="btn btn-primary btn-xs shrink-0" onclick={openAddFileModal}>+ Add File</button>
 					{/if}
 				</div>
 			{/snippet}
 
 			{#if s.files.length === 0}
-				<p class="py-6 text-center text-sm opacity-50">No nested files. Add one for additional context.</p>
+				<p class="py-6 text-center text-sm opacity-50">No resource files. Attach examples or sub-topics that should only load when the model asks for them.</p>
 			{:else}
 				<div class="space-y-2">
 					{#each s.files as file (file.id)}
@@ -489,6 +587,46 @@
 					</button>
 				</div>
 			</form>
+		</div>
+		<form method="dialog" class="modal-backdrop"><button>close</button></form>
+	</dialog>
+{/if}
+
+<!-- SKILL.md export dialog -->
+{#if showExport}
+	<dialog bind:this={exportDialogEl} class="modal" onclose={() => (showExport = false)}>
+		<div class="modal-box max-w-3xl">
+			<div class="mb-3 flex items-center justify-between gap-3">
+				<div>
+					<h3 class="text-lg font-bold">Export as SKILL.md package</h3>
+					<p class="mt-0.5 text-xs opacity-60">Round-trip-clean — paste into the Import dialog on /skills to recreate this skill.</p>
+				</div>
+				<button class="btn btn-ghost btn-xs" onclick={copyExportText}>
+					{exportCopied ? 'Copied!' : 'Copy all'}
+				</button>
+			</div>
+			<div class="space-y-3">
+				<div>
+					<div class="mb-1 text-xs font-semibold uppercase tracking-wider opacity-40">SKILL.md</div>
+					<pre class="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-base-200 p-3 font-mono text-xs">{exportSkillMd}</pre>
+				</div>
+				{#if exportResources.length > 0}
+					<div>
+						<div class="mb-1 text-xs font-semibold uppercase tracking-wider opacity-40">Resource files ({exportResources.length})</div>
+						<div class="space-y-2">
+							{#each exportResources as r (r.name)}
+								<details class="rounded-lg bg-base-200 p-2">
+									<summary class="cursor-pointer font-mono text-xs">resources/{r.name}</summary>
+									<pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-base-100 p-2 text-xs">{r.content}</pre>
+								</details>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+			<div class="modal-action">
+				<button type="button" class="btn btn-ghost btn-sm" onclick={closeExportModal}>Close</button>
+			</div>
 		</div>
 		<form method="dialog" class="modal-backdrop"><button>close</button></form>
 	</dialog>

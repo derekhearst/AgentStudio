@@ -1,6 +1,6 @@
 import { boolean, jsonb, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
-import { chatModeEnum } from '$lib/sessions/sessions.schema'
+import { agents } from '$lib/agents/agents.schema'
 
 export type WorkbenchPanelLayout = {
 	openTab?: string
@@ -14,7 +14,10 @@ export const chatWorkbenchPreferences = pgTable('chat_workbench_preferences', {
 		.notNull()
 		.references(() => users.id, { onDelete: 'cascade' })
 		.unique(),
-	defaultMode: chatModeEnum('default_mode').notNull().default('chat'),
+	// Default agent for new conversations. Nullable so a deleted custom-agent default
+	// gracefully falls back to the built-in Chat agent (resolveDefaultAgentId in
+	// agent-switch.server.ts).
+	defaultAgentId: uuid('default_agent_id').references(() => agents.id, { onDelete: 'set null' }),
 	showRightPanel: boolean('show_right_panel').notNull().default(true),
 	panelLayout: jsonb('panel_layout').$type<WorkbenchPanelLayout>(),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

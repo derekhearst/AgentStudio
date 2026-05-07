@@ -82,7 +82,13 @@ export const getAgent = query(agentIdSchema, async (agentId) => {
 
 export const getAgentChoices = query(async () => {
 	return db
-		.select({ id: agents.id, name: agents.name, status: agents.status })
+		.select({
+			id: agents.id,
+			name: agents.name,
+			status: agents.status,
+			builtinKey: agents.builtinKey,
+			role: agents.role,
+		})
 		.from(agents)
 		.orderBy(asc(agents.createdAt))
 })

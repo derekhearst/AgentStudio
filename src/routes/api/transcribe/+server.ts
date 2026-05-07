@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit'
 import type { RequestHandler } from './$types'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
+import { logger } from '$lib/observability/logger'
 
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) {
@@ -61,7 +62,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	if (!response.ok) {
 		const text = await response.text()
-		console.error('Transcription API error:', response.status, text)
+		logger.error('[api/transcribe] Transcription API error', { status: response.status, body: text })
 		throw error(502, 'Transcription failed')
 	}
 

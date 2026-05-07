@@ -154,10 +154,48 @@ export const operationalMetrics = pgTable(
 	}),
 )
 
+export const logLevelEnum = pgEnum('log_level', ['debug', 'info', 'warn', 'error'])
+
+export const appLogs = pgTable(
+	'app_logs',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		// Time the log line was emitted at the call site (not when persisted). The logger sets
+		// this when the entry hits its in-memory buffer so batched flushes preserve ordering
+		// even if writes lag.
+		ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull(),
+		level: logLevelEnum('level').notNull(),
+		// Message string — keeps the leading `[domain]` prefix the call sites already use so
+		// the table reads like the existing console output. Indexed via trigram-style filter on
+		// the read path; for now a plain BTREE on (level, ts) covers most queries.
+		message: text('message').notNull(),
+		// Optional structured context object — anything the call site passes as the second arg
+		// to `logger.warn(message, context)`. Errors are normalized to `{ message, name, stack }`
+		// before insert so a thrown Error doesn't serialize to `{}`.
+		context: jsonb('context').$type<Record<string, unknown> | null>(),
+		// Optional bracketed prefix lifted off the message (e.g. "automations" from
+		// "[automations] budget block alert insert failed"). Indexed for fast per-domain filters.
+		source: text('source'),
+		// Optional userId, set when the log site has a request user in scope. Cascades to NULL
+		// rather than delete so historical logs survive a user soft-delete.
+		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+	},
+	(t) => ({
+		// Default browse view: most recent first.
+		tsIdx: index('app_logs_ts_idx').on(t.ts),
+		// Per-level filter (warn/error views) ordered by recency.
+		levelTsIdx: index('app_logs_level_ts_idx').on(t.level, t.ts),
+		// Per-source filter for narrowing to a domain (e.g. "automations").
+		sourceTsIdx: index('app_logs_source_ts_idx').on(t.source, t.ts),
+	}),
+)
+
 export type RunTraceRow = typeof runTraces.$inferSelect
 export type ReviewItemRow = typeof reviewItems.$inferSelect
 export type OperationalMetricRow = typeof operationalMetrics.$inferSelect
+export type AppLogRow = typeof appLogs.$inferSelect
 export type ReviewItemType = (typeof reviewItemTypeEnum.enumValues)[number]
 export type ReviewItemStatus = (typeof reviewItemStatusEnum.enumValues)[number]
 export type ReviewItemSeverity = (typeof reviewItemSeverityEnum.enumValues)[number]
 export type RunTraceStatus = (typeof runTraceStatusEnum.enumValues)[number]
+export type LogLevel = (typeof logLevelEnum.enumValues)[number]

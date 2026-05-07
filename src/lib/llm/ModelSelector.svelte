@@ -29,24 +29,30 @@
 	$effect(() => {
 		getAvailableModels().then((m) => (models = m))
 	})
+
+	// Move the modal element out of the composer's stacking context (the composer wrapper has
+	// `view-transition-name`, which creates a stacking context that traps `position: fixed`
+	// children below later-painted siblings like the chat-list aside).
+	function portal(node: HTMLElement) {
+		document.body.appendChild(node)
+		return {
+			destroy() {
+				node.remove()
+			},
+		}
+	}
 	let search = $state('')
 	let open = $state(false)
-	let ready = $state(false)
 	let settingsOpen = $state(false)
 	let inputEl: HTMLInputElement | undefined = $state()
 	let settingsRef: HTMLDivElement | undefined = $state()
 
 	function openModal() {
 		open = true
-		ready = false
-		requestAnimationFrame(() => {
-			ready = true
-		})
 	}
 
 	function closeModal() {
 		open = false
-		ready = false
 		search = ''
 	}
 
@@ -322,7 +328,7 @@
 	</button>
 
 	{#if open}
-		<div class="modal modal-open z-[1000]">
+		<div use:portal class="modal modal-open z-[1000]">
 			<button
 				type="button"
 				class="modal-backdrop bg-neutral/60 absolute inset-0 backdrop-blur-sm"
@@ -331,7 +337,7 @@
 			></button>
 
 			<div
-				class="bg-base-100 text-base-content border-base-300 relative mx-auto flex max-h-[85dvh] w-[95vw] flex-col overflow-hidden rounded-2xl border p-0 shadow-2xl sm:max-h-[70vh] sm:w-full sm:max-w-2xl"
+				class="bg-base-100 text-base-content border-base-300 relative mx-auto flex max-h-[85dvh] w-[95vw] flex-col overflow-hidden rounded-2xl border p-0 shadow-2xl tablet:max-h-[80vh] tablet:w-full tablet:max-w-5xl desktop:max-w-6xl"
 			>
 				<!-- Top bar: search + settings + close -->
 				<div class="border-base-300 bg-base-100 flex items-center gap-2 border-b px-3 py-2">
@@ -432,23 +438,23 @@
 
 				<!-- Model list -->
 				<div class="bg-base-100 min-h-0 flex-1 overflow-y-auto p-2">
-					{#if filtered.length === 0 && ready}
+					{#if filtered.length === 0}
 						<div class="border-base-300 text-base-content/55 rounded-xl border border-dashed p-4 text-center text-sm">
 							No models found for that search.
 						</div>
-					{:else if grouped && ready}
+					{:else if grouped}
 						{#each grouped as group (group.creator)}
 							<div class="mb-3">
 								<h3 class="text-base-content/50 mb-1 px-1 text-xs font-semibold uppercase tracking-wide">{group.creator}</h3>
-								<div class="flex flex-col gap-1 {gridSizeClass}">
+								<div class="grid grid-cols-1 gap-1.5 tablet:grid-cols-2 desktop:grid-cols-3 {gridSizeClass}">
 									{#each group.models as m (m.id)}
 										{@render modelCard(m)}
 									{/each}
 								</div>
 							</div>
 						{/each}
-					{:else if ready}
-						<div class="flex flex-col gap-1 {gridSizeClass}">
+					{:else}
+						<div class="grid grid-cols-1 gap-1.5 tablet:grid-cols-2 desktop:grid-cols-3 {gridSizeClass}">
 							{#each sorted as m (m.id)}
 								{@render modelCard(m)}
 							{/each}

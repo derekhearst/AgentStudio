@@ -10,6 +10,7 @@ import {
 	type ClaimJobOptions,
 } from './jobs.server'
 import type { JobRow } from './jobs.schema'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 4 #17 phase 1 — minimal in-process worker loop.
@@ -99,7 +100,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 			types: opts.types ?? [...handlers.keys()],
 		}
 		const job = await claimNextJob(claimOpts).catch((err) => {
-			console.warn('[jobs/worker] claimNextJob failed', err)
+			logger.warn('[jobs/worker] claimNextJob failed', { err })
 			return null
 		})
 		if (!job) return false
@@ -114,7 +115,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 		}
 
 		await beginJob(job.id).catch((err) => {
-			console.warn('[jobs/worker] beginJob failed — proceeding anyway', err)
+			logger.warn('[jobs/worker] beginJob failed — proceeding anyway', { err })
 		})
 
 		// Set up a heartbeat tick so the lease doesn't expire during long handlers.
@@ -157,7 +158,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 					await delay(pollIntervalMs)
 				}
 			} catch (err) {
-				console.warn('[jobs/worker] loop iteration crashed', err)
+				logger.warn('[jobs/worker] loop iteration crashed', { err })
 				await delay(pollIntervalMs)
 			}
 		}

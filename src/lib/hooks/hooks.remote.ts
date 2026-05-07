@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { hookInvocations } from './hooks.schema'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Wave 3 #13 phase 5 — admin-only `hook_invocations` reader for `/settings/hooks`.
@@ -79,7 +80,7 @@ export const listHookInvocationsQuery = query(listSchema, async (input) => {
 		return { invocations, summary, adminOnly: false as const }
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
-		console.error('[hooks/listHookInvocationsQuery] DB error:', message)
+		logger.error('[hooks/listHookInvocationsQuery] DB error', { message })
 		return {
 			invocations: [],
 			summary: [],

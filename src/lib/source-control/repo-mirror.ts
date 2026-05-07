@@ -12,8 +12,18 @@ import { join } from 'node:path'
 // First char rejects leading dot so a malicious repo name like `.git` can't collide with
 // the real `.git` metadata dir; subsequent chars allow dots so `repo.name` round-trips.
 const SAFE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/
-const CREDENTIAL_HELPER_ARG =
-	'credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_TOKEN"; }; f'
+// Default username matches GitHub OAuth's `x-access-token` convention. Azure DevOps and
+// generic-PAT callers override via `credentialUsername`. The literal `$GIT_TOKEN` is
+// expanded by the bash function shipped with git-credential-helper at runtime.
+const DEFAULT_CREDENTIAL_USERNAME = 'x-access-token'
+const SAFE_USERNAME = /^[A-Za-z0-9._-]{0,64}$/
+
+function buildCredentialHelperArg(credentialUsername: string): string {
+	if (!SAFE_USERNAME.test(credentialUsername)) {
+		throw new Error(`Invalid credential username: ${credentialUsername}`)
+	}
+	return `credential.helper=!f() { echo "username=${credentialUsername}"; echo "password=$GIT_TOKEN"; }; f`
+}
 
 export function sanitizeRepoSegment(segment: string, kind: string): string {
 	if (!SAFE_SEGMENT.test(segment)) {
@@ -22,10 +32,14 @@ export function sanitizeRepoSegment(segment: string, kind: string): string {
 	return segment
 }
 
-export function buildCloneArgs(input: { remoteUrl: string; targetPath: string }): string[] {
+export function buildCloneArgs(input: {
+	remoteUrl: string
+	targetPath: string
+	credentialUsername?: string
+}): string[] {
 	return [
 		'-c',
-		CREDENTIAL_HELPER_ARG,
+		buildCredentialHelperArg(input.credentialUsername ?? DEFAULT_CREDENTIAL_USERNAME),
 		'clone',
 		'--no-tags',
 		input.remoteUrl,
@@ -33,10 +47,14 @@ export function buildCloneArgs(input: { remoteUrl: string; targetPath: string })
 	]
 }
 
-export function buildFetchArgs(input: { repoPath: string; remoteUrl: string }): string[] {
+export function buildFetchArgs(input: {
+	repoPath: string
+	remoteUrl: string
+	credentialUsername?: string
+}): string[] {
 	return [
 		'-c',
-		CREDENTIAL_HELPER_ARG,
+		buildCredentialHelperArg(input.credentialUsername ?? DEFAULT_CREDENTIAL_USERNAME),
 		'-C',
 		input.repoPath,
 		'fetch',
@@ -55,4 +73,4 @@ export function buildMirrorPath(mirrorRoot: string, owner: string, repo: string)
 	return join(mirrorRoot, safeOwner, safeRepo)
 }
 
-export { CREDENTIAL_HELPER_ARG }
+export { buildCredentialHelperArg, DEFAULT_CREDENTIAL_USERNAME }

@@ -7,11 +7,14 @@
 	--breakpoint-tablet: 48rem;
 	--breakpoint-desktop: 80rem;
 
-	/* Legacy aliases mapped to canonical tiers */
-	--breakpoint-sm: var(--breakpoint-tablet);
-	--breakpoint-md: var(--breakpoint-tablet);
-	--breakpoint-lg: var(--breakpoint-desktop);
-	--breakpoint-xl: var(--breakpoint-desktop);
+	/* Legacy aliases mapped to canonical tiers. Inlined as literals because Tailwind v4
+	 * emits these into `@media (width >= var(--breakpoint-X))` rules, and CSS media queries
+	 * do not resolve var() — using var() here makes every `sm:`/`md:`/`lg:`/`xl:` utility
+	 * silently no-op. Keep these in sync with --breakpoint-tablet / --breakpoint-desktop. */
+	--breakpoint-sm: 48rem;
+	--breakpoint-md: 48rem;
+	--breakpoint-lg: 80rem;
+	--breakpoint-xl: 80rem;
 }
 
 /* ─────────────────────────────────────────────────────────────────

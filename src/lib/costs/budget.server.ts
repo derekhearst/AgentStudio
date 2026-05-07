@@ -1,6 +1,7 @@
 import { and, eq, gte, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { budgetAlerts, budgetLimits, llmUsage, toolUsage } from '$lib/costs/usage.schema'
+import { logger } from '$lib/observability/logger'
 
 export type BudgetPeriod = 'day' | 'week' | 'month' | 'run'
 export type BudgetScope = 'global' | 'project' | 'agent' | 'run'
@@ -125,7 +126,7 @@ export async function checkBudgetLimits(ctx: BudgetCheckContext, now = new Date(
 
 		return result
 	} catch (err) {
-		console.warn('[budget] checkBudgetLimits failed; allowing request', err)
+		logger.warn('[budget] checkBudgetLimits failed; allowing request', { err })
 		return { allowed: true, blockedBy: null, warnings: [] }
 	}
 }

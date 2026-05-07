@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { recordApprovalDecision } from '$lib/runs/approvals.server'
+import { logger } from '$lib/observability/logger'
 
 const RESOLVABLE_STATES = ['running', 'waiting_tool_approval'] as const
 
@@ -17,7 +18,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 
 		const body = (await request.json()) as { token?: string; approved?: boolean }
 		if (!body.token || typeof body.approved !== 'boolean') {
-			console.warn('[chat/tool-approve] Invalid request payload', {
+			logger.warn('[chat/tool-approve] Invalid request payload', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				body,
@@ -40,7 +41,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			.limit(1)
 
 		if (!run) {
-			console.warn('[chat/tool-approve] Approval token not found in any active run', {
+			logger.warn('[chat/tool-approve] Approval token not found in any active run', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				token: body.token,
@@ -51,7 +52,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 
 		const result = await recordApprovalDecision(run.id, body.token, body.approved)
 		if (!result.resolved) {
-			console.warn('[chat/tool-approve] Approval already resolved or missing', {
+			logger.warn('[chat/tool-approve] Approval already resolved or missing', {
 				conversationId: params.id,
 				userId: locals.user.id,
 				runId: run.id,
@@ -61,7 +62,7 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		}
 		return json({ resolved: result.resolved })
 	} catch (error) {
-		console.error('[chat/tool-approve] Failed to resolve tool approval', {
+		logger.error('[chat/tool-approve] Failed to resolve tool approval', {
 			conversationId: params.id,
 			userId: locals.user?.id ?? null,
 			error: error instanceof Error ? error.message : String(error),
