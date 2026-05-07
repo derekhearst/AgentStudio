@@ -177,10 +177,10 @@ test.describe('projects/session-binding — conversations.project_id round-trip'
 })
 
 test.describe('projects/session-binding — set_project_context tool registration', () => {
-	test('set_project_context is in the projects capability group', async () => {
+	test('set_project_context is registered in the tool schema registry', async () => {
 		try {
-			const { capabilityGroups } = await import('../src/lib/tools/tools')
-			expect(capabilityGroups.projects.tools).toContain('set_project_context')
+			const { allToolNames } = await import('../src/lib/tools/tool-schemas')
+			expect(allToolNames).toContain('set_project_context')
 		} catch (err) {
 			expect(err).toBeTruthy()
 		}

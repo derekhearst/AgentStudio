@@ -1,5 +1,14 @@
 import { z } from 'zod'
-import { toolSchemas, toolDescriptions, allToolNames, normalizeToolName, type ToolName } from './tool-schemas'
+import {
+	toolSchemas,
+	toolDescriptions,
+	toolExamples,
+	toolDisclosure,
+	searchToolsRegistry,
+	allToolNames,
+	normalizeToolName,
+	type ToolName,
+} from './tool-schemas'
 import {
 	toolUserContext,
 	getWorkspace,
@@ -497,19 +506,49 @@ function stringifyPlanForSpec(plan: ProposePlanInput): string {
  * When `onlyTools` is provided, only those tools are included (capability filtering).
  * When omitted, all tools are returned (backwards compatible).
  */
-export function getToolDefinitions(onlyTools?: ToolName[]) {
+/**
+ * Build OpenAI-style tool definitions. When `onlyTools` is passed, the result is filtered to
+ * exactly that set (used for agents with a fixed `allowedTools` policy). Otherwise we apply the
+ * Tool Search Tool tier filter:
+ *
+ *   - `disclosure: 'always'` tools are always included.
+ *   - `disclosure: 'searchable'` tools are included only if their name is in `loadedSearchable`,
+ *     which the runtime maintains per-run (search_tools side-effect → next-round refresh).
+ *
+ * Pass `tierFilter: false` to ignore tiers entirely (returns the whole registry — currently used
+ * by the MCP endpoint, which exposes the full surface to external clients).
+ */
+export function getToolDefinitions(
+	onlyTools?: ToolName[],
+	options?: { tierFilter?: boolean; loadedSearchable?: ReadonlySet<string> },
+) {
+	const tierFilter = options?.tierFilter !== false
+	const loadedSearchable = options?.loadedSearchable
+
 	const entries = onlyTools
 		? Object.entries(toolSchemas).filter(([name]) => onlyTools.includes(name as ToolName))
-		: Object.entries(toolSchemas)
+		: Object.entries(toolSchemas).filter(([name]) => {
+				if (!tierFilter) return true
+				const tier = toolDisclosure[name as ToolName]
+				if (tier === 'always') return true
+				if (tier === 'searchable') return loadedSearchable?.has(name) ?? false
+				return false
+			})
 
-	return entries.map(([name, schema]) => ({
-		type: 'function' as const,
-		function: {
-			name,
-			description: toolDescriptions[name as ToolName],
-			parameters: zodToJsonSchema(schema),
-		},
-	}))
+	return entries.map(([name, schema]) => {
+		const examples = toolExamples[name as ToolName]
+		return {
+			type: 'function' as const,
+			function: {
+				name,
+				description: toolDescriptions[name as ToolName],
+				parameters: zodToJsonSchema(schema),
+				// Anthropic-style `input_examples`. Other providers ignore unknown fields.
+				// OpenRouter forwards extras on tool defs through to the upstream provider.
+				...(examples && examples.length > 0 ? { input_examples: examples } : {}),
+			},
+		}
+	})
 }
 
 export type ToolCall = {
@@ -1775,30 +1814,19 @@ export async function executeTool(
 				}
 			}
 
-			if (call.name === 'enable_capability') {
-				const input = toolSchemas.enable_capability.parse(call.arguments)
+			if (call.name === 'search_tools') {
+				const input = toolSchemas.search_tools.parse(call.arguments)
 				const ctx = toolUserContext.getStore()
-				if (!ctx?.runId) {
-					return {
-						success: false,
-						tool: call.name,
-						error: 'enable_capability requires a runId in the tool execution context.',
-						executionMs: Date.now() - startedAt,
-					}
-				}
-				const { enableGroupForRun } = await import('$lib/tools/capabilities.server')
-				const enableResult = await enableGroupForRun(ctx.runId, input.group)
-				// Wave 2 #9 Phase 1 — surface companion skill summaries inline with the
-				// enable result so the model learns when/how to use the new tools without
-				// us having to recompute context slots for every round.
-				let companionSummaries: Array<{ name: string; description: string }> = []
-				if (enableResult.added) {
+				const hits = searchToolsRegistry(input.query, input.limit ?? 10)
+				// Register matches into the per-run loaded set so they appear in the tools array
+				// on the next round. Done via a callback the runtime exposes — the runtime owns
+				// the actual Set and refreshes its computeTools() each round.
+				const matchedNames = hits.map((h) => h.name)
+				if (matchedNames.length > 0 && ctx?.runtime?.loadSearchableTools) {
 					try {
-						const { getCompanionSkillsForGroups } = await import('$lib/skills/skills.server')
-						const skills = await getCompanionSkillsForGroups([input.group])
-						companionSummaries = skills.map((s) => ({ name: s.name, description: s.description }))
+						ctx.runtime.loadSearchableTools(matchedNames)
 					} catch (err) {
-						logger.warn('[enable_capability] companion skill lookup failed', { err })
+						logger.warn('[search_tools] loadSearchableTools callback threw', { err })
 					}
 				}
 				return {
@@ -1806,17 +1834,11 @@ export async function executeTool(
 					tool: call.name,
 					input,
 					result: {
-						added: enableResult.added,
-						enabledGroups: enableResult.enabledGroups,
-						addedTools: enableResult.addedTools,
-						companionSkills: companionSummaries,
-						note: enableResult.added
-							? `Enabled '${input.group}'. ${enableResult.addedTools.length} new tools available next round: ${enableResult.addedTools.join(', ')}.${
-									companionSummaries.length > 0
-										? ` Use \`read_skill\` to load any of these companion skills for usage guidance: ${companionSummaries.map((s) => s.name).join(', ')}.`
-										: ''
-								}`
-							: `'${input.group}' was already enabled.`,
+						matches: hits.map((h) => ({ name: h.name, description: h.description })),
+						note:
+							matchedNames.length === 0
+								? `No tools matched "${input.query}". Try different keywords or check the spelling.`
+								: `Loaded ${matchedNames.length} tool${matchedNames.length === 1 ? '' : 's'} for the next round: ${matchedNames.join(', ')}. Call them on the next turn — they're now in your tools array.`,
 					},
 					executionMs: Date.now() - startedAt,
 				}

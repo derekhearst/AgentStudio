@@ -24,11 +24,10 @@ async function getActiveUserId() {
 	return user.id
 }
 
-test.describe('source-control/capability-group — full surface', () => {
-	test('source_control group exposes the full read + write tool list', async () => {
-		const { capabilityGroups } = await import('../src/lib/tools/tools')
-		const tools = capabilityGroups.source_control.tools as readonly string[]
-		expect(tools).toEqual(
+test.describe('source-control — registered tool surface', () => {
+	test('source-control read + write tools are all registered', async () => {
+		const { allToolNames } = await import('../src/lib/tools/tool-schemas')
+		expect(allToolNames).toEqual(
 			expect.arrayContaining([
 				'list_my_repos',
 				'sync_my_repos',

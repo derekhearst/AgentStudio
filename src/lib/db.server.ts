@@ -425,18 +425,9 @@ async function bootstrapDatabase() {
 			console.warn('[db] Built-in agents seed failed (non-fatal):', err)
 		}
 
-		// Wave 2 #9 Phase 1 — seed first-party companion skills (one per capability group). Same
-		// idempotent pattern as mode skills.
-		try {
-			const { seedCompanionSkills } = await import('$lib/skills/companion-skills.server')
-			const seedDb = createDatabase(client)
-			const result = await seedCompanionSkills(seedDb)
-			if (result.inserted > 0) {
-				console.log(`[db] Seeded ${result.inserted} companion skill(s)`)
-			}
-		} catch (err) {
-			console.warn('[db] Companion skill seed failed (non-fatal):', err)
-		}
+		// Companion-skill seed deleted alongside the capability-group system. Tool Search Tool
+		// replaces the auto-load-on-group-enable mechanism; skills surface via listSkillSummaries
+		// + listRelevantSkillSummaries (relevance ranked) per query instead.
 
 		// Wave 3 #13 phase 1 — register the built-in hook handlers exactly once at boot.
 		try {

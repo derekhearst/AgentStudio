@@ -59,9 +59,10 @@ test.describe('source-control — mandatory approval set', () => {
 		expect(set.has('create_pull_request')).toBe(true)
 	})
 
-	test('source_control capability group lists every write tool plus existing read-only ones', async () => {
-		const { capabilityGroups } = await import('../src/lib/tools/tools')
-		const tools = capabilityGroups.source_control.tools as readonly string[]
-		expect(tools).toEqual(expect.arrayContaining(['list_my_repos', 'sync_my_repos', 'prepare_commit', 'push_branch', 'create_pull_request']))
+	test('source-control read + write tools are all registered in the tool registry', async () => {
+		const { allToolNames } = await import('../src/lib/tools/tool-schemas')
+		expect(allToolNames).toEqual(
+			expect.arrayContaining(['list_my_repos', 'sync_my_repos', 'prepare_commit', 'push_branch', 'create_pull_request']),
+		)
 	})
 })

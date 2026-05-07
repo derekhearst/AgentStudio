@@ -3,17 +3,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { listSkillsQuery, getCapabilityGroupsQuery, importSkillCommand } from '$lib/skills';
+	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
-	type CapabilityGroup = Awaited<ReturnType<typeof getCapabilityGroupsQuery>>[number];
 
 	let search = $state('');
 	let skills = $state<SkillRow[]>([]);
 	let allSkills = $state<SkillRow[]>([]);
-	let allGroups = $state<CapabilityGroup[]>([]);
-	let companionGroupFilter = $state<string | null>(null);
 
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -56,7 +53,6 @@
 
 	onMount(() => {
 		void loadSkills();
-		void loadGroups();
 	});
 
 	async function loadSkills() {
@@ -64,21 +60,11 @@
 		filterLocally();
 	}
 
-	async function loadGroups() {
-		allGroups = await getCapabilityGroupsQuery();
-	}
-
 	function filterLocally() {
 		const q = search.trim().toLowerCase();
 
 		let filtered = allSkills;
 		filtered = filtered.filter((s) => !s.name.startsWith('capability:'));
-
-		if (companionGroupFilter) {
-			filtered = filtered.filter((s) =>
-				Array.isArray(s.companionGroups) && s.companionGroups.includes(companionGroupFilter as string)
-			);
-		}
 
 		// Filter by search text
 		if (q) {
@@ -98,10 +84,6 @@
 		filterTimer = setTimeout(filterLocally, 150);
 	}
 
-	function selectCompanionFilter(group: string | null) {
-		companionGroupFilter = group;
-		filterLocally();
-	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
@@ -130,24 +112,6 @@
 			oninput={handleSearchInput}
 			placeholder="Search skills..."
 		/>
-	</div>
-
-	<!-- Companion-group filter chips: dynamic from capabilityGroups registry -->
-	<div class="flex shrink-0 flex-wrap items-center gap-1.5 text-xs">
-		<span class="text-base-content/55" title="Skills attached to a capability group auto-load when that group is enabled in a chat.">Companion to:</span>
-		<button
-			type="button"
-			class="badge badge-sm cursor-pointer {companionGroupFilter === null ? 'badge-primary' : 'badge-ghost'}"
-			onclick={() => selectCompanionFilter(null)}
-		>any</button>
-		{#each allGroups as group (group.name)}
-			<button
-				type="button"
-				class="badge badge-sm cursor-pointer font-mono {companionGroupFilter === group.name ? 'badge-primary' : 'badge-ghost'}"
-				title={group.description}
-				onclick={() => selectCompanionFilter(group.name)}
-			>{group.name}</button>
-		{/each}
 	</div>
 
 	<!-- Skill list (scrollable) -->
@@ -181,11 +145,6 @@
 						{#if skill.tags.length > 0}
 							{#each skill.tags as tag (tag)}
 								<span class="badge badge-outline badge-xs">{tag}</span>
-							{/each}
-						{/if}
-						{#if Array.isArray(skill.companionGroups) && skill.companionGroups.length > 0}
-							{#each skill.companionGroups as group (group)}
-								<span class="badge badge-info badge-xs font-mono opacity-100" title="Companion to capability group">↳ {group}</span>
 							{/each}
 						{/if}
 						<span>{skill.fileCount} file{skill.fileCount !== 1 ? 's' : ''}</span>

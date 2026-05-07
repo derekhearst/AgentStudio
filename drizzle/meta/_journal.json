@@ -393,6 +393,20 @@
       "when": 1778700000000,
       "tag": "0055_unify_modes_into_agents",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1778800000000,
+      "tag": "0056_llm_usage_cache_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1778900000000,
+      "tag": "0057_drop_capability_groups",
+      "breakpoints": true
     }
   ]
 }

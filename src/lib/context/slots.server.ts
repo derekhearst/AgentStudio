@@ -47,6 +47,12 @@ export type AssembleResult = {
 	droppedSlots: string[]
 	truncatedSlots: string[]
 	estimatedTokens: number
+	/**
+	 * Per-slot rendered content (in priority order, same as joined into systemPrompt).
+	 * Lets callers split the system block at boundaries — e.g. for prompt caching, where
+	 * stable slots get a cache_control marker and a volatile slot like memory comes after.
+	 */
+	renderedSlots: Array<{ name: string; content: string }>
 }
 
 const SLOT_SEPARATOR = '\n\n'
@@ -70,6 +76,7 @@ export function assembleSystemPrompt(slots: ContextSlot[], budgetTokens?: number
 			droppedSlots: [],
 			truncatedSlots: [],
 			estimatedTokens: 0,
+			renderedSlots: [],
 		}
 	}
 
@@ -114,11 +121,13 @@ export function assembleSystemPrompt(slots: ContextSlot[], budgetTokens?: number
 
 	const includedSlots: string[] = []
 	const renderedParts: string[] = []
+	const renderedSlots: Array<{ name: string; content: string }> = []
 	for (const { slot, idx } of usable) {
 		const decision = decisions.get(idx)
 		if (!decision?.include) continue
 		includedSlots.push(slot.name)
 		renderedParts.push(decision.content)
+		renderedSlots.push({ name: slot.name, content: decision.content })
 	}
 
 	const systemPrompt = renderedParts.join(SLOT_SEPARATOR)
@@ -128,5 +137,6 @@ export function assembleSystemPrompt(slots: ContextSlot[], budgetTokens?: number
 		droppedSlots,
 		truncatedSlots,
 		estimatedTokens: estimateTokens(systemPrompt),
+		renderedSlots,
 	}
 }

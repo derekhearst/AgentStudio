@@ -25,7 +25,6 @@ export const DEFAULT_SETTINGS = {
 	contextConfig: {
 		reservedResponsePct: 30,
 		autoCompactThresholdPct: 72,
-		compactionModel: 'openai/gpt-4o-mini',
 	},
 	toolConfig: {
 		approvalRequiredTools: [] as string[],
@@ -87,7 +86,7 @@ export async function updateSettings(input: {
 	contextConfig?: {
 		reservedResponsePct?: number
 		autoCompactThresholdPct?: number
-		compactionModel?: string
+		preserveToolResults?: string[]
 	}
 	toolConfig?: {
 		approvalRequiredTools?: string[]

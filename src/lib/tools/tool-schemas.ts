@@ -232,8 +232,9 @@ export const toolSchemas = {
 		paths: z.array(z.string().min(1)).optional(),
 		staged: z.boolean().default(false),
 	}),
-	enable_capability: z.object({
-		group: z.enum(['core', 'sandbox', 'skills', 'agents', 'media']),
+	search_tools: z.object({
+		query: z.string().trim().min(1).max(200),
+		limit: z.number().int().min(1).max(20).optional(),
 	}),
 	propose_plan: z.object({
 		summary: z.string().min(1).max(500),
@@ -350,8 +351,158 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Propose a structured execution plan to the user with ordered steps, estimated cost/time, risks, and rollback. The user explicitly approves or denies before you call any non-readonly tool. Required in plan mode; should be called before taking any destructive or expensive action.',
 	propose_research_plan:
 		'Propose a Deep Research plan to the user. Pass `summary` (1-2 sentence framing of what you intend to investigate), `subQuestions` (4-8 concrete, googleable sub-questions covering definitions, mechanisms, evidence, edge cases, and recent developments), and an optional `rationale` (why this decomposition). The user explicitly approves or denies in the right sidebar; on approve, a background research run starts (plan→search→fetch→reflect→synthesize, ~10-15 minutes) and the user is notified when the cited report is ready. On deny, the user will likely reply with feedback — call this tool again with a revised plan. Use ONLY when the user actually wants a deep, cited research run; for trivial lookups, use web_search/web_fetch directly.',
-	enable_capability:
-		'Enable a capability group (sandbox / skills / agents / media) so its tools become available on the next round. Use this when the task clearly needs filesystem operations, skill management, agent delegation, or image generation. The active surface starts with only the `core` group; expand on demand to keep the prompt slim.',
+	search_tools:
+		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, propose_plan, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
 	run_code:
-		'Run a JavaScript program in the sandboxed Bun runtime. Inside the script every tool currently available to you is callable as `await tools.<name>(args)` — same arguments and return shape as a direct tool call, same approvals, capabilities, and policies. Use this when you need to chain many tool calls, post-process their results, or branch on intermediate values without spending a round-trip per call. The script\'s working directory is the same persistent sandbox as the `shell` tool, so files persist across calls. `console.log` output is returned as `stdout`; throw to surface an error. The last expression\'s value (or an explicit `return` from the top-level wrapper) is captured as `returnValue` (must be JSON-serializable). Default timeout 60s, max 300s. Available tool names are listed in `tools.list()`. Cannot recursively call `run_code`. Example: `const files = await tools.search_files({ query: "TODO" }); console.log("found", files.length)`.',
+		'Run a JavaScript program in the sandboxed Bun runtime. Inside the script every tool currently available to you is callable as `await tools.<name>(args)` — same arguments, return shape, approvals, capabilities, and policies as a direct tool call. Use this when you need to fan out many tool calls in parallel, post-process their results, or branch on intermediate values without spending a round-trip per call. PREFER `return` OVER `console.log` for output the model should see: when the script returns a value, that becomes `returnValue` and stdout is omitted from the result to keep your context tight. console.log is for debugging only and is truncated to 8KB in the model-facing result. Run tool calls in parallel with `Promise.all` whenever they are independent — that\'s the main reason to use run_code over individual tool calls. The script\'s working directory is the same persistent sandbox as `shell`, so files persist. Throw to surface an error. The returned value must be JSON-serializable. Default timeout 60s, max 300s. Cannot recursively call `run_code`. Example pattern: `const [a, b, c] = await Promise.all([tools.web_search({query: "x"}), tools.web_search({query: "y"}), tools.web_search({query: "z"})]); return {a: a.length, b: b.length, c: c.length}` — three searches batched into one round-trip, model sees only the summary.',
+}
+
+/**
+ * Realistic example invocations per tool, attached to tool definitions as `input_examples`.
+ * Anthropic models are documented to use these to infer conventions (kebab-case, ID prefix
+ * shapes, when to populate optional blocks) — their internal eval reported a 72%→90% accuracy
+ * lift on complex parameter handling.
+ *
+ * OpenRouter passes through extra fields on tool definitions; if a provider doesn't recognize
+ * `input_examples` it simply ignores the field. Empty/undefined entries get omitted from the
+ * tool def by `getToolDefinitions`.
+ *
+ * Keep examples short — every byte ships in the tool defs prefix on every request. Five
+ * high-cardinality tools have examples; the long tail relies on description + schema alone.
+ */
+export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
+	web_search: [
+		{ query: 'sveltekit remote functions 2026' },
+		{ query: 'pgvector hnsw vs ivfflat benchmark' },
+	],
+	shell: [
+		// Use shell when nothing more specific fits — but prefer file_read / list_directory
+		// / git_status / search_files when they apply.
+		{ command: 'bun run check' },
+		{ command: 'bunx prisma generate' },
+	],
+	run_code: [
+		// Parallel batching pattern — the canonical reason to use run_code instead of individual
+		// tool calls. Tool results stay inside the sandbox; only the structured returnValue
+		// reaches the model's context.
+		{
+			code: `const [a, b, c] = await Promise.all([
+  tools.web_search({ query: 'pgvector benchmarks' }),
+  tools.web_search({ query: 'hnsw recall accuracy' }),
+  tools.web_search({ query: 'ivfflat performance' }),
+])
+return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.title } }`,
+		},
+	],
+	propose_plan: [
+		{
+			summary: 'Migrate the auth middleware to drop session-token storage in cookies.',
+			steps: [
+				{ title: 'Audit current cookie reads/writes', detail: 'Grep for `Set-Cookie` / `cookie.session` across the codebase' },
+				{ title: 'Add token-rotation endpoint', estimatedDurationMin: 60 },
+				{ title: 'Migrate clients to fetch + Authorization header' },
+				{ title: 'Remove cookie-write paths and run integration tests' },
+			],
+		},
+	],
+	propose_research_plan: [
+		// Tighter 4-question plan for a focused topic
+		{
+			summary: 'Compare HNSW vs IVF-Flat for pgvector at the 5M-row scale.',
+			subQuestions: [
+				'What recall and latency does HNSW deliver at 5M rows for typical embedding sizes (1024, 1536, 3072)?',
+				'How does IVF-Flat compare under the same load and probe counts?',
+				'What index build times and memory overhead should we plan for?',
+				'Are there known issues with either index type on Postgres 16+?',
+			],
+			rationale: 'Picking the right index up front avoids a costly re-index later.',
+		},
+	],
+}
+
+/**
+ * Disclosure tier per tool — drives Tool Search Tool deferred loading.
+ *
+ *   `always`: shipped in the tools array on every request. Reserved for high-cardinality,
+ *     orchestration-class tools the model reaches for constantly.
+ *   `searchable`: discoverable via `search_tools(query)`. Once a tool name is returned by
+ *     a search, the runtime adds it to the per-run loaded set and it appears in subsequent
+ *     rounds' tools arrays. ~85% of the registry lives here.
+ *
+ * Approval gating is orthogonal to this tier — sensitive tools (push_branch,
+ * create_pull_request, propose_research_plan) live in `searchable` and rely on the
+ * existing `MANDATORY_APPROVAL_TOOLS` enforcement at execution time. Loading a tool ≠
+ * permission to use it without approval.
+ */
+export type ToolDisclosure = 'always' | 'searchable'
+
+const ALWAYS_LOADED: ToolName[] = [
+	'web_search',
+	'ask_user',
+	'propose_plan',
+	'run_code',
+	'search_tools',
+]
+
+export const toolDisclosure: Record<ToolName, ToolDisclosure> = (() => {
+	const m: Partial<Record<ToolName, ToolDisclosure>> = {}
+	for (const name of allToolNames) {
+		m[name] = ALWAYS_LOADED.includes(name) ? 'always' : 'searchable'
+	}
+	return m as Record<ToolName, ToolDisclosure>
+})()
+
+/**
+ * Find tools matching a query, ranked by name + description relevance. Pure helper — the
+ * runtime side-effect (registering matched names into the per-run loaded set) is wired in
+ * the `search_tools` execution handler.
+ */
+export type ToolSearchHit = { name: ToolName; description: string; score: number }
+
+export function searchToolsRegistry(query: string, limit = 10): ToolSearchHit[] {
+	const q = query.trim().toLowerCase()
+	if (q.length === 0) return []
+	const queryWords = q.split(/[^a-z0-9]+/).filter((w) => w.length > 0)
+
+	const hits: ToolSearchHit[] = []
+	for (const name of allToolNames) {
+		// Always-loaded tools are already in the model's surface; surfacing them here would
+		// be wasted output. Only suggest searchable tools.
+		if (toolDisclosure[name] !== 'searchable') continue
+		const desc = toolDescriptions[name] ?? ''
+		const score = scoreToolMatch(name, desc, q, queryWords)
+		if (score > 0) hits.push({ name, description: desc, score })
+	}
+	hits.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+	return hits.slice(0, limit)
+}
+
+function scoreToolMatch(name: string, description: string, q: string, queryWords: string[]): number {
+	const nameLower = name.toLowerCase()
+	const descLower = description.toLowerCase()
+	const nameParts = nameLower.split(/[^a-z0-9]+/).filter((w) => w.length > 0)
+
+	let score = 0
+
+	// Exact name match — strongest signal.
+	if (nameLower === q) score += 100
+
+	// Whole-name substring (e.g. query "git" → "git_status").
+	else if (nameLower.includes(q)) score += 30
+
+	// Per-query-word matching.
+	for (const word of queryWords) {
+		if (word.length < 2) continue
+		// Word matches a name part exactly.
+		if (nameParts.includes(word)) score += 15
+		// Word is a prefix of a name part.
+		else if (nameParts.some((p) => p.startsWith(word))) score += 8
+		// Word appears as a whole word in description.
+		const descWordRe = new RegExp(`(?:^|[^a-z0-9_])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9_])`, 'i')
+		if (descWordRe.test(descLower)) score += 4
+		// Word substring in description (weakest signal, capped contribution).
+		else if (descLower.includes(word)) score += 1
+	}
+
+	return score
 }

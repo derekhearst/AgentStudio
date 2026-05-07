@@ -160,38 +160,26 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 	})
 })
 
-test.describe('projects/tools — capability group registration', () => {
-	test('projects group includes the 6 expected tool names', async () => {
+test.describe('projects/tools — registry presence', () => {
+	test('all six project tools are registered in the schema registry', async () => {
 		try {
-			const { capabilityGroups } = await import('../src/lib/tools/tools')
-			const projectsGroup = capabilityGroups.projects
-			expect(projectsGroup).toBeTruthy()
-			expect(projectsGroup.tools).toEqual(
-				expect.arrayContaining([
-					'list_projects',
-					'create_project',
-					'list_artifacts',
-					'read_artifact',
-					'create_artifact',
-					'edit_artifact',
-				]),
-			)
-			expect(projectsGroup.alwaysOn).toBe(false)
+			const { allToolNames, toolDisclosure } = await import('../src/lib/tools/tool-schemas')
+			for (const name of [
+				'list_projects',
+				'create_project',
+				'list_artifacts',
+				'read_artifact',
+				'create_artifact',
+				'edit_artifact',
+			]) {
+				expect(allToolNames).toContain(name)
+				// Project tools live in the searchable tier (Tool Search Tool deferred loading).
+				expect(toolDisclosure[name as keyof typeof toolDisclosure]).toBe('searchable')
+			}
 		} catch (err) {
 			// Server-import fallback per project pattern.
 			expect(err).toBeTruthy()
 		}
 	})
 
-	test('suggest-capabilities classifier surfaces projects on project-related queries', async () => {
-		try {
-			const { suggestCapabilityGroups } = await import('../src/lib/tools/suggest-capabilities')
-			expect(suggestCapabilityGroups('Create a new project for the efoil rebuild')).toContain('projects')
-			expect(suggestCapabilityGroups('Edit the artifact for the spec')).toContain('projects')
-			// Not triggered for vague non-project messages.
-			expect(suggestCapabilityGroups('hello there')).not.toContain('projects')
-		} catch (err) {
-			expect(err).toBeTruthy()
-		}
-	})
 })

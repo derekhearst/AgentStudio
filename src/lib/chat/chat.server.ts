@@ -8,7 +8,6 @@ export { findSafeSplitPoint } from '$lib/chat/compaction'
 
 type Message = { role: 'user' | 'assistant'; content: string }
 
-const DEFAULT_COMPACTION_MODEL = 'openai/gpt-4o-mini'
 const KEEP_RECENT_MESSAGES = 8
 const MIN_MESSAGES_FOR_COMPACTION = 10
 
@@ -87,12 +86,6 @@ export async function generateTitleAndCategory(messages: Message[]): Promise<{ t
 	}
 }
 
-async function getCompactionModel(userId: string): Promise<string> {
-	const settings = await getOrCreateSettings(userId)
-	const contextConfig = settings.contextConfig as { compactionModel?: string } | undefined
-	return contextConfig?.compactionModel || DEFAULT_COMPACTION_MODEL
-}
-
 /**
  * Per-message overhead the API adds on top of content tokens. Approximate; mirrors what
  * OpenAI/Anthropic clients commonly add for role + name + structural framing.
@@ -160,15 +153,38 @@ export async function shouldCompact(
 	}
 }
 
+/**
+ * Static compaction system prompt. Pulled out of the call site so the cacheControl marker
+ * can engage on it — the same string ships on every compaction event, so caching it pays off
+ * after the first compaction in any conversation history.
+ */
+const COMPACTION_SYSTEM_PROMPT = `You are a conversation summarizer. Produce a concise summary that preserves:
+1. Key decisions and conclusions reached
+2. Important facts, data, or context mentioned
+3. Current task state and what remains to be done
+4. Any tool calls that were made and the key results they produced (preserve tool names + outcomes)
+5. User preferences, corrections, or explicit constraints they expressed
+
+Write in third-person past tense. Output four sections in this exact order, using markdown headings:
+
+## Decisions
+## Key Facts
+## Task State
+## Tool Results
+
+Be concise but don't lose critical details. Keep under 800 words total.`
+
 export async function compactMessages(
 	messages: LlmMessage[],
-	userId: string,
-	model?: string,
+	_userId: string,
+	model: string,
 ): Promise<{
 	compacted: LlmMessage[]
 	summary: string
 	originalTokens: number
 	compactedTokens: number
+	summaryTokens: number
+	compactionModel: string
 }> {
 	const originalTokens = estimateMessageTokens(messages, model)
 
@@ -185,7 +201,14 @@ export async function compactMessages(
 	// If the safe-split rule pushed the boundary too far up to make summarization worthwhile,
 	// or if there isn't enough history to summarize, skip compaction entirely.
 	if (earlyMessages.length < 4) {
-		return { compacted: messages, summary: '', originalTokens, compactedTokens: originalTokens }
+		return {
+			compacted: messages,
+			summary: '',
+			originalTokens,
+			compactedTokens: originalTokens,
+			summaryTokens: 0,
+			compactionModel: model,
+		}
 	}
 
 	const earlyText = earlyMessages
@@ -199,34 +222,28 @@ export async function compactMessages(
 		})
 		.join('\n\n')
 
-	const compactionModel = await getCompactionModel(userId)
-
+	// Always compact using the conversation's own model. Continuity matters more than the
+	// per-event cost saving from a cheaper model, and the system prompt above gets cached
+	// (cacheControl marker on the text block) so the per-event overhead is mostly read-cost
+	// after the first compaction.
 	const summaryResponse = await chat(
 		[
 			{
 				role: 'system',
-				content: `You are a conversation summarizer. Produce a concise summary that preserves:
-1. Key decisions and conclusions reached
-2. Important facts, data, or context mentioned
-3. Current task state and what remains to be done
-4. Any tool calls that were made and the key results they produced (preserve tool names + outcomes)
-5. User preferences, corrections, or explicit constraints they expressed
-
-Write in third-person past tense. Output four sections in this exact order, using markdown headings:
-
-## Decisions
-## Key Facts
-## Task State
-## Tool Results
-
-Be concise but don't lose critical details. Keep under 800 words total.`,
+				content: [
+					{
+						type: 'text' as const,
+						text: COMPACTION_SYSTEM_PROMPT,
+						cacheControl: { type: 'ephemeral' as const },
+					},
+				],
 			},
 			{
 				role: 'user',
 				content: `Summarize this conversation history:\n\n${earlyText}`,
 			},
 		],
-		compactionModel,
+		model,
 	)
 
 	const summary = summaryResponse.content as string
@@ -241,6 +258,14 @@ Be concise but don't lose critical details. Keep under 800 words total.`,
 	]
 
 	const compactedTokens = estimateMessageTokens(compacted, model)
+	const summaryTokens = estimateTokensForModel(summary, model)
 
-	return { compacted, summary, originalTokens, compactedTokens }
+	return {
+		compacted,
+		summary,
+		originalTokens,
+		compactedTokens,
+		summaryTokens,
+		compactionModel: model,
+	}
 }

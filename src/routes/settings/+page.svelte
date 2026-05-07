@@ -13,7 +13,7 @@
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
-	import { BUILTIN_TOOLS, capabilityGroups } from '$lib/tools/tools';
+	import { BUILTIN_TOOLS } from '$lib/tools/tools';
 	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
@@ -58,17 +58,24 @@
 
 	type SectionId = (typeof sections)[number]['id'];
 
-	const toolsByGroup = Object.entries(capabilityGroups)
-		.map(([groupKey, group]) => ({
-			groupKey,
-			group,
-			tools: BUILTIN_TOOLS.filter((tool) => tool.group === groupKey),
+	// Tool tiers come from `toolDisclosure`: 'always' = loaded every request, 'searchable' =
+	// loaded on-demand via `search_tools`. The UI groups tools by tier so operators can bulk-
+	// approve a tier (e.g. require approval for every searchable tool but waive the always set).
+	const TIER_META: Array<{ tierKey: 'always' | 'searchable'; label: string; description: string; alwaysOn: boolean }> = [
+		{ tierKey: 'always', label: 'Always loaded', description: 'Tools shipped in the model surface on every request (web_search, ask_user, propose_plan, run_code, search_tools).', alwaysOn: true },
+		{ tierKey: 'searchable', label: 'Searchable', description: 'The long tail of tools — loaded only after the model invokes `search_tools(query)`.', alwaysOn: false },
+	];
+	const toolsByTier = TIER_META
+		.map(({ tierKey, label, description, alwaysOn }) => ({
+			tierKey,
+			tier: { label, description, alwaysOn },
+			tools: BUILTIN_TOOLS.filter((tool) => tool.tier === tierKey),
 		}))
 		.filter((entry) => entry.tools.length > 0);
 
-	const filteredToolsByGroup = $derived.by(() => {
-		if (!searchLower) return toolsByGroup;
-		return toolsByGroup
+	const filteredToolsByTier = $derived.by(() => {
+		if (!searchLower) return toolsByTier;
+		return toolsByTier
 			.map((g) => ({
 				...g,
 				tools: g.tools.filter(
@@ -85,7 +92,7 @@
 		const section = sections.find((s) => s.id === id);
 		const keywordMatch = section ? section.keywords.includes(searchLower) : false;
 		// Tool Approval is also visible when the search matches any tool name/description
-		if (id === 'tools') return keywordMatch || filteredToolsByGroup.length > 0;
+		if (id === 'tools') return keywordMatch || filteredToolsByTier.length > 0;
 		return keywordMatch;
 	}
 
@@ -347,13 +354,15 @@
 		};
 	}
 
-	function setGroupApproval(groupKey: string, required: boolean) {
+	function setTierApproval(tierKey: 'always' | 'searchable', required: boolean) {
 		if (!settings || isWildcardApproval) return;
-		const group = capabilityGroups[groupKey as keyof typeof capabilityGroups];
-		if (!group || group.alwaysOn) return;
+		// `always` tools never have approval pre-set en-masse; the UI hides the bulk-controls
+		// for that tier. Defensive guard for callers passing it anyway.
+		if (tierKey === 'always') return;
+		const tierTools = BUILTIN_TOOLS.filter((t) => t.tier === tierKey).map((t) => t.name);
 		const base = settings.toolConfig?.approvalRequiredTools ?? [];
-		let next = base.filter((n) => !(group.tools as readonly string[]).includes(n));
-		if (required) next = [...new Set([...next, ...group.tools])];
+		let next = base.filter((n) => !tierTools.includes(n));
+		if (required) next = [...new Set([...next, ...tierTools])];
 		settings = {
 			...settings,
 			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
@@ -505,23 +514,6 @@
 										<p class="mt-1.5 text-xs text-base-content/55">Auto-compaction triggers when a model switch would exceed this</p>
 									</div>
 
-									<!-- Compaction Model -->
-									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0 xl:col-span-2 xl:py-3.5">
-										<div>
-											<p class="text-sm font-medium">Compaction Model</p>
-											<p class="mt-0.5 text-xs text-base-content/55">Model used to summarize conversations during auto-compaction</p>
-										</div>
-										<div class="w-full sm:w-64">
-											<ModelSelector
-												value={settings.contextConfig.compactionModel}
-												showChevron={false}
-												showBrowseBadge={false}
-												onchange={(id: string) => {
-													if (settings) settings.contextConfig.compactionModel = id;
-												}}
-											/>
-										</div>
-									</div>
 								</div>
 							</ContentPanel>
 						</div>
@@ -576,31 +568,31 @@
 									class:pointer-events-none={isWildcardApproval}
 									aria-disabled={isWildcardApproval}
 								>
-									{#each filteredToolsByGroup as groupEntry (groupEntry.groupKey)}
-										{@const alwaysOn = groupEntry.group.alwaysOn}
+									{#each filteredToolsByTier as tierEntry (tierEntry.tierKey)}
+										{@const alwaysOn = tierEntry.tier.alwaysOn}
 										<div>
 											<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
 												<div class="min-w-0">
 													<p class="flex items-center gap-2 text-sm font-medium">
-														{groupEntry.group.label}
+														{tierEntry.tier.label}
 														{#if alwaysOn}
-															<span class="badge badge-success badge-xs">Always on</span>
+															<span class="badge badge-success badge-xs">Always loaded</span>
 														{/if}
 													</p>
-													<p class="mt-0.5 text-xs text-base-content/55">{groupEntry.group.description}</p>
+													<p class="mt-0.5 text-xs text-base-content/55">{tierEntry.tier.description}</p>
 												</div>
 												{#if !alwaysOn}
 													<div class="flex shrink-0 items-center gap-1">
 														<button
 															type="button"
 															class="btn btn-ghost btn-xs"
-															onclick={() => setGroupApproval(groupEntry.groupKey, true)}
+															onclick={() => setTierApproval(tierEntry.tierKey, true)}
 															disabled={isWildcardApproval}
 														>All</button>
 														<button
 															type="button"
 															class="btn btn-ghost btn-xs"
-															onclick={() => setGroupApproval(groupEntry.groupKey, false)}
+															onclick={() => setTierApproval(tierEntry.tierKey, false)}
 															disabled={isWildcardApproval}
 														>None</button>
 													</div>
@@ -611,7 +603,7 @@
 												class:opacity-60={alwaysOn}
 												class:pointer-events-none={alwaysOn}
 											>
-												{#each groupEntry.tools as tool (tool.name)}
+												{#each tierEntry.tools as tool (tool.name)}
 													<ToolToggleChip
 														name={tool.name}
 														description={tool.description}

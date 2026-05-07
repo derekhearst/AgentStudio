@@ -13,7 +13,6 @@ import {
 } from '$lib/skills/skills.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditSkillDeleted } from '$lib/governance'
-import { capabilityGroups } from '$lib/tools/tools'
 import { parseSkillSource, serializeSkillSource } from '$lib/skills/skill-source'
 
 /* ── Queries ────────────────────────────────────────────────── */
@@ -36,14 +35,6 @@ export const getSkillByIdQuery = query(skillIdSchema, async ({ id }) => {
 	return getSkillById(id)
 })
 
-// Single source of truth for the chips in the skills UI. Filters `core` because it's
-// always-on — marking a skill as a companion to `core` is a no-op.
-export const getCapabilityGroupsQuery = query(async () => {
-	return Object.entries(capabilityGroups)
-		.filter(([name]) => name !== 'core')
-		.map(([name, group]) => ({ name, label: group.label, description: group.description }))
-})
-
 /* ── Commands ───────────────────────────────────────────────── */
 
 // PR-3 — skill category enum. Validated at the API surface; stored as nullable text in the
@@ -58,15 +49,6 @@ const createSkillSchema = z.object({
 	category: skillCategorySchema.optional(),
 })
 
-// Refines against the in-process registry rather than a hardcoded list — adding a new
-// capability group in `tools.ts` automatically becomes a valid companion target without
-// updating this file.
-const companionGroupSchema = z
-	.string()
-	.trim()
-	.min(1)
-	.refine((s) => s in capabilityGroups, { message: 'unknown capability group' })
-
 const updateSkillSchema = z.object({
 	id: z.string().uuid(),
 	name: z.string().trim().min(1).max(100).optional(),
@@ -75,8 +57,6 @@ const updateSkillSchema = z.object({
 	tags: z.array(z.string().trim().min(1)).optional(),
 	enabled: z.boolean().optional(),
 	category: skillCategorySchema.nullable().optional(),
-	companionGroups: z.array(companionGroupSchema).optional(),
-	companionTools: z.array(z.string().trim().min(1).max(100)).optional(),
 })
 
 const addSkillFileSchema = z.object({
@@ -175,8 +155,6 @@ export const importSkillCommand = command(importSkillSchema, async ({ source, mo
 		content: parsed.body,
 		category: parsed.frontmatter.category,
 		tags: parsed.frontmatter.tags,
-		companionGroups: parsed.frontmatter.companionGroups,
-		companionTools: parsed.frontmatter.companionTools,
 		enabled: parsed.frontmatter.enabled,
 		resources,
 	})
@@ -191,8 +169,6 @@ export const exportSkillCommand = command(skillIdSchema, async ({ id }) => {
 		description: skill.description,
 		content: skill.content,
 		tags: skill.tags,
-		companionGroups: skill.companionGroups,
-		companionTools: skill.companionTools,
 		enabled: skill.enabled,
 	})
 	const resources = skill.files.map((f) => ({

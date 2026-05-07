@@ -89,6 +89,8 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	let assistantContent = ''
 	let promptTokens = 0
 	let completionTokens = 0
+	let cacheCreationInputTokens = 0
+	let cacheReadInputTokens = 0
 	let firstTokenAt: number | null = null
 	let reasoningTokens: number | null = null
 	let finishedNaturally = false
@@ -96,11 +98,23 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 
 	for (let round = 0; round <= input.maxRounds; round++) {
 		await setRunRound(session.runId, round)
-		// Refresh the active tool surface so progressive disclosure (`enable_capability` calls in
-		// the previous round) takes effect this round. Caller decides whether this is a no-op.
+		// Refresh the active tool surface so deferred loading (`search_tools` calls in the
+		// previous round) takes effect this round. Caller decides whether this is a no-op.
 		tools = await input.computeTools()
 
-		const stream = await streamChat(currentMessages, input.model, tools, input.reasoningConfig)
+		// Mark the last tool with an Anthropic ephemeral cache marker so the tools prefix gets
+		// cached when stable. OpenRouter forwards this to Anthropic; other providers ignore it.
+		// camelCase `cacheControl` matches the OpenRouter SDK input shape (it converts to
+		// `cache_control` on the wire). Done every round so progressive-disclosure refreshes
+		// still get the marker.
+		const toolsForRequest =
+			tools.length > 0
+				? tools.map((tool, idx) =>
+						idx === tools.length - 1 ? { ...tool, cacheControl: { type: 'ephemeral' as const } } : tool,
+					)
+				: tools
+
+		const stream = await streamChat(currentMessages, input.model, toolsForRequest, input.reasoningConfig)
 
 		// Accumulated tool calls for THIS round (streamed piecewise).
 		const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
@@ -170,6 +184,30 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 					reasoningTokens =
 						chunk.usage.completionTokensDetails?.reasoningTokens ?? reasoningTokens
 				}
+				// Anthropic prompt-caching stats — exposed by OpenRouter inside
+				// `promptTokensDetails`. Confirmed shape from a live OpenRouter response:
+				//   { cachedTokens: N, cacheWriteTokens: N, audioTokens, videoTokens }
+				// Read snake_case variants too in case the SDK normalizes differently across
+				// versions.
+				const usageRaw = chunk.usage as unknown as {
+					promptTokensDetails?: {
+						cachedTokens?: number
+						cached_tokens?: number
+						cacheWriteTokens?: number
+						cache_write_tokens?: number
+					}
+					prompt_tokens_details?: {
+						cached_tokens?: number
+						cachedTokens?: number
+						cache_write_tokens?: number
+						cacheWriteTokens?: number
+					}
+				}
+				const details = usageRaw.promptTokensDetails ?? usageRaw.prompt_tokens_details ?? {}
+				const writeDelta = details.cacheWriteTokens ?? details.cache_write_tokens ?? 0
+				const readDelta = details.cachedTokens ?? details.cached_tokens ?? 0
+				cacheCreationInputTokens += writeDelta
+				cacheReadInputTokens += readDelta
 			}
 
 			await session.updateRun({ state: 'running', heartbeat: true })
@@ -473,6 +511,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 					currentToolNames: () => tools.map((t) => t.function.name),
 					session,
 					isOrchestrator: input.isOrchestrator,
+					loadSearchableTools: input.loadSearchableTools,
 				},
 			})
 
@@ -608,6 +647,8 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		streamBlocks,
 		promptTokens,
 		completionTokens,
+		cacheCreationInputTokens,
+		cacheReadInputTokens,
 		firstTokenAt: firstTokenAt ? firstTokenAt - startedAt : null,
 		finishedNaturally,
 	}

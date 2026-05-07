@@ -89,7 +89,7 @@ const toolDescriptions: Record<ToolName, string> = {
 	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
 	propose_plan: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
 	propose_research_plan: 'Propose a Deep Research plan (sub-questions for the user to approve in the sidebar). On approve, a background research run produces a cited report.',
-	enable_capability: 'Enable a capability group (sandbox / skills / agents / media) so its tools become available next round.',
+	search_tools: 'Search the tool registry by free-text query and load matching tools into the model surface for the next round.',
 	run_code: 'Run a JavaScript program in the sandbox; available tools are exposed as `await tools.<name>(args)`. Gated by the global Programmatic Tool Calling setting.',
 }
 

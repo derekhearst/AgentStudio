@@ -4,7 +4,7 @@ import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/setting
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
-import { capabilityGroups, estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
+import { estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
 import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
 
 const settingsUpdateSchema = z.object({
@@ -28,7 +28,7 @@ const settingsUpdateSchema = z.object({
 		.object({
 			reservedResponsePct: z.number().min(10).max(40).optional(),
 			autoCompactThresholdPct: z.number().min(40).max(95).optional(),
-			compactionModel: z.string().trim().min(1).max(120).optional(),
+			preserveToolResults: z.array(z.string().trim().min(1).max(64)).max(20).optional(),
 		})
 		.optional(),
 	toolConfig: z
@@ -146,7 +146,6 @@ export const getFullPromptPreview = query(async () => {
 
 	return {
 		model: settings.defaultModel,
-		availableCapabilityGroups: Object.entries(capabilityGroups).map(([key, group]) => ({ key, label: group.label })),
 		approvalRequiredTools:
 			(settings.toolConfig as { approvalRequiredTools?: string[] } | undefined)?.approvalRequiredTools ?? [],
 		scenarios: {

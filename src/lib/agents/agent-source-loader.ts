@@ -27,7 +27,6 @@ export type AgentSourceFrontmatter = {
 	name?: string
 	role?: string
 	model?: string
-	capabilityGroups?: string[]
 }
 
 export type AgentDefinitionSource = {
@@ -58,12 +57,6 @@ function coerceFrontmatter(raw: Record<string, unknown> | null): AgentSourceFron
 	if (typeof raw.name === 'string' && raw.name.trim().length > 0) out.name = raw.name.trim()
 	if (typeof raw.role === 'string' && raw.role.trim().length > 0) out.role = raw.role.trim()
 	if (typeof raw.model === 'string' && raw.model.trim().length > 0) out.model = raw.model.trim()
-	if (Array.isArray(raw.capabilityGroups)) {
-		out.capabilityGroups = raw.capabilityGroups
-			.filter((v): v is string => typeof v === 'string')
-			.map((v) => v.trim())
-			.filter((v) => v.length > 0)
-	}
 	return out
 }
 

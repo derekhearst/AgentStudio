@@ -49,13 +49,13 @@ const BUILTIN_IDENTITY_SKILL_IDS: Record<BuiltinAgentKey, string> = {
  * tools fail closed for these agents until explicitly audited.
  */
 export const READ_ONLY_TOOL_NAMES: readonly string[] = [
-	// Always-on essentials (core capability group).
+	// Always-loaded essentials (Tool Search Tool `disclosure: 'always'` tier).
 	'ask_user',
 	'propose_plan',
 	// Research initiator: the Research agent calls this to propose sub-questions; the user
 	// approves in the chat sidebar and a background research job runs to produce a cited report.
 	'propose_research_plan',
-	'enable_capability',
+	'search_tools',
 	'web_search',
 	// Sandbox: read-only inspection.
 	'file_read',

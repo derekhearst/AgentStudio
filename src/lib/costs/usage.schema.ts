@@ -16,6 +16,11 @@ export const llmUsage = pgTable(
 		model: text('model').notNull(),
 		tokensIn: integer('tokens_in').notNull().default(0),
 		tokensOut: integer('tokens_out').notNull().default(0),
+		// Anthropic prompt-caching breakdown. tokensIn includes these (it's the gross prompt
+		// token count); the columns below isolate the cached portions for cost analysis. Zero
+		// on non-Anthropic providers.
+		tokensCacheWrite: integer('tokens_cache_write').notNull().default(0),
+		tokensCacheRead: integer('tokens_cache_read').notNull().default(0),
 		cost: numeric('cost', { precision: 18, scale: 12 }).notNull().default('0'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 		runId: uuid('run_id').references(() => chatRuns.id, { onDelete: 'set null' }),

@@ -141,12 +141,11 @@ export async function updateAgentRecord(
 		role?: string
 		systemPrompt?: string
 		model?: string
-		// Wave 2 #8 phase 4 — let operators bind which capability groups an agent gets by
-		// default (instead of the legacy "all tools" surface for agents without allowedTools).
-		// Lives in agent.config.capabilityGroups; the stream handler reads it on run start.
-		capabilityGroups?: string[]
-		// Optional fine-grained override: a fixed allow-list of tool names (no progressive
-		// disclosure). Empty/undefined means use capabilityGroups (or fall back to legacy).
+		// Optional fine-grained override: a fixed allow-list of tool names. When set, the
+		// agent's tool surface is exactly this list (no Tool Search Tool deferred loading).
+		// Empty/undefined means the agent uses the default tier-based surface like the
+		// orchestrator: `disclosure: 'always'` tools loaded by default, others loaded on
+		// `search_tools` invocation.
 		allowedTools?: string[]
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Refs are either
 		// registered built-in hook names OR future skill slugs (Phase 3). Empty array clears the
@@ -170,22 +169,15 @@ export async function updateAgentRecord(
 	if (patch.identitySkillId !== undefined) updates.identitySkillId = patch.identitySkillId
 
 	const configChanged =
-		patch.capabilityGroups !== undefined ||
-		patch.allowedTools !== undefined ||
-		patch.hooks !== undefined ||
-		patch.research !== undefined
+		patch.allowedTools !== undefined || patch.hooks !== undefined || patch.research !== undefined
 	if (configChanged) {
 		// Read existing config so we don't clobber unrelated keys (workspace, etc.).
 		const [current] = await db.select({ config: agents.config }).from(agents).where(eq(agents.id, agentId))
 		const existing = (current?.config ?? {}) as Record<string, unknown>
 		const nextConfig: Record<string, unknown> = { ...existing }
-		if (patch.capabilityGroups !== undefined) {
-			if (patch.capabilityGroups.length === 0) {
-				delete nextConfig.capabilityGroups
-			} else {
-				nextConfig.capabilityGroups = patch.capabilityGroups
-			}
-		}
+		// Drop the legacy `capabilityGroups` field if a previous version of the agent had it.
+		// Tool Search Tool replaces capability groups; leaving them would be silently ignored.
+		delete nextConfig.capabilityGroups
 		if (patch.allowedTools !== undefined) {
 			if (patch.allowedTools.length === 0) {
 				delete nextConfig.allowedTools

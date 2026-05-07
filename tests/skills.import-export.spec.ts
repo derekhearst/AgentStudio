@@ -41,8 +41,6 @@ test.describe('skills/skill-source — parseSkillSource', () => {
 				'description: How to safely inspect files.',
 				'category: tool',
 				'tags: [system, companion, sandbox]',
-				'companion_groups: [sandbox]',
-				'companion_tools: [shell, file_patch]',
 				'enabled: true',
 				'---',
 				'Body.',
@@ -50,26 +48,7 @@ test.describe('skills/skill-source — parseSkillSource', () => {
 		)
 		expect(out.frontmatter.category).toBe('tool')
 		expect(out.frontmatter.tags).toEqual(['system', 'companion', 'sandbox'])
-		expect(out.frontmatter.companionGroups).toEqual(['sandbox'])
-		expect(out.frontmatter.companionTools).toEqual(['shell', 'file_patch'])
 		expect(out.frontmatter.enabled).toBe(true)
-	})
-
-	test('supports the camelCase aliases companionGroups / companionTools (forward-compat)', async () => {
-		const { parseSkillSource } = await import('../src/lib/skills/skill-source')
-		const out = parseSkillSource(
-			[
-				'---',
-				'name: foo',
-				'description: bar',
-				'companionGroups: [sandbox]',
-				'companionTools: [shell]',
-				'---',
-				'body',
-			].join('\n'),
-		)
-		expect(out.frontmatter.companionGroups).toEqual(['sandbox'])
-		expect(out.frontmatter.companionTools).toEqual(['shell'])
 	})
 
 	test('throws when frontmatter is missing entirely', async () => {
@@ -159,8 +138,6 @@ test.describe('skills/skill-source — serializeSkillSource', () => {
 			content: '# Body\n\nFirst paragraph.\n\nSecond paragraph.',
 			category: 'tool',
 			tags: ['alpha', 'beta'],
-			companionGroups: ['sandbox', 'projects'],
-			companionTools: ['shell'],
 			enabled: false,
 		}
 		const md = serializeSkillSource(original)
@@ -169,8 +146,6 @@ test.describe('skills/skill-source — serializeSkillSource', () => {
 		expect(reparsed.frontmatter.description).toBe(original.description)
 		expect(reparsed.frontmatter.category).toBe(original.category)
 		expect(reparsed.frontmatter.tags).toEqual(original.tags)
-		expect(reparsed.frontmatter.companionGroups).toEqual(original.companionGroups)
-		expect(reparsed.frontmatter.companionTools).toEqual(original.companionTools)
 		expect(reparsed.frontmatter.enabled).toBe(false)
 		expect(reparsed.body).toBe(original.content.trim())
 	})
@@ -182,7 +157,6 @@ test.describe('skills/skill-source — serializeSkillSource', () => {
 			description: 'Byte-stable serialization fixture.',
 			content: 'Body content.',
 			tags: ['a', 'b'],
-			companionGroups: ['sandbox'],
 		})
 		const reparsed = parseSkillSource(first)
 		const second = serializeSkillSource({
@@ -191,8 +165,6 @@ test.describe('skills/skill-source — serializeSkillSource', () => {
 			content: reparsed.body,
 			category: reparsed.frontmatter.category,
 			tags: reparsed.frontmatter.tags,
-			companionGroups: reparsed.frontmatter.companionGroups,
-			companionTools: reparsed.frontmatter.companionTools,
 			enabled: reparsed.frontmatter.enabled,
 		})
 		expect(second).toBe(first)

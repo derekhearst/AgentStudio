@@ -25,10 +25,15 @@ export const appSettings = pgTable('app_settings', {
 		.$type<{
 			reservedResponsePct: number
 			autoCompactThresholdPct: number
-			compactionModel: string
+			/**
+			 * Tool names whose results should never be trimmed by trimHistoricalToolResults.
+			 * Use for tools whose output the model should be able to refer back to indefinitely
+			 * (e.g. propose_plan, propose_research_plan). Empty / unset = trim by default rules.
+			 */
+			preserveToolResults?: string[]
 		}>()
 		.notNull()
-		.default({ reservedResponsePct: 30, autoCompactThresholdPct: 72, compactionModel: 'openai/gpt-4o-mini' }),
+		.default({ reservedResponsePct: 30, autoCompactThresholdPct: 72 }),
 	toolConfig: jsonb('tool_config')
 		.$type<{
 			approvalRequiredTools: string[]

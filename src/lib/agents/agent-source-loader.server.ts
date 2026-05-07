@@ -128,9 +128,9 @@ async function applyAgent(
 
 		const baseConfig: Record<string, unknown> = (existing?.config as Record<string, unknown> | undefined) ?? {}
 		const nextConfig: Record<string, unknown> = { ...baseConfig, sourceSlug: source.slug }
-		if (source.frontmatter.capabilityGroups && source.frontmatter.capabilityGroups.length > 0) {
-			nextConfig.capabilityGroups = source.frontmatter.capabilityGroups
-		}
+		// Tool Search Tool replaces capability groups; drop the legacy field if it was set on
+		// the existing row by an older version of this loader.
+		delete nextConfig.capabilityGroups
 
 		if (existing) {
 			if (priority === 'db') {

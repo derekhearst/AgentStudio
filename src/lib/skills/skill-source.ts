@@ -14,7 +14,7 @@ import { extractFrontmatter, serializeFrontmatter } from '$lib/util/frontmatter'
  *   description: How to safely inspect & edit.   # required, ≤500 chars
  *   category: tool                               # optional; lands fully in PR-3
  *   tags: [system, companion, sandbox]           # optional
- *   companion_groups: [sandbox]                  # optional — auto-injects on enable_capability
+ *   # (companion_groups / companion_tools removed alongside the enable_capability concept)
  *   companion_tools: [shell, file_patch]         # optional
  *   enabled: true                                # optional, defaults to true
  *   ---
@@ -29,8 +29,6 @@ export type SkillFrontmatter = {
 	description: string
 	category?: string
 	tags?: string[]
-	companionGroups?: string[]
-	companionTools?: string[]
 	enabled?: boolean
 }
 
@@ -51,8 +49,6 @@ export type SkillSerializeInput = {
 	content: string
 	category?: string | null
 	tags?: string[]
-	companionGroups?: string[]
-	companionTools?: string[]
 	enabled?: boolean
 }
 
@@ -95,12 +91,6 @@ export function parseSkillSource(source: string): ParsedSkillSource {
 	const tags = readStringArray(raw, 'tags')
 	if (tags) frontmatter.tags = tags
 
-	const companionGroups = readStringArray(raw, 'companion_groups') ?? readStringArray(raw, 'companionGroups')
-	if (companionGroups) frontmatter.companionGroups = companionGroups
-
-	const companionTools = readStringArray(raw, 'companion_tools') ?? readStringArray(raw, 'companionTools')
-	if (companionTools) frontmatter.companionTools = companionTools
-
 	const enabled = raw.enabled
 	if (typeof enabled === 'boolean') frontmatter.enabled = enabled
 	else if (enabled === 'true' || enabled === 'false') frontmatter.enabled = enabled === 'true'
@@ -119,8 +109,6 @@ export function serializeSkillSource(input: SkillSerializeInput): string {
 	}
 	if (input.category) fm.category = input.category
 	if (input.tags && input.tags.length > 0) fm.tags = input.tags
-	if (input.companionGroups && input.companionGroups.length > 0) fm.companion_groups = input.companionGroups
-	if (input.companionTools && input.companionTools.length > 0) fm.companion_tools = input.companionTools
 	// Only emit `enabled` when explicitly disabled — true is the default and would just be noise.
 	if (input.enabled === false) fm.enabled = false
 

@@ -23,7 +23,7 @@ function makeFixtureRoot(layout: Record<string, string>): string {
 }
 
 test.describe('agents/agent-source-loader — pure helpers', () => {
-	test('extractFrontmatter parses key: value, inline arrays, and dash-lists', async () => {
+	test('extractFrontmatter parses key: value pairs and the body that follows', async () => {
 		const { extractFrontmatter } = await import('../src/lib/agents/agent-source-loader')
 		const out = extractFrontmatter(
 			[
@@ -31,7 +31,6 @@ test.describe('agents/agent-source-loader — pure helpers', () => {
 				'name: Codex',
 				'role: Coding agent',
 				'model: anthropic/claude-sonnet-4',
-				'capabilityGroups: [core, sandbox, skills]',
 				'---',
 				'',
 				'You are Codex.',
@@ -43,17 +42,8 @@ test.describe('agents/agent-source-loader — pure helpers', () => {
 			name: 'Codex',
 			role: 'Coding agent',
 			model: 'anthropic/claude-sonnet-4',
-			capabilityGroups: ['core', 'sandbox', 'skills'],
 		})
 		expect(out.body.startsWith('You are Codex.')).toBe(true)
-	})
-
-	test('extractFrontmatter accepts indented dash-lists for arrays', async () => {
-		const { extractFrontmatter } = await import('../src/lib/agents/agent-source-loader')
-		const out = extractFrontmatter(
-			['---', 'name: Codex', 'capabilityGroups:', '  - core', '  - skills', '---', 'body'].join('\n'),
-		)
-		expect(out.frontmatter?.capabilityGroups).toEqual(['core', 'skills'])
 	})
 
 	test('extractFrontmatter strips surrounding quotes from string values', async () => {
@@ -110,7 +100,6 @@ test.describe('agents/agent-source-loader — pure helpers', () => {
 				'name: Codex',
 				'role: Coding agent',
 				'model: anthropic/claude-haiku-4-5',
-				'capabilityGroups: [core, sandbox]',
 				'---',
 				'',
 				'You are Codex. Be careful.',
@@ -130,7 +119,6 @@ test.describe('agents/agent-source-loader — pure helpers', () => {
 			expect(out.agents).toHaveLength(2)
 			const codex = out.agents.find((a) => a.slug === 'codex')
 			expect(codex?.frontmatter.name).toBe('Codex')
-			expect(codex?.frontmatter.capabilityGroups).toEqual(['core', 'sandbox'])
 			expect(codex?.systemPrompt).toBe('You are Codex. Be careful.')
 			const researcher = out.agents.find((a) => a.slug === 'researcher')
 			expect(researcher?.frontmatter.name).toBeUndefined() // resolveAgentName fills from slug
@@ -203,7 +191,7 @@ test.describe('agents/agent-source-loader — DB application', () => {
 		await sql`
 			insert into agents (name, role, system_prompt, model, config)
 			values ('Existing', 'preserved role', 'preserved prompt', 'anthropic/claude-sonnet-4',
-				${sql.json({ sourceSlug: fixtureSlug, capabilityGroups: ['core'] })})
+				${sql.json({ sourceSlug: fixtureSlug })})
 		`
 
 		try {
@@ -278,7 +266,6 @@ test.describe('agents/agent-source-loader — DB application', () => {
 						frontmatter: {
 							name: 'Renamed',
 							role: 'new role',
-							capabilityGroups: ['core', 'skills'],
 						},
 						systemPrompt: 'new prompt',
 					},
@@ -289,14 +276,13 @@ test.describe('agents/agent-source-loader — DB application', () => {
 			expect(result.agentsUpdated).toBe(1)
 			expect(result.agentsInserted).toBe(0)
 
-			const [updated] = await sql<{ name: string; role: string; system_prompt: string; config: { capabilityGroups?: string[]; sourceSlug?: string } }[]>`
+			const [updated] = await sql<{ name: string; role: string; system_prompt: string; config: { sourceSlug?: string } }[]>`
 				select name, role, system_prompt, config
 				from agents where config->>'sourceSlug' = ${fixtureSlug}
 			`
 			expect(updated.name).toBe('Renamed')
 			expect(updated.role).toBe('new role')
 			expect(updated.system_prompt).toBe('new prompt')
-			expect(updated.config.capabilityGroups).toEqual(['core', 'skills'])
 			expect(updated.config.sourceSlug).toBe(fixtureSlug)
 		} finally {
 			await sql`delete from agents where config->>'sourceSlug' = ${fixtureSlug}`

@@ -1,7 +1,6 @@
 export {
 	listSkillsQuery,
 	getSkillByIdQuery,
-	getCapabilityGroupsQuery,
 	createSkillCommand,
 	updateSkillCommand,
 	deleteSkillCommand,

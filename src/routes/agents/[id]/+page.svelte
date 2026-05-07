@@ -21,11 +21,6 @@
 	let configSaved = $state(false)
 	let draftSystemPrompt = $state('')
 	let draftModel = $state('')
-	// Wave 2 #8 phase 4 — capability binding draft state.
-	const ALL_CAPABILITY_GROUPS = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects', 'source_control'] as const
-	type CapabilityGroupName = (typeof ALL_CAPABILITY_GROUPS)[number]
-	let draftCapabilityGroups = $state<CapabilityGroupName[]>([])
-	let useCapabilityBinding = $state(false)
 
 	// Wave 3 #13 phase 4 — per-agent hook bindings draft state.
 	// Map of `event → comma-separated refs string` so the UI can edit text and convert on save.
@@ -156,14 +151,6 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
-	function readAgentCapabilityGroups(agent: AgentData['agent']): CapabilityGroupName[] {
-		const config = (agent.config ?? null) as { capabilityGroups?: unknown } | null
-		if (!Array.isArray(config?.capabilityGroups)) return []
-		return config.capabilityGroups.filter(
-			(g): g is CapabilityGroupName => typeof g === 'string' && (ALL_CAPABILITY_GROUPS as readonly string[]).includes(g),
-		)
-	}
-
 	function readAgentHooks(agent: AgentData['agent']): Record<string, string[]> {
 		const config = (agent.config ?? null) as { hooks?: unknown } | null
 		if (!config?.hooks || typeof config.hooks !== 'object') return {}
@@ -180,9 +167,6 @@
 	function syncDraftFromAgent(agent: AgentData['agent']) {
 		draftSystemPrompt = agent.systemPrompt
 		draftModel = agent.model
-		const groups = readAgentCapabilityGroups(agent)
-		draftCapabilityGroups = groups
-		useCapabilityBinding = groups.length > 0
 		// Convert `event → string[]` into `event → comma-separated string` for the textbox UI.
 		const persistedHooks = readAgentHooks(agent)
 		draftHookRefs = Object.fromEntries(
@@ -214,16 +198,6 @@
 		syncDraftFromAgent(data.agent)
 	}
 
-	function toggleCapabilityGroup(group: CapabilityGroupName) {
-		// `core` is always-on; toggling it is a no-op.
-		if (group === 'core') return
-		if (draftCapabilityGroups.includes(group)) {
-			draftCapabilityGroups = draftCapabilityGroups.filter((g) => g !== group)
-		} else {
-			draftCapabilityGroups = [...draftCapabilityGroups, group]
-		}
-	}
-
 	async function saveConfig() {
 		if (!data) return
 		const systemPrompt = draftSystemPrompt.trim()
@@ -241,10 +215,6 @@
 		configError = null
 		configSaved = false
 		try {
-			// Empty array clears the override (back-compat: legacy "all tools" surface).
-			const capabilityGroups = useCapabilityBinding
-				? Array.from(new Set<CapabilityGroupName>(['core', ...draftCapabilityGroups]))
-				: []
 			// Convert `event → comma-separated string` back to `event → string[]`. Empty entries
 			// drop out so updateAgentRecord can clear them via its empty-array semantics.
 			const hooks: Record<string, string[]> = {}
@@ -256,7 +226,6 @@
 				agentId: data.agent.id,
 				systemPrompt,
 				model,
-				capabilityGroups,
 				hooks,
 			})
 			if (!updated) {
@@ -572,63 +541,6 @@
 				<p class="mt-1 text-right text-[11px] text-base-content/45">{draftSystemPrompt.length} chars</p>
 			{:else}
 				<pre class="whitespace-pre-wrap text-xs leading-relaxed text-base-content/70">{data.agent.systemPrompt}</pre>
-			{/if}
-
-			<div class="mb-2 mt-4 border-t border-base-300/70"></div>
-
-			<div class="mb-1 flex items-center justify-between gap-2">
-				<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Capability binding</p>
-				{#if editingConfig}
-					<label class="flex cursor-pointer items-center gap-2 text-xs">
-						<input
-							type="checkbox"
-							class="toggle toggle-xs"
-							checked={useCapabilityBinding}
-							onchange={(e) => (useCapabilityBinding = (e.currentTarget as HTMLInputElement).checked)}
-						/>
-						<span>Restrict tools to selected groups</span>
-					</label>
-				{/if}
-			</div>
-			<p class="mb-2 text-[11px] leading-snug text-base-content/55">
-				When enabled, this agent's chat starts with only the selected capability groups; the model can call <code class="font-mono text-[10px]">enable_capability</code> to expand. When disabled, the agent gets the legacy "all tools" surface (back-compat).
-			</p>
-			{#if editingConfig}
-				{#if useCapabilityBinding}
-					<div class="flex flex-wrap gap-2">
-						{#each ALL_CAPABILITY_GROUPS as group (group)}
-							{@const checked = group === 'core' || draftCapabilityGroups.includes(group)}
-							<label
-								class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors {checked ? 'border-primary/55 bg-primary/10' : 'border-base-300/60 bg-base-200/30 hover:bg-base-200/55'}"
-							>
-								<input
-									type="checkbox"
-									class="checkbox checkbox-xs"
-									{checked}
-									disabled={group === 'core'}
-									onchange={() => toggleCapabilityGroup(group)}
-								/>
-								<span class="font-mono">{group}</span>
-								{#if group === 'core'}
-									<span class="badge badge-xs badge-ghost">always-on</span>
-								{/if}
-							</label>
-						{/each}
-					</div>
-				{:else}
-					<p class="text-xs italic text-base-content/40">All tools available (no restriction).</p>
-				{/if}
-			{:else}
-				{@const persistedGroups = readAgentCapabilityGroups(data.agent)}
-				{#if persistedGroups.length > 0}
-					<div class="flex flex-wrap gap-1.5">
-						{#each persistedGroups as group (group)}
-							<span class="badge badge-sm badge-outline font-mono">{group}</span>
-						{/each}
-					</div>
-				{:else}
-					<p class="text-xs italic text-base-content/40">All tools available (no restriction).</p>
-				{/if}
 			{/if}
 
 			<div class="mb-2 mt-4 border-t border-base-300/70"></div>

@@ -14,7 +14,6 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditAgentConfigUpdated } from '$lib/governance'
 
 const agentIdSchema = z.string().uuid()
-const CAPABILITY_GROUP_NAMES = ['core', 'sandbox', 'skills', 'agents', 'media', 'research', 'projects', 'source_control'] as const
 const HOOK_EVENT_NAMES = [
 	'before_run',
 	'after_run',
@@ -36,9 +35,6 @@ const updateAgentSchema = z
 		agentId: agentIdSchema,
 		systemPrompt: z.string().trim().min(1).optional(),
 		model: z.string().trim().min(1).optional(),
-		// Wave 2 #8 phase 4 — capability binding. Pass an empty array to clear the override and
-		// fall back to the legacy "all tools" default for back-compat.
-		capabilityGroups: z.array(z.enum(CAPABILITY_GROUP_NAMES)).optional(),
 		allowedTools: z.array(z.string().trim().min(1)).optional(),
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Empty object
 		// clears all bindings; empty array per-event drops that event's overrides.
@@ -64,7 +60,6 @@ const updateAgentSchema = z
 		(input) =>
 			input.systemPrompt !== undefined ||
 			input.model !== undefined ||
-			input.capabilityGroups !== undefined ||
 			input.allowedTools !== undefined ||
 			input.hooks !== undefined ||
 			input.research !== undefined ||
@@ -131,7 +126,6 @@ export const updateAgentCommand = command(updateAgentSchema, async (input) => {
 	const updated = await updateAgentRecord(input.agentId, {
 		systemPrompt: input.systemPrompt,
 		model: input.model,
-		capabilityGroups: input.capabilityGroups,
 		allowedTools: input.allowedTools,
 		hooks: input.hooks,
 		research: input.research,

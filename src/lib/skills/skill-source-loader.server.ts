@@ -63,8 +63,6 @@ async function applyOneSkill(
 			content: source.parsed.body,
 			category: fm.category,
 			tags: fm.tags,
-			companionGroups: fm.companionGroups,
-			companionTools: fm.companionTools,
 			enabled: fm.enabled,
 			resources: source.resources,
 			sourceFile: source.path,

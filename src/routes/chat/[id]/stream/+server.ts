@@ -183,11 +183,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let scopedAgentTools: string[] | null = null
 	let persistentKey: string | null = null
 	let worktreeConfig: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null = null
-	// Wave 2 #8 phase 4 — agent.config.capabilityGroups overrides the legacy "all tools" default
-	// for non-orchestrator agents without an explicit allowedTools list. When set, the agent gets
-	// progressive disclosure starting from these groups (instead of jumping straight to the full
-	// surface). When unset, the legacy back-compat path is preserved.
-	let agentCapabilityGroups: string[] | null = null
 
 	// Resolve the bound agent — conversations are always logically bound to one (the modes
 	// concept folded into agents) but the column is nullable at the DB layer for back-compat
@@ -212,13 +207,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 	const agentToolPolicy = resolveAgentToolPolicy(agent.config as Parameters<typeof resolveAgentToolPolicy>[0])
 
-	// Wave 2 #8 phase 2 — pre-suggest capability groups from the user message so the model gets
-	// the right tools on round 0 without spending a round calling enable_capability. Computed
-	// here (before slot assembly) so the matching companion-skill summaries (Wave 2 #9 phase 3)
-	// can be added as a context slot in the same pass.
 	const isOrchestrator = agent.builtinKey != null
-	const { suggestCapabilityGroups } = await import('$lib/tools/suggest-capabilities')
-	const suggestedGroups = isOrchestrator && body.content ? suggestCapabilityGroups(body.content) : []
 
 	// --- Context Engineering: Built-in Agent Posture ---
 	// Built-in agents other than `chat` overlay their identity-skill content as a posture slot
@@ -283,7 +272,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		const config = agent.config as
 			| {
 					allowedTools?: string[]
-					capabilityGroups?: string[]
 					workspace?: {
 						mode?: string
 						key?: string
@@ -295,9 +283,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			| null
 		if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
 			scopedAgentTools = config.allowedTools
-		}
-		if (Array.isArray(config?.capabilityGroups) && config.capabilityGroups.length > 0) {
-			agentCapabilityGroups = config.capabilityGroups
 		}
 		// Phase 2 of #7: opt-in persistent workspace per agent.
 		if (
@@ -337,10 +322,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
 				'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
 				'',
-				'Tool surface (progressive disclosure):',
-				'- Only `core` capability tools are loaded by default. Other groups (`sandbox`, `skills`, `agents`, `media`) are gated behind the `enable_capability` meta-tool.',
-				"- Call `enable_capability(group: '<name>')` once when the task clearly needs that group; the new tools become available on the NEXT round (not the same turn). Available groups: `sandbox` (file/shell/git tools), `skills` (manage reusable knowledge bundles), `agents` (delegate, schedule, manage), `media` (image generation).",
-				"- Don't enable groups speculatively. Match what the user actually asked for.",
+				'Tool surface (deferred loading):',
+				'- A small core (web_search, ask_user, propose_plan, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
+				'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
+				"- Don't search speculatively. Match what the user actually asked for.",
+				'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
 			].join('\n'),
 		})
 	} else {
@@ -352,8 +338,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				'- You cannot call ask_user directly in agent conversations.',
 				'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
 				'',
-				'Tool surface (progressive disclosure):',
-				'- Only `core` capability tools are loaded by default. If you need filesystem/shell/git, skill management, sub-agent delegation, or image generation, call `enable_capability(group: \'sandbox\' | \'skills\' | \'agents\' | \'media\')` first; the tools become available on the NEXT round.',
+				'Tool surface (deferred loading):',
+				'- A small core (web_search, propose_plan, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
 			].join('\n'),
 		})
 	}
@@ -364,28 +350,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			content: `Available skills (use read_skill to load full content when relevant):\n${skillSummariesText}`,
 			truncationStrategy: 'truncate-end',
 		})
-	}
-
-	// Wave 2 #9 phase 3 — when capability groups are auto-suggested (or pre-bound on the agent),
-	// surface their companion skill summaries in the context so the model knows when/how to use
-	// the tools without waiting for an explicit enable_capability round-trip. Only the summaries
-	// (not full bodies) — bodies still require read_skill.
-	if (suggestedGroups.length > 0) {
-		try {
-			const { getCompanionSkillsForGroups } = await import('$lib/skills/skills.server')
-			const companions = await getCompanionSkillsForGroups(suggestedGroups)
-			if (companions.length > 0) {
-				const lines = companions.map((s) => `- ${s.name}: ${s.description}`).join('\n')
-				contextSlots.push({
-					name: 'companion_skills',
-					priority: 75,
-					content: `Companion skills for the active capability groups (${suggestedGroups.join(', ')}). Call read_skill('<name>') to load full guidance:\n${lines}`,
-					truncationStrategy: 'truncate-end',
-				})
-			}
-		} catch (err) {
-			logger.warn('[skills] companion lookup for suggested groups failed', { err })
-		}
 	}
 
 	// --- Context Engineering: Memory Palace Recall ---
@@ -425,46 +389,101 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const capabilityPrompt = assembled.systemPrompt
 
 	if (capabilityPrompt) {
-		llmMessages.unshift({
-			role: 'system',
-			content: capabilityPrompt,
-		})
+		// Build the system message as content blocks so the cache_control marker can sit AT
+		// the boundary between stable and volatile content. Several slots recompute per query
+		// (skills via top-K relevance, companion_skills via suggested groups, memory via
+		// recall) — keeping them inside the cached prefix would cache-miss every turn.
+		// Strategy: render stable slots as one block with cache_control, append volatile
+		// slots as a second block without one. Result: the cached prefix stays byte-stable
+		// across turns of the same conversation; only the volatile portion churns.
+		const VOLATILE_SLOT_NAMES = new Set(['memory', 'skills', 'companion_skills'])
+		const stableParts: string[] = []
+		const volatileParts: string[] = []
+		for (const { name, content } of assembled.renderedSlots) {
+			if (VOLATILE_SLOT_NAMES.has(name)) volatileParts.push(content)
+			else stableParts.push(content)
+		}
+		// `cacheControl` (camelCase) matches the OpenRouter SDK input shape; the SDK
+		// converts it to `cache_control` on the wire to Anthropic.
+		const blocks: Array<{ type: 'text'; text: string; cacheControl?: { type: 'ephemeral' } }> = []
+		if (stableParts.length > 0) {
+			blocks.push({
+				type: 'text',
+				text: stableParts.join('\n\n'),
+				cacheControl: { type: 'ephemeral' },
+			})
+		}
+		if (volatileParts.length > 0) {
+			blocks.push({ type: 'text', text: volatileParts.join('\n\n') })
+		}
+		// Fallback: if the split produced nothing (e.g. all slots happened to be volatile),
+		// keep the original behavior with cacheControl on the whole prompt.
+		if (blocks.length === 0) {
+			blocks.push({
+				type: 'text',
+				text: capabilityPrompt,
+				cacheControl: { type: 'ephemeral' },
+			})
+		}
+		llmMessages.unshift({ role: 'system', content: blocks })
 	}
 
 	// --- Context Engineering: Conversation Compaction ---
 	const compactionCheck = await shouldCompact(llmMessages, routedModel, user.id)
 	let didCompact = false
+	let compactionStats: {
+		messagesBefore: number
+		messagesAfter: number
+		originalTokens: number
+		compactedTokens: number
+		summaryTokens: number
+		compactionModel: string
+	} | null = null
 	if (compactionCheck.needed) {
+		const messagesBefore = llmMessages.length
 		const result = await compactMessages(llmMessages, user.id, routedModel)
 		if (result.summary) {
 			llmMessages.length = 0
 			llmMessages.push(...result.compacted)
 			didCompact = true
+			compactionStats = {
+				messagesBefore,
+				messagesAfter: result.compacted.length,
+				originalTokens: result.originalTokens,
+				compactedTokens: result.compactedTokens,
+				summaryTokens: result.summaryTokens,
+				compactionModel: result.compactionModel,
+			}
 		}
 	}
 
 	// --- Context Engineering: Trim Historical Tool Results ---
-	const trimmedMessages = trimHistoricalToolResults(llmMessages)
+	const preserveToolResultsRaw = (currentSettings.contextConfig as { preserveToolResults?: string[] } | null)?.preserveToolResults
+	const preserveToolNames = Array.isArray(preserveToolResultsRaw) && preserveToolResultsRaw.length > 0
+		? new Set(preserveToolResultsRaw)
+		: undefined
+	const trimResult = trimHistoricalToolResults(llmMessages, { preserveToolNames })
+	const trimmedMessages = trimResult.messages
+	const appliedEdits = trimResult.appliedEdits
 
 	const startedAt = Date.now()
 
-	// --- Context Engineering: Tool Loading (Wave 2 #8 phases 1 + 4 — progressive disclosure) ---
+	// --- Context Engineering: Tool Loading (Tool Search Tool — deferred loading) ---
 	// Resolution order:
-	//   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface, no PD.
-	//   2. Orchestrator conversations OR agent conversations with agent.config.capabilityGroups —
-	//      progressive disclosure starting at `core` (orchestrator) or the configured groups (agent).
-	//   3. Agent conversations without allowedTools and without capabilityGroups — keep the legacy
-	//      "all tools" surface so existing agents don't suddenly lose their toolkit.
-	const { expandGroupsToToolNames, getEnabledGroups } = await import('$lib/tools/capabilities.server')
-	const useProgressiveDisclosure = !scopedAgentTools && (isOrchestrator || agentCapabilityGroups !== null)
-	// Pre-suggested groups (computed earlier so the slot pass could reference them) get merged
-	// into the orchestrator's initial enabled set.
-	const orchestratorBaseGroups = Array.from(new Set<string>(['core', ...suggestedGroups]))
-	const initialEnabledGroups: string[] = isOrchestrator
-		? orchestratorBaseGroups
-		: (agentCapabilityGroups ?? ['core'])
-	function computeToolsFor(enabledGroupNames: string[]) {
-		const all = getToolDefinitions()
+	//   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface, tier filter off.
+	//   2. Default — only `disclosure: 'always'` tools loaded; everything else is searchable via
+	//      `search_tools(query)`. Once the model invokes search_tools, the runtime adds the matched
+	//      names to `loadedSearchableTools` and they appear on subsequent rounds.
+	//
+	// `loadedSearchableTools` is a per-run mutable set owned by this closure. The runtime calls
+	// the `loadSearchableTools` callback (see RunChatLoopInput) when search_tools succeeds; the
+	// next `computeTools()` invocation picks the new names up.
+	const loadedSearchableTools = new Set<string>()
+	function computeTools() {
+		const all = getToolDefinitions(undefined, {
+			tierFilter: !scopedAgentTools,
+			loadedSearchable: loadedSearchableTools,
+		})
 		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
 		// Programmatic tool calling is gated behind a global setting (Settings → Tool Approval).
 		// When off, `run_code` is hidden from the model entirely so it cannot be invoked.
@@ -474,13 +493,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		let assembled: typeof ptcFiltered
 		if (scopedAgentTools) {
 			assembled = ptcFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
-		} else if (!useProgressiveDisclosure) {
-			assembled = ptcFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 		} else {
-			const activeNames = new Set(expandGroupsToToolNames(enabledGroupNames))
-			assembled = ptcFiltered
-				.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
-				.filter((tool) => activeNames.has(tool.function.name))
+			assembled = ptcFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
 		}
 		// Built-in Research + Plan agents strip write tools so the model has to surface
 		// findings/proposals instead of silently taking action. Allow-list shape (see
@@ -488,7 +502,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		// explicitly audited. Chat / Autonomous / custom agents pass through unfiltered.
 		return filterToolsByAgentPolicy(assembled, agentToolPolicy)
 	}
-	const initialTools = computeToolsFor(initialEnabledGroups)
+	const initialTools = computeTools()
 	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
 
@@ -568,9 +582,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			label: body.regenerate ? 'Regenerating response' : 'Generating response',
 			startedAt: new Date(),
 			lastHeartbeatAt: new Date(),
-			// Seed the run with the initial capability groups (orchestrator → ['core'], agent →
-			// agent.config.capabilityGroups). Subsequent enable_capability calls mutate this set.
-			enabledCapabilityGroups: initialEnabledGroups,
 		})
 		.returning({ id: chatRuns.id, evalRequired: chatRuns.evalRequired })
 
@@ -581,9 +592,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			const session = createSseSession({ runId: run.id, controller })
 
 			try {
-				// Notify client if compaction occurred
-				if (didCompact) {
-					await session.emit('compaction', { tokensBefore: compactionCheck.tokenEstimate })
+				// Notify client if compaction occurred. Include the full stats so the dev panel
+				// can render before/after counts and the model used (Feature #6 telemetry).
+				if (didCompact && compactionStats) {
+					await session.emit('compaction', {
+						tokensBefore: compactionCheck.tokenEstimate,
+						...compactionStats,
+					})
 				}
 
 				// Phase 7 of #4: emit a context_stats snapshot so the chat workbench can show
@@ -598,6 +613,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					droppedSlots: assembled.droppedSlots,
 					truncatedSlots: assembled.truncatedSlots,
 					systemPromptTokens: assembled.estimatedTokens,
+					// Feature #5: applied_edits-style telemetry — what got trimmed before this turn
+					appliedEdits,
 				})
 
 				const loopResult = await runChatLoop({
@@ -614,12 +631,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					agentId: conversation.agentId ?? null,
 					persistentKey,
 					worktree: worktreeConfig,
-					computeTools: useProgressiveDisclosure
-						? async () => {
-								const enabled = await getEnabledGroups(run.id)
-								return computeToolsFor(enabled)
-							}
-						: async () => initialTools,
+					computeTools: async () => computeTools(),
+					loadSearchableTools: (toolNames) => {
+						for (const name of toolNames) loadedSearchableTools.add(name)
+					},
 					spawnSubagent: async (req) => {
 						const fullTask = req.context ? `${req.context}\n\n${req.task}` : req.task
 						const result = await runInlineSubagent(
@@ -636,6 +651,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					promptTokens,
 					completionTokens,
 					reasoningTokens,
+					cacheCreationInputTokens,
+					cacheReadInputTokens,
 					finalText: allTextContent,
 					toolCalls: allToolCalls,
 					streamBlocks,
@@ -662,6 +679,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					model: routedModel,
 					tokensIn: promptTokens,
 					tokensOut: completionTokens,
+					tokensCacheWrite: cacheCreationInputTokens,
+					tokensCacheRead: cacheReadInputTokens,
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
@@ -676,6 +695,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					modelSelection,
 					reasoningEffort,
 					reasoningTokens,
+					tokensCacheWrite: cacheCreationInputTokens,
+					tokensCacheRead: cacheReadInputTokens,
 					runId: run.id,
 					blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
 				}
@@ -838,6 +859,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					model: routedModel,
 					tokensIn: promptTokens,
 					tokensOut: completionTokens,
+					tokensCacheWrite: cacheCreationInputTokens,
+					tokensCacheRead: cacheReadInputTokens,
 					reasoningTokens,
 					ttftMs,
 					totalMs,

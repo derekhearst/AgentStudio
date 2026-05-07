@@ -13,12 +13,6 @@ export const skills = pgTable('skills', {
 	// (Phase 4 of #4). Nullable so existing rows keep working until they get re-embedded.
 	descriptionEmbedding: vector('description_embedding', { dimensions: 1536 }),
 	descriptionEmbeddedAt: timestamp('description_embedded_at', { withTimezone: true }),
-	// Wave 2 #9 Phase 1 — tool-to-skill mapping for progressive disclosure of usage guidance.
-	// `companionGroups` lists capability group names this skill teaches (e.g. ['sandbox']).
-	// `companionTools` lists specific tool names this skill teaches (e.g. ['shell', 'file_patch']).
-	// When the run enables a matching group, the skill's summary is auto-loaded as a context slot.
-	companionGroups: text('companion_groups').array().notNull().default([]),
-	companionTools: text('companion_tools').array().notNull().default([]),
 	// PR-3 — skill category (tool/workflow/domain/policy/identity/hook). Nullable text
 	// rather than a Postgres enum so we can iterate the set via Zod without enum migrations.
 	// Backfilled from the `name` namespace in migration 0054.

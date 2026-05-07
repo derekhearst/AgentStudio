@@ -6,7 +6,6 @@
 	import { onMount } from 'svelte';
 	import {
 		getSkillByIdQuery,
-		getCapabilityGroupsQuery,
 		updateSkillCommand,
 		deleteSkillCommand,
 		addSkillFileCommand,
@@ -21,7 +20,6 @@
 
 	type SkillDetail = NonNullable<Awaited<ReturnType<typeof getSkillByIdQuery>>>;
 	type SkillFile = SkillDetail['files'][number];
-	type CapabilityGroup = Awaited<ReturnType<typeof getCapabilityGroupsQuery>>[number];
 
 	let skill = $state<SkillDetail | null>(null);
 	let loading = $state(false);
@@ -29,7 +27,7 @@
 	let error = $state<string | null>(null);
 
 	/* ── Editing state ───────────────────── */
-	let editingField = $state<'name' | 'description' | 'content' | 'tags' | 'companionTools' | null>(null);
+	let editingField = $state<'name' | 'description' | 'content' | 'tags' | null>(null);
 	let editValue = $state('');
 
 	const CATEGORIES = ['tool', 'workflow', 'domain', 'policy', 'identity', 'hook'] as const;
@@ -45,41 +43,6 @@
 		} finally {
 			busy = false;
 		}
-	}
-
-	/* ── Companion mapping editor — chips dynamic from capabilityGroups registry ── */
-	let allGroups = $state<CapabilityGroup[]>([]);
-	let editingCompanionGroups = $state(false);
-	let draftCompanionGroups = $state<string[]>([]);
-
-	function startEditCompanionGroups() {
-		if (!skill || skill.isSystem) return;
-		draftCompanionGroups = Array.isArray(skill.companionGroups) ? [...skill.companionGroups] : [];
-		editingCompanionGroups = true;
-	}
-
-	function toggleCompanionGroup(g: string) {
-		if (draftCompanionGroups.includes(g)) {
-			draftCompanionGroups = draftCompanionGroups.filter((x) => x !== g);
-		} else {
-			draftCompanionGroups = [...draftCompanionGroups, g];
-		}
-	}
-
-	async function saveCompanionGroups() {
-		if (!skill) return;
-		busy = true;
-		try {
-			await updateSkillCommand({ id: skill.id, companionGroups: draftCompanionGroups });
-			editingCompanionGroups = false;
-			await refresh();
-		} finally {
-			busy = false;
-		}
-	}
-
-	function cancelCompanionGroupsEdit() {
-		editingCompanionGroups = false;
 	}
 
 	/* ── File editing state ──────────────── */
@@ -145,12 +108,7 @@
 
 	onMount(() => {
 		void refresh();
-		void loadGroups();
 	});
-
-	async function loadGroups() {
-		allGroups = await getCapabilityGroupsQuery();
-	}
 
 	async function refresh() {
 		loading = true;
@@ -166,13 +124,11 @@
 	}
 
 	/* ── Inline editing ──────────────────── */
-	function startEdit(field: 'name' | 'description' | 'content' | 'tags' | 'companionTools') {
+	function startEdit(field: 'name' | 'description' | 'content' | 'tags') {
 		if (!skill || skill.isSystem) return;
 		editingField = field;
 		if (field === 'tags') {
 			editValue = skill.tags.join(', ');
-		} else if (field === 'companionTools') {
-			editValue = (skill.companionTools ?? []).join(', ');
 		} else {
 			editValue = skill[field];
 		}
@@ -185,9 +141,6 @@
 			if (editingField === 'tags') {
 				const tags = editValue.split(',').map((t) => t.trim()).filter(Boolean);
 				await updateSkillCommand({ id: skill.id, tags });
-			} else if (editingField === 'companionTools') {
-				const companionTools = editValue.split(',').map((t) => t.trim()).filter(Boolean);
-				await updateSkillCommand({ id: skill.id, companionTools });
 			} else {
 				await updateSkillCommand({ id: skill.id, [editingField]: editValue.trim() });
 			}
@@ -395,68 +348,6 @@
 								<option value={c}>{c}</option>
 							{/each}
 						</select>
-					{/if}
-				</div>
-			</div>
-
-			<!-- Companion mapping — auto-load this skill's summary when its group enables -->
-			<div class="mb-4 space-y-3">
-				<div>
-					<div class="mb-1 flex items-center justify-between">
-						<div class="text-xs font-semibold uppercase tracking-wider opacity-40">Companion to capability groups</div>
-						{#if !isSystemSkill && !editingCompanionGroups}
-							<button class="btn btn-ghost btn-xs" onclick={startEditCompanionGroups}>Edit</button>
-						{/if}
-					</div>
-					<p class="mb-2 text-[11px] leading-snug opacity-55">
-						When the agent enables one of these groups (auto-suggest or <code class="font-mono">enable_capability</code>), this skill's summary is auto-injected into the system prompt so the model knows when and how to use the new tools.
-					</p>
-					{#if editingCompanionGroups}
-						<div class="flex flex-wrap gap-2">
-							{#each allGroups as group (group.name)}
-								{@const checked = draftCompanionGroups.includes(group.name)}
-								<label class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-colors {checked ? 'border-info/55 bg-info/10' : 'border-base-300/60 bg-base-200/30 hover:bg-base-200/55'}" title={group.description}>
-									<input type="checkbox" class="checkbox checkbox-xs" {checked} onchange={() => toggleCompanionGroup(group.name)} />
-									<span class="font-mono">{group.name}</span>
-								</label>
-							{/each}
-						</div>
-						<div class="mt-2 flex gap-2">
-							<button class="btn btn-primary btn-xs" onclick={saveCompanionGroups} disabled={busy}>Save</button>
-							<button class="btn btn-ghost btn-xs" onclick={cancelCompanionGroupsEdit}>Cancel</button>
-						</div>
-					{:else if Array.isArray(s.companionGroups) && s.companionGroups.length > 0}
-						<div class="flex flex-wrap gap-1.5">
-							{#each s.companionGroups as group (group)}
-								<span class="badge badge-info badge-sm font-mono">{group}</span>
-							{/each}
-						</div>
-					{:else}
-						<span class="text-xs opacity-40">No groups{isSystemSkill ? '' : ' — click Edit to assign'}</span>
-					{/if}
-				</div>
-
-				<div>
-					<div class="mb-1 flex items-center justify-between">
-						<div class="text-xs font-semibold uppercase tracking-wider opacity-40">Companion to specific tools</div>
-						{#if !isSystemSkill && editingField !== 'companionTools'}
-							<button class="btn btn-ghost btn-xs" onclick={() => startEdit('companionTools')}>Edit</button>
-						{/if}
-					</div>
-					{#if editingField === 'companionTools'}
-						<div class="flex items-center gap-2">
-							<input type="text" class="input input-bordered input-sm flex-1" placeholder="comma-separated tool names (e.g. shell, file_patch)" bind:value={editValue} />
-							<button class="btn btn-primary btn-xs" onclick={saveEdit} disabled={busy}>Save</button>
-							<button class="btn btn-ghost btn-xs" onclick={cancelEdit}>Cancel</button>
-						</div>
-					{:else if Array.isArray(s.companionTools) && s.companionTools.length > 0}
-						<div class="flex flex-wrap gap-1.5">
-							{#each s.companionTools as tool (tool)}
-								<span class="badge badge-outline badge-sm font-mono">{tool}</span>
-							{/each}
-						</div>
-					{:else}
-						<span class="text-xs opacity-40">No tools{isSystemSkill ? '' : ' — click Edit to assign'}</span>
 					{/if}
 				</div>
 			</div>

@@ -1,4 +1,4 @@
-import type { LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
+import type { CacheControl, LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 
 /** OpenAI-style tool definition shape — same one streamChat accepts. */
@@ -9,6 +9,12 @@ export type ToolDefinition = {
 		description: string
 		parameters: Record<string, unknown>
 	}
+	/**
+	 * Optional Anthropic ephemeral cache marker. Set on the LAST tool def in the array to cache
+	 * the tools prefix. Ignored by non-Anthropic providers. Note: camelCase here matches the
+	 * OpenRouter SDK input shape; the SDK converts to `cache_control` on the wire.
+	 */
+	cacheControl?: CacheControl
 }
 
 /**
@@ -102,8 +108,8 @@ export type RunChatLoopInput = {
 	initialTools: ToolDefinition[]
 	/**
 	 * Re-compute the active tool surface at the start of each round. Used by progressive disclosure
-	 * so an `enable_capability` call in round N takes effect in round N+1. Pass a function that
-	 * returns the same value every time when progressive disclosure is off.
+	 * so a `search_tools` call in round N takes effect in round N+1. Pass a function that
+	 * returns the same value every time when deferred loading is off.
 	 */
 	computeTools: () => Promise<ToolDefinition[]>
 	/** Pass-through to streamChat. */
@@ -121,6 +127,13 @@ export type RunChatLoopInput = {
 	worktree: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null
 	/** Sub-agent spawn callback (only used when the orchestrator calls run_subagent with an agentId). */
 	spawnSubagent?: SpawnSubagent
+	/**
+	 * Tool Search Tool side-effect channel. The `search_tools` handler invokes this with the
+	 * names of tools it matched; the runtime adds them to the per-run loaded set so the next
+	 * round's `computeTools()` includes them. No-op when the caller doesn't supply one (e.g.
+	 * detached automation runs that pre-bind their tool surface).
+	 */
+	loadSearchableTools?: (toolNames: string[]) => void
 }
 
 export type RunChatLoopResult = {
@@ -137,6 +150,13 @@ export type RunChatLoopResult = {
 	/** Token usage summed across rounds. */
 	promptTokens: number
 	completionTokens: number
+	/**
+	 * Anthropic prompt-caching stats (zero on non-Anthropic providers). cacheCreationInputTokens
+	 * = tokens written to the cache this turn (charged at +25% over base input); cacheReadInputTokens
+	 * = tokens read from cache this turn (charged at 10% of base input).
+	 */
+	cacheCreationInputTokens: number
+	cacheReadInputTokens: number
 	/** First-token latency (ms since loop start). Null when the model produced no content. */
 	firstTokenAt: number | null
 	/** Whether the loop terminated because the model stopped calling tools (true) or hit MAX_ROUNDS (false). */

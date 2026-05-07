@@ -21,6 +21,13 @@ type LogInput = {
 	model: string
 	tokensIn: number
 	tokensOut: number
+	/**
+	 * Anthropic prompt-caching breakdown. tokensIn is the gross prompt token count (which already
+	 * includes any cached portion); these fields isolate the cached pieces for cost analysis. Zero
+	 * on non-Anthropic providers.
+	 */
+	tokensCacheWrite?: number
+	tokensCacheRead?: number
 	metadata?: Record<string, unknown>
 	/** Override cost instead of calculating from model pricing (e.g. image gen returns cost directly) */
 	costOverride?: number
@@ -84,6 +91,8 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 			model: input.model,
 			tokensIn: input.tokensIn,
 			tokensOut: input.tokensOut,
+			tokensCacheWrite: input.tokensCacheWrite ?? 0,
+			tokensCacheRead: input.tokensCacheRead ?? 0,
 			cost,
 			userId: input.userId ?? null,
 			runId: input.runId ?? null,

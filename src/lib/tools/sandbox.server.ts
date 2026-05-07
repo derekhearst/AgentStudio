@@ -72,6 +72,12 @@ export type ToolRuntimeContext = {
 		| null
 	/** Whether this run is the orchestrator (controls run_subagent etc). */
 	isOrchestrator?: boolean
+	/**
+	 * Register tool names to be loaded into the model's tools array on the NEXT round.
+	 * Invoked by the `search_tools` handler with the matched tool names. The runtime owns
+	 * the actual Set; this is the side-effect channel into it.
+	 */
+	loadSearchableTools?: (toolNames: string[]) => void
 }
 
 export function getWorkspace() {

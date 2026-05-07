@@ -118,8 +118,6 @@ function buildSystemSkill() {
 		lastAccessed: null as Date | null,
 		descriptionEmbedding: null as number[] | null,
 		descriptionEmbeddedAt: null as Date | null,
-		companionGroups: [] as string[],
-		companionTools: [] as string[],
 		category: 'domain' as string | null,
 		sourceFile: null as string | null,
 		createdAt: SYSTEM_SKILL_CREATED_AT,
@@ -180,9 +178,6 @@ export async function updateSkill(
 		tags?: string[]
 		enabled?: boolean
 		category?: string | null
-		// Wave 2 #9 phase 2 — companion mapping editable through the skills UI.
-		companionGroups?: string[]
-		companionTools?: string[]
 	},
 ) {
 	if (isSystemSkillId(id)) {
@@ -214,8 +209,8 @@ export async function deleteSkill(id: string) {
  *
  * Match key: `skills.name`. When `mode: 'create'` and a row with the same name already exists,
  * throws so the UI can prompt the user to switch to overwrite mode. When `mode: 'overwrite'`,
- * updates the existing row in place — companionGroups/Tools and tags fully replace whatever was
- * there. Resource files are reconciled (insert new, update by name, delete missing).
+ * updates the existing row in place — tags fully replace whatever was there. Resource files
+ * are reconciled (insert new, update by name, delete missing).
  */
 export async function upsertSkillFromSource(input: {
 	mode: 'create' | 'overwrite'
@@ -224,8 +219,6 @@ export async function upsertSkillFromSource(input: {
 	content: string
 	category?: string
 	tags?: string[]
-	companionGroups?: string[]
-	companionTools?: string[]
 	enabled?: boolean
 	resources?: Array<{ name: string; description?: string; content: string }>
 	sourceFile?: string
@@ -247,8 +240,6 @@ export async function upsertSkillFromSource(input: {
 		content: input.content,
 		tags: input.tags ?? [],
 		enabled: input.enabled ?? true,
-		companionGroups: input.companionGroups ?? [],
-		companionTools: input.companionTools ?? [],
 		category: input.category ?? null,
 		sourceFile: input.sourceFile ?? null,
 		updatedAt: new Date(),
@@ -688,69 +679,6 @@ function buildSystemSkillSummary(): SkillSummary {
 	}
 }
 
-/**
- * Wave 2 #9 Phase 1 — companion-skill lookup. Returns enabled skills whose `companionGroups`
- * array overlaps with any of the given group names (Postgres `&&` array overlap operator).
- *
- * Used by the chat stream handler: when a run enables a capability group via `enable_capability`,
- * the companion skills' summaries (NOT full bodies) get auto-injected as a context slot so the
- * model knows when/how to use the new tools without bloating the prompt.
- */
-export async function getCompanionSkillsForGroups(groups: string[]): Promise<SkillSummary[]> {
-	if (groups.length === 0) return []
-	// Build a Postgres array literal `'{sandbox,skills}'` and cast to text[]. drizzle-orm doesn't
-	// auto-bind JS arrays to pg arrays in raw `sql` template literals — manually format instead.
-	const arrayLiteral = formatPgArrayLiteral(groups)
-	const rows = await db
-		.select({ id: skills.id, name: skills.name, description: skills.description })
-		.from(skills)
-		.where(
-			and(
-				eq(skills.enabled, true),
-				drizzleSql`${skills.companionGroups} && ${arrayLiteral}::text[]`,
-			),
-		)
-		.orderBy(asc(skills.name))
-	if (rows.length === 0) return []
-	const fileRows = await db
-		.select({ skillId: skillFiles.skillId, name: skillFiles.name, description: skillFiles.description })
-		.from(skillFiles)
-		.innerJoin(skills, eq(skillFiles.skillId, skills.id))
-		.where(eq(skills.enabled, true))
-		.orderBy(asc(skillFiles.sortOrder), asc(skillFiles.name))
-	const fileMap = new Map<string, Array<{ name: string; description: string }>>()
-	for (const f of fileRows) {
-		const arr = fileMap.get(f.skillId) ?? []
-		arr.push({ name: f.name, description: f.description })
-		fileMap.set(f.skillId, arr)
-	}
-	return rows.map((r) => ({ ...r, files: fileMap.get(r.id) ?? [] }))
-}
-
-/**
- * Companion-skill lookup keyed by tool name (rather than capability group). Useful when a single
- * tool has bespoke usage guidance separate from its group. Pure DB lookup; no embedding ranking.
- */
-export async function getCompanionSkillsForTools(toolNames: string[]): Promise<SkillSummary[]> {
-	if (toolNames.length === 0) return []
-	const arrayLiteral = formatPgArrayLiteral(toolNames)
-	const rows = await db
-		.select({ id: skills.id, name: skills.name, description: skills.description })
-		.from(skills)
-		.where(
-			and(
-				eq(skills.enabled, true),
-				drizzleSql`${skills.companionTools} && ${arrayLiteral}::text[]`,
-			),
-		)
-		.orderBy(asc(skills.name))
-	return rows.map((r) => ({ ...r, files: [] }))
-}
-
-function formatPgArrayLiteral(values: string[]): string {
-	// Postgres array literal with quoted elements + escaped quotes/backslashes. We control the
-	// callers (capability group names, tool names — alphanumeric + underscore + slash), but we
-	// still escape defensively to avoid future surprises.
-	const escaped = values.map((v) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`)
-	return `{${escaped.join(',')}}`
-}
+// Capability-group / companion-tool skill lookups removed alongside the `enable_capability`
+// meta-tool. Skills are now surfaced exclusively via `listSkillSummaries` /
+// `listRelevantSkillSummaries` (relevance-ranked per query).

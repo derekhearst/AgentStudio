@@ -15,6 +15,10 @@ import xml from 'highlight.js/lib/languages/xml'
 export type LlmMessage = {
 	role: 'system' | 'user' | 'assistant' | 'tool'
 	content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>
+	/** Set on tool-role messages — points back at the assistant tool_call that produced it. */
+	toolCallId?: string
+	/** Set on assistant messages that called tools. Mirrors LoopMessage / runtime LlmMessage. */
+	toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
 }
 
 /* ── Markdown Rendering ────────────────────────────────────── */
@@ -240,29 +244,105 @@ export function faviconUrl(hostname: string) {
 
 /* ── Context Compaction ────────────────────────────────────── */
 
-export function trimHistoricalToolResults(messages: LlmMessage[], keepFull = 3): LlmMessage[] {
+export type TrimToolResultsOptions = {
+	/** How many of the most recent tool results to keep at full length. Defaults to 3. */
+	keepFull?: number
+	/**
+	 * Tool names whose results are NEVER trimmed even when they're old. Use for tools whose
+	 * results are summary/decision output the model needs to reference indefinitely (e.g.
+	 * `propose_plan`, `propose_research_plan`).
+	 */
+	preserveToolNames?: ReadonlySet<string>
+	/**
+	 * Skip trimming when the cumulative bytes across ALL tool-role messages is below this.
+	 * Default 30000 chars (~7.5K tokens) — short conversations keep their full tool results
+	 * intact and only large transcripts pay the trim. Pass 0 to always trim.
+	 */
+	triggerCharThreshold?: number
+}
+
+export type TrimToolResultsResult = {
+	messages: LlmMessage[]
+	/** Mirrors Anthropic's `context_management.applied_edits` shape. */
+	appliedEdits: {
+		resultsCleared: number
+		charsCleared: number
+		toolNames: string[]
+	}
+}
+
+export function trimHistoricalToolResults(
+	messages: LlmMessage[],
+	options: TrimToolResultsOptions = {},
+): TrimToolResultsResult {
+	const { keepFull = 3, preserveToolNames, triggerCharThreshold = 30_000 } = options
+
 	const toolIndices: number[] = []
+	let totalToolChars = 0
 	for (let i = 0; i < messages.length; i++) {
-		if (messages[i].role === 'tool') {
+		const m = messages[i]
+		if (m.role === 'tool') {
 			toolIndices.push(i)
+			const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+			totalToolChars += c.length
 		}
 	}
 
-	if (toolIndices.length <= keepFull) {
-		return messages
-	}
+	const noOpResult = (): TrimToolResultsResult => ({
+		messages,
+		appliedEdits: { resultsCleared: 0, charsCleared: 0, toolNames: [] },
+	})
+
+	if (toolIndices.length <= keepFull) return noOpResult()
+	if (totalToolChars < triggerCharThreshold) return noOpResult()
 
 	const trimSet = new Set(toolIndices.slice(0, -keepFull))
+	let resultsCleared = 0
+	let charsCleared = 0
+	const toolNamesCleared = new Set<string>()
 
-	return messages.map((msg, i) => {
+	const trimmed = messages.map((msg, i) => {
 		if (!trimSet.has(i)) return msg
+
+		// Look up the tool name from the preceding assistant tool_calls. We match by toolCallId.
+		const toolName = preserveToolNames ? findToolNameForToolMessage(messages, i) : null
+		if (toolName && preserveToolNames?.has(toolName)) return msg
 
 		const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
 		const charCount = content.length
-		const truncated = charCount > 200 ? content.slice(0, 100) + `... [${charCount} chars trimmed]` : content
-
+		if (charCount <= 200) return msg
+		const truncated = content.slice(0, 100) + `... [${charCount} chars trimmed]`
+		resultsCleared++
+		charsCleared += charCount - truncated.length
+		if (toolName) toolNamesCleared.add(toolName)
 		return { ...msg, content: truncated }
 	})
+
+	return {
+		messages: trimmed,
+		appliedEdits: {
+			resultsCleared,
+			charsCleared,
+			toolNames: [...toolNamesCleared],
+		},
+	}
+}
+
+/**
+ * Walk backwards from a tool-role message to find the assistant tool_call that produced it,
+ * matching by toolCallId. Returns the function name, or null when nothing matches.
+ */
+function findToolNameForToolMessage(messages: LlmMessage[], toolMsgIndex: number): string | null {
+	const toolMsg = messages[toolMsgIndex]
+	const id = toolMsg.toolCallId
+	if (!id) return null
+	for (let i = toolMsgIndex - 1; i >= 0; i--) {
+		const m = messages[i]
+		if (m.role !== 'assistant' || !Array.isArray(m.toolCalls)) continue
+		const match = m.toolCalls.find((tc) => tc.id === id)
+		if (match?.function?.name) return match.function.name
+	}
+	return null
 }
 
 export function trimToolResult(toolName: string, resultStr: string): string {

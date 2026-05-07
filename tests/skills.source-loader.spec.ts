@@ -87,7 +87,6 @@ test.describe('skills/skill-source-loader — pure scanner', () => {
 			expect(out.skills).toHaveLength(2)
 			const sandbox = out.skills.find((s) => s.parsed.frontmatter.name === 'tools/sandbox-fs')
 			expect(sandbox?.parsed.frontmatter.category).toBe('tool')
-			expect(sandbox?.parsed.frontmatter.companionGroups).toEqual(['sandbox'])
 			const mode = out.skills.find((s) => s.parsed.frontmatter.name === 'system/mode-chat')
 			expect(mode?.parsed.frontmatter.category).toBe('identity')
 		} finally {

@@ -11,11 +11,11 @@ import { expect, test } from '@playwright/test'
  */
 
 test.describe('research/pdf-tool — registration + URL safety', () => {
-	test('pdf_read is in the research capability group', async () => {
+	test('pdf_read and web_fetch are registered in the tool registry', async () => {
 		try {
-			const { capabilityGroups } = await import('../src/lib/tools/tools')
-			expect(capabilityGroups.research.tools).toContain('pdf_read')
-			expect(capabilityGroups.research.tools).toContain('web_fetch') // existing
+			const { allToolNames } = await import('../src/lib/tools/tool-schemas')
+			expect(allToolNames).toContain('pdf_read')
+			expect(allToolNames).toContain('web_fetch')
 		} catch (err) {
 			expect(err).toBeTruthy()
 		}

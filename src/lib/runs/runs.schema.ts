@@ -75,10 +75,6 @@ export const chatRuns = pgTable(
 		streamBlocks: jsonb('stream_blocks').$type<StreamBlock[]>().notNull().default([]),
 		currentRound: integer('current_round').notNull().default(0),
 		nextEventSeq: integer('next_event_seq').notNull().default(0),
-		// Wave 2 #8 phase 1 — progressive tool disclosure. Defaults to ['core'] (the alwaysOn group).
-		// Additional groups are added when the model calls the `enable_capability` meta-tool.
-		// Persisted on the run so a resume picks up the same active surface.
-		enabledCapabilityGroups: jsonb('enabled_capability_groups').$type<string[]>().notNull().default(['core']),
 		// Wave 2 #11 phase 1 — optional task linkage. Set when a run is the materialization of a
 		// planned task (post-orchestrator-emits-tasks integration in phase 2). Foreign keys point
 		// at tasks/task_attempts; declared by-name to avoid a circular import (tasks.schema also

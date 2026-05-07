@@ -41,17 +41,25 @@ export type RunCodeResult = {
 const DEFAULT_TIMEOUT_MS = 60_000
 const MAX_TIMEOUT_MS = 300_000
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024
-const MAX_CONCURRENT_RPC = 8
+// Native PTC encourages massive parallelism (Anthropic's canonical demo runs 20+ tool calls
+// in parallel). A low cap defeats the pattern PTC is best at — batching many calls into one
+// model round-trip. Downstream tool concurrency caps still gate per-tool resource use.
+const MAX_CONCURRENT_RPC = 16
+// Bytes of stdout the model sees on the tool_result. Anything beyond this is wasted context;
+// scripts wanting structured output should `return` a value (becomes `returnValue`) instead
+// of console.log'ing megabytes. The full stdout is preserved on disk for forensics.
+const MODEL_VISIBLE_STDOUT_BYTES = 8 * 1024
 
 /**
  * Tools the script is never allowed to call:
  *  - `run_code` itself, to avoid recursion + listener leaks.
  *  - `ask_user`, because it requires the orchestrator's question-routing path.
- *  - `enable_capability`, because the script's tool list is frozen at start; calling it from
- *    inside the script wouldn't surface the new tools until the next round anyway.
+ *  - `search_tools`, because the script's tool list is frozen at start; loading more tools
+ *    affects the NEXT round, not the running script — calling it here is a no-op pretending
+ *    to be useful.
  *  - `run_subagent`, because the loop's special-case dispatch wraps it in subagent setup.
  */
-const SCRIPT_DISALLOWED_TOOLS = new Set(['run_code', 'ask_user', 'enable_capability', 'run_subagent'])
+const SCRIPT_DISALLOWED_TOOLS = new Set(['run_code', 'ask_user', 'search_tools', 'run_subagent'])
 
 export async function runCodeTool(input: RunCodeInput): Promise<RunCodeResult> {
 	const ctx = toolUserContext.getStore()
@@ -114,7 +122,7 @@ export async function runCodeTool(input: RunCodeInput): Promise<RunCodeResult> {
 				}
 				if (!enabledTools.includes(normalized)) {
 					return {
-						error: `tool ${normalized} is not currently enabled — call enable_capability(...) from a normal tool round first`,
+						error: `tool ${normalized} is not currently loaded — call search_tools(query) from a normal tool round first to add it to your tool surface`,
 					}
 				}
 				toolCallCount++
@@ -228,8 +236,21 @@ export async function runCodeTool(input: RunCodeInput): Promise<RunCodeResult> {
 			returnValue = undefined
 		}
 
+		// What the model sees vs. what we record: native PTC returns ONLY the script's final
+		// printed value to the model. We keep that contract — when `returnValue` is set, omit
+		// stdout from the model-facing payload so intermediate prints don't bloat context. When
+		// no returnValue, fall back to a truncated head of stdout (full text is in stderr/disk
+		// for debugging via the dev panel).
+		const modelStdout =
+			returnValue !== undefined
+				? ''
+				: stdout.length <= MODEL_VISIBLE_STDOUT_BYTES
+					? stdout
+					: stdout.slice(0, MODEL_VISIBLE_STDOUT_BYTES) +
+						`\n[run_code stdout truncated at ${MODEL_VISIBLE_STDOUT_BYTES} bytes for model context — return a structured value instead of console.log for large outputs]`
+
 		return {
-			stdout,
+			stdout: modelStdout,
 			stderr,
 			exitCode,
 			returnValue,
