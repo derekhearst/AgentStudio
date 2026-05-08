@@ -7,14 +7,11 @@
 		getPushPublicKey,
 		listNotificationFeed,
 		listSubscriptions,
-		markNotification,
-		sendTestNotification,
 		subscribePush,
 		unsubscribePush
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
 	import { BUILTIN_TOOLS } from '$lib/tools/tools';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
 	import SettingsToolApprovalPanel from '$lib/settings/panels/SettingsToolApprovalPanel.svelte';
@@ -24,6 +21,7 @@
 	import SettingsNotificationsPanel from '$lib/settings/panels/SettingsNotificationsPanel.svelte';
 	import SettingsBudgetPanel from '$lib/settings/panels/SettingsBudgetPanel.svelte';
 	import SettingsAppPushPanel from '$lib/settings/panels/SettingsAppPushPanel.svelte';
+	import SettingsDevToolsPanel from '$lib/settings/panels/SettingsDevToolsPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -40,9 +38,6 @@
 	let pushEnabled = $state(false);
 	let busy = $state(false);
 	let installAvailable = $derived(installPromptEvent !== null);
-	let testTitle = $state('Task needs review');
-	let testBody = $state('A delegated task is waiting for your approval.');
-	let testUrl = $state('/chat');
 	let statusMessage = $state('');
 	let settings = $state<SettingsRow | null>(null);
 	let searchQuery = $state('');
@@ -267,36 +262,6 @@
 		}
 	}
 
-	async function sendTest() {
-		if (busy) return;
-		busy = true;
-		statusMessage = '';
-		try {
-			await sendTestNotification({
-				title: testTitle,
-				body: testBody,
-				url: testUrl,
-				tag: 'phase7-test'
-			});
-			statusMessage = 'Test notification sent.';
-			await refresh();
-		} catch (err) {
-			statusMessage = `Test failed: ${err instanceof Error ? err.message : String(err)}`;
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function markRead(notificationId: string, read: boolean) {
-		try {
-			await markNotification({ notificationId, read });
-		} catch (err) {
-			statusMessage = `Notification update failed: ${err instanceof Error ? err.message : String(err)}`;
-			return;
-		}
-		await refresh();
-	}
-
 	async function promptInstall() {
 		if (!installPromptEvent) return;
 		await installPromptEvent.prompt();
@@ -428,50 +393,12 @@
 				     ════════════════════════════════════════════════ -->
 				{#if isVisible('devtools')}
 					<div id="sec-devtools" data-settings-section class="scroll-mt-4">
-						<ContentPanel>
-							{#snippet header()}
-								<h2 class="flex items-center gap-2 text-base font-semibold">
-									<span class="h-1.5 w-1.5 rounded-full bg-error"></span>
-									Developer Tools
-								</h2>
-							{/snippet}
-							<div class="space-y-3">
-								<!-- Test Notification -->
-								<div class="rounded-md bg-base-200/40 px-4 py-3.5">
-									<p class="mb-2.5 text-sm font-medium">Send Test Notification</p>
-									<div class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-										<input class="input input-bordered input-sm" bind:value={testTitle} placeholder="Title" />
-										<input class="input input-bordered input-sm" bind:value={testBody} placeholder="Body" />
-										<button class="btn btn-secondary btn-sm" type="button" onclick={sendTest} disabled={busy}>Send</button>
-									</div>
-								</div>
-
-								<!-- Notification Feed -->
-								<div class="rounded-md bg-base-200/40 px-4 py-3.5">
-									<p class="mb-2 text-sm font-medium">Notification Feed</p>
-									{#if notifications.length === 0}
-										<p class="text-xs text-base-content/55">No notifications recorded yet.</p>
-									{:else}
-										<div class="space-y-1.5">
-											{#each notifications as item (item.id)}
-												<div class="flex items-start justify-between gap-3 rounded-md bg-base-300/30 px-3 py-2">
-													<div class="min-w-0">
-														<p class="truncate text-sm font-medium">{item.title}</p>
-														<p class="truncate text-xs text-base-content/60">{item.body}</p>
-														<p class="mt-0.5 text-[10px] text-base-content/45">{new Date(item.createdAt).toLocaleString()}</p>
-													</div>
-													{#if item.read}
-														<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, false)}>Unread</button>
-													{:else}
-														<button class="btn btn-ghost btn-xs shrink-0" type="button" onclick={() => markRead(item.id, true)}>Read</button>
-													{/if}
-												</div>
-											{/each}
-										</div>
-									{/if}
-								</div>
-							</div>
-						</ContentPanel>
+						<SettingsDevToolsPanel
+							{notifications}
+							{busy}
+							onStatusMessage={(msg) => (statusMessage = msg)}
+							onRefresh={refresh}
+						/>
 					</div>
 				{/if}
 			</div>
