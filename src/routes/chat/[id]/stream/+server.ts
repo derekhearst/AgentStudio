@@ -4,7 +4,7 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { type LlmMessage } from '$lib/llm/chat.server'
-import { generateTitle, shouldCompact, compactMessages, estimateMessageTokens } from '$lib/chat/chat.server'
+import { generateTitle, estimateMessageTokens } from '$lib/chat/chat.server'
 import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
@@ -14,24 +14,26 @@ import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import {
 	buildApprovalRequiredSet,
+	buildBuiltinAgentPostureSlot,
 	buildCacheableSystemPromptBlocks,
+	buildIdentitySlot,
 	buildMemoryRecallSlot,
 	buildProjectContextSlot,
 	buildSkillSummariesText,
 	buildToolPolicySlot,
 	extractAgentWorkspaceConfig,
+	maybeCompactConversation,
 	resolveSkillTopK,
+	type CompactionStats,
 } from '$lib/chat/stream-prep.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
-import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import {
 	filterToolsByAgentPolicy,
 	resolveAgentToolPolicy,
-	loadAgentIdentityContent,
 } from '$lib/chat/agent-switch.server'
 import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { runChatLoop, createSseSession } from '$lib/runtime'
@@ -205,18 +207,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const isOrchestrator = agent.builtinKey != null
 
 	// --- Context Engineering: Built-in Agent Posture ---
-	// Built-in agents other than `chat` overlay their identity-skill content as a posture slot
-	// at priority 95 (under the orchestrator identity at 100). Replaces the prior mode posture
-	// slot — the chat built-in has no overlay because it IS the default orchestrator persona.
-	// Custom agents inject their identity via the identity slot below instead.
-	if (agent.builtinKey && agent.builtinKey !== 'chat') {
-		const posture = await loadAgentIdentityContent(agent)
-		contextSlots.push({
-			name: `agent_${agent.builtinKey}`,
-			priority: 95,
-			content: posture,
-		})
-	}
+	const postureSlot = await buildBuiltinAgentPostureSlot(agent)
+	if (postureSlot) contextSlots.push(postureSlot)
 
 	// Wave 4 #15 phase 2 — project context slot when the conversation is bound to a project.
 	const projectSlot = await buildProjectContextSlot({
@@ -226,29 +218,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (projectSlot) contextSlots.push(projectSlot)
 
 	// --- Context Engineering: Orchestrator / Agent Identity ---
-	if (isOrchestrator) {
-		const orchestratorPrompt = await buildOrchestratorPrompt()
-		contextSlots.push({ name: 'identity', priority: 100, content: orchestratorPrompt })
-	} else {
-		// Custom agent — load identity from the linked skill (with systemPrompt fallback)
-		// and expand any `@import skill-name` fragments. Wave 5 #22 phases 2 + 5.
-		let identityContent = await loadAgentIdentityContent(agent)
-		try {
-			const { expandFragments } = await import('$lib/agents/fragment-expand')
-			const { skills: skillsTable } = await import('$lib/skills/skills.schema')
-			identityContent = await expandFragments(identityContent, async (name) => {
-				const [row] = await db
-					.select({ content: skillsTable.content, enabled: skillsTable.enabled })
-					.from(skillsTable)
-					.where(eq(skillsTable.name, name))
-					.limit(1)
-				if (!row || !row.enabled) return null
-				return row.content
-			})
-		} catch (err) {
-			logger.warn('[chat] fragment expansion failed, using raw identity content', { err })
-		}
-		contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
+	contextSlots.push(await buildIdentitySlot(agent))
+	if (!isOrchestrator) {
 		const workspace = extractAgentWorkspaceConfig(agent.config)
 		scopedAgentTools = workspace.scopedAgentTools
 		persistentKey = workspace.persistentKey
@@ -296,33 +267,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	// --- Context Engineering: Conversation Compaction ---
-	const compactionCheck = await shouldCompact(llmMessages, routedModel, user.id)
-	let didCompact = false
-	let compactionStats: {
-		messagesBefore: number
-		messagesAfter: number
-		originalTokens: number
-		compactedTokens: number
-		summaryTokens: number
-		compactionModel: string
-	} | null = null
-	if (compactionCheck.needed) {
-		const messagesBefore = llmMessages.length
-		const result = await compactMessages(llmMessages, user.id, routedModel)
-		if (result.summary) {
-			llmMessages.length = 0
-			llmMessages.push(...result.compacted)
-			didCompact = true
-			compactionStats = {
-				messagesBefore,
-				messagesAfter: result.compacted.length,
-				originalTokens: result.originalTokens,
-				compactedTokens: result.compactedTokens,
-				summaryTokens: result.summaryTokens,
-				compactionModel: result.compactionModel,
-			}
-		}
-	}
+	const compaction = await maybeCompactConversation({
+		llmMessages,
+		model: routedModel,
+		userId: user.id,
+	})
+	const didCompact = compaction.didCompact
+	const compactionStats: CompactionStats | null = compaction.stats
+	const compactionTokensBefore = compaction.tokensBefore
 
 	// --- Context Engineering: Trim Historical Tool Results ---
 	const preserveToolResultsRaw = (currentSettings.contextConfig as { preserveToolResults?: string[] } | null)?.preserveToolResults
@@ -463,7 +415,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// can render before/after counts and the model used (Feature #6 telemetry).
 				if (didCompact && compactionStats) {
 					await session.emit('compaction', {
-						tokensBefore: compactionCheck.tokenEstimate,
+						tokensBefore: compactionTokensBefore,
 						...compactionStats,
 					})
 				}

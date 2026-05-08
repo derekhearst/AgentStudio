@@ -11,9 +11,17 @@ import { listRelevantSkillSummaries, listSkillSummaries } from '$lib/skills/skil
 import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import type { ContextSlot } from '$lib/context/slots.server'
 import { logger } from '$lib/observability/logger'
+import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
+import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
+import { compactMessages, shouldCompact } from '$lib/chat/chat.server'
+import { db } from '$lib/db.server'
+import { eq } from 'drizzle-orm'
+import type { LlmMessage } from '$lib/llm/chat.server'
+import type { agents as agentsTable } from '$lib/agents/agents.schema'
 import type { getSettings } from '$lib/settings'
 
 type AppSettings = Awaited<ReturnType<typeof getSettings>>
+type AgentRow = typeof agentsTable.$inferSelect
 
 // Slot names whose content recomputes per query (skill top-K relevance, companion-skill
 // groups, memory recall) — they're appended after the cache_control boundary so the
@@ -127,6 +135,106 @@ export async function buildMemoryRecallSlot(input: {
 	} catch (err) {
 		logger.warn('[memory] recall failed', { err })
 		return null
+	}
+}
+
+/**
+ * Build the built-in-agent posture slot. Non-`chat` built-in agents
+ * (research / plan / autonomous) overlay their identity-skill content as a
+ * posture slot at priority 95 — under the orchestrator identity at 100, above
+ * the project context at 80. Returns null for the `chat` built-in (which IS
+ * the default orchestrator persona) and for custom agents.
+ */
+export async function buildBuiltinAgentPostureSlot(agent: AgentRow): Promise<ContextSlot | null> {
+	if (!agent.builtinKey || agent.builtinKey === 'chat') return null
+	const posture = await loadAgentIdentityContent(agent)
+	return {
+		name: `agent_${agent.builtinKey}`,
+		priority: 95,
+		content: posture,
+	}
+}
+
+/**
+ * Build the identity slot. Orchestrator agents use the shared orchestrator
+ * prompt; custom agents load their identity skill (or systemPrompt fallback)
+ * and expand any `@import skill-name` fragments. Wave 5 #22 phases 2 + 5.
+ *
+ * Fragment-expansion failures are logged and the raw identity is used so
+ * malformed @imports never block the chat path.
+ */
+export async function buildIdentitySlot(agent: AgentRow): Promise<ContextSlot> {
+	const isOrchestrator = agent.builtinKey != null
+	if (isOrchestrator) {
+		return { name: 'identity', priority: 100, content: await buildOrchestratorPrompt() }
+	}
+
+	let identityContent = await loadAgentIdentityContent(agent)
+	try {
+		const { expandFragments } = await import('$lib/agents/fragment-expand')
+		const { skills: skillsTable } = await import('$lib/skills/skills.schema')
+		identityContent = await expandFragments(identityContent, async (name) => {
+			const [row] = await db
+				.select({ content: skillsTable.content, enabled: skillsTable.enabled })
+				.from(skillsTable)
+				.where(eq(skillsTable.name, name))
+				.limit(1)
+			if (!row || !row.enabled) return null
+			return row.content
+		})
+	} catch (err) {
+		logger.warn('[chat] fragment expansion failed, using raw identity content', { err })
+	}
+	return { name: 'identity', priority: 100, content: identityContent }
+}
+
+export type CompactionStats = {
+	messagesBefore: number
+	messagesAfter: number
+	originalTokens: number
+	compactedTokens: number
+	summaryTokens: number
+	compactionModel: string
+}
+
+/**
+ * Run conversation compaction if the message list has grown past the model's
+ * context window. Mutates `llmMessages` in place when compaction succeeds and
+ * returns the stats summary the SSE handler emits to the client. `tokensBefore`
+ * comes from the shouldCompact probe so the SSE compaction event can show the
+ * pre-compaction token estimate even when no compaction ran (degenerate cases
+ * like an empty history that produced no summary).
+ */
+export async function maybeCompactConversation(input: {
+	llmMessages: LlmMessage[]
+	model: string
+	userId: string
+}): Promise<{ didCompact: boolean; stats: CompactionStats | null; tokensBefore: number }> {
+	const compactionCheck = await shouldCompact(input.llmMessages, input.model, input.userId)
+	const tokensBefore = compactionCheck.tokenEstimate
+	if (!compactionCheck.needed) {
+		return { didCompact: false, stats: null, tokensBefore }
+	}
+
+	const messagesBefore = input.llmMessages.length
+	const result = await compactMessages(input.llmMessages, input.userId, input.model)
+	if (!result.summary) {
+		return { didCompact: false, stats: null, tokensBefore }
+	}
+
+	input.llmMessages.length = 0
+	input.llmMessages.push(...result.compacted)
+	return {
+		didCompact: true,
+		tokensBefore,
+		stats: {
+			messagesBefore,
+			messagesAfter: result.compacted.length,
+			originalTokens: result.originalTokens,
+			compactedTokens: result.compactedTokens,
+			summaryTokens: result.summaryTokens,
+			compactionModel: result.compactionModel,
+		},
 	}
 }
 
