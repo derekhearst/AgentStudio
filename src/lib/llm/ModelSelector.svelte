@@ -2,6 +2,14 @@
 	import { tick } from 'svelte'
 	import { getAvailableModels } from '$lib/llm/models.remote'
 	import type { ModelInfo } from '$lib/llm/models.server'
+	import {
+		collectAvailableModalities,
+		filterModels,
+		getCreator,
+		groupModelsByCreator,
+		sortModels,
+		type SortKey,
+	} from '$lib/llm/model-filters'
 
 	interface Props {
 		value?: string
@@ -60,7 +68,6 @@
 		settingsOpen = false
 	}
 
-	type SortKey = 'name' | 'price' | 'context' | 'newest' | 'oldest'
 	let sortBy: SortKey = $state('name')
 	let selectedInputMods: Set<string> = $state(new Set())
 	let selectedOutputMods: Set<string> = $state(new Set())
@@ -124,107 +131,13 @@
 		size === 'xs' ? 'text-xs' : size === 'sm' ? 'text-sm' : ''
 	)
 
-	const availableInputMods = $derived.by(() => {
-		const caps = new Set<string>()
-		for (const m of models) {
-			for (const mod of m.inputModalities ?? []) caps.add(mod)
-		}
-		return Array.from(caps).sort()
-	})
-
-	const availableOutputMods = $derived.by(() => {
-		const caps = new Set<string>()
-		for (const m of models) {
-			for (const mod of m.outputModalities ?? []) caps.add(mod)
-		}
-		return Array.from(caps).sort()
-	})
-
-	const filtered = $derived.by(() => {
-		let result = models
-
-		if (requireInputModality) {
-			result = result.filter((m) => (m.inputModalities ?? []).includes(requireInputModality))
-		}
-
-		if (search.trim()) {
-			const lower = search.toLowerCase()
-			result = result.filter(
-				(m) =>
-					m.id.toLowerCase().includes(lower) ||
-					m.name.toLowerCase().includes(lower) ||
-					(m.description ?? '').toLowerCase().includes(lower) ||
-					(m.modality ?? '').toLowerCase().includes(lower) ||
-					(m.instructType ?? '').toLowerCase().includes(lower) ||
-					(m.inputModalities ?? []).join(' ').toLowerCase().includes(lower) ||
-					(m.outputModalities ?? []).join(' ').toLowerCase().includes(lower)
-			)
-		}
-
-		if (selectedInputMods.size > 0) {
-			result = result.filter((m) => {
-				const mods = new Set(m.inputModalities ?? [])
-				for (const cap of selectedInputMods) {
-					if (!mods.has(cap)) return false
-				}
-				return true
-			})
-		}
-
-		if (selectedOutputMods.size > 0) {
-			result = result.filter((m) => {
-				const mods = new Set(m.outputModalities ?? [])
-				for (const cap of selectedOutputMods) {
-					if (!mods.has(cap)) return false
-				}
-				return true
-			})
-		}
-
-		return result
-	})
-
-	function getCreator(id: string): string {
-		const slash = id.indexOf('/')
-		return slash > 0 ? id.slice(0, slash) : 'unknown'
-	}
-
-	const sorted = $derived.by(() => {
-		const list = [...filtered]
-		switch (sortBy) {
-			case 'name':
-				list.sort((a, b) => a.name.localeCompare(b.name))
-				break
-			case 'price':
-				list.sort((a, b) => Number(a.promptPrice) - Number(b.promptPrice))
-				break
-			case 'context':
-				list.sort((a, b) => (b.contextLength ?? 0) - (a.contextLength ?? 0))
-				break
-			case 'newest':
-				list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-				break
-			case 'oldest':
-				list.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
-				break
-		}
-		return list
-	})
-
-	type GroupedModels = { creator: string; models: ModelInfo[] }[]
-
-	const grouped = $derived.by((): GroupedModels | null => {
-		if (!groupByCreator) return null
-		const map = new Map<string, ModelInfo[]>()
-		for (const m of sorted) {
-			const creator = getCreator(m.id)
-			if (!map.has(creator)) map.set(creator, [])
-			map.get(creator)!.push(m)
-		}
-		return Array.from(map.entries())
-			.sort(([a], [b]) => a.localeCompare(b))
-			.map(([creator, models]) => ({ creator, models }))
-	})
+	const availableInputMods = $derived(collectAvailableModalities(models, 'input'))
+	const availableOutputMods = $derived(collectAvailableModalities(models, 'output'))
+	const filtered = $derived(
+		filterModels({ models, search, selectedInputMods, selectedOutputMods, requireInputModality }),
+	)
+	const sorted = $derived(sortModels(filtered, sortBy))
+	const grouped = $derived(groupByCreator ? groupModelsByCreator(sorted) : null)
 
 	const selectedLabel = $derived.by(() => {
 		const found = models.find((m) => m.id === value)
