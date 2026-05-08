@@ -9,7 +9,6 @@ import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
-import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import {
@@ -21,6 +20,7 @@ import {
 	buildProjectContextSlot,
 	buildSkillSummariesText,
 	buildToolPolicySlot,
+	enforceBudgetGuard,
 	extractAgentWorkspaceConfig,
 	maybeCompactConversation,
 	resolveSkillTopK,
@@ -326,68 +326,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const MAX_TOOL_ROUNDS = 50
 
 	// Phase 3 of #5: budget enforcement BEFORE creating the run row, so a `block` cap
-	// short-circuits without leaving an orphan run. Warnings are non-blocking and just
-	// fire alert rows.
-	const budgetCheck = await checkBudgetLimits({
+	// short-circuits without leaving an orphan run.
+	const budgetGuard = await enforceBudgetGuard({
 		userId: user.id,
 		agentId: conversation.agentId,
+		conversationId: body.conversationId,
 	})
-	for (const w of budgetCheck.warnings) {
-		try {
-			await recordBudgetAlert({ limit: w.limit, triggerType: 'warn', spendUsd: w.spendUsd })
-		} catch (err) {
-			logger.warn('[budget] warn alert insert failed', { err })
-		}
-	}
-	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
-		const blockedBy = budgetCheck.blockedBy
-		// Await the alert write so callers querying budget_alerts immediately after the 402
-		// response see the row (no fire-and-forget race).
-		try {
-			await recordBudgetAlert({
-				limit: blockedBy,
-				triggerType: 'block',
-				spendUsd: parseFloat(blockedBy.limitUsd),
-			})
-		} catch (err) {
-			logger.warn('[budget] block alert insert failed', { err })
-		}
-		// Wave 5 #20 — surface the block as a policy_override_request in the review inbox so
-		// an operator can decide whether to lift the cap or hold it. Best-effort dynamic
-		// import keeps the chat-stream path free of an observability cycle. DedupeKey
-		// `budget:<limitId>:<userId>` collapses repeated denials into one open item.
-		void (async () => {
-			try {
-				const { openReviewItem } = await import('$lib/observability/review.server')
-				await openReviewItem({
-					type: 'policy_override_request',
-					severity: 'warning',
-					summary: `Budget block: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd} for user ${user.id.slice(0, 8)}`,
-					payload: {
-						kind: 'budget',
-						limitId: blockedBy.id,
-						scope: blockedBy.scope,
-						scopeId: blockedBy.scopeId,
-						period: blockedBy.period,
-						limitUsd: blockedBy.limitUsd,
-						userId: user.id,
-						conversationId: body.conversationId,
-					},
-					sessionId: body.conversationId,
-					dedupeKey: `budget:${blockedBy.id}:${user.id}`,
-				})
-			} catch (err) {
-				logger.warn('[budget] policy_override_request open failed', { err })
-			}
-		})()
-		return json(
-			{
-				error: 'budget_exceeded',
-				message: `Budget cap exceeded: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd}`,
-				limitId: blockedBy.id,
-			},
-			{ status: 402 },
-		)
+	if (budgetGuard.blocked) {
+		return json(budgetGuard.payload, { status: 402 })
 	}
 
 	const [run] = await db
