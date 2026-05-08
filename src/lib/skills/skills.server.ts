@@ -2,151 +2,27 @@ import { and, asc, desc, eq, ilike, or, sql, sql as drizzleSql } from 'drizzle-o
 import { db } from '$lib/db.server'
 import { skillFiles, skills } from '$lib/skills/skills.schema'
 import { emitActivity } from '$lib/activity/activity.server'
-import { embed, embedOne, toPgVector } from '$lib/memory/embeddings.server'
+import { embedOne, toPgVector } from '$lib/memory/embeddings.server'
 import { logger } from '$lib/observability/logger'
+import {
+	SYSTEM_SKILL_FILES,
+	SYSTEM_SKILL_ID,
+	SYSTEM_SKILL_NAME,
+	buildSystemSkill,
+	isSystemSkillId,
+	shouldIncludeSystemSkill,
+} from './skills-system.server'
+import { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
 
-const SYSTEM_SKILL_ID = '00000000-0000-4000-8000-000000000042'
-const SYSTEM_SKILL_NAME = 'agentstudio-guide'
-const SYSTEM_SKILL_CREATED_AT = new Date('2026-01-01T00:00:00.000Z')
-
-const SYSTEM_SKILL_FILES = [
-	{
-		id: '00000000-0000-4000-8000-000000000043',
-		name: 'quickstart.md',
-		description: 'Best-practice workflow to get value quickly from AgentStudio.',
-		content: `# AgentStudio Quickstart
-
-## What this app is best at
-- Conversational coding assistance across your local workspace
-- Tool-driven task execution (files, shell, web, browser automation)
-- Reusable skills for consistent responses
-- Agent/task orchestration for larger work items
-
-## Daily workflow
-1. Open or create a chat from /chat.
-2. Pick the model and reasoning effort appropriate for the task.
-3. State your goal plus constraints (files, deadlines, style, no-go zones).
-4. Ask for concrete outputs: code edits, tests, docs updates, and validation.
-5. Review tool calls and diffs before finalizing.
-
-## Prompting pattern that works
-Use this format:
-- Goal: what done looks like.
-- Scope: exact files/routes/domains.
-- Constraints: style, libraries, performance, security.
-- Verification: tests/checks to run.
-
-Example:
-"Implement X in src/lib/foo and src/routes/bar, keep existing API shape, run relevant tests, and summarize risk."`,
-		sortOrder: 0,
-	},
-	{
-		id: '00000000-0000-4000-8000-000000000044',
-		name: 'feature-map.md',
-		description: 'High-level map of core product areas and when to use each.',
-		content: `# Feature Map
-
-## Chat
-Use for interactive implementation, debugging, design iteration, and code reviews. The orchestrator chat is the primary interface.
-
-## Skills
-Use /skills to store repeatable instructions, standards, and domain playbooks.
-
-## Agents
-Use /agents to manage sub-agents and their configurations.
-
-## Automations
-Use /automations for scheduled and recurring agent workflows.
-
-## Cost
-Use /cost to track usage and budgets.
-
-## Settings
-Configure defaults (model, budgets, notifications, behavior preferences) in /settings.`,
-		sortOrder: 1,
-	},
-	{
-		id: '00000000-0000-4000-8000-000000000045',
-		name: 'effectiveness-playbook.md',
-		description: 'Tactics for higher-quality outputs with fewer iterations.',
-		content: `# Effectiveness Playbook
-
-## Be explicit about success criteria
-- Include acceptance criteria and edge cases.
-- Name exact files and expected behavior changes.
-
-## Ask for verification every time
-- Request tests/checks and what was validated.
-- Ask for residual risks and follow-up recommendations.
-
-## Use staged execution for bigger changes
-1. Discovery and plan
-2. Implementation
-3. Validation
-4. Summary with risks and next steps
-
-## Prefer deterministic edits
-- Ask for minimal, targeted changes.
-- Avoid broad refactors unless requested.
-
-## Build reusable knowledge
-- Promote repeated guidance into /skills.
-
-## Review mindset
-When requesting review, prioritize bugs, regressions, and missing tests before style feedback.`,
-		sortOrder: 2,
-	},
-] as const
-
-function isSystemSkillId(id: string) {
-	return id === SYSTEM_SKILL_ID
-}
-
-function isSystemSkillFileId(fileId: string) {
-	return SYSTEM_SKILL_FILES.some((file) => file.id === fileId)
-}
-
-function buildSystemSkill() {
-	return {
-		id: SYSTEM_SKILL_ID,
-		name: SYSTEM_SKILL_NAME,
-		description: 'Built-in guide for understanding AgentStudio features and using the app effectively.',
-		content: 'This is a built-in, read-only onboarding skill that explains AgentStudio and how to use it effectively.',
-		tags: ['onboarding', 'guide', 'agentstudio', 'best-practices'],
-		enabled: true,
-		accessCount: 0,
-		lastAccessed: null as Date | null,
-		descriptionEmbedding: null as number[] | null,
-		descriptionEmbeddedAt: null as Date | null,
-		category: 'domain' as string | null,
-		sourceFile: null as string | null,
-		createdAt: SYSTEM_SKILL_CREATED_AT,
-		updatedAt: SYSTEM_SKILL_CREATED_AT,
-		isSystem: true,
-		fileCount: SYSTEM_SKILL_FILES.length,
-		files: SYSTEM_SKILL_FILES.map((file) => ({
-			...file,
-			skillId: SYSTEM_SKILL_ID,
-			createdAt: SYSTEM_SKILL_CREATED_AT,
-			updatedAt: SYSTEM_SKILL_CREATED_AT,
-		})),
-	}
-}
-
-function shouldIncludeSystemSkill(options?: { search?: string; enabled?: boolean }) {
-	if (options?.enabled !== undefined && options.enabled !== true) return false
-	if (!options?.search) return true
-
-	const skill = buildSystemSkill()
-	const q = options.search.trim().toLowerCase()
-	if (!q) return true
-
-	return (
-		skill.name.toLowerCase().includes(q) ||
-		skill.description.toLowerCase().includes(q) ||
-		skill.tags.some((tag) => tag.toLowerCase().includes(q))
-	)
-}
+// Re-export so external callers ($lib/skills/skills.server) keep working after the split.
+export { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
+export {
+	addSkillFile,
+	deleteSkillFile,
+	getSkillFile,
+	getSkillFileByName,
+	updateSkillFile,
+} from './skills-files.server'
 
 /* ── Skills CRUD ────────────────────────────────────────────── */
 
@@ -446,134 +322,8 @@ export async function bumpSkillAccess(id: string) {
 		.where(eq(skills.id, id))
 }
 
-/* ── Skill Files CRUD ───────────────────────────────────────── */
-
-export async function addSkillFile(
-	skillId: string,
-	name: string,
-	description: string,
-	content: string,
-	sortOrder?: number,
-) {
-	if (isSystemSkillId(skillId)) {
-		throw new Error('System skill is read-only')
-	}
-
-	const [file] = await db
-		.insert(skillFiles)
-		.values({ skillId, name, description, content, sortOrder: sortOrder ?? 0 })
-		.returning()
-	return file
-}
-
-export async function updateSkillFile(
-	fileId: string,
-	fields: { name?: string; description?: string; content?: string; sortOrder?: number },
-) {
-	if (isSystemSkillFileId(fileId)) {
-		throw new Error('System skill file is read-only')
-	}
-
-	const [file] = await db
-		.update(skillFiles)
-		.set({ ...fields, updatedAt: new Date() })
-		.where(eq(skillFiles.id, fileId))
-		.returning()
-	return file
-}
-
-export async function deleteSkillFile(fileId: string) {
-	if (isSystemSkillFileId(fileId)) {
-		throw new Error('System skill file cannot be deleted')
-	}
-
-	await db.delete(skillFiles).where(eq(skillFiles.id, fileId))
-}
-
-export async function getSkillFile(fileId: string) {
-	const [file] = await db.select().from(skillFiles).where(eq(skillFiles.id, fileId)).limit(1)
-	return file ?? null
-}
-
-export async function getSkillFileByName(skillId: string, fileName: string) {
-	if (skillId === SYSTEM_SKILL_ID) {
-		const match = SYSTEM_SKILL_FILES.find((file) => file.name === fileName)
-		if (!match) return null
-		return {
-			...match,
-			skillId,
-			createdAt: SYSTEM_SKILL_CREATED_AT,
-			updatedAt: SYSTEM_SKILL_CREATED_AT,
-		}
-	}
-
-	const [file] = await db
-		.select()
-		.from(skillFiles)
-		.where(and(eq(skillFiles.skillId, skillId), eq(skillFiles.name, fileName)))
-		.limit(1)
-	return file ?? null
-}
-
-/* ── Skill relevance (Phase 4 of #4) ────────────────────────── */
-
-const SKILL_EMBED_TEXT = (name: string, description: string) =>
-	`${name}\n${description}`.slice(0, 2000)
-
-/**
- * Compute and persist `description_embedding` for a single skill row. Idempotent: writes the
- * vector + timestamp; safe to call repeatedly. Failures (e.g. embedding API down) are logged
- * and swallowed so they never block CRUD.
- */
-export async function refreshSkillEmbedding(skillId: string): Promise<void> {
-	if (isSystemSkillId(skillId)) return // virtual system skill has no DB row to update
-	try {
-		const [row] = await db
-			.select({ name: skills.name, description: skills.description })
-			.from(skills)
-			.where(eq(skills.id, skillId))
-			.limit(1)
-		if (!row) return
-		const vector = await embedOne(SKILL_EMBED_TEXT(row.name, row.description))
-		await db
-			.update(skills)
-			.set({ descriptionEmbedding: vector, descriptionEmbeddedAt: new Date() })
-			.where(eq(skills.id, skillId))
-	} catch (err) {
-		logger.warn('[skills] refreshSkillEmbedding failed', { err })
-	}
-}
-
-/**
- * Backfill embeddings for every enabled skill that doesn't have one yet. Runs in batches.
- * Returns the count of newly-embedded rows.
- */
-export async function backfillSkillEmbeddings(limit = 50): Promise<{ embedded: number }> {
-	try {
-		const pending = await db
-			.select({ id: skills.id, name: skills.name, description: skills.description })
-			.from(skills)
-			.where(and(eq(skills.enabled, true), drizzleSql`${skills.descriptionEmbedding} is null`))
-			.limit(limit)
-		if (pending.length === 0) return { embedded: 0 }
-
-		const texts = pending.map((s) => SKILL_EMBED_TEXT(s.name, s.description))
-		const vectors = await embed(texts)
-		const now = new Date()
-		for (let i = 0; i < pending.length; i++) {
-			const v = vectors[i]
-			if (!v) continue
-			await db
-				.update(skills)
-				.set({ descriptionEmbedding: v, descriptionEmbeddedAt: now })
-				.where(eq(skills.id, pending[i].id))
-		}
-		return { embedded: vectors.filter(Boolean).length }
-	} catch (err) {
-		logger.warn('[skills] backfillSkillEmbeddings failed', { err })
-		return { embedded: 0 }
-	}
-}
+/* ── Skill Files CRUD ─────── moved to skills-files.server.ts ─ */
+/* ── Skill embeddings ─────── moved to skills-embeddings.server.ts ─ */
 
 export type SkillSummary = Awaited<ReturnType<typeof listSkillSummaries>>[number]
 

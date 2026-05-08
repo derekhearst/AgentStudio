@@ -38,10 +38,15 @@ import { stat } from 'node:fs/promises'
 
 const execFileAsync = promisify(execFile)
 import { db } from '$lib/db.server'
+import { getSandboxRoot, getSearchCostPerCall, getSearxngUrl } from '$lib/server/config'
 import { eq } from 'drizzle-orm'
 import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
 import { safePathWithin } from '$lib/workspace/workspace.server'
 import { logToolUsage } from '$lib/costs/usage'
+import { webSearch } from './web-search.server'
+import { generateImage } from './image-gen.server'
+import { webFetch, pdfRead } from './web-fetch.server'
+import { assertArtifactAccessible, resolveConversationFromRunId } from './artifact-scope.server'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -62,175 +67,12 @@ import {
 } from '$lib/skills/skills.server'
 import { logger } from '$lib/observability/logger'
 
-type SearchResult = {
-	title: string
-	url: string
-	snippet: string
-	engine?: string
-	score?: number
-}
-
-type ImageModel = 'flux' | 'sdxl' | 'dall-e'
-type ImageSize = '256x256' | '512x512' | '1024x1024'
-
-type ImageResult = {
-	url: string
-	model: string
-	size: string
-	prompt: string
-	cost: number
-}
-
-const MODEL_MAP: Record<ImageModel, string> = {
-	flux: 'black-forest-labs/flux-1-schnell',
-	sdxl: 'stabilityai/stable-diffusion-xl-base-1.0',
-	'dall-e': 'openai/dall-e-3',
-}
-
-/**
- * Wave 4 #15 phase 2 finish — resolve the conversation that a tool call belongs to via
- * the runId in the AsyncLocalStorage context. Used by set_project_context to know which
- * `conversations` row to update. Returns null when there's no run-context (e.g. a tool
- * call from a one-shot synthesis path that bypasses chat_runs).
- */
-async function resolveConversationFromRunId(runId: string | null): Promise<string | null> {
-	if (!runId) return null
-	try {
-		const { chatRuns } = await import('$lib/runs/runs.schema')
-		const { eq } = await import('drizzle-orm')
-		const [row] = await db
-			.select({ conversationId: chatRuns.conversationId })
-			.from(chatRuns)
-			.where(eq(chatRuns.id, runId))
-			.limit(1)
-		return row?.conversationId ?? null
-	} catch (err) {
-		logger.warn('[tools] resolveConversationFromRunId failed', { err })
-		return null
-	}
-}
-
-/**
- * Verify that the user owns the project (project-scoped) or conversation (conversation-scoped)
- * an artifact belongs to. Returns an OK marker (with project name when applicable) or an error
- * string the caller surfaces back to the agent.
- */
-async function assertArtifactAccessible(
-	artifact: { projectId: string | null; conversationId: string | null; id: string },
-	userId: string,
-): Promise<{ ok: true; projectName: string | null } | { ok: false; error: string }> {
-	if (artifact.projectId) {
-		const projectsModule = await import('$lib/projects/projects.server')
-		const project = await projectsModule.getProjectById(artifact.projectId)
-		if (!project || project.userId !== userId) {
-			return { ok: false, error: `Artifact ${artifact.id} not accessible` }
-		}
-		return { ok: true, projectName: project.name }
-	}
-	if (artifact.conversationId) {
-		const { conversations } = await import('$lib/sessions/sessions.schema')
-		const { eq } = await import('drizzle-orm')
-		const [conv] = await db
-			.select({ userId: conversations.userId })
-			.from(conversations)
-			.where(eq(conversations.id, artifact.conversationId))
-			.limit(1)
-		if (!conv || conv.userId !== userId) {
-			return { ok: false, error: `Artifact ${artifact.id} not accessible` }
-		}
-		return { ok: true, projectName: null }
-	}
-	return { ok: false, error: `Artifact ${artifact.id} has no scope` }
-}
-
-function buildAuthHeader() {
-	if (!process.env.SEARXNG_PASSWORD) return undefined
-	const username = process.env.SEARXNG_USERNAME || 'derek'
-	const token = Buffer.from(`${username}:${process.env.SEARXNG_PASSWORD}`).toString('base64')
-	return `Basic ${token}`
-}
-
-export async function webSearch(query: string, limit = 8): Promise<SearchResult[]> {
-	if (!process.env.SEARXNG_URL) {
-		throw new Error('SEARXNG_URL is not configured')
-	}
-
-	const url = new URL('/search', process.env.SEARXNG_URL)
-	url.searchParams.set('q', query)
-	url.searchParams.set('format', 'json')
-
-	const authHeader = buildAuthHeader()
-	const response = await fetch(url, {
-		headers: authHeader ? { Authorization: authHeader } : undefined,
-	})
-
-	if (!response.ok) {
-		throw new Error(`SearXNG request failed with status ${response.status}`)
-	}
-
-	const payload = (await response.json()) as {
-		results?: Array<{ title?: string; url?: string; content?: string; engine?: string; score?: number }>
-	}
-
-	const normalized = (payload.results ?? [])
-		.filter((entry) => Boolean(entry.url))
-		.map((entry) => ({
-			title: entry.title || 'Untitled',
-			url: entry.url || '',
-			snippet: entry.content || '',
-			engine: entry.engine,
-			score: entry.score,
-		}))
-
-	return normalized.slice(0, limit)
-}
-
-export async function generateImage(
-	prompt: string,
-	model: ImageModel = 'flux',
-	size: ImageSize = '1024x1024',
-): Promise<ImageResult> {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
-
-	const response = await fetch('https://openrouter.ai/api/v1/images/generations', {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			model: MODEL_MAP[model],
-			prompt,
-			n: 1,
-			size,
-		}),
-	})
-
-	if (!response.ok) {
-		const text = await response.text()
-		throw new Error(`Image generation failed (${response.status}): ${text}`)
-	}
-
-	const data = (await response.json()) as {
-		data?: Array<{ url?: string; b64_json?: string }>
-		usage?: { total_cost?: number }
-	}
-
-	const imageUrl = data.data?.[0]?.url
-	if (!imageUrl) {
-		throw new Error('No image URL returned from generation API')
-	}
-
-	return {
-		url: imageUrl,
-		model: MODEL_MAP[model],
-		size,
-		prompt,
-		cost: data.usage?.total_cost ?? 0,
-	}
-}
+// Re-export tool implementations that have been extracted into focused modules.
+// External callers ($lib/tools/tools.remote.ts, $lib/research/research-runner.server.ts) keep
+// importing from this barrel.
+export { webSearch } from './web-search.server'
+export { generateImage } from './image-gen.server'
+export { webFetch, pdfRead } from './web-fetch.server'
 
 export async function execShell(command: string) {
 	const result = await shellExec(command)
@@ -325,157 +167,8 @@ export async function browserScreenshot(url?: string) {
 	}
 }
 
-/**
- * Wave 4 #18 phase 5 — `pdf_read` tool implementation.
- *
- * Shells out to `pdftotext` (poppler-utils, available in most Linux/macOS dev environments
- * + the production Docker image). Accepts either:
- *   - HTTP(S) URL — downloads to a temp file via fetch(), then runs pdftotext
- *   - Absolute path inside the user's sandbox workspace — used directly
- *
- * URL validation reuses the SSRF defense from web_fetch (private/loopback rejection). Path
- * validation uses safePathWithin so an agent can't traverse out of its sandbox via `../`.
- *
- * Returns the extracted text trimmed to maxChars at the nearest paragraph boundary. When
- * pdftotext is missing, returns a structured error with install instructions instead of
- * crashing the run.
- */
-export async function pdfRead(rawSource: string, maxChars = 100_000): Promise<{
-	source: string
-	text: string
-	charCount: number
-	truncated: boolean
-	pageHint: number | null
-}> {
-	const { spawn } = await import('node:child_process')
-	const { mkdtemp, writeFile, rm, stat } = await import('node:fs/promises')
-	const { join } = await import('node:path')
-	const { tmpdir } = await import('node:os')
-	const { validateFetchUrl, truncateAtParagraph, cleanupExtractedText } = await import('$lib/research/web-fetch')
-
-	const trimmed = rawSource.trim()
-	let pdfPath: string
-	let cleanupTempDir: string | null = null
-	let resolvedSource = trimmed
-
-	if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-		const validation = validateFetchUrl(trimmed)
-		if (!validation.ok) throw new Error(validation.error)
-		// Download to a tmp dir.
-		const tempDir = await mkdtemp(join(tmpdir(), 'pdf-read-'))
-		cleanupTempDir = tempDir
-		const response = await fetch(validation.url.toString(), {
-			signal: AbortSignal.timeout(45_000),
-		})
-		if (!response.ok) {
-			await rm(tempDir, { recursive: true, force: true }).catch(() => undefined)
-			throw new Error(`failed to download PDF: HTTP ${response.status}`)
-		}
-		const buf = Buffer.from(await response.arrayBuffer())
-		pdfPath = join(tempDir, 'source.pdf')
-		await writeFile(pdfPath, buf)
-		resolvedSource = validation.url.toString()
-	} else {
-		// Treat as a path inside the user's sandbox workspace.
-		const ctxSnapshot = toolUserContext.getStore()
-		if (!ctxSnapshot?.userId) throw new Error('Missing user context for pdf_read')
-		await ensureWorkspaceDir()
-		const workspaceRoot = getWorkspace()
-		pdfPath = await safePathWithin(workspaceRoot, trimmed)
-		const fileStat = await stat(pdfPath).catch(() => null)
-		if (!fileStat || !fileStat.isFile()) {
-			throw new Error(`PDF not found at sandbox path: ${trimmed}`)
-		}
-	}
-
-	try {
-		const stdout = await new Promise<string>((resolve, reject) => {
-			const proc = spawn('pdftotext', ['-layout', '-enc', 'UTF-8', pdfPath, '-'], {
-				stdio: ['ignore', 'pipe', 'pipe'],
-			})
-			const out: Buffer[] = []
-			const err: Buffer[] = []
-			proc.stdout.on('data', (chunk) => out.push(chunk as Buffer))
-			proc.stderr.on('data', (chunk) => err.push(chunk as Buffer))
-			proc.on('error', (e) => {
-				if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-					reject(
-						new Error(
-							'pdftotext binary not found — install poppler-utils (apt-get install poppler-utils on Debian/Ubuntu, brew install poppler on macOS) to enable pdf_read.',
-						),
-					)
-				} else {
-					reject(e)
-				}
-			})
-			proc.on('close', (code) => {
-				if (code === 0) resolve(Buffer.concat(out).toString('utf8'))
-				else reject(new Error(`pdftotext exited with code ${code}: ${Buffer.concat(err).toString('utf8').slice(0, 500)}`))
-			})
-		})
-
-		const cleaned = cleanupExtractedText(stdout)
-		const text = truncateAtParagraph(cleaned, maxChars)
-		// pdftotext doesn't expose a page count from the -layout pipe, but we can hint by
-		// counting form-feed characters which it inserts between pages.
-		const pageHint = (stdout.match(/\f/g) ?? []).length || null
-		return {
-			source: resolvedSource,
-			text,
-			charCount: cleaned.length,
-			truncated: cleaned.length > maxChars,
-			pageHint,
-		}
-	} finally {
-		if (cleanupTempDir) {
-			await rm(cleanupTempDir, { recursive: true, force: true }).catch(() => undefined)
-		}
-	}
-}
-
-/**
- * Wave 4 #18 phase 1 — `web_fetch` tool implementation.
- *
- * Reuses the existing Playwright browser singleton (same one `browser_screenshot` uses) so we
- * don't fight over chromium processes. Returns the page's text content trimmed to maxChars.
- *
- * SAFETY: URL goes through `validateFetchUrl` BEFORE the network call so private/loopback
- * addresses are blocked at the boundary (SSRF defense). Also wraps the navigate in a 30s
- * timeout — sites that hang past that fail rather than tying up the worker indefinitely.
- *
- * Boilerplate strip + paragraph-boundary truncation are pure helpers in `$lib/research/web-fetch`
- * so the URL safety contract is testable without booting Playwright.
- */
-export async function webFetch(rawUrl: string, maxChars = 50_000) {
-	const { validateFetchUrl, cleanupExtractedText, truncateAtParagraph } = await import('$lib/research/web-fetch')
-	const validation = validateFetchUrl(rawUrl)
-	if (!validation.ok) {
-		throw new Error(validation.error)
-	}
-	const targetUrl = validation.url.toString()
-	const p = await getPage()
-	await p.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-	// Best-effort: also wait for network to settle briefly so SPA pages have time to render.
-	await p.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined)
-
-	const title = await p.title().catch(() => '')
-	const finalUrl = p.url()
-	const rawText = (await p.textContent('body').catch(() => '')) ?? ''
-	const cleaned = cleanupExtractedText(rawText)
-	const text = truncateAtParagraph(cleaned, maxChars)
-
-	return {
-		title,
-		url: finalUrl,
-		text,
-		fetchedAt: new Date().toISOString(),
-		fullCharCount: cleaned.length,
-		truncated: cleaned.length > maxChars,
-	}
-}
-
 export async function getSandboxStatus() {
-	const workspace = process.env.SANDBOX_WORKSPACE || '/workspace'
+	const workspace = getSandboxRoot()
 	try {
 		const s = await stat(workspace)
 		return {
@@ -617,10 +310,10 @@ export async function executeTool(
 				// Phase 2 ledger: log every web_search as 1 call. SEARCH_COST_PER_CALL_USD lets
 				// operators set a per-call cost (e.g. for paid backends like Serper); SearXNG is
 				// self-hosted so cost defaults to 0 but the call count is still tracked.
-				const costPerCall = Number.parseFloat(process.env.SEARCH_COST_PER_CALL_USD ?? '0') || 0
+				const costPerCall = getSearchCostPerCall()
 				void logToolUsage({
 					toolName: 'web_search',
-					provider: process.env.SEARXNG_URL ? 'searxng' : null,
+					provider: getSearxngUrl() ? 'searxng' : null,
 					unitType: 'call',
 					units: 1,
 					cost: costPerCall,

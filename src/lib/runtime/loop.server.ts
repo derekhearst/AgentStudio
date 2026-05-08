@@ -13,6 +13,7 @@ import type {
 	ToolDefinition,
 } from './types'
 import { logger } from '$lib/observability/logger'
+import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -31,32 +32,6 @@ import { logger } from '$lib/observability/logger'
  *   3. Call `runChatLoop`.
  *   4. Persist the resulting message + cost + activity rollups.
  */
-
-type ReasoningDetail = {
-	type?: string | null
-	text?: string | null
-	summary?: string | null
-	data?: string | null
-	[key: string]: unknown
-}
-
-function extractReasoningFragment(details: ReasoningDetail[] | undefined): string {
-	if (!details?.length) return ''
-	return details
-		.map((detail) => {
-			switch (detail.type) {
-				case 'reasoning.text':
-					return typeof detail.text === 'string' ? detail.text : ''
-				case 'reasoning.summary':
-					return typeof detail.summary === 'string' ? detail.summary : ''
-				case 'reasoning.encrypted':
-					return '[Reasoning hidden by provider]'
-				default:
-					return typeof detail.text === 'string' ? detail.text : ''
-			}
-		})
-		.join('')
-}
 
 export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopResult> {
 	const { session } = input
