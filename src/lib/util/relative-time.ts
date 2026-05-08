@@ -45,6 +45,16 @@ export function relativeTime(
 }
 
 /**
+ * Format a date+time as a locale string. Returns `'—'` for nullish input so
+ * UI columns stay populated even when a row hasn't reached the relevant phase
+ * (e.g. `startedAt` for a queued job, `finishedAt` for a running job).
+ */
+export function formatDateTime(value: Date | string | null | undefined): string {
+	if (!value) return '—'
+	return new Date(value).toLocaleString()
+}
+
+/**
  * Bidirectional variant: supports future dates with "in Xm" / "in Xh" / "in Xd"
  * formatting. Used by the automations page to show next-run times alongside
  * last-run times.

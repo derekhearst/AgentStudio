@@ -5,6 +5,7 @@
 	import { listJobsQuery } from '$lib/jobs/jobs.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { formatDateTime as fmtDate } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof listJobsQuery>>;
 
@@ -32,10 +33,7 @@
 		}
 	}
 
-	function fmtDate(d: Date | string | null) {
-		if (!d) return '—';
-		return new Date(d).toLocaleString();
-	}
+	// fmtDate imported from $lib/util/relative-time as formatDateTime
 
 	function statusTone(status: string): string {
 		switch (status) {
