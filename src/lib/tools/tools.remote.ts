@@ -1,6 +1,7 @@
 import { command, query } from '$app/server'
 import { z } from 'zod'
-import { execShell, getSandboxStatus as fetchSandboxStatus, readFile, webSearch } from './tools.server'
+import { getSandboxStatus as fetchSandboxStatus, webSearch } from './tools.server'
+import { fileRead, shellExec } from './sandbox.server'
 
 const execSchema = z.object({
 	command: z.string().trim().min(1),
@@ -12,11 +13,21 @@ const searchSchema = z.object({
 })
 
 export const execCommand = command(execSchema, async (input) => {
-	return execShell(input.command)
+	const result = await shellExec(input.command)
+	const success = result.exitCode === 0
+	return {
+		success,
+		command: input.command,
+		status: success ? 'completed' : 'failed',
+		exitCode: result.exitCode,
+		output: result.stdout + (result.stderr ? `\n${result.stderr}` : ''),
+		raw: result,
+	}
 })
 
 export const getFileContent = query(z.string().trim().min(1), async (path) => {
-	return readFile(path)
+	const content = await fileRead(path)
+	return { path, content }
 })
 
 export const getSandboxStatus = query(async () => {
