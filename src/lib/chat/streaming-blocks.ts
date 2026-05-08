@@ -142,3 +142,92 @@ export function getCompletedToolCalls(blocks: StreamingBlock[]): Array<Record<st
 export function estimateTokens(value: string | null | undefined): number {
 	return Math.max(0, Math.ceil((value?.length ?? 0) / 4))
 }
+
+type MaybeSequenced = { sequence?: number | null }
+type RemoteUserShape = { role: string; content: string; createdAt: Date | string }
+
+type PendingUser = { id: string; content: string; createdAt: Date }
+type PendingAssistant = {
+	id: string
+	content: string
+	createdAt: Date
+	toolCalls?: Array<Record<string, unknown>>
+}
+
+/**
+ * Merge remote DB-backed messages with optimistic / pending drafts and sort by
+ * per-conversation `sequence`.
+ *
+ * Optimistic user drafts are dropped once the matching DB row appears
+ * (content + recency match within 15s). Pending assistant drafts are dropped
+ * once their id is in the remote set. Drafts without a server-assigned
+ * sequence get sentinel values near `Number.MAX_SAFE_INTEGER` so they sort to
+ * the end while a streaming turn is in flight; once the real row lands its
+ * sequence takes over.
+ */
+export function buildDisplayedMessages<R extends RemoteUserShape & MaybeSequenced & { id: string }>(input: {
+	remoteMessages: R[]
+	pendingUserMessages: PendingUser[]
+	pendingAssistantDrafts: PendingAssistant[]
+	model: string
+}): Array<R | ReturnType<typeof buildOptimisticUser> | ReturnType<typeof buildPendingAssistant>> {
+	const { remoteMessages, pendingUserMessages, pendingAssistantDrafts, model } = input
+	const remoteIds = new Set(remoteMessages.map((m) => m.id))
+	let pendingSeq = Number.MAX_SAFE_INTEGER - 10000
+
+	const optimisticUsers = pendingUserMessages
+		.filter(
+			(message) =>
+				!remoteMessages.some(
+					(remote) =>
+						remote.role === 'user' &&
+						remote.content === message.content &&
+						new Date(remote.createdAt).getTime() >= message.createdAt.getTime() - 15000,
+				),
+		)
+		.map((message) => buildOptimisticUser(message, model, ++pendingSeq))
+
+	const pendingAssistants = pendingAssistantDrafts
+		.filter((message) => !remoteIds.has(message.id))
+		.map((message) => buildPendingAssistant(message, model, ++pendingSeq))
+
+	const combined = [...remoteMessages, ...optimisticUsers, ...pendingAssistants]
+	combined.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
+	return combined
+}
+
+function buildOptimisticUser(message: PendingUser, model: string, sequence: number) {
+	return {
+		id: message.id,
+		role: 'user' as const,
+		content: message.content,
+		model,
+		tokensIn: 0,
+		tokensOut: 0,
+		cost: '0',
+		ttftMs: null,
+		totalMs: null,
+		tokensPerSec: null,
+		createdAt: message.createdAt,
+		sequence,
+		toolCalls: [] as Array<Record<string, unknown>>,
+	}
+}
+
+function buildPendingAssistant(message: PendingAssistant, model: string, sequence: number) {
+	return {
+		id: message.id,
+		role: 'assistant' as const,
+		content: message.content,
+		model,
+		tokensIn: 0,
+		tokensOut: 0,
+		cost: '0',
+		ttftMs: null,
+		totalMs: null,
+		tokensPerSec: null,
+		createdAt: message.createdAt,
+		sequence,
+		toolCalls: message.toolCalls ?? [],
+	}
+}

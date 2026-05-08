@@ -37,6 +37,7 @@
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
 	import {
+		buildDisplayedMessages,
 		estimateTokens,
 		getCompletedToolCalls,
 		getLatestReasoningTokens,
@@ -492,66 +493,14 @@
 	}
 	const initialPrompt = $derived(page.url.searchParams.get('prompt')?.trim() ?? '');
 	// estimateTokens is imported from $lib/chat/streaming-blocks (chars / 4 fallback).
-	const displayedMessages = $derived.by(() => {
-		const remoteMessages = messages;
-		const remoteIds = new Set(remoteMessages.map((message) => message.id));
-
-		// Optimistic / pending drafts that don't yet have a server-assigned `sequence`
-		// sort to the end via Number.MAX_SAFE_INTEGER, in the order they were created.
-		// Once the real DB row arrives, the draft is filtered out (see remoteIds /
-		// content-match dedupe below) and the real row's `sequence` takes its place.
-		let pendingSeq = Number.MAX_SAFE_INTEGER - 10000;
-
-		const optimisticUsers = pendingUserMessages
-			.filter((message) =>
-				!remoteMessages.some(
-					(remote) =>
-						remote.role === 'user' &&
-						remote.content === message.content &&
-						new Date(remote.createdAt).getTime() >= message.createdAt.getTime() - 15000
-				)
-			)
-			.map((message) => ({
-				id: message.id,
-				role: 'user' as const,
-				content: message.content,
-				model,
-				tokensIn: 0,
-				tokensOut: 0,
-				cost: '0',
-				ttftMs: null,
-				totalMs: null,
-				tokensPerSec: null,
-				createdAt: message.createdAt,
-				sequence: ++pendingSeq,
-				toolCalls: []
-			}));
-
-		const pendingAssistants = pendingAssistantDrafts
-			.filter((message) => !remoteIds.has(message.id))
-			.map((message) => ({
-				id: message.id,
-				role: 'assistant' as const,
-				content: message.content,
-				model,
-				tokensIn: 0,
-				tokensOut: 0,
-				cost: '0',
-				ttftMs: null,
-				totalMs: null,
-				tokensPerSec: null,
-				createdAt: message.createdAt,
-				sequence: ++pendingSeq,
-				toolCalls: message.toolCalls ?? []
-			}));
-
-		// Order by per-conversation `sequence` — assigned by insertMessageWithSequence at
-		// write time. Real DB rows always have it; optimistic drafts get the sentinel
-		// values above so they sort to the end while a streaming turn is in flight.
-		const combined = [...remoteMessages, ...optimisticUsers, ...pendingAssistants];
-		combined.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-		return combined;
-	});
+	const displayedMessages = $derived(
+		buildDisplayedMessages({
+			remoteMessages: messages,
+			pendingUserMessages,
+			pendingAssistantDrafts,
+			model,
+		}),
+	);
 
 	const lastUserMessageId = $derived.by(() => {
 		for (let i = displayedMessages.length - 1; i >= 0; i -= 1) {
