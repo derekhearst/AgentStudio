@@ -10,14 +10,17 @@
 	} from '$lib/projects/projects.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import RepoTab from '$lib/projects/components/RepoTab.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getProjectByIdQuery>>>;
+	type TabName = 'artifacts' | 'repo';
 
 	const projectId = $derived(page.params.id ?? '');
 
 	let detail = $state<Detail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let activeTab = $state<TabName>('artifacts');
 
 	let formOpen = $state(false);
 	let formName = $state('');
@@ -33,6 +36,9 @@
 		{ value: 'yaml', label: 'YAML' },
 		{ value: 'plaintext', label: 'Plain text' },
 	];
+
+	const repoKind = $derived(detail?.project.repoKind ?? 'none');
+	const hasRepo = $derived(repoKind !== 'none');
 
 	onMount(() => void load());
 
@@ -96,10 +102,10 @@
 		title={detail?.project.name ?? 'Project'}
 		crumbs={[{ label: 'Projects', href: '/projects' }]}
 		backHref="/projects"
-		subtitle={detail ? `/${detail.project.slug} · ${detail.project.kind}` : ''}
+		subtitle={detail ? `/${detail.project.slug} · ${detail.project.kind}${hasRepo ? ` · ${detail.project.repoKind}` : ''}` : ''}
 	>
 		{#snippet actions()}
-			{#if detail}
+			{#if detail && activeTab === 'artifacts'}
 				<button class="btn btn-xs btn-primary" type="button" onclick={() => (formOpen = !formOpen)}>
 					{formOpen ? 'Cancel' : '+ New artifact'}
 				</button>
@@ -119,97 +125,117 @@
 	{@const p = detail.project}
 	<section class="space-y-3 sm:space-y-4">
 
-		<ContentPanel>
-			{#snippet header()}
-				<div class="flex flex-1 flex-wrap items-start justify-between gap-2">
-					<div class="min-w-0 flex-1">
-						{#if p.description}
-							<p class="text-sm text-base-content/70">{p.description}</p>
+		{#if p.description}
+			<p class="text-sm text-base-content/70">{p.description}</p>
+		{/if}
+
+		<!-- Tabs -->
+		<div role="tablist" class="tabs tabs-bordered">
+			<button
+				role="tab"
+				class="tab {activeTab === 'artifacts' ? 'tab-active' : ''}"
+				type="button"
+				onclick={() => (activeTab = 'artifacts')}
+			>
+				Artifacts {detail.artifacts.length > 0 ? `(${detail.artifacts.length})` : ''}
+			</button>
+			{#if hasRepo}
+				<button
+					role="tab"
+					class="tab {activeTab === 'repo' ? 'tab-active' : ''}"
+					type="button"
+					onclick={() => (activeTab = 'repo')}
+				>
+					Repo
+				</button>
+			{/if}
+		</div>
+
+		{#if activeTab === 'artifacts'}
+			<ContentPanel>
+				{#if formOpen}
+					<form class="grid gap-2 rounded-xl border border-base-300/60 bg-base-200/40 p-3 text-sm" onsubmit={submitCreate}>
+						<div class="grid gap-2 sm:grid-cols-[2fr_1fr]">
+							<fieldset class="fieldset">
+								<legend class="fieldset-legend text-xs">Name</legend>
+								<input
+									type="text"
+									class="input input-sm input-bordered"
+									bind:value={formName}
+									placeholder="e.g. Hydrofoil Assembly Guide"
+									maxlength="160"
+									required
+								/>
+							</fieldset>
+							<fieldset class="fieldset">
+								<legend class="fieldset-legend text-xs">Content type</legend>
+								<select class="select select-sm select-bordered" bind:value={formContentType}>
+									{#each CONTENT_TYPES as t (t.value)}
+										<option value={t.value}>{t.label}</option>
+									{/each}
+								</select>
+							</fieldset>
+						</div>
+						<fieldset class="fieldset">
+							<legend class="fieldset-legend text-xs">Initial content (will be saved as v1)</legend>
+							<textarea
+								class="textarea textarea-bordered font-mono text-xs"
+								bind:value={formContent}
+								placeholder="Type or paste content here…"
+								rows="8"
+							></textarea>
+						</fieldset>
+						{#if formError}
+							<div class="alert alert-error py-2 text-xs">{formError}</div>
 						{/if}
-					</div>
-				</div>
-			{/snippet}
-
-			{#if formOpen}
-				<form class="mt-3 grid gap-2 rounded-xl border border-base-300/60 bg-base-200/40 p-3 text-sm" onsubmit={submitCreate}>
-					<div class="grid gap-2 sm:grid-cols-[2fr_1fr]">
-						<fieldset class="fieldset">
-							<legend class="fieldset-legend text-xs">Name</legend>
-							<input
-								type="text"
-								class="input input-sm input-bordered"
-								bind:value={formName}
-								placeholder="e.g. Hydrofoil Assembly Guide"
-								maxlength="160"
-								required
-							/>
-						</fieldset>
-						<fieldset class="fieldset">
-							<legend class="fieldset-legend text-xs">Content type</legend>
-							<select class="select select-sm select-bordered" bind:value={formContentType}>
-								{#each CONTENT_TYPES as t (t.value)}
-									<option value={t.value}>{t.label}</option>
-								{/each}
-							</select>
-						</fieldset>
-					</div>
-					<fieldset class="fieldset">
-						<legend class="fieldset-legend text-xs">Initial content (will be saved as v1)</legend>
-						<textarea
-							class="textarea textarea-bordered font-mono text-xs"
-							bind:value={formContent}
-							placeholder="Type or paste content here…"
-							rows="8"
-						></textarea>
-					</fieldset>
-					{#if formError}
-						<div class="alert alert-error py-2 text-xs">{formError}</div>
-					{/if}
-					<div class="flex justify-end gap-2">
-						<button type="button" class="btn btn-xs btn-ghost" onclick={() => (formOpen = false)} disabled={creating}>
-							Cancel
-						</button>
-						<button type="submit" class="btn btn-xs btn-primary" disabled={creating}>
-							{creating ? 'Creating…' : 'Create artifact'}
-						</button>
-					</div>
-				</form>
-			{/if}
-		</ContentPanel>
-
-		<ContentPanel>
-			{#snippet header()}
-				<div class="flex flex-1 items-center justify-between gap-2">
-					<h2 class="font-semibold">Artifacts</h2>
-					<span class="badge badge-sm badge-ghost">{detail?.artifacts.length ?? 0}</span>
-				</div>
-			{/snippet}
-			{#if detail.artifacts.length === 0}
-				<p class="py-6 text-center text-sm italic text-base-content/45">
-					No artifacts yet. Create one above to start version-tracking content.
-				</p>
-			{:else}
-				<ul class="space-y-2">
-					{#each detail.artifacts as a (a.id)}
-						<li class="group flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 p-3">
-							<div class="min-w-0 flex-1">
-								<a href="/projects/{p.id}/artifacts/{a.id}" class="link link-hover font-medium">{a.name}</a>
-								<p class="font-mono text-[10px] text-base-content/45">
-									/{a.slug} · {a.contentType} · updated {fmtDate(a.updatedAt)}
-								</p>
-							</div>
-							<button
-								class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100"
-								type="button"
-								onclick={() => handleDelete(a.id, a.name)}
-							>
-								Soft delete
+						<div class="flex justify-end gap-2">
+							<button type="button" class="btn btn-xs btn-ghost" onclick={() => (formOpen = false)} disabled={creating}>
+								Cancel
 							</button>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</ContentPanel>
+							<button type="submit" class="btn btn-xs btn-primary" disabled={creating}>
+								{creating ? 'Creating…' : 'Create artifact'}
+							</button>
+						</div>
+					</form>
+				{/if}
+			</ContentPanel>
+
+			<ContentPanel>
+				{#snippet header()}
+					<div class="flex flex-1 items-center justify-between gap-2">
+						<h2 class="font-semibold">Artifacts</h2>
+						<span class="badge badge-sm badge-ghost">{detail?.artifacts.length ?? 0}</span>
+					</div>
+				{/snippet}
+				{#if detail.artifacts.length === 0}
+					<p class="py-6 text-center text-sm italic text-base-content/45">
+						No artifacts yet. Create one above to start version-tracking content.
+					</p>
+				{:else}
+					<ul class="space-y-2">
+						{#each detail.artifacts as a (a.id)}
+							<li class="group flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 p-3">
+								<div class="min-w-0 flex-1">
+									<a href="/projects/{p.id}/artifacts/{a.id}" class="link link-hover font-medium">{a.name}</a>
+									<p class="font-mono text-[10px] text-base-content/45">
+										/{a.slug} · {a.contentType} · updated {fmtDate(a.updatedAt)}
+									</p>
+								</div>
+								<button
+									class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100"
+									type="button"
+									onclick={() => handleDelete(a.id, a.name)}
+								>
+									Soft delete
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</ContentPanel>
+		{:else if activeTab === 'repo'}
+			<RepoTab {projectId} {repoKind} />
+		{/if}
 	</section>
 {/if}
 	</div>

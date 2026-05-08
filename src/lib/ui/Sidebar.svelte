@@ -74,12 +74,6 @@
 					Projects
 				</a>
 			</li>
-			<li>
-				<a href="/source-control" class:menu-active={isActive('/source-control')} onclick={onNavigate}>
-					<i class="mdi mdi-source-branch text-base shrink-0 opacity-60"></i>
-					Source control
-				</a>
-			</li>
 		</ul>
 
 		<!-- Insights group -->

@@ -1,4 +1,4 @@
-import type { CacheControl, LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
+import type { AudioOutputConfig, CacheControl, ChatPlugin, LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 
 /** OpenAI-style tool definition shape — same one streamChat accepts. */
@@ -114,6 +114,19 @@ export type RunChatLoopInput = {
 	computeTools: () => Promise<ToolDefinition[]>
 	/** Pass-through to streamChat. */
 	reasoningConfig?: ReasoningConfig
+	/**
+	 * Pass-through to streamChat for OpenRouter plugin slots. Used by the chat stream to enable
+	 * the `file-parser` plugin (PDF OCR engine) when the user attaches a PDF.
+	 */
+	chatPlugins?: ChatPlugin[]
+	/**
+	 * Output modalities. When `'audio'` is included, the model emits spoken audio inline with
+	 * text via `delta.audio` SSE chunks. Requires a model that lists `audio` in its
+	 * outputModalities (see `modelCapabilities`).
+	 */
+	modalities?: Array<'text' | 'audio'>
+	/** Audio output configuration. Required when `modalities` includes `'audio'`. */
+	audio?: AudioOutputConfig
 	/** Hard cap on tool rounds. The loop exits when the model stops calling tools or this is hit. */
 	maxRounds: number
 	/** Tools requiring explicit user approval (or the wildcard "*"). */
@@ -125,6 +138,12 @@ export type RunChatLoopInput = {
 	/** Workspace context — passed through to executeTool. */
 	persistentKey: string | null
 	worktree: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null
+	/**
+	 * Project ID when the conversation is bound to a project (`conversations.project_id`).
+	 * Triggers project-scoped workspace resolution: the agent's cwd lands inside
+	 * `<sandbox>/<userId>/projects/<projectId>` instead of an ephemeral run dir.
+	 */
+	projectId: string | null
 	/** Sub-agent spawn callback (only used when the orchestrator calls run_subagent with an agentId). */
 	spawnSubagent?: SpawnSubagent
 	/**

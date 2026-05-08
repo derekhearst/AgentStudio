@@ -322,6 +322,16 @@
 				<div class="console-msg__user-bubble">
 					<p class="whitespace-pre-wrap">{message.content}</p>
 				</div>
+				<div class="console-msg__actions">
+					<button class="console-pill" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
+						<i class="mdi mdi-pencil-outline" aria-hidden="true"></i>
+					</button>
+					{#if canRegenerate}
+						<button class="console-pill" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
+							<i class="mdi mdi-refresh" aria-hidden="true"></i>
+						</button>
+					{/if}
+				</div>
 			</div>
 		{/if}
 	{:else}
@@ -457,60 +467,48 @@
 		{/if}
 	{/if}
 
-	{#if !editing}
-		<div class={`chat-footer mt-1 flex items-center gap-1 ${isUser ? 'justify-end' : 'justify-start'}`} style={isUser ? 'grid-column: 1 / -1; justify-self: end;' : 'grid-column: 1 / -1; justify-self: start;'}>
-			{#if isUser}
-				<button class="btn btn-ghost btn-xs btn-circle" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
-					<i class="mdi mdi-pencil-outline text-sm" aria-hidden="true"></i>
-				</button>
-				{#if canRegenerate}
-					<button class="btn btn-ghost btn-xs rounded-md px-2" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
-						<i class="mdi mdi-refresh text-sm" aria-hidden="true"></i>
-					</button>
+	{#if !editing && isAssistant}
+		<div class="console-msg__actions">
+			<button
+				class="console-pill"
+				type="button"
+				onclick={copyAssistantResponse}
+				title="Copy response"
+				aria-label="Copy response"
+			>
+				{#if copied}
+					<i class="mdi mdi-check text-success" aria-hidden="true"></i>
+				{:else}
+					<i class="mdi mdi-content-copy" aria-hidden="true"></i>
 				{/if}
-			{/if}
-			{#if isAssistant}
-				<button
-					class="btn btn-ghost btn-xs rounded-md px-2"
-					type="button"
-					onclick={copyAssistantResponse}
-					title="Copy response"
-					aria-label="Copy response"
-				>
-					{#if copied}
-						<i class="mdi mdi-check text-sm text-success" aria-hidden="true"></i>
-					{:else}
-						<i class="mdi mdi-content-copy text-sm" aria-hidden="true"></i>
-					{/if}
+			</button>
+			<div class="dropdown dropdown-top">
+				<button tabindex="0" class="console-pill" type="button" title="Message stats" aria-label="Message stats">
+					<i class="mdi mdi-information-outline" aria-hidden="true"></i>
 				</button>
-				<div class="dropdown dropdown-top">
-					<button tabindex="0" class="btn btn-ghost btn-xs btn-circle" type="button" title="Message stats" aria-label="Message stats">
-						<i class="mdi mdi-information-outline text-sm" aria-hidden="true"></i>
-					</button>
-					<div tabindex="0" role="menu" class="dropdown-content card card-compact bg-base-100 border-base-300 z-20 mt-2 w-72 border p-3 text-xs shadow-xl">
-						<div class="grid grid-cols-2 gap-x-3 gap-y-2">
-							<span class="opacity-70">Model</span>
-							<span class="truncate text-right">{message.model ?? 'n/a'}</span>
-							<span class="opacity-70">Tokens In</span>
-							<span class="text-right">{estimatedTokensIn}</span>
-							<span class="opacity-70">Tokens Out</span>
-							<span class="text-right">{estimatedTokensOut}</span>
-							{#if messageReasoningTokens !== null}
-								<span class="opacity-70">Thinking</span>
-								<span class="text-right">{messageReasoningTokens.toLocaleString()}</span>
-							{/if}
-							<span class="opacity-70">Cost</span>
-							<span class="text-right">${formattedCost}</span>
-							<span class="opacity-70">TTFT</span>
-							<span class="text-right">{message.ttftMs ?? 'n/a'}{message.ttftMs !== null ? 'ms' : ''}</span>
-							<span class="opacity-70">Total</span>
-							<span class="text-right">{message.totalMs ?? 'n/a'}{message.totalMs !== null ? 'ms' : ''}</span>
-							<span class="opacity-70">Tok/s</span>
-							<span class="text-right">{message.tokensPerSec ?? 'n/a'}</span>
-						</div>
+				<div tabindex="0" role="menu" class="dropdown-content card card-compact bg-base-100 border-base-300 z-20 mt-2 w-72 border p-3 text-xs shadow-xl">
+					<div class="grid grid-cols-2 gap-x-3 gap-y-2">
+						<span class="opacity-70">Model</span>
+						<span class="truncate text-right">{message.model ?? 'n/a'}</span>
+						<span class="opacity-70">Tokens In</span>
+						<span class="text-right">{estimatedTokensIn}</span>
+						<span class="opacity-70">Tokens Out</span>
+						<span class="text-right">{estimatedTokensOut}</span>
+						{#if messageReasoningTokens !== null}
+							<span class="opacity-70">Thinking</span>
+							<span class="text-right">{messageReasoningTokens.toLocaleString()}</span>
+						{/if}
+						<span class="opacity-70">Cost</span>
+						<span class="text-right">${formattedCost}</span>
+						<span class="opacity-70">TTFT</span>
+						<span class="text-right">{message.ttftMs ?? 'n/a'}{message.ttftMs !== null ? 'ms' : ''}</span>
+						<span class="opacity-70">Total</span>
+						<span class="text-right">{message.totalMs ?? 'n/a'}{message.totalMs !== null ? 'ms' : ''}</span>
+						<span class="opacity-70">Tok/s</span>
+						<span class="text-right">{message.tokensPerSec ?? 'n/a'}</span>
 					</div>
 				</div>
-			{/if}
+			</div>
 		</div>
 	{/if}
 

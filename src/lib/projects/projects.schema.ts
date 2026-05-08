@@ -48,6 +48,18 @@ export const projectKindEnum = pgEnum('project_kind', [
 	'other',
 ])
 
+/**
+ * Whether the project has a sandboxed git repo on disk, and where it came from.
+ *
+ *   'none'     — no filesystem footprint (legacy / database-only project)
+ *   'local'    — `git init`'d at <SANDBOX_WORKSPACE>/<userId>/projects/<projectId>, no remote
+ *   'imported' — cloned from a remote (GitHub / Azure / URL); paired with a `repositories` sidecar row
+ *
+ * Stored as a plain text column rather than an enum so adding a future kind (e.g. 'submodule')
+ * doesn't require a migration of every existing row.
+ */
+export type RepoKind = 'none' | 'local' | 'imported'
+
 export const artifactContentTypeEnum = pgEnum('artifact_content_type', [
 	'markdown',
 	'code',
@@ -65,6 +77,14 @@ export const projects = pgTable(
 		description: text('description'),
 		kind: projectKindEnum('kind').notNull().default('other'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+		// Repo-shape fields. `repoKind='none'` means no fs footprint; 'local' = git init'd
+		// at the project's sandbox path; 'imported' = cloned from a remote (paired with a
+		// `repositories` sidecar row carrying provider/owner/name/cloneUrl).
+		repoKind: text('repo_kind').notNull().default('none').$type<RepoKind>(),
+		repoLocalPath: text('repo_local_path'),
+		defaultBranch: text('default_branch'),
+		lastPulledAt: timestamp('last_pulled_at', { withTimezone: true }),
+		lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 	},

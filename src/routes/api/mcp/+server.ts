@@ -61,6 +61,8 @@ const toolDescriptions: Record<ToolName, string> = {
 	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio. Returns {total, inserted, updated, skipped}.',
 	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
 	image_generate: 'Generate an image from a text prompt',
+	video_generate:
+		'Generate a video from a text prompt (Veo, Wan, etc.) via async OpenRouter video generation. Polls until completion or timeoutSeconds elapses; returns urls or a pollUrl when still in progress.',
 	list_skills: 'List all available skills with their names and descriptions.',
 	read_skill: 'Read a skill by name. Returns main content and available nested files.',
 	read_skill_file: 'Read a specific nested file within a skill.',

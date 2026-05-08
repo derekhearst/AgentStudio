@@ -18,6 +18,27 @@ export type ModelInfo = {
 	createdAt?: number | null
 }
 
+/** Convenience capability flags derived from ModelInfo.inputModalities/outputModalities. */
+export type ModelCapabilities = {
+	supportsImage: boolean
+	supportsAudioIn: boolean
+	supportsAudioOut: boolean
+	supportsVideo: boolean
+	supportsFile: boolean
+}
+
+export function modelCapabilities(model: ModelInfo): ModelCapabilities {
+	const inputs = new Set(model.inputModalities ?? [])
+	const outputs = new Set(model.outputModalities ?? [])
+	return {
+		supportsImage: inputs.has('image'),
+		supportsAudioIn: inputs.has('audio'),
+		supportsAudioOut: outputs.has('audio') || outputs.has('speech'),
+		supportsVideo: inputs.has('video'),
+		supportsFile: inputs.has('file'),
+	}
+}
+
 let cachedModels: ModelInfo[] | null = null
 let cacheTime = 0
 const CACHE_TTL = 1000 * 60 * 60 // 1 hour

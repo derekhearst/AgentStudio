@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getConversations } from '$lib/chat';
+	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
 	import { useResizableSize } from './use-resize.svelte';
 
@@ -37,6 +38,24 @@
 
 	let conversations = $state<Conversation[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
+	let creditsBalance = $derived(await getCredits());
+
+	function formatUsd(value: number): string {
+		if (value >= 100) return `$${value.toFixed(0)}`;
+		if (value >= 1) return `$${value.toFixed(2)}`;
+		return `$${value.toFixed(3)}`;
+	}
+
+	async function handleRefreshCredits(event: MouseEvent) {
+		event.preventDefault();
+		event.stopPropagation();
+		try {
+			await refreshCredits();
+			await getCredits().refresh();
+		} catch {
+			/* widget is best-effort */
+		}
+	}
 	let chatFilter = $state('');
 	let openMenu = $state(false);
 	let filters = $state({ status: 'All', project: 'All', env: 'All', lastActivity: 'All' });
@@ -225,6 +244,19 @@
 			{/each}
 		</div>
 	{/each}
+
+	{#if creditsBalance}
+		<button
+			type="button"
+			class="console-sb__credits"
+			title={`OpenRouter credits — click to refresh.\nTotal: ${formatUsd(creditsBalance.totalCredits)}\nUsed: ${formatUsd(creditsBalance.totalUsage)}`}
+			onclick={handleRefreshCredits}
+		>
+			<span class="ic"><Icon name="dollar" size={13} /></span>
+			<span class="l">Credits</span>
+			<span class="v">{formatUsd(creditsBalance.remaining)}</span>
+		</button>
+	{/if}
 
 	<!-- Chats panel -->
 	<div class="console-sb__chats" style="height:{chatsHeight.value}px;">

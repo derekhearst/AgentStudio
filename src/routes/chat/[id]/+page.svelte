@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { tick } from 'svelte';
 	import {
+		deleteMessagesAfter,
 		editMessage,
 		getConversation,
 		getMessageStats,
@@ -1559,7 +1560,36 @@
 	}
 
 	async function handleRegenerate() {
-		await streamMessage('regenerate', true);
+		if (!conversationId || streaming) return;
+		const pivotId = lastUserMessageId;
+		if (!pivotId) return;
+		try {
+			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId });
+			if (!result || result.success !== true) {
+				setRecoverableError(
+					result?.error ?? 'Unable to regenerate response',
+					{ kind: 'regenerate', messageId: pivotId },
+					{ action: 'handleRegenerate', messageId: pivotId }
+				);
+				return;
+			}
+			clearRecoverableError();
+			pendingAssistantDrafts = [];
+			pendingMessageId = null;
+			streamingBlocks = [];
+			currentTextTarget = '';
+			currentThinkingTarget = '';
+			stopDraftInterpolation();
+			stopThinkingInterpolation();
+			await refreshAll();
+			await streamMessage('regenerate', true);
+		} catch (error) {
+			setRecoverableError(
+				error instanceof Error ? error.message : 'Unable to regenerate response',
+				{ kind: 'regenerate', messageId: pivotId },
+				{ action: 'handleRegenerate', messageId: pivotId }
+			);
+		}
 	}
 
 	function getContextLimitForModel(modelId: string) {
@@ -1783,9 +1813,11 @@
 				{/each}
 
 				{#if waitingForFirstToken && streaming && streamingBlocks.length === 0}
-					<div class="flex items-center gap-3 px-1 py-2 text-sm text-base-content/65">
-						<span class="loading loading-spinner loading-md text-primary"></span>
-						<span class="sr-only">Assistant is generating a response</span>
+					<div class="console-typing" role="status" aria-live="polite">
+						<span class="console-typing__dots" aria-hidden="true">
+							<span></span><span></span><span></span>
+						</span>
+						<span class="console-typing__label">Generating response</span>
 					</div>
 				{:else if streaming}
 					{#each streamingBlocks as block (block.id)}

@@ -1,95 +1,42 @@
 import { eq, sql } from 'drizzle-orm'
 import { agents } from '$lib/agents/agents.schema'
-import { skills } from '$lib/skills/skills.schema'
-import {
-	ORCHESTRATOR_IDENTITY_SKILL_ID,
-	ORCHESTRATOR_IDENTITY_SKILL_NAME,
-} from './identity-seed.server'
 import {
 	resolveAgentName,
 	scanAgentSources,
 	type AgentDefinitionSource,
 	type AgentSourcesScan,
 } from './agent-source-loader'
+import type { db as DbType } from '$lib/db.server'
 
 /**
- * Wave 5 #22 phase 4 — DB side of the AGENTS.md scanner.
+ * DB side of the AGENTS.md scanner.
  *
  * `applyAgentSources(scan, priority)` reconciles a parsed `AgentSourcesScan` (from the pure
- * file walker) into the DB. Two write paths:
+ * file walker) into the `agents` table:
  *
- *   - `AGENTS.md` content → upserts the `system/orchestrator-identity` skill (same row
- *     seeded by Phase 1). Operators editing this file in their repo can override the
- *     baseline orchestrator prompt without code.
+ *   - `docs/agents/<slug>/AGENT.md` content → upserts an `agents` row by `config.sourceSlug`.
+ *     Frontmatter supplies role + model; markdown body becomes the `systemPrompt` column.
  *
- *   - `docs/agents/<slug>/AGENT.md` content → upserts an `agents` row by name. Frontmatter
- *     supplies role + model + capabilityGroups; markdown body becomes the legacy
- *     `systemPrompt` column. Operators can later promote the prompt into a skill via the
- *     `/agents/[id]/identity` editor (Phase 3); the AGENTS.md → DB sync stays compatible
- *     with that downstream flow.
+ * Top-level AGENTS.md content is intentionally ignored — orchestrator identity now lives in
+ * the in-code `ORCHESTRATOR_IDENTITY_DEFAULT` constant ([orchestrator.ts](./orchestrator.ts)),
+ * not a DB skill row.
  *
  * Priority modes:
- *   - `'db'` (default) — repo files only INSERT new agents + only UPDATE the orchestrator
- *     skill if it has the default seeded content (i.e. operator has not customized it). Safe
- *     for a fresh deploy that already has hand-tuned agents in the DB.
+ *   - `'db'` (default) — repo files only INSERT new agents. Safe for fresh deploys.
  *   - `'repo'` — repo files OVERRIDE the DB on conflict. The repo becomes system of record.
  *
  * Best-effort throughout: any single failure is logged + skipped, never thrown.
  */
-
-import type { db as DbType } from '$lib/db.server'
 
 type DbLike = typeof DbType
 
 export type ApplyAgentSourcesPriority = 'repo' | 'db'
 
 export type ApplyAgentSourcesResult = {
-	orchestratorOverridden: boolean
 	agentsInserted: number
 	agentsUpdated: number
 	agentsSkipped: number
 	errors: string[]
-}
-
-const ORCHESTRATOR_OVERRIDDEN_TAG = 'identity:from-repo'
-
-async function applyOrchestratorIdentity(
-	dbInstance: DbLike,
-	override: { path: string; content: string },
-	priority: ApplyAgentSourcesPriority,
-): Promise<{ overridden: boolean; error: string | null }> {
-	try {
-		const trimmed = override.content.trim()
-		if (trimmed.length === 0) {
-			return { overridden: false, error: null }
-		}
-
-		if (priority === 'db') {
-			// In db-priority mode we never overwrite operator edits. We only seed when no row
-			// exists yet (handled by the Phase 1 seeder), so here we no-op.
-			return { overridden: false, error: null }
-		}
-
-		// priority === 'repo' — write the repo content to the orchestrator-identity skill.
-		const now = new Date()
-		const [updated] = await dbInstance
-			.update(skills)
-			.set({
-				content: trimmed,
-				updatedAt: now,
-				tags: sql`(
-					CASE
-						WHEN ${skills.tags} @> ARRAY[${ORCHESTRATOR_OVERRIDDEN_TAG}]::text[] THEN ${skills.tags}
-						ELSE array_append(${skills.tags}, ${ORCHESTRATOR_OVERRIDDEN_TAG})
-					END
-				)`,
-			})
-			.where(eq(skills.id, ORCHESTRATOR_IDENTITY_SKILL_ID))
-			.returning({ id: skills.id })
-		return { overridden: !!updated, error: null }
-	} catch (err) {
-		return { overridden: false, error: `orchestrator override failed: ${(err as Error).message}` }
-	}
 }
 
 async function applyAgent(
@@ -171,16 +118,9 @@ export async function applyAgentSources(
 	priority: ApplyAgentSourcesPriority = 'db',
 ): Promise<ApplyAgentSourcesResult> {
 	const errors: string[] = []
-	let orchestratorOverridden = false
 	let agentsInserted = 0
 	let agentsUpdated = 0
 	let agentsSkipped = 0
-
-	if (scan.orchestratorIdentity) {
-		const result = await applyOrchestratorIdentity(dbInstance, scan.orchestratorIdentity, priority)
-		orchestratorOverridden = result.overridden
-		if (result.error) errors.push(result.error)
-	}
 
 	for (const source of scan.agents) {
 		const result = await applyAgent(dbInstance, source, priority)
@@ -191,7 +131,6 @@ export async function applyAgentSources(
 	}
 
 	return {
-		orchestratorOverridden,
 		agentsInserted,
 		agentsUpdated,
 		agentsSkipped,
@@ -200,13 +139,13 @@ export async function applyAgentSources(
 }
 
 /**
- * Boot entry point. Returns null + logs a single line if the env vars don't request a scan,
- * so the boot path stays quiet for operators who don't use the AGENTS.md feature.
+ * Boot entry point. Returns null when no AGENT.md files exist, so the boot path stays
+ * quiet for operators who don't use the AGENTS.md feature.
  *
  * Reads:
  *   - `AGENT_SOURCE_PATH`     — root to scan; default = `process.cwd()`. Scanner is a no-op
- *                                if no AGENTS.md and no `docs/agents/<slug>/AGENT.md` files
- *                                exist at that root, so leaving this unset is safe.
+ *                                if no `docs/agents/<slug>/AGENT.md` files exist at that root,
+ *                                so leaving this unset is safe.
  *   - `AGENT_SOURCE_PRIORITY` — `'repo' | 'db'`; default `'db'` (repo only inserts new agents,
  *                                never overwrites operator edits).
  */
@@ -218,14 +157,9 @@ export async function loadAgentSourcesAtBoot(
 	const priority: ApplyAgentSourcesPriority = priorityEnv === 'repo' ? 'repo' : 'db'
 
 	const scan = scanAgentSources(root)
-	if (!scan.orchestratorIdentity && scan.agents.length === 0) {
+	if (scan.agents.length === 0) {
 		return null
 	}
 
 	return applyAgentSources(dbInstance, scan, priority)
 }
-
-export {
-	ORCHESTRATOR_IDENTITY_SKILL_ID,
-	ORCHESTRATOR_IDENTITY_SKILL_NAME,
-} from './identity-seed.server'

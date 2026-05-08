@@ -566,6 +566,12 @@ export type WorkspaceOptions = {
 	persistentKey?: string | null
 	worktree?: WorktreeStoreConfig | null
 	/**
+	 * Project ID for project-bound chat runs. The chat-loop entry point reads this from
+	 * `conversations.projectId` and passes it through. Surfaces in the AsyncLocalStorage
+	 * so workspace resolution lands the cwd at `<sandbox>/<userId>/projects/<projectId>`.
+	 */
+	projectId?: string | null
+	/**
 	 * Optional runtime hooks for tools that need to dispatch nested calls (currently `run_code`).
 	 * The loop populates this; standalone callers (MCP HTTP endpoint, automations) pass nothing
 	 * and run_code falls back to a no-session, empty-approval-set, all-tools-enabled mode.
@@ -585,6 +591,7 @@ export async function executeTool(
 			runId: runId ?? null,
 			persistentKey: workspace?.persistentKey ?? null,
 			worktree: workspace?.worktree ?? null,
+			projectId: workspace?.projectId ?? null,
 			runtime: workspace?.runtime ?? null,
 		},
 		async () => {
@@ -863,11 +870,12 @@ export async function executeTool(
 				}
 				if (call.name === 'create_project') {
 					const input = toolSchemas.create_project.parse(call.arguments)
-					const created = await projectsModule.createProject({
+					const { project: created } = await projectsModule.createProject({
 						userId,
 						name: input.name,
 						kind: input.kind,
 						description: input.description ?? null,
+						repoMode: 'none',
 					})
 					return {
 						success: true,
@@ -1124,6 +1132,56 @@ export async function executeTool(
 						},
 						executionMs: Date.now() - startedAt,
 					}
+				}
+			}
+
+			if (call.name === 'video_generate') {
+				const input = toolSchemas.video_generate.parse(call.arguments)
+				const { submitVideoGenJob, waitForVideoGenJob } = await import('$lib/llm/video-generation.server')
+				const submitted = await submitVideoGenJob({
+					model: input.model,
+					prompt: input.prompt,
+					resolution: input.resolution,
+					aspectRatio: input.aspectRatio,
+					durationSeconds: input.durationSeconds,
+					seed: input.seed,
+					generateAudio: input.generateAudio,
+				})
+				const final = await waitForVideoGenJob(submitted.jobId, {
+					timeoutMs: input.timeoutSeconds * 1000,
+					pollIntervalMs: 5000,
+				})
+				const completed = final.status === 'completed' && Array.isArray(final.unsignedUrls) && final.unsignedUrls.length > 0
+				if (completed && typeof final.cost === 'number' && final.cost > 0) {
+					try {
+						const { logToolUsage } = await import('$lib/costs/usage')
+						await logToolUsage({
+							toolName: 'video_generate',
+							provider: 'openrouter',
+							unitType: 'second',
+							units: input.durationSeconds,
+							cost: final.cost,
+							userId,
+							runId: runId ?? null,
+							metadata: { model: input.model, resolution: input.resolution, jobId: final.jobId },
+						})
+					} catch (err) {
+						logger.warn('[tools] video_generate cost log failed', { err })
+					}
+				}
+				return {
+					success: completed,
+					tool: call.name,
+					input,
+					result: {
+						jobId: final.jobId,
+						status: final.status,
+						urls: final.unsignedUrls ?? [],
+						pollUrl: completed ? null : `/api/video-jobs/${final.jobId}`,
+						error: final.error ?? null,
+						cost: final.cost ?? null,
+					},
+					executionMs: Date.now() - startedAt,
 				}
 			}
 

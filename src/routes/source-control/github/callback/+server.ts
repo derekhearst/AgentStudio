@@ -29,7 +29,7 @@ import { logger } from '$lib/observability/logger'
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const user = requireAuthenticatedRequestUser()
-	const returnTo = cookies.get(GITHUB_OAUTH_RETURN_COOKIE) ?? '/source-control'
+	const returnTo = cookies.get(GITHUB_OAUTH_RETURN_COOKIE) ?? '/projects'
 
 	function fail(reason: string): never {
 		cookies.delete(GITHUB_OAUTH_STATE_COOKIE, { path: '/source-control/github' })

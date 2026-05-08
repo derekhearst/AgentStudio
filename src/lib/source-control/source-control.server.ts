@@ -639,12 +639,14 @@ export async function importRepository(input: ImportRepositoryInput): Promise<Im
 		}
 		projectRow = existing
 	} else {
-		projectRow = await createProject({
+		const created = await createProject({
 			userId: input.userId,
 			name: input.projectName?.trim() || `${owner}/${name}`,
 			description: `Source-controlled project for ${parsed.cloneUrl}`,
 			kind: 'code',
+			repoMode: 'none',
 		})
+		projectRow = created.project
 	}
 
 	const baseMetadata: Record<string, unknown> = {

@@ -1,17 +1,14 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, getSql } from './helpers'
 
 /**
- * Built-in agents seeder (replaces the prior `chat.mode-skills` spec after the
- * modes-into-agents unification).
+ * Built-in agents seeder.
  *
- * The four mode personas (chat / research / plan / autonomous) are now first-class agent rows
- * seeded by `seedBuiltinAgents`. Each links to one of the existing mode-identity skill UUIDs
- * (c001 / c002 / c023 / c004) so user edits to those skills carry over to the new agents.
+ * The four agents (chat / research / plan / autonomous) are seeded by `seedBuiltinAgents`
+ * with stable UUIDs. Persona text lives in `agents.system_prompt` (no longer in a separate
+ * `system/mode-*` skill); `identity_skill_id` is always NULL after migration 0059.
  *
- * Plan-mode UUID was previously bumped c003 → c023 when the plan-mode skill content was
- * rewritten to require `propose_plan` (Wave 1 #6 phase 4). Source of truth for IDs:
- * src/lib/agents/builtin-agents.server.ts.
+ * Source of truth for IDs: src/lib/agents/builtin-agents.server.ts.
  */
 
 const BUILTIN_AGENT_IDS = {
@@ -21,29 +18,22 @@ const BUILTIN_AGENT_IDS = {
 	autonomous: '00000000-0000-4000-8000-0000000a6e74',
 } as const
 
-const IDENTITY_SKILL_IDS = {
-	chat: '00000000-0000-4000-8000-00000000c001',
-	research: '00000000-0000-4000-8000-00000000c002',
-	plan: '00000000-0000-4000-8000-00000000c023',
-	autonomous: '00000000-0000-4000-8000-00000000c004',
-} as const
-
 async function ensureBootstrap(page: { goto: (url: string) => Promise<unknown> }) {
 	// Hitting the index forces SvelteKit to evaluate db.server.ts, which seeds the agents.
 	await page.goto('/')
 }
 
 test.describe('agents/builtin — four built-in agents are seeded with stable IDs', () => {
-	test('all four built-in agents exist with builtin_key + correct identity_skill_id', async ({ page, context }) => {
+	test('all four built-in agents exist with builtin_key and identity_skill_id NULL', async ({ page, context }) => {
 		test.setTimeout(60_000)
 		await authenticateContext(context)
 		await ensureBootstrap(page)
 
 		const sql = getSql()
 		const rows = await sql<
-			{ id: string; name: string; builtin_key: string; identity_skill_id: string; role: string }[]
+			{ id: string; name: string; builtin_key: string; identity_skill_id: string | null; role: string; system_prompt: string }[]
 		>`
-			select id::text as id, name, builtin_key, identity_skill_id::text as identity_skill_id, role
+			select id::text as id, name, builtin_key, identity_skill_id::text as identity_skill_id, role, system_prompt
 			from agents
 			where builtin_key is not null
 			order by builtin_key
@@ -55,15 +45,41 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(byKey.plan?.id).toBe(BUILTIN_AGENT_IDS.plan)
 		expect(byKey.autonomous?.id).toBe(BUILTIN_AGENT_IDS.autonomous)
 
-		expect(byKey.chat?.identity_skill_id).toBe(IDENTITY_SKILL_IDS.chat)
-		expect(byKey.research?.identity_skill_id).toBe(IDENTITY_SKILL_IDS.research)
-		expect(byKey.plan?.identity_skill_id).toBe(IDENTITY_SKILL_IDS.plan)
-		expect(byKey.autonomous?.identity_skill_id).toBe(IDENTITY_SKILL_IDS.autonomous)
+		// All built-ins now use system_prompt directly — identity_skill_id is always NULL.
+		expect(byKey.chat?.identity_skill_id).toBeNull()
+		expect(byKey.research?.identity_skill_id).toBeNull()
+		expect(byKey.plan?.identity_skill_id).toBeNull()
+		expect(byKey.autonomous?.identity_skill_id).toBeNull()
+
+		// system_prompt must contain the canonical persona text, not the migration-0055
+		// 'Seeded at boot.' placeholder.
+		for (const row of rows) {
+			expect(row.system_prompt, `${row.builtin_key} system_prompt must not be the placeholder`).not.toBe(
+				'Seeded at boot.',
+			)
+			expect(row.system_prompt.length, `${row.builtin_key} system_prompt should be substantial`).toBeGreaterThan(100)
+		}
+		expect(byKey.chat?.system_prompt).toContain('# Agent: Chat')
+		expect(byKey.research?.system_prompt).toContain('# Agent: Research')
+		expect(byKey.plan?.system_prompt).toContain('# Agent: Plan')
+		expect(byKey.autonomous?.system_prompt).toContain('# Agent: Autonomous')
 
 		expect(byKey.chat?.name).toBe('Chat')
 		expect(byKey.research?.name).toBe('Research')
 		expect(byKey.plan?.name).toBe('Plan')
 		expect(byKey.autonomous?.name).toBe('Autonomous')
+	})
+
+	test('no system/ skills remain in the database', async ({ page, context }) => {
+		test.setTimeout(60_000)
+		await authenticateContext(context)
+		await ensureBootstrap(page)
+
+		const sql = getSql()
+		const [{ count }] = await sql<{ count: number }[]>`
+			select count(*)::int as count from skills where name like 'system/%'
+		`
+		expect(count, 'no skill rows should match the system/ namespace').toBe(0)
 	})
 
 	test('built-in agents carry expected toolPolicy in config jsonb', async ({ page, context }) => {
@@ -107,31 +123,48 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		}
 	})
 
-	test('user edits to a mode-identity skill survive re-seed (ON CONFLICT DO NOTHING)', async ({ page, context }) => {
+	test('placeholder system_prompt gets healed on re-seed', async ({ page, context }) => {
 		test.setTimeout(60_000)
 		await authenticateContext(context)
 		await ensureBootstrap(page)
 
 		const sql = getSql()
-		const customContent = `# Custom edit ${uniquePrefix('builtin-skill-edit')}`
+		// Force the placeholder back into the chat agent and re-trigger the seed by hitting /.
+		await sql`update agents set system_prompt = 'Seeded at boot.' where id::text = ${BUILTIN_AGENT_IDS.chat}`
+		await ensureBootstrap(page)
+
+		const [row] = await sql<{ system_prompt: string }[]>`
+			select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.chat}
+		`
+		expect(row.system_prompt, 'placeholder must be healed on next boot').not.toBe('Seeded at boot.')
+		expect(row.system_prompt).toContain('# Agent: Chat')
+	})
+
+	test('user-edited system_prompt survives re-seed', async ({ page, context }) => {
+		test.setTimeout(60_000)
+		await authenticateContext(context)
+		await ensureBootstrap(page)
+
+		const sql = getSql()
+		const customContent = `# Custom edit — should not be overwritten`
+		const [original] = await sql<{ system_prompt: string }[]>`
+			select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.plan}
+		`
 		try {
-			await sql`update skills set content = ${customContent}, updated_at = now() where id::text = ${IDENTITY_SKILL_IDS.plan}`
+			await sql`update agents set system_prompt = ${customContent} where id::text = ${BUILTIN_AGENT_IDS.plan}`
 
-			// Re-attempt the seed insert and assert it doesn't overwrite.
-			await sql`
-				insert into skills (id, name, description, content, tags, enabled)
-				values (${IDENTITY_SKILL_IDS.plan}::uuid, 'system/mode-plan', 'desc', 'should-not-overwrite', '{"system"}', true)
-				on conflict (id) do nothing
-			`
+			// Re-trigger the seed.
+			await ensureBootstrap(page)
 
-			const [row] = await sql<{ content: string }[]>`
-				select content from skills where id::text = ${IDENTITY_SKILL_IDS.plan}
+			const [row] = await sql<{ system_prompt: string }[]>`
+				select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.plan}
 			`
-			expect(row.content, 'user edit must survive ON CONFLICT DO NOTHING re-seed').toBe(customContent)
+			expect(row.system_prompt, 'user edit must survive re-seed').toBe(customContent)
 		} finally {
-			// Leave the user's version — this is a development DB and the seeder only
-			// inserts on first boot.
-			void 0
+			// Restore the canonical content so subsequent tests see it. The healing path only
+			// triggers when the value is the placeholder; an explicit restore avoids leaking
+			// the custom content into other tests in this file.
+			await sql`update agents set system_prompt = ${original.system_prompt} where id::text = ${BUILTIN_AGENT_IDS.plan}`
 		}
 	})
 })

@@ -601,6 +601,7 @@ async function runAutomationWithAgent(args: {
 			agentId: agent.id,
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
+			projectId: conversation.projectId ?? null,
 			spawnSubagent: undefined,
 		})
 

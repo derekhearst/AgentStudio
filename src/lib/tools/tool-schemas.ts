@@ -160,6 +160,18 @@ export const toolSchemas = {
 		model: z.enum(['flux', 'sdxl', 'dall-e']).default('flux'),
 		size: z.enum(['256x256', '512x512', '1024x1024']).default('1024x1024'),
 	}),
+	video_generate: z.object({
+		prompt: z.string().min(1).max(2000),
+		/** OpenRouter video model id, e.g. `google/veo-3.1`, `alibaba/wan-2.7`. */
+		model: z.string().min(1).max(120),
+		resolution: z.enum(['480p', '720p', '1080p', '4k']).default('720p'),
+		aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']).default('16:9'),
+		durationSeconds: z.number().min(1).max(60).default(5),
+		seed: z.number().int().optional(),
+		generateAudio: z.boolean().optional(),
+		/** Cap on poll-wait time before returning a still-pending job. */
+		timeoutSeconds: z.number().int().min(30).max(600).default(300),
+	}),
 	update_agent: z.object({
 		agentId: z.string().uuid(),
 		name: z.string().min(1).max(120).optional(),
@@ -300,14 +312,14 @@ export const toolDescriptions: Record<ToolName, string> = {
 	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
 	list_projects: 'List the user\'s projects (durable containers for artifacts with append-only version history). Returns id, name, slug, kind, description for each project.',
 	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
-	list_my_repos: 'List source-control repositories the user has imported (downloaded) into AgentStudio. Optional `search` substring on owner/name. Returns id, owner, name, defaultBranch, htmlUrl, private. Repos are imported via the /source-control page; only imported (locally cloned) repos are visible here.',
-	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio (idempotent). Requires the user to have connected GitHub at /source-control. Returns {total, inserted, updated, skipped} or an errorMessage when the connection is missing/expired.',
+	list_my_repos: 'List source-control repositories the user has imported (downloaded) into AgentStudio. Optional `search` substring on owner/name. Returns id, owner, name, defaultBranch, htmlUrl, private. New imports are managed at /projects (each imported project has a sidecar repository row); only imported (locally cloned) repos are visible here. Prefer `list_projects` for the canonical list of work surfaces.',
+	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio (idempotent). Requires the user to have connected GitHub at /projects (Connections panel). Returns {total, inserted, updated, skipped} or an errorMessage when the connection is missing/expired. Prefer the picker on /projects for human-driven imports.',
 	prepare_commit: 'Inspect a working tree (defaults to the workspace root; supply a relative `path` to inspect a subdirectory) and produce a structured commit draft. Returns {branch, upstream, ahead, behind, dirty, diff: {filesChanged, insertions, deletions, files}, suggestedSubject, files}. Read-only — no commit/push happens. Use as the first step before requesting human approval to push or open a PR. The path must be a git repository (has a .git entry); otherwise the call fails with a clear error.',
 	push_branch: 'Push a local branch to GitHub. ALWAYS REQUIRES OPERATOR APPROVAL — mandatory regardless of per-tool settings, refused entirely in detached/automation runs. Authenticates with the user\'s connected GitHub OAuth token (no SSH keys). Pushes to `https://github.com/<owner>/<repo>.git` so the local `origin` remote is irrelevant; `branch` defaults to the current HEAD if omitted. `force=true` enables `--force-with-lease` (safer than plain --force; rejected if the remote ref moved since last fetch). Returns {success, branch, remote, stdout, stderr, exitCode} with the token redacted from any output.',
 	create_pull_request: 'Open a pull request on GitHub against an attached repository. ALWAYS REQUIRES OPERATOR APPROVAL — mandatory regardless of per-tool settings, refused entirely in detached/automation runs. `head` is the source branch (or `owner:branch` for cross-fork PRs); `base` is the target branch (typically the repo default). `draft=true` opens a draft PR (the default). Persists the resulting PR row to the source-control schema linked to the active run, and opens a `pull_request_ready` review-inbox item so an operator can spot the new PR in /review. Returns {number, htmlUrl, state, draft, recordedId}.',
 	list_pull_requests: 'List pull requests recorded for a repository (the user must have synced the repo via sync_my_repos first). Returns up to `limit` rows (default 50) ordered by most recently updated, each with {id, providerPrNumber, title, status, headBranch, baseBranch, providerUrl, runId, taskId, createdBy, createdAt, updatedAt}. Read-only. Returns an empty list when the repo has no recorded PRs yet.',
 	get_pull_request: 'Fetch a single pull request by its AgentStudio id (the `recordedId` returned by create_pull_request, or any id from list_pull_requests). Returns the full row including title, body, status, head/base branches, providerUrl, runId, taskId, metadata. Read-only. Returns null when the id is unknown.',
-	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox (`${SANDBOX_WORKSPACE}/<userId>/repos/<owner>/<repo>`). Idempotent — if the path already has a clone, runs `git fetch --prune` instead of re-cloning. Authenticated via the user\'s stored OAuth token (private repos work without the agent ever seeing the token). Returns {path, fresh, branch} where `fresh=true` indicates a brand-new clone vs. an updated existing one. Refuses repos the user has not connected (i.e., not present in the sync\'d list). After clone, use prepare_commit / push_branch / create_pull_request against the returned path.',
+	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox (`${SANDBOX_WORKSPACE}/<userId>/repos/<owner>/<repo>`, legacy layout). Idempotent — if the path already has a clone, runs `git fetch --prune` instead of re-cloning. Authenticated via the user\'s stored OAuth token (private repos work without the agent ever seeing the token). Returns {path, fresh, branch}. Prefer creating an imported project at /projects: that flow clones into the project\'s sandbox path and gives you the full repo controls UI; this tool is kept for ad-hoc one-shot clones outside any project.',
 	list_artifacts: 'List artifacts. Pass projectId for project-scoped artifacts, conversationId for in-chat artifacts, or omit both to list artifacts in the current conversation. Returns id, name, slug, contentType, isActive (active by default; pass includeInactive to see soft-deleted).',
 	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s scope (project or conversation). Use to load an artifact before editing or implementing against it.',
 	create_artifact: 'Create a new artifact (saves the initial content as v1). Pass projectId for a project-scoped artifact, conversationId for a chat-scoped artifact, or omit both to scope to the current conversation. Slug auto-generated from name. Use this to write a plan/todo/document the agent (or a downstream agent) can re-read.',
@@ -316,6 +328,8 @@ export const toolDescriptions: Record<ToolName, string> = {
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
 	image_generate: 'Generate an image from a text prompt.',
+	video_generate:
+		'Generate a video from a text prompt via async OpenRouter video generation (Veo, Wan, etc.). Submits a job and waits up to `timeoutSeconds` for completion. Returns the job id, status, and (when ready) URLs to download. If the job is still in progress when the timeout hits, the response includes a poll URL the agent can call later.',
 	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
 	pause_agent: 'Pause an agent so it is not used for delegations.',
 	resume_agent: 'Resume a paused agent and mark it active again.',

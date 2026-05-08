@@ -1,6 +1,5 @@
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { agents } from '$lib/agents/agents.schema'
-import { skills } from '$lib/skills/skills.schema'
 import type { db } from '$lib/db.server'
 
 type DbLike = typeof db
@@ -11,19 +10,11 @@ type DbLike = typeof db
  * Replaces the prior 4-mode concept (`chat` | `research` | `plan` | `agent`) with four seeded
  * agents that the picker pins to the top of the dropdown. Custom user agents appear below.
  *
- * Idempotency: upserts agents by `builtin_key`. On conflict we refresh `name`, `role`,
- * `config.toolPolicy`, `anchor_prompt`, and `identity_skill_id` (so changes here propagate
- * across boots) but NEVER overwrite `system_prompt` after creation — the user can edit it via
- * the agents UI without it being clobbered.
- *
- * Identity skills: each built-in points at the existing `system/mode-*` skill UUID
- * (c001 / c002 / c023 / c004). Those skill rows are seeded inline by this function with
- * `ON CONFLICT (id) DO NOTHING`, so any user edits to the skill content survive — same
- * pattern the previous `seedModeIdentitySkills` used.
- *
- * Anchor prompts: short `[Agent changed to X] ...` sentence persisted to conversation
- * history when the user flips agents. Built-ins seed this; user agents leave it null and
- * the switcher falls back to a generic line.
+ * Idempotency: upserts agents by `id`. On conflict we refresh `name`, `role`,
+ * `config.toolPolicy`, `anchor_prompt`, `kind`, and force `identity_skill_id = NULL` (so any
+ * stale link to a removed `system/mode-*` skill is healed). `system_prompt` is generally
+ * preserved across boots — except when it still equals the migration-0055 placeholder
+ * `'Seeded at boot.'`, in which case we backfill the canonical persona text.
  */
 
 export const BUILTIN_AGENT_KEYS = ['chat', 'research', 'plan', 'autonomous'] as const
@@ -34,13 +25,6 @@ export const BUILTIN_AGENT_IDS: Record<BuiltinAgentKey, string> = {
 	research: '00000000-0000-4000-8000-0000000a6e72',
 	plan: '00000000-0000-4000-8000-0000000a6e73',
 	autonomous: '00000000-0000-4000-8000-0000000a6e74',
-}
-
-const BUILTIN_IDENTITY_SKILL_IDS: Record<BuiltinAgentKey, string> = {
-	chat: '00000000-0000-4000-8000-00000000c001',
-	research: '00000000-0000-4000-8000-00000000c002',
-	plan: '00000000-0000-4000-8000-00000000c023',
-	autonomous: '00000000-0000-4000-8000-00000000c004',
 }
 
 /**
@@ -91,16 +75,12 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	'list_memory',
 ]
 
-const IDENTITY_SKILL_TAGS = ['system', 'mode-identity']
-
-const IDENTITY_SKILL_DEFAULTS: Record<
-	BuiltinAgentKey,
-	{ name: string; description: string; content: string }
-> = {
-	chat: {
-		name: 'system/mode-chat',
-		description: 'Conversational, collaborative posture for the Chat agent.',
-		content: `# Agent: Chat
+/**
+ * Persona text for each built-in agent. Persisted into `agents.system_prompt` on first
+ * insert. Editable via the agents UI; user edits survive subsequent boots.
+ */
+const BUILTIN_AGENT_PROMPTS: Record<BuiltinAgentKey, string> = {
+	chat: `# Agent: Chat
 
 You are the Chat agent — the default workbench. Be conversational and collaborative.
 
@@ -110,11 +90,7 @@ You are the Chat agent — the default workbench. Be conversational and collabor
 - When you take a tool action, state in one sentence what you're about to do and why before the call.
 - You have read+write tool access. Use it. Don't quote shell commands at the user when you can run them yourself.
 `,
-	},
-	research: {
-		name: 'system/mode-research',
-		description: 'Drafts research plan artifacts, hands off to a research-runner agent on approval.',
-		content: `# Agent: Research
+	research: `# Agent: Research
 
 You are the Research agent. Your job is to draft a research plan as a markdown **artifact** the user can review, then hand off the conversation to a research-runner agent on approval.
 
@@ -146,11 +122,7 @@ If the user denies, they typically reply with feedback. Read it and start the cy
 
 Read-only tool access — write actions happen in the runner / Chat / Autonomous agents.
 `,
-	},
-	plan: {
-		name: 'system/mode-plan',
-		description: 'Plan-before-execute posture: drafts plan artifacts and hands off on approval.',
-		content: `# Agent: Plan
+	plan: `# Agent: Plan
 
 You are the Plan agent. Think before acting; draft the plan as a versioned **artifact** the user can review, then hand off execution to an implementer agent on approval.
 
@@ -176,11 +148,7 @@ If the user denies, read their feedback, call \`edit_artifact\` to refine the pl
 - Decompose ambiguous requests into discrete, testable steps. Each step should have a single owner and a verifiable outcome.
 - Prefer reversible operations early; defer destructive ones until late, after a checkpoint.
 `,
-	},
-	autonomous: {
-		name: 'system/mode-agent',
-		description: 'Autonomous executor posture for the Autonomous agent.',
-		content: `# Agent: Autonomous
+	autonomous: `# Agent: Autonomous
 
 You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 
@@ -191,7 +159,6 @@ You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 - When you finish or hit a real blocker, summarize: what was done, what's left, what needs human input. Three bullets max.
 - Don't chain exploratory tools when the goal is already clear. Read the task, plan the path, execute it.
 `,
-	},
 }
 
 const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
@@ -210,14 +177,6 @@ const ROLE_DESCRIPTIONS: Record<BuiltinAgentKey, string> = {
 	autonomous: 'Executes autonomously with minimal interruption.',
 }
 
-/**
- * Snippet from the OLD Research identity skill (pre-2026-05). When existing installs match
- * this verbatim, we know the user hasn't customized it and we can safely replace with the
- * new content. If the content has been edited, we leave it alone — the user owns it.
- */
-const LEGACY_RESEARCH_SKILL_MARKER =
-	'A Deep Research run has typically already produced a cited report'
-
 const NAMES: Record<BuiltinAgentKey, string> = {
 	chat: 'Chat',
 	research: 'Research',
@@ -233,7 +192,7 @@ function buildToolPolicyConfig(key: BuiltinAgentKey): Record<string, unknown> {
 }
 
 /**
- * Seed the four mode-identity skills + four built-in agents in a single transaction.
+ * Seed the four built-in agents in a single transaction.
  *
  * `dbInstance` is required because this runs from `bootstrapDatabase()` where the top-level
  * `db` export of db.server.ts has not been evaluated yet (it's exported AFTER
@@ -241,78 +200,30 @@ function buildToolPolicyConfig(key: BuiltinAgentKey): Record<string, unknown> {
  */
 export async function seedBuiltinAgents(
 	dbInstance: DbLike,
-): Promise<{ skillsInserted: number; agentsUpserted: number }> {
+): Promise<{ agentsUpserted: number }> {
 	const now = new Date()
 
-	// 1. Seed identity skills first (agents reference them via FK-by-convention).
-	const skillRows = (Object.keys(IDENTITY_SKILL_DEFAULTS) as BuiltinAgentKey[]).map((key) => {
-		const defaults = IDENTITY_SKILL_DEFAULTS[key]
-		return {
-			id: BUILTIN_IDENTITY_SKILL_IDS[key],
-			name: defaults.name,
-			description: defaults.description,
-			content: defaults.content,
-			tags: IDENTITY_SKILL_TAGS,
-			enabled: true,
-			createdAt: now,
-			updatedAt: now,
-		}
-	})
-	const insertedSkills = await dbInstance
-		.insert(skills)
-		.values(skillRows)
-		.onConflictDoNothing()
-		.returning({ id: skills.id })
-
-	// One-time migration: refresh the Research identity skill content for existing installs
-	// where the previous "post-research analyst" wording is still in place. Detected by a
-	// short marker phrase from the old default; if the user has customized the content the
-	// marker is gone and we leave it alone.
-	const researchSkillId = BUILTIN_IDENTITY_SKILL_IDS['research']
-	const newResearchContent = IDENTITY_SKILL_DEFAULTS['research'].content
-	const newResearchDescription = IDENTITY_SKILL_DEFAULTS['research'].description
-	const [existingResearchSkill] = await dbInstance
-		.select({ content: skills.content })
-		.from(skills)
-		.where(eq(skills.id, researchSkillId))
-		.limit(1)
-	if (
-		existingResearchSkill &&
-		existingResearchSkill.content.includes(LEGACY_RESEARCH_SKILL_MARKER)
-	) {
-		await dbInstance
-			.update(skills)
-			.set({
-				content: newResearchContent,
-				description: newResearchDescription,
-				updatedAt: now,
-			})
-			.where(eq(skills.id, researchSkillId))
-	}
-
-	// 2. Upsert agents by builtin_key. On conflict refresh metadata but never clobber
-	//    user edits to system_prompt. (system_prompt is a fallback; the live posture comes
-	//    from the linked identity skill, which the user can edit independently.)
 	let agentsUpserted = 0
 	for (const key of BUILTIN_AGENT_KEYS) {
 		const id = BUILTIN_AGENT_IDS[key]
-		const skillContent = IDENTITY_SKILL_DEFAULTS[key].content
-		// ON CONFLICT (id) — the partial unique index on builtin_key isn't a valid ON CONFLICT
-		// target without a WHERE clause, but each built-in agent has a stable UUID so id-based
-		// conflict handling is just as deterministic. Refresh metadata fields but never clobber
-		// system_prompt (the user can edit it via the agents UI without it being overwritten).
+		const promptContent = BUILTIN_AGENT_PROMPTS[key]
+		// ON CONFLICT (id) — each built-in agent has a stable UUID so id-based conflict
+		// handling is deterministic. Refresh metadata fields and force identity_skill_id
+		// to NULL (heals stale links to removed system/mode-* skills). system_prompt is
+		// preserved across boots EXCEPT when it still equals the migration-0055 placeholder,
+		// in which case we backfill the canonical persona text.
 		await dbInstance
 			.insert(agents)
 			.values({
 				id,
 				name: NAMES[key],
 				role: ROLE_DESCRIPTIONS[key],
-				systemPrompt: skillContent,
+				systemPrompt: promptContent,
 				model: 'anthropic/claude-sonnet-4',
 				config: buildToolPolicyConfig(key),
 				status: 'idle',
 				kind: 'orchestrator',
-				identitySkillId: BUILTIN_IDENTITY_SKILL_IDS[key],
+				identitySkillId: null,
 				builtinKey: key,
 				anchorPrompt: ANCHOR_PROMPTS[key],
 				createdAt: now,
@@ -323,17 +234,17 @@ export async function seedBuiltinAgents(
 					name: NAMES[key],
 					role: ROLE_DESCRIPTIONS[key],
 					config: buildToolPolicyConfig(key),
-					identitySkillId: BUILTIN_IDENTITY_SKILL_IDS[key],
+					identitySkillId: null,
 					builtinKey: key,
 					anchorPrompt: ANCHOR_PROMPTS[key],
-					// Bump kind in case the enum gained a value later — keeps existing rows aligned.
 					kind: 'orchestrator',
+					systemPrompt: sql`CASE WHEN ${agents.systemPrompt} = 'Seeded at boot.' THEN ${promptContent} ELSE ${agents.systemPrompt} END`,
 				},
 			})
 		agentsUpserted++
 	}
 
-	return { skillsInserted: insertedSkills.length, agentsUpserted }
+	return { agentsUpserted }
 }
 
 /**

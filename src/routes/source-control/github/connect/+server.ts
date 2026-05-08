@@ -35,7 +35,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	const state = generateOAuthState()
-	const returnTo = url.searchParams.get('return') ?? '/source-control'
+	const returnTo = url.searchParams.get('return') ?? '/projects'
 	const redirectUri = buildRedirectUri(url.origin)
 
 	cookies.set(GITHUB_OAUTH_STATE_COOKIE, state, {

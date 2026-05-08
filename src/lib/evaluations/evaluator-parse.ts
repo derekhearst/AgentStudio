@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { EvaluationFinding, EvaluationVerdict } from './evaluations.schema'
+import type { ResponseFormat } from '$lib/llm/chat.server'
 
 /**
  * Wave 3 #14 evaluations plan phase 2 — pure response parser.
@@ -22,6 +23,20 @@ const evaluatorResponseSchema = z.object({
 	confidence: z.number().min(0).max(1).optional(),
 	findings: z.array(findingSchema).default([]),
 })
+
+/**
+ * OpenRouter `response_format: json_schema` body for the evaluator. Supplied by callers of
+ * `chat()` so models that support strict mode return validated JSON; the parser below still
+ * handles the fallback case where the model ignored the field or wrapped output in a fence.
+ */
+export const evaluatorResponseFormat: ResponseFormat = {
+	type: 'json_schema',
+	json_schema: {
+		name: 'evaluator_response',
+		strict: true,
+		schema: z.toJSONSchema(evaluatorResponseSchema) as Record<string, unknown>,
+	},
+}
 
 export type ParsedEvaluatorResponse = {
 	verdict: EvaluationVerdict

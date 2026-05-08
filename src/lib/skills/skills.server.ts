@@ -6,15 +6,15 @@ import { embed, embedOne, toPgVector } from '$lib/memory/embeddings.server'
 import { logger } from '$lib/observability/logger'
 
 const SYSTEM_SKILL_ID = '00000000-0000-4000-8000-000000000042'
-const SYSTEM_SKILL_NAME = 'drokbot-guide'
+const SYSTEM_SKILL_NAME = 'agentstudio-guide'
 const SYSTEM_SKILL_CREATED_AT = new Date('2026-01-01T00:00:00.000Z')
 
 const SYSTEM_SKILL_FILES = [
 	{
 		id: '00000000-0000-4000-8000-000000000043',
 		name: 'quickstart.md',
-		description: 'Best-practice workflow to get value quickly from DrokBot.',
-		content: `# DrokBot Quickstart
+		description: 'Best-practice workflow to get value quickly from AgentStudio.',
+		content: `# AgentStudio Quickstart
 
 ## What this app is best at
 - Conversational coding assistance across your local workspace
@@ -110,9 +110,9 @@ function buildSystemSkill() {
 	return {
 		id: SYSTEM_SKILL_ID,
 		name: SYSTEM_SKILL_NAME,
-		description: 'Built-in guide for understanding DrokBot features and using the app effectively.',
-		content: 'This is a built-in, read-only onboarding skill that explains DrokBot and how to use it effectively.',
-		tags: ['onboarding', 'guide', 'drokbot', 'best-practices'],
+		description: 'Built-in guide for understanding AgentStudio features and using the app effectively.',
+		content: 'This is a built-in, read-only onboarding skill that explains AgentStudio and how to use it effectively.',
+		tags: ['onboarding', 'guide', 'agentstudio', 'best-practices'],
 		enabled: true,
 		accessCount: 0,
 		lastAccessed: null as Date | null,
@@ -584,7 +584,7 @@ export type SkillSummary = Awaited<ReturnType<typeof listSkillSummaries>>[number
  * Skills without an embedding (newly added, not yet backfilled, or embedding API was down when
  * they were saved) are appended after the relevance-ranked set so they're never invisible.
  *
- * The built-in `drokbot-guide` system skill is always included.
+ * The built-in `agentstudio-guide` system skill is always included.
  *
  * Falls back to `listSkillSummaries()` when the query embedding fails or no skills have
  * embeddings yet — the system stays usable even if OPENROUTER_API_KEY is unset.

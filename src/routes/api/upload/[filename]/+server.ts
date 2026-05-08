@@ -15,6 +15,11 @@ const MIME_MAP: Record<string, string> = {
 	csv: 'text/csv',
 	json: 'application/json',
 	xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+	mp4: 'video/mp4',
+	webm: 'video/webm',
+	mov: 'video/quicktime',
+	mpeg: 'video/mpeg',
+	mpg: 'video/mpeg',
 }
 
 export const GET: RequestHandler = async ({ params }) => {

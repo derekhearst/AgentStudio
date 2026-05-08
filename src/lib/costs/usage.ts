@@ -15,6 +15,8 @@ export type LlmUsageSource =
 	| 'memory_extract'
 	| 'memory_rerank'
 	| 'memory_qa'
+	| 'tts'
+	| 'video_gen'
 
 type LogInput = {
 	source: LlmUsageSource

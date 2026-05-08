@@ -54,6 +54,15 @@ export async function runInlineSubagent(
 		].join('\n'),
 	})
 
+	// Inherit the parent conversation's project binding so sub-agents work inside the same
+	// sandboxed project repo. Sub-agents that don't have a parent project simply run with
+	// the default ephemeral workspace.
+	const [parentConversation] = await db
+		.select({ projectId: conversations.projectId })
+		.from(conversations)
+		.where(eq(conversations.id, parentConversationId))
+		.limit(1)
+
 	// Create a conversation for this sub-agent run + its chat_runs row.
 	const [subConversation] = await db
 		.insert(conversations)
@@ -62,6 +71,7 @@ export async function runInlineSubagent(
 			userId,
 			agentId: agent.id,
 			model: agent.model,
+			projectId: parentConversation?.projectId ?? null,
 		})
 		.returning()
 
@@ -121,6 +131,9 @@ export async function runInlineSubagent(
 			agentId: agent.id,
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
+			// Sub-agents inherit the parent conversation's project binding (looked up in caller scope
+			// — the parent conversation's projectId is visible via subConversation if persisted).
+			projectId: subConversation.projectId ?? null,
 			// Sub-agents don't spawn their own sub-agents in this flow.
 			spawnSubagent: undefined,
 		})

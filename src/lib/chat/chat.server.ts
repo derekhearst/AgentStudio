@@ -1,4 +1,5 @@
-import { chat, type LlmMessage } from '$lib/llm/chat.server'
+import { z } from 'zod'
+import { chat, type LlmMessage, type ResponseFormat } from '$lib/llm/chat.server'
 import { estimateTokens, estimateTokensForModel, getContextWindowSize } from '$lib/tools/tools'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { logLlmUsage } from '$lib/costs/usage'
@@ -29,6 +30,7 @@ export async function generateTitle(messages: Message[]): Promise<string> {
 			},
 		],
 		titleModel,
+		{ cache: { enabled: true, ttlSeconds: 3600 } },
 	)
 
 	void logLlmUsage({
@@ -43,6 +45,20 @@ export async function generateTitle(messages: Message[]): Promise<string> {
 		.replace(/^["']|["']$/g, '')
 		.slice(0, 120)
 	return title || 'Untitled conversation'
+}
+
+const titleCategorySchema = z.object({
+	title: z.string().max(120),
+	category: z.string().max(60),
+})
+
+const titleCategoryResponseFormat: ResponseFormat = {
+	type: 'json_schema',
+	json_schema: {
+		name: 'conversation_label',
+		strict: true,
+		schema: z.toJSONSchema(titleCategorySchema) as Record<string, unknown>,
+	},
 }
 
 export async function generateTitleAndCategory(messages: Message[]): Promise<{ title: string; category: string }> {
@@ -62,6 +78,7 @@ export async function generateTitleAndCategory(messages: Message[]): Promise<{ t
 			},
 		],
 		catModel,
+		{ responseFormat: titleCategoryResponseFormat, cache: { enabled: true, ttlSeconds: 3600 } },
 	)
 
 	void logLlmUsage({

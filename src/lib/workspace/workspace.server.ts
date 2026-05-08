@@ -50,6 +50,14 @@ export type WorkspaceContext = {
 	 */
 	worktree?: WorktreeConfig | null
 	/**
+	 * When the conversation is bound to a project, the project's sandboxed working tree
+	 * (`<sandboxRoot>/<userId>/projects/<projectId>`) becomes the default cwd for tool
+	 * runs. Lower priority than `persistentKey` and `worktree` (those are explicit overrides
+	 * for run-isolation), but higher than the bare `runId` ephemeral path so chats bound
+	 * to a project consistently land inside the project repo.
+	 */
+	projectId?: string | null
+	/**
 	 * Absolute or relative path to the sandbox root directory. Pass the value of
 	 * `$env/dynamic/private`'s `SANDBOX_WORKSPACE` here (the workspace module is
 	 * SvelteKit-agnostic so unit tests can inject any root they want).
@@ -63,11 +71,12 @@ export type WorkspaceContext = {
  * Resolution priority (most-specific wins):
  * - With `persistentKey`:        ${sandboxRoot}/<userId>/persistent/<key>   (Phase 2 — opt-in stable)
  * - Else with `worktree` + runId: ${sandboxRoot}/<userId>/worktrees/<runId> (Phase 4 — git worktree)
+ * - Else with `projectId`:        ${sandboxRoot}/<userId>/projects/<projectId> (project-bound chat)
  * - Else with `runId`:            ${sandboxRoot}/<userId>/runs/<runId>      (Phase 1 — per-run isolation)
  * - Else:                          ${sandboxRoot}/<userId>                   (legacy path; back-compat for
  *   callers that haven't been migrated yet, e.g. ad-hoc/admin tool invocations outside a run loop)
  *
- * All four roots share a parent tree per user, so legacy persistent files at the user root
+ * All five roots share a parent tree per user, so legacy persistent files at the user root
  * remain accessible to admin tooling but are invisible to ephemeral runs.
  */
 export function resolveWorkspaceRoot(ctx: WorkspaceContext): string {
@@ -80,6 +89,10 @@ export function resolveWorkspaceRoot(ctx: WorkspaceContext): string {
 	if (ctx.worktree && ctx.runId) {
 		const runId = sanitize(ctx.runId, 'runId')
 		return resolve(root, userId, 'worktrees', runId)
+	}
+	if (ctx.projectId) {
+		const projectId = sanitize(ctx.projectId, 'projectId')
+		return resolve(root, userId, 'projects', projectId)
 	}
 	if (ctx.runId) {
 		const runId = sanitize(ctx.runId, 'runId')
@@ -116,6 +129,11 @@ export async function ensureWorkspace(
 		)
 		return root
 	}
+	// Project-backed workspaces are pre-materialized by `createProject` (`git init` for local,
+	// `git clone` for imported). We only ensure the path exists here so a tool invocation
+	// against a project that's somehow lost its dir doesn't blow up — but we don't try to
+	// re-init the repo. The caller is expected to have created the project via the proper
+	// flow.
 	await mkdir(root, { recursive: true })
 	return root
 }

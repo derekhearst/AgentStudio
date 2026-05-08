@@ -42,6 +42,10 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 			headers: {
 				authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
 				'content-type': 'application/json',
+				// Embeddings are deterministic per-(model,input) — re-embedding identical drawer
+				// content during rebuild/reindex is exactly the cache-hit case OpenRouter optimizes.
+				'x-openrouter-cache': 'true',
+				'x-openrouter-cache-ttl': '86400',
 			},
 			body: JSON.stringify({ model, input }),
 		})

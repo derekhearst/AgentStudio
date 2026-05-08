@@ -114,7 +114,11 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 					)
 				: tools
 
-		const stream = await streamChat(currentMessages, input.model, toolsForRequest, input.reasoningConfig)
+		const streamOptions: Parameters<typeof streamChat>[4] = {}
+		if (input.chatPlugins && input.chatPlugins.length > 0) streamOptions.plugins = input.chatPlugins
+		if (input.modalities && input.modalities.length > 0) streamOptions.modalities = input.modalities
+		if (input.audio) streamOptions.audio = input.audio
+		const stream = await streamChat(currentMessages, input.model, toolsForRequest, input.reasoningConfig, streamOptions)
 
 		// Accumulated tool calls for THIS round (streamed piecewise).
 		const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
@@ -134,8 +138,29 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 							id?: string
 							function?: { name?: string; arguments?: string }
 						}>
+						audio?: {
+							id?: string
+							data?: string
+							transcript?: string
+							expires_at?: number
+						}
 				  }
 				| undefined
+
+			// Audio output streams as `delta.audio` chunks with base64 data + an inline transcript.
+			// Forward both to the SSE relay; the runtime accumulates the bytes as a side-effect of
+			// the consumer collecting the events. The text transcript also lands in `assistantContent`
+			// so the persisted message keeps a readable text body.
+			if (delta?.audio) {
+				if (typeof delta.audio.data === 'string' && delta.audio.data.length > 0) {
+					await session.emit('audio', { data: delta.audio.data, id: delta.audio.id })
+				}
+				if (typeof delta.audio.transcript === 'string' && delta.audio.transcript.length > 0) {
+					if (firstTokenAt === null) firstTokenAt = Date.now()
+					assistantContent += delta.audio.transcript
+					await session.emit('delta', { content: delta.audio.transcript })
+				}
+			}
 
 			const reasoningDelta = delta?.reasoning
 			const reasoningDetailDelta = delta?.reasoningDetails
@@ -506,6 +531,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			const toolResult = await executeTool(toolCall, input.userId, session.runId, {
 				persistentKey: input.persistentKey,
 				worktree: input.worktree,
+				projectId: input.projectId,
 				runtime: {
 					approvalRequiredTools: input.approvalRequiredTools,
 					currentToolNames: () => tools.map((t) => t.function.name),

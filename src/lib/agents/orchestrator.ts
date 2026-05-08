@@ -2,10 +2,6 @@ import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { skills } from '$lib/skills/skills.schema'
-import {
-	ORCHESTRATOR_IDENTITY_DEFAULT,
-	ORCHESTRATOR_IDENTITY_SKILL_ID,
-} from '$lib/agents/identity-seed.server'
 import { expandFragments } from '$lib/agents/fragment-expand'
 import { logger } from '$lib/observability/logger'
 
@@ -13,39 +9,35 @@ import { logger } from '$lib/observability/logger'
  * Orchestrator identity — injected as system message for conversations
  * where agentId IS NULL (direct user↔orchestrator chat).
  *
- * Wave 5 #22 phase 1 — content lives in the `system/orchestrator-identity` skill (boot-
- * seeded with a fixed UUID). buildOrchestratorPrompt reads from the skill at runtime so
- * operators can edit the prompt via /skills without a deploy. The TS default is a fallback
- * when the skill is missing or disabled — defense in depth so a misconfigured skill row
- * can never break orchestrator chat.
+ * The persona text below is the canonical content. To customize per-deploy without a code
+ * change, create a custom agent in /agents and set it as the user's default — orchestrator
+ * mode runs only when no agent is bound.
  */
 
-/**
- * Load the orchestrator identity content from the seeded skill, falling back to the TS
- * default when the skill is missing/disabled. Always returns a non-empty string.
- */
+export const ORCHESTRATOR_IDENTITY_DEFAULT = `You are the Orchestrator — the user's primary AI assistant in AgentStudio.
+
+Your responsibilities:
+- Answer questions directly when you can (simple path)
+- For complex, multi-step work, propose a plan with specific agents before executing
+- Delegate sub-tasks to specialized agents when their expertise is needed
+- Synthesize sub-agent results into coherent responses
+
+Behavior:
+- Be concise and helpful. Don't over-explain.
+- When a task is simple (lookup, chat, brainstorming), handle it yourself — no plan needed.
+- When a task is complex (multi-step, needs tools, specialized knowledge), propose a plan first.
+- Plans list the steps and which agent handles each. Wait for user approval before executing.
+- After sub-agents complete, synthesize their results and present a unified response.
+`
+
 async function loadOrchestratorIdentity(): Promise<string> {
-	let raw = ORCHESTRATOR_IDENTITY_DEFAULT
+	// Phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup failure
+	// leaves a `<!-- @import:missing ... -->` marker rather than throwing.
 	try {
-		const [skill] = await db
-			.select({ content: skills.content, enabled: skills.enabled })
-			.from(skills)
-			.where(eq(skills.id, ORCHESTRATOR_IDENTITY_SKILL_ID))
-			.limit(1)
-		if (skill && skill.enabled && skill.content.trim().length > 0) {
-			raw = skill.content
-		}
-	} catch (err) {
-		logger.warn('[orchestrator] failed to load identity skill, using TS fallback', { err })
-	}
-	// Wave 5 #22 phase 5 — expand `@import skill-name` fragments. Best-effort: a lookup
-	// failure leaves a `<!-- @import:missing ... -->` marker in the assembled prompt rather
-	// than throwing.
-	try {
-		return await expandFragments(raw, lookupFragmentByName)
+		return await expandFragments(ORCHESTRATOR_IDENTITY_DEFAULT, lookupFragmentByName)
 	} catch (err) {
 		logger.warn('[orchestrator] fragment expansion failed, using raw content', { err })
-		return raw
+		return ORCHESTRATOR_IDENTITY_DEFAULT
 	}
 }
 

@@ -5,7 +5,8 @@
  * the single best drawer. Mirrors MemPalace's hybrid-v4 + LLM rerank step.
  */
 
-import { chat } from '$lib/llm/chat.server'
+import { z } from 'zod'
+import { chat, type ResponseFormat } from '$lib/llm/chat.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import type { RetrievedDrawer } from '$lib/memory/retrieval.server'
 import { logger } from '$lib/observability/logger'
@@ -16,6 +17,19 @@ const RERANK_SYSTEM = `You are a re-ranking judge for a memory retrieval system.
 You will receive a question and a numbered list of candidate memory snippets.
 Return STRICT JSON: { "rankedIds": [<id>, <id>, ...] } listing the candidate
 ids from most-relevant to least-relevant. Do not include any other fields.`
+
+const rerankSchema = z.object({
+	rankedIds: z.array(z.string()),
+})
+
+const rerankResponseFormat: ResponseFormat = {
+	type: 'json_schema',
+	json_schema: {
+		name: 'memory_rerank',
+		strict: true,
+		schema: z.toJSONSchema(rerankSchema) as Record<string, unknown>,
+	},
+}
 
 export type RerankOptions = {
 	model?: string
@@ -64,6 +78,7 @@ export async function rerank(
 				},
 			],
 			model,
+			{ responseFormat: rerankResponseFormat, cache: { enabled: true, ttlSeconds: 1800 } },
 		)
 
 		await logLlmUsage({

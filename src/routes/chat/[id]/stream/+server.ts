@@ -123,8 +123,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const llmMessages: LlmMessage[] = historyRows
 		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
 		.map((row) => {
-			const imageAttachments = (row.attachments ?? []).filter((a) => a.mimeType.startsWith('image/'))
-			if (imageAttachments.length > 0 && row.role === 'user') {
+			const attachments = row.attachments ?? []
+			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith('image/'))
+			const pdfAttachments = attachments.filter((a) => a.mimeType === 'application/pdf')
+			const videoAttachments = attachments.filter((a) => a.mimeType.startsWith('video/'))
+			const hasMultimodal =
+				row.role === 'user' && (imageAttachments.length > 0 || pdfAttachments.length > 0 || videoAttachments.length > 0)
+			if (hasMultimodal) {
 				return {
 					role: row.role,
 					content: [
@@ -132,6 +137,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						...imageAttachments.map((a) => ({
 							type: 'image_url' as const,
 							image_url: { url: a.url },
+						})),
+						...pdfAttachments.map((a) => ({
+							type: 'file' as const,
+							file: { filename: a.filename || 'document.pdf', file_data: a.url },
+						})),
+						...videoAttachments.map((a) => ({
+							type: 'video_url' as const,
+							video_url: { url: a.url },
 						})),
 					],
 				}
@@ -617,6 +630,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					appliedEdits,
 				})
 
+				// PDF input — switch on the file-parser plugin so OpenRouter routes the file
+				// content blocks through Mistral OCR (default) or the model's native engine.
+				// `pdf-text` is a good middle ground for text-only PDFs without paying the OCR cost.
+				const hasPdfAttachment = trimmedMessages.some(
+					(m) =>
+						Array.isArray(m.content) &&
+						m.content.some((b) => typeof b === 'object' && b !== null && 'type' in b && b.type === 'file'),
+				)
+				const chatPlugins = hasPdfAttachment
+					? [{ id: 'file-parser' as const, pdf: { engine: 'pdf-text' as const } }]
+					: undefined
+
 				const loopResult = await runChatLoop({
 					session,
 					userId: user.id,
@@ -625,12 +650,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					initialMessages: trimmedMessages,
 					initialTools,
 					reasoningConfig,
+					chatPlugins,
 					maxRounds: MAX_TOOL_ROUNDS,
 					approvalRequiredTools,
 					isOrchestrator,
 					agentId: conversation.agentId ?? null,
 					persistentKey,
 					worktree: worktreeConfig,
+					projectId: conversation.projectId ?? null,
 					computeTools: async () => computeTools(),
 					loadSearchableTools: (toolNames) => {
 						for (const name of toolNames) loadedSearchableTools.add(name)

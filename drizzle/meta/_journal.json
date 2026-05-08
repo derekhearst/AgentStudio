@@ -414,6 +414,20 @@
       "when": 1778950000000,
       "tag": "0058_remove_tasks_artifacts_in_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1779000000000,
+      "tag": "0059_remove_system_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1779100000000,
+      "tag": "0060_projects_repo_fields",
+      "breakpoints": true
     }
   ]
 }

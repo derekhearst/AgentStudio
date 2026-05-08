@@ -2,11 +2,10 @@ import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
 
 /**
- * Chat-stream integration with the unified agent picker (replaces the prior
- * `chat.mode-stream-integration` spec).
+ * Chat-stream integration with the unified agent picker.
  *
  * Verifies:
- *   - The Research built-in's identity skill is seeded with non-empty content
+ *   - The Research built-in agent has a non-empty system_prompt seeded
  *   - Switching the conversation's bound agent persists + writes an `agent_anchor` system
  *     message into history
  *   - The agent.config.toolPolicy on Research/Plan strips destructive tools (data-layer
@@ -14,7 +13,6 @@ import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } fro
  */
 
 const RESEARCH_AGENT_ID = '00000000-0000-4000-8000-0000000a6e72'
-const RESEARCH_SKILL_ID = '00000000-0000-4000-8000-00000000c002'
 
 async function getActiveUserId() {
 	const sql = getSql()
@@ -38,16 +36,18 @@ async function seedConversation(prefix: string, userId: string, agentId: string 
 }
 
 test.describe('chat/agent-stream-integration — Research agent posture', () => {
-	test('research agent identity skill is seeded with non-empty content', async () => {
+	test('research agent has a non-empty system_prompt seeded', async () => {
 		const sql = getSql()
-		const [skill] = await sql<{ id: string; name: string; content: string; enabled: boolean }[]>`
-			select id, name, content, enabled from skills where id = ${RESEARCH_SKILL_ID}
+		const [agent] = await sql<{ id: string; name: string; system_prompt: string; identity_skill_id: string | null }[]>`
+			select id, name, system_prompt, identity_skill_id::text as identity_skill_id
+			from agents where id = ${RESEARCH_AGENT_ID}
 		`
-		test.skip(!skill, 'Research mode-identity skill not yet seeded — restart dev server')
-		expect(skill.name).toBe('system/mode-research')
-		expect(skill.enabled).toBe(true)
-		expect(skill.content).toMatch(/Research/)
-		expect(skill.content.length).toBeGreaterThan(80)
+		test.skip(!agent, 'Research agent not yet seeded — restart dev server')
+		expect(agent.name).toBe('Research')
+		expect(agent.identity_skill_id, 'built-in agents must not link to a system/ skill').toBeNull()
+		expect(agent.system_prompt).not.toBe('Seeded at boot.')
+		expect(agent.system_prompt).toMatch(/Research/)
+		expect(agent.system_prompt.length).toBeGreaterThan(80)
 	})
 
 	test('switching a conversation to the Research agent persists + writes anchor message', async ({ page }) => {

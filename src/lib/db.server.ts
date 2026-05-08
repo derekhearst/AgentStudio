@@ -404,28 +404,19 @@ async function bootstrapDatabase() {
 			console.log('[db] Database ready')
 		}
 
-		// Seed built-in agents (chat / research / plan / autonomous) and their identity skills
-		// in a single idempotent operation. Replaces the prior `seedModeIdentitySkills` — the
-		// four "modes" are now first-class agent rows. Identity skill UUIDs are preserved
-		// (c001/c002/c023/c004) so user edits to those skills carry over to the new agents.
+		// Seed built-in agents (chat / research / plan / autonomous). Idempotent upsert by id.
 		// Lazy-imported to avoid a require cycle and pass a fresh db handle, since the top-level
 		// `db` export of this file is evaluated AFTER `await databaseReadyPromise`.
 		try {
 			const { seedBuiltinAgents } = await import('$lib/agents/builtin-agents.server')
 			const seedDb = createDatabase(client)
 			const result = await seedBuiltinAgents(seedDb)
-			if (result.skillsInserted > 0 || result.agentsUpserted > 0) {
-				console.log(
-					`[db] Seeded ${result.agentsUpserted} built-in agent(s) and ${result.skillsInserted} identity skill(s)`,
-				)
+			if (result.agentsUpserted > 0) {
+				console.log(`[db] Seeded ${result.agentsUpserted} built-in agent(s)`)
 			}
 		} catch (err) {
 			console.warn('[db] Built-in agents seed failed (non-fatal):', err)
 		}
-
-		// Companion-skill seed deleted alongside the capability-group system. Tool Search Tool
-		// replaces the auto-load-on-group-enable mechanism; skills surface via listSkillSummaries
-		// + listRelevantSkillSummaries (relevance ranked) per query instead.
 
 		// Wave 3 #13 phase 1 — register the built-in hook handlers exactly once at boot.
 		try {
@@ -448,30 +439,15 @@ async function bootstrapDatabase() {
 			console.warn('[db] Default evaluator seed failed (non-fatal):', err)
 		}
 
-		// Wave 5 #22 phase 1 — seed the orchestrator-identity skill so operators can edit the
-		// orchestrator system prompt via /skills without a deploy. Idempotent ON CONFLICT.
-		try {
-			const { seedOrchestratorIdentity } = await import('$lib/agents/identity-seed.server')
-			const seedDb = createDatabase(client)
-			const result = await seedOrchestratorIdentity(seedDb)
-			if (result.inserted > 0) {
-				console.log('[db] Seeded orchestrator-identity skill')
-			}
-		} catch (err) {
-			console.warn('[db] Orchestrator identity seed failed (non-fatal):', err)
-		}
-
-		// Wave 5 #22 phase 4 — AGENTS.md repo-file discovery. Runs AFTER the Phase 1 seed so
-		// repo-priority overrides have a row to update. No-op if neither AGENTS.md nor any
-		// docs/agents/<slug>/AGENT.md files exist at the configured root, so the default
-		// deployment stays quiet for operators who don't use this feature.
+		// AGENTS.md repo-file discovery. Scans `docs/agents/<slug>/AGENT.md` files and upserts
+		// each into the `agents` table. No-op if no such files exist at the configured root,
+		// so the default deployment stays quiet for operators who don't use this feature.
 		try {
 			const { loadAgentSourcesAtBoot } = await import('$lib/agents/agent-source-loader.server')
 			const seedDb = createDatabase(client)
 			const result = await loadAgentSourcesAtBoot(seedDb)
 			if (result) {
 				const summary = [
-					result.orchestratorOverridden ? 'orchestrator override' : null,
 					result.agentsInserted > 0 ? `${result.agentsInserted} inserted` : null,
 					result.agentsUpdated > 0 ? `${result.agentsUpdated} updated` : null,
 					result.agentsSkipped > 0 ? `${result.agentsSkipped} skipped` : null,

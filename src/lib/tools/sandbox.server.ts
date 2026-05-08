@@ -54,6 +54,12 @@ export const toolUserContext = new AsyncLocalStorage<{
 	runId?: string | null
 	persistentKey?: string | null
 	worktree?: WorktreeStoreConfig | null
+	/**
+	 * Project ID when the chat run is bound to a project. Used by the workspace resolver
+	 * to land the tool's cwd at `<sandbox>/<userId>/projects/<projectId>` and by tools that
+	 * default to "this project's repo" when no path is supplied.
+	 */
+	projectId?: string | null
 	runtime?: ToolRuntimeContext | null
 }>()
 
@@ -90,6 +96,7 @@ export function getWorkspace() {
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
+		projectId: ctx.projectId ?? null,
 		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 }
@@ -114,6 +121,7 @@ export async function ensureWorkspaceDir() {
 		runId: ctx.runId ?? null,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
+		projectId: ctx.projectId ?? null,
 		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 }

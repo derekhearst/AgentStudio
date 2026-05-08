@@ -6,7 +6,7 @@ import { logLlmUsage } from '$lib/costs/usage'
 import { recordEvaluation } from './evaluations.server'
 import type { RunEvaluationRow } from './evaluations.schema'
 import { DEFAULT_EVALUATOR_AGENT_ID } from './evaluators-seed.server'
-import { parseEvaluatorResponse, type ParsedEvaluatorResponse } from './evaluator-parse'
+import { evaluatorResponseFormat, parseEvaluatorResponse, type ParsedEvaluatorResponse } from './evaluator-parse'
 import { logger } from '$lib/observability/logger'
 
 export { parseEvaluatorResponse, type ParsedEvaluatorResponse }
@@ -62,7 +62,10 @@ export async function runEvaluatorPass(input: RunEvaluatorPassInput): Promise<Ru
 	let raw = ''
 	let usage: { promptTokens?: number; completionTokens?: number } | undefined
 	try {
-		const result = await chat(messages, evaluator.model)
+		const result = await chat(messages, evaluator.model, {
+			responseFormat: evaluatorResponseFormat,
+			cache: { enabled: true, ttlSeconds: 1800 },
+		})
 		raw = result.content
 		usage = result.usage
 	} catch (err) {

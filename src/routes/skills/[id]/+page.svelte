@@ -275,7 +275,7 @@
 		{@const s = skill}
 		{#if isSystemSkill}
 			<div class="alert alert-info">
-				This is a built-in DrokBot guide skill. It is read-only and always available.
+				This is a built-in AgentStudio guide skill. It is read-only and always available.
 			</div>
 		{/if}
 		<!-- Skill header -->

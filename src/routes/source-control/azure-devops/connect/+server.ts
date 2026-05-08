@@ -34,7 +34,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	const state = generateAzureOAuthState()
-	const returnTo = url.searchParams.get('return') ?? '/source-control'
+	const returnTo = url.searchParams.get('return') ?? '/projects'
 	const redirectUri = buildAzureRedirectUri(url.origin)
 
 	cookies.set(AZURE_OAUTH_STATE_COOKIE, state, {
