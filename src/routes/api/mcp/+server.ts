@@ -1,9 +1,14 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { executeTool, toolSchemas, type ToolName } from '$lib/tools/tools.server'
+import {
+	executeTool,
+	getToolDefinitions,
+	toolSchemas,
+	type ToolName,
+} from '$lib/tools/tools.server'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
-import { desc, eq } from 'drizzle-orm'
+import { desc } from 'drizzle-orm'
 import { getMcpApiKey } from '$lib/server/config'
 
 const MCP_API_KEY = getMcpApiKey()
@@ -16,7 +21,6 @@ function verifyApiKey(request: Request): boolean {
 	return token === MCP_API_KEY
 }
 
-// MCP Server Info
 const SERVER_INFO = {
 	name: 'AgentStudio',
 	version: '1.0.0',
@@ -27,338 +31,34 @@ const SERVER_INFO = {
 	},
 }
 
-// Expose agent tools as MCP tools
+/**
+ * Expose every registered tool as an MCP tool. We re-use the canonical registry by calling
+ * `getToolDefinitions(undefined, { tierFilter: false })` — that single call returns
+ * `{type, function: {name, description, parameters}}` records derived from the same
+ * `toolSchemas` + `toolDescriptions` the LLM loop uses, including JSON-schema parameters.
+ *
+ * MCP wants `{name, description, inputSchema}` so we just remap the shape.
+ *
+ * Previously this file kept its own ~350-line copy of descriptions and JSON-schema fragments
+ * which silently drifted from `tool-schemas.ts` (e.g. `web_search` had a stale description and
+ * the MCP map dropped half the optional parameters). Pulling from the registry kills the drift.
+ */
 function listTools() {
-	return Object.entries(toolSchemas).map(([name, schema]) => ({
-		name,
-		description: toolDescriptions[name as ToolName] ?? name,
-		inputSchema: schemaToJsonSchema(name as ToolName),
+	return getToolDefinitions(undefined, { tierFilter: false }).map((def) => ({
+		name: def.function.name,
+		description: def.function.description,
+		inputSchema: def.function.parameters,
 	}))
 }
 
-const toolDescriptions: Record<ToolName, string> = {
-	web_search: 'Search the web using SearXNG',
-	shell: 'Run a shell command in a sandboxed environment',
-	file_read: 'Read a file from the sandbox filesystem, optionally by line range',
-	file_write: 'Write a file to the sandbox filesystem',
-	file_patch: 'Apply a unified diff patch to files in the sandbox workspace',
-	file_replace: 'Replace an exact string in a file with deterministic unique-match behavior by default',
-	list_directory: 'List files and directories with optional depth and hidden-file controls',
-	delete_file: 'Delete a file or directory (recursive=true required for directories)',
-	move_file: 'Move or rename a file/directory',
-	search_files: 'Search file contents with ripgrep-style matching and options',
-	file_info: 'Return metadata for a file or directory',
-	browser_screenshot: 'Take a screenshot of a web page',
-	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt }. Blocks private/loopback addresses for SSRF safety.',
-	pdf_read: 'Extract text from a PDF (URL or sandbox path) via pdftotext. Returns { source, text, charCount, truncated, pageHint }.',
-	list_projects: 'List the user\'s projects (durable artifact containers).',
-	create_project: 'Create a new project to group related artifacts.',
-	list_artifacts: 'List artifacts in a project.',
-	read_artifact: 'Read an artifact\'s current version content.',
-	create_artifact: 'Create a new artifact in a project (saves initial content as v1).',
-	edit_artifact: 'Append a new version to an existing artifact (append-only).',
-	set_project_context: 'Bind a project to the current conversation so subsequent edits target it by default. projectId=null unbinds.',
-	list_my_repos: 'List the user\'s imported (downloaded) source-control repositories. Optional `search` substring filter.',
-	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio. Returns {total, inserted, updated, skipped}.',
-	run_subagent: 'Run a general-purpose stateless subagent to handle a task',
-	image_generate: 'Generate an image from a text prompt',
-	video_generate:
-		'Generate a video from a text prompt (Veo, Wan, etc.) via async OpenRouter video generation. Polls until completion or timeoutSeconds elapses; returns urls or a pollUrl when still in progress.',
-	list_skills: 'List all available skills with their names and descriptions.',
-	read_skill: 'Read a skill by name. Returns main content and available nested files.',
-	read_skill_file: 'Read a specific nested file within a skill.',
-	create_skill: 'Create a new skill with a name, description, and main content.',
-	update_skill: 'Update an existing skill by name.',
-	add_skill_file: 'Add a nested file to an existing skill.',
-	update_skill_file: 'Update a nested file within a skill.',
-	delete_skill: 'Delete a skill and all its nested files.',
-	delete_skill_file: 'Delete a specific nested file from a skill.',
-	ask_user: 'Request clarification or confirmation from the user before proceeding.',
-	update_agent: 'Update an existing agent fields such as name, role, model, or prompt.',
-	pause_agent: 'Pause an agent.',
-	resume_agent: 'Resume an agent.',
-	create_automation: 'Create a scheduled automation.',
-	list_automations: 'List scheduled automations.',
-	update_automation: 'Update an automation.',
-	delete_automation: 'Delete an automation.',
-	git_status: 'Show git working-tree status (read-only). Worktree mode only.',
-	prepare_commit: 'Inspect the workspace working tree and return a structured commit draft (branch, ahead/behind, file list, diff stat, suggested subject). Read-only.',
-	push_branch: 'Push a local branch to GitHub via the user\'s OAuth token. ALWAYS requires operator approval; refused in detached automation runs.',
-	create_pull_request: 'Open a pull request on GitHub against an attached repository. ALWAYS requires operator approval; refused in detached automation runs. Fires a pull_request_ready review-inbox item on success.',
-	list_pull_requests: 'List recorded pull requests for an attached repository (read-only).',
-	get_pull_request: 'Fetch a single pull request by AgentStudio id (read-only).',
-	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox. Idempotent (fetch-if-present). Refuses repos the user has not connected.',
-	git_log: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
-	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
-	present_artifact: 'Surface an artifact in the chat as a focused inline card (plan/todo/document/data).',
-	request_plan_approval: 'Mandatory-approval handoff: ask the user to approve a plan artifact and switch the conversation to an implementer agent.',
-	search_tools: 'Search the tool registry by free-text query and load matching tools into the model surface for the next round.',
-	run_code: 'Run a JavaScript program in the sandbox; available tools are exposed as `await tools.<name>(args)`. Gated by the global Programmatic Tool Calling setting.',
-}
-
-function schemaToJsonSchema(name: ToolName) {
-	const schemas: Record<string, object> = {
-		web_search: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-		shell: {
-			type: 'object',
-			properties: { command: { type: 'string' } },
-			required: ['command'],
-		},
-		file_read: {
-			type: 'object',
-			properties: { path: { type: 'string' }, startLine: { type: 'number' }, endLine: { type: 'number' } },
-			required: ['path'],
-		},
-		file_write: {
-			type: 'object',
-			properties: { path: { type: 'string' }, content: { type: 'string' } },
-			required: ['path', 'content'],
-		},
-		file_patch: { type: 'object', properties: { patch: { type: 'string' } }, required: ['patch'] },
-		file_replace: {
-			type: 'object',
-			properties: {
-				path: { type: 'string' },
-				oldStr: { type: 'string' },
-				newStr: { type: 'string' },
-				requireUnique: { type: 'boolean', default: true },
-				replaceAll: { type: 'boolean', default: false },
-			},
-			required: ['path', 'oldStr', 'newStr'],
-		},
-		list_directory: {
-			type: 'object',
-			properties: {
-				path: { type: 'string' },
-				depth: { type: 'number', default: 1 },
-				includeHidden: { type: 'boolean', default: false },
-			},
-		},
-		delete_file: {
-			type: 'object',
-			properties: { path: { type: 'string' }, recursive: { type: 'boolean', default: false } },
-			required: ['path'],
-		},
-		move_file: {
-			type: 'object',
-			properties: {
-				fromPath: { type: 'string' },
-				toPath: { type: 'string' },
-				overwrite: { type: 'boolean', default: false },
-			},
-			required: ['fromPath', 'toPath'],
-		},
-		search_files: {
-			type: 'object',
-			properties: {
-				query: { type: 'string' },
-				path: { type: 'string' },
-				maxResults: { type: 'number', default: 50 },
-				isRegex: { type: 'boolean', default: false },
-				includeIgnored: { type: 'boolean', default: false },
-				caseSensitive: { type: 'boolean', default: false },
-			},
-			required: ['query'],
-		},
-		file_info: {
-			type: 'object',
-			properties: { path: { type: 'string' } },
-			required: ['path'],
-		},
-		browser_screenshot: { type: 'object', properties: { url: { type: 'string' } } },
-		web_fetch: {
-			type: 'object',
-			properties: { url: { type: 'string' }, maxChars: { type: 'integer' } },
-			required: ['url'],
-		},
-		pdf_read: {
-			type: 'object',
-			properties: { source: { type: 'string' }, maxChars: { type: 'integer' } },
-			required: ['source'],
-		},
-		list_projects: { type: 'object', properties: {} },
-		create_project: {
-			type: 'object',
-			properties: {
-				name: { type: 'string' },
-				kind: { type: 'string', enum: ['efoil', 'research', 'code', 'documentation', 'other'] },
-				description: { type: 'string' },
-			},
-			required: ['name'],
-		},
-		list_artifacts: {
-			type: 'object',
-			properties: { projectId: { type: 'string' }, includeInactive: { type: 'boolean' } },
-			required: ['projectId'],
-		},
-		read_artifact: {
-			type: 'object',
-			properties: { artifactId: { type: 'string' } },
-			required: ['artifactId'],
-		},
-		create_artifact: {
-			type: 'object',
-			properties: {
-				projectId: { type: 'string' },
-				name: { type: 'string' },
-				content: { type: 'string' },
-				contentType: { type: 'string', enum: ['markdown', 'code', 'json', 'yaml', 'plaintext'] },
-				changeNote: { type: 'string' },
-			},
-			required: ['projectId', 'name', 'content'],
-		},
-		edit_artifact: {
-			type: 'object',
-			properties: {
-				artifactId: { type: 'string' },
-				content: { type: 'string' },
-				changeNote: { type: 'string' },
-			},
-			required: ['artifactId', 'content'],
-		},
-		set_project_context: {
-			type: 'object',
-			properties: { projectId: { type: ['string', 'null'] } },
-		},
-		list_my_repos: {
-			type: 'object',
-			properties: { search: { type: 'string' }, limit: { type: 'integer' } },
-		},
-		sync_my_repos: {
-			type: 'object',
-			properties: {
-				includeForks: { type: 'boolean' },
-				includeArchived: { type: 'boolean' },
-				maxPages: { type: 'integer' },
-			},
-		},
-		run_subagent: {
-			type: 'object',
-			properties: { task: { type: 'string' }, context: { type: 'string' } },
-			required: ['task'],
-		},
-		image_generate: {
-			type: 'object',
-			properties: {
-				prompt: { type: 'string' },
-				model: { type: 'string', enum: ['flux', 'sdxl', 'dall-e'], default: 'flux' },
-				size: { type: 'string', enum: ['256x256', '512x512', '1024x1024'], default: '1024x1024' },
-			},
-			required: ['prompt'],
-		},
-		list_skills: { type: 'object', properties: {} },
-		read_skill: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
-		read_skill_file: {
-			type: 'object',
-			properties: { skillName: { type: 'string' }, fileName: { type: 'string' } },
-			required: ['skillName', 'fileName'],
-		},
-		create_skill: {
-			type: 'object',
-			properties: {
-				name: { type: 'string' },
-				description: { type: 'string' },
-				content: { type: 'string' },
-				tags: { type: 'array', items: { type: 'string' } },
-			},
-			required: ['name', 'description', 'content'],
-		},
-		update_skill: {
-			type: 'object',
-			properties: {
-				name: { type: 'string' },
-				description: { type: 'string' },
-				content: { type: 'string' },
-				tags: { type: 'array', items: { type: 'string' } },
-			},
-			required: ['name'],
-		},
-		add_skill_file: {
-			type: 'object',
-			properties: {
-				skillName: { type: 'string' },
-				fileName: { type: 'string' },
-				description: { type: 'string' },
-				content: { type: 'string' },
-			},
-			required: ['skillName', 'fileName', 'content'],
-		},
-		update_skill_file: {
-			type: 'object',
-			properties: {
-				skillName: { type: 'string' },
-				fileName: { type: 'string' },
-				content: { type: 'string' },
-				description: { type: 'string' },
-			},
-			required: ['skillName', 'fileName'],
-		},
-		delete_skill: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
-		delete_skill_file: {
-			type: 'object',
-			properties: { skillName: { type: 'string' }, fileName: { type: 'string' } },
-			required: ['skillName', 'fileName'],
-		},
-		update_agent: {
-			type: 'object',
-			properties: {
-				agentId: { type: 'string' },
-				name: { type: 'string' },
-				role: { type: 'string' },
-				systemPrompt: { type: 'string' },
-				model: { type: 'string' },
-			},
-			required: ['agentId'],
-		},
-		pause_agent: {
-			type: 'object',
-			properties: { agentId: { type: 'string' } },
-			required: ['agentId'],
-		},
-		resume_agent: {
-			type: 'object',
-			properties: { agentId: { type: 'string' } },
-			required: ['agentId'],
-		},
-		create_automation: {
-			type: 'object',
-			properties: {
-				agentId: { type: 'string' },
-				description: { type: 'string' },
-				cronExpression: { type: 'string' },
-				prompt: { type: 'string' },
-				enabled: { type: 'boolean' },
-				conversationMode: { type: 'string', enum: ['new_each_run', 'reuse'] },
-			},
-			required: ['description', 'cronExpression', 'prompt'],
-		},
-		list_automations: { type: 'object', properties: {} },
-		update_automation: {
-			type: 'object',
-			properties: {
-				automationId: { type: 'string' },
-				agentId: { type: 'string' },
-				description: { type: 'string' },
-				cronExpression: { type: 'string' },
-				prompt: { type: 'string' },
-				enabled: { type: 'boolean' },
-				conversationMode: { type: 'string', enum: ['new_each_run', 'reuse'] },
-			},
-			required: ['automationId'],
-		},
-		delete_automation: {
-			type: 'object',
-			properties: { automationId: { type: 'string' } },
-			required: ['automationId'],
-		},
-	}
-	return schemas[name] ?? { type: 'object' }
-}
-
-// MCP Resources
 function listResources() {
 	return [
-		{ uri: 'AgentStudio://agents', name: 'Agents', description: 'Configured AI agents', mimeType: 'application/json' },
+		{
+			uri: 'AgentStudio://agents',
+			name: 'Agents',
+			description: 'Configured AI agents',
+			mimeType: 'application/json',
+		},
 		{
 			uri: 'AgentStudio://conversations',
 			name: 'Conversations',
@@ -374,7 +74,11 @@ async function readResource(uri: string) {
 		return [{ uri, mimeType: 'application/json', text: JSON.stringify(rows) }]
 	}
 	if (uri === 'AgentStudio://conversations') {
-		const rows = await db.select().from(conversations).orderBy(desc(conversations.createdAt)).limit(50)
+		const rows = await db
+			.select()
+			.from(conversations)
+			.orderBy(desc(conversations.createdAt))
+			.limit(50)
 		return [{ uri, mimeType: 'application/json', text: JSON.stringify(rows) }]
 	}
 	throw new Error(`Unknown resource: ${uri}`)
@@ -430,7 +134,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (!Object.keys(toolSchemas).includes(name)) {
 					return json(rpcError(body.id, -32602, `Unknown tool: ${name}`))
 				}
-				const result = await executeTool({ name: name as ToolName, arguments: args }, locals.user.id)
+				const result = await executeTool(
+					{ name: name as ToolName, arguments: args },
+					locals.user.id,
+				)
 				if (result.success) {
 					return json(
 						rpcResponse(body.id, {
@@ -462,6 +169,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				return json(rpcError(body.id, -32601, `Method not found: ${body.method}`))
 		}
 	} catch (error) {
-		return json(rpcError(body.id, -32603, error instanceof Error ? error.message : 'Internal server error'))
+		return json(
+			rpcError(body.id, -32603, error instanceof Error ? error.message : 'Internal server error'),
+		)
 	}
 }
