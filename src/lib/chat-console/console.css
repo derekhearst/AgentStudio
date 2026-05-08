@@ -1,0 +1,1514 @@
+/* Console — chat redesign global styles.
+ * Imported once from +layout.svelte. Theme-token aware so dark/light still work,
+ * but the visual character is the dense lime-on-near-black IDE feel from the design.
+ */
+
+/* ── Shell ────────────────────────────────────────────────────── */
+
+.console-shell {
+	display: flex;
+	flex-direction: column;
+	height: 100vh;
+	width: 100vw;
+	overflow: hidden;
+	color: var(--color-base-content);
+	background: var(--color-base-100);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 12px;
+	letter-spacing: -0.005em;
+	font-variant-numeric: tabular-nums;
+	position: relative;
+	isolation: isolate;
+}
+
+/* Static dot-grid + corner aurora — replaces the cursor reactor */
+.console-shell::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background-image: radial-gradient(
+		circle at 1px 1px,
+		color-mix(in oklab, var(--color-base-content) 6%, transparent) 1px,
+		transparent 0
+	);
+	background-size: 22px 22px;
+	pointer-events: none;
+	z-index: 0;
+}
+
+.console-shell > * {
+	position: relative;
+	z-index: 1;
+}
+
+[data-theme='AgentStudio'] .console-shell::before {
+	background-image: radial-gradient(
+		circle at 1px 1px,
+		color-mix(in oklab, var(--color-base-content) 8%, transparent) 1px,
+		transparent 0
+	);
+}
+
+
+/* ── Grid ─────────────────────────────────────────────────────── */
+.console-grid {
+	flex: 1;
+	display: grid;
+	grid-template-columns: var(--c-sb-w, 220px) 1fr;
+	min-height: 0;
+	gap: 0;
+	position: relative;
+}
+
+.console-grid.has-rail {
+	grid-template-columns: var(--c-sb-w, 220px) 1fr var(--c-rail-w, 360px);
+}
+
+/* ── Resize handles ───────────────────────────────────────────── */
+.console-resize {
+	position: absolute;
+	cursor: col-resize;
+	z-index: 10;
+	background: transparent;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 0;
+	padding: 0;
+}
+
+.console-resize.is-vert { cursor: row-resize; }
+
+.console-resize::before {
+	content: '';
+	position: absolute;
+	background: var(--color-base-300);
+	transition: background 120ms;
+	pointer-events: none;
+}
+
+.console-resize:not(.is-vert)::before {
+	top: 0; bottom: 0; left: 50%; width: 1px; transform: translateX(-0.5px);
+}
+
+.console-resize.is-vert::before {
+	left: 0; right: 0; top: 50%; height: 1px; transform: translateY(-0.5px);
+}
+
+.console-resize__grip {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	background: color-mix(in oklab, var(--color-base-content) 18%, transparent);
+	border-radius: 2px;
+	transition: background 120ms, width 120ms, height 120ms;
+	pointer-events: none;
+}
+
+.console-resize:not(.is-vert) .console-resize__grip {
+	width: 4px;
+	height: 44px;
+	transform: translate(-50%, -50%);
+}
+
+.console-resize.is-vert .console-resize__grip {
+	width: 44px;
+	height: 4px;
+	transform: translate(-50%, -50%);
+}
+
+.console-resize:hover .console-resize__grip,
+.console-resize.is-dragging .console-resize__grip {
+	background: var(--color-primary);
+	box-shadow: 0 0 10px color-mix(in oklab, var(--color-primary) 60%, transparent);
+}
+
+.console-resize:not(.is-vert):hover .console-resize__grip { width: 6px; }
+.console-resize.is-vert:hover .console-resize__grip { height: 6px; }
+
+.console-resize:hover::before { background: var(--color-primary); }
+
+body.console-resizing { user-select: none; }
+body.console-resizing-col * { cursor: col-resize !important; }
+body.console-resizing-row * { cursor: row-resize !important; }
+
+.console-resize--sb {
+	top: 0;
+	bottom: 0;
+	width: 12px;
+	left: var(--c-sb-w, 220px);
+	margin-left: -6px;
+}
+
+.console-resize--rail {
+	top: 0;
+	bottom: 0;
+	width: 12px;
+	right: var(--c-rail-w, 360px);
+	margin-right: -6px;
+}
+
+.console-resize--chats {
+	left: 0;
+	right: 0;
+	top: 0;
+	height: 12px;
+	margin-top: -6px;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+.console-sb {
+	border-right: 1px solid var(--color-base-300);
+	display: flex;
+	flex-direction: column;
+	padding: 0 10px 14px;
+	gap: 14px;
+	min-height: 0;
+	overflow: hidden;
+	background: linear-gradient(180deg, color-mix(in oklab, var(--color-base-content) 1%, transparent), transparent 200px);
+}
+
+.console-sb__head {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-height: var(--c-header-h, 49px);
+	box-sizing: border-box;
+	margin: 0 -10px;
+	padding: 0 18px;
+	border-bottom: 1px solid var(--color-base-300);
+}
+
+.console-sb__head img { border-radius: 6px; }
+
+.console-sb__brand {
+	font-size: 13px;
+	letter-spacing: 0.01em;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-sb__brand .lt { font-weight: 300; }
+.console-sb__brand .bd { font-weight: 700; }
+
+.console-sb__pill {
+	margin-left: auto;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 9.5px;
+	padding: 2px 6px;
+	border: 1px solid var(--color-base-300);
+	border-radius: 4px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	letter-spacing: 0.04em;
+}
+
+.console-sb__theme {
+	margin-left: auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border-radius: 4px;
+	background: transparent;
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+	cursor: pointer;
+	flex: 0 0 auto;
+}
+
+.console-sb__theme:hover {
+	color: var(--color-primary);
+	border-color: color-mix(in oklab, var(--color-primary) 50%, var(--color-base-300));
+}
+
+.console-sb__group {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-sb__title {
+	font-size: 9.5px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.16em;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	padding: 8px 10px 4px;
+}
+
+.console-nav-item {
+	display: grid;
+	grid-template-columns: 16px 1fr;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 10px;
+	border: 0;
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+	border-radius: 6px;
+	cursor: pointer;
+	text-align: left;
+	font-size: 12.5px;
+	font-weight: 500;
+	font-family: inherit;
+	transition: background 100ms, color 100ms;
+	text-decoration: none;
+}
+
+.console-nav-item:hover {
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+}
+
+.console-nav-item.active {
+	background: var(--color-base-200);
+	color: var(--color-primary);
+	box-shadow: inset 2px 0 0 var(--color-primary);
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.console-nav-item .ic { display: inline-flex; opacity: 0.7; }
+.console-nav-item.active .ic { opacity: 1; }
+
+/* Sidebar Chats section — pinned bottom, scrollable, vertically resizable */
+.console-sb__chats {
+	margin-top: auto;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	flex: 0 0 auto;
+	height: var(--c-chats-h, 240px);
+	border-top: 1px solid var(--color-base-300);
+	padding-top: 10px;
+	gap: 6px;
+	position: relative;
+}
+
+.console-sb__chats-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 10px;
+}
+
+.console-sb__chats-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 4px 6px 6px;
+}
+
+.console-sb__chats-row .console-sb__filterbtn { margin: 0; flex: 1 1 auto; min-width: 0; }
+.console-sb__chats-row .console-sb__newchat { flex: 0 0 auto; }
+
+.console-sb__newchat {
+	background: transparent;
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	border-radius: 4px;
+	width: 22px;
+	height: 22px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.console-sb__newchat:hover {
+	color: var(--color-primary);
+	border-color: color-mix(in oklab, var(--color-primary) 50%, var(--color-base-300));
+}
+
+.console-sb__search {
+	display: grid;
+	grid-template-columns: 14px 1fr;
+	gap: 6px;
+	align-items: center;
+	margin: 0 4px;
+	padding: 5px 8px;
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	border-radius: 5px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+}
+
+.console-sb__search input {
+	background: transparent;
+	border: 0;
+	outline: 0;
+	color: var(--color-base-content);
+	font: inherit;
+	font-size: 12px;
+	width: 100%;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-sb__search input::placeholder {
+	color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+}
+
+.console-sb__filterbtn {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 4px 6px 6px;
+	padding: 5px 8px;
+	border-radius: 4px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+	font: inherit;
+	font-size: 11px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	cursor: pointer;
+	text-align: left;
+}
+
+.console-sb__filterbtn:hover { background: var(--color-base-300); }
+
+.console-sb__filterbtn .sum {
+	flex: 1;
+	min-width: 0;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: var(--color-primary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.console-sb__filterbtn .car {
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 10px;
+}
+
+.console-fmenu {
+	margin: 0 6px 6px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 6px;
+	padding: 6px 4px;
+	box-shadow: 0 8px 24px oklch(0% 0 0 / 0.4);
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-fmenu__row {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: 3px;
+}
+
+.console-fmenu__row:hover { background: var(--color-base-300); }
+.console-fmenu__row .l { font-size: 11.5px; color: var(--color-base-content); font-weight: 500; }
+
+.console-fmenu__sel {
+	font: inherit;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10.5px;
+	background: transparent;
+	border: 0;
+	color: var(--color-primary);
+	cursor: pointer;
+	padding: 2px 16px 2px 4px;
+	border-radius: 3px;
+	appearance: none;
+	background-image:
+		linear-gradient(45deg, transparent 50%, color-mix(in oklab, var(--color-base-content) 50%, transparent) 50%),
+		linear-gradient(135deg, color-mix(in oklab, var(--color-base-content) 50%, transparent) 50%, transparent 50%);
+	background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+	background-size: 4px 4px, 4px 4px;
+	background-repeat: no-repeat;
+}
+
+.console-fmenu__sel:hover { background-color: color-mix(in oklab, var(--color-base-content) 6%, transparent); }
+.console-fmenu__sel option { background: var(--color-base-200); color: var(--color-base-content); }
+.console-fmenu__sep { height: 1px; background: var(--color-base-300); margin: 4px 0; }
+
+.console-sb__chatlist {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-bottom: 4px;
+}
+
+.console-chatgroup {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 9.5px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	padding: 8px 12px 3px;
+}
+
+.console-chatgroup .ct {
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 9px;
+	background: var(--color-base-200);
+	padding: 1px 5px;
+	border-radius: 3px;
+	letter-spacing: 0;
+}
+
+.console-chatempty {
+	padding: 12px 16px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	font-size: 11px;
+	font-style: italic;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-chatrow {
+	display: grid;
+	grid-template-columns: 7px 1fr auto;
+	gap: 7px;
+	align-items: center;
+	padding: 4px 8px;
+	cursor: pointer;
+	border-radius: 4px;
+	font-size: 12px;
+	margin: 0 2px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	color: var(--color-base-content);
+	text-decoration: none;
+}
+
+.console-chatrow:hover { background: var(--color-base-200); }
+
+.console-chatrow.active {
+	background: var(--color-base-200);
+	box-shadow: inset 2px 0 0 var(--color-primary);
+	border-top-left-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.console-chatrow .t {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+	font-weight: 500;
+}
+
+.console-chatrow .s {
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 10.5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-chatrow .pulse-dot {
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	border-radius: 999px;
+	background: var(--color-primary);
+	animation: console-pulse 1.6s ease-in-out infinite;
+}
+
+.console-chatrow .pulse-dot.idle {
+	background: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+	animation: none;
+}
+
+@keyframes console-pulse {
+	0%, 100% { opacity: 1; transform: scale(1); }
+	50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+/* ── Main column ──────────────────────────────────────────────── */
+.console-main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.console-main__inner {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+/* ── Right rail ───────────────────────────────────────────────── */
+.console-rail {
+	border-left: 1px solid var(--color-base-300);
+	display: flex;
+	flex-direction: column;
+	background: linear-gradient(180deg, color-mix(in oklab, var(--color-base-content) 1%, transparent), transparent 200px);
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-rail__tabs {
+	display: flex;
+	min-height: var(--c-header-h, 49px);
+	box-sizing: border-box;
+	border-bottom: 1px solid var(--color-base-300);
+	padding: 0 8px;
+}
+
+.console-rail__tab {
+	display: inline-flex;
+	align-items: center;
+	background: transparent;
+	border: 0;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	padding: 10px 12px;
+	font-family: inherit;
+	font-size: 11.5px;
+	font-weight: 500;
+	cursor: pointer;
+	border-bottom: 1px solid transparent;
+	margin-bottom: -1px;
+}
+
+.console-rail__tab:hover { color: var(--color-base-content); }
+.console-rail__tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+
+.console-rail__tab .ct {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 9.5px;
+	background: var(--color-base-200);
+	padding: 1px 5px;
+	border-radius: 3px;
+	margin-left: 6px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.console-rail__body {
+	flex: 1;
+	overflow-y: auto;
+	padding: 8px 4px;
+}
+
+.console-rail__sec { padding: 10px 12px 6px; }
+.console-rail__sec .lbl {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font-size: 9.5px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.16em;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	margin-bottom: 6px;
+}
+
+.console-rail__sec .lbl .meta {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 9.5px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	letter-spacing: 0.04em;
+	text-transform: none;
+	font-weight: 500;
+}
+
+.console-rail__empty {
+	padding: 18px 16px;
+	color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+	font-size: 11.5px;
+	font-style: italic;
+	text-align: center;
+}
+
+/* Activity rows */
+.console-act {
+	display: grid;
+	grid-template-columns: 14px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 10px;
+	font-size: 11.5px;
+	border-radius: 4px;
+	margin: 0 4px;
+}
+
+.console-act:hover { background: var(--color-base-200); }
+.console-act__icon { display: flex; align-items: center; justify-content: center; }
+.console-act__title {
+	color: var(--color-base-content);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.console-act__title .det {
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10.5px;
+}
+
+.console-act__t {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+}
+
+.console-act.ok .console-act__icon { color: var(--color-primary); }
+.console-act.warn .console-act__icon { color: var(--color-warning); }
+.console-act.run .console-act__icon { color: var(--color-primary); }
+.console-act.err .console-act__icon { color: var(--color-error); }
+
+.console-act .spin {
+	width: 10px;
+	height: 10px;
+	border: 1.5px solid var(--color-base-300);
+	border-top-color: var(--color-primary);
+	border-radius: 999px;
+	animation: console-spin 0.8s linear infinite;
+}
+
+@keyframes console-spin { to { transform: rotate(360deg); } }
+
+/* Artifacts cards */
+.console-art {
+	margin: 8px 8px 12px;
+	padding: 10px 12px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 6px;
+}
+
+.console-art.is-progress {
+	background: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 6%, transparent), transparent 60%), var(--color-base-200);
+	border-color: color-mix(in oklab, var(--color-primary) 30%, var(--color-base-300));
+}
+
+.console-art__head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 6px;
+}
+
+.console-art__type {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 9.5px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	letter-spacing: 0.14em;
+	font-weight: 600;
+}
+
+.console-art__status {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.console-art__status.run { color: var(--color-primary); }
+.console-art__status.warn { color: var(--color-warning); }
+
+.console-art__title {
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--color-base-content);
+	margin-bottom: 8px;
+}
+
+.console-art__progress {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	gap: 8px;
+	align-items: center;
+	margin-bottom: 8px;
+}
+
+.console-art__bar {
+	height: 4px;
+	background: var(--color-base-300);
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.console-art__bar > div {
+	height: 100%;
+	background: linear-gradient(90deg, color-mix(in oklab, var(--color-primary) 60%, transparent), var(--color-primary));
+	border-radius: 2px;
+}
+
+.console-art__pct {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: var(--color-primary);
+}
+
+.console-art__steps {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	font-size: 11px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-art__steps .step {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 0;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.console-art__steps .step.done { color: color-mix(in oklab, var(--color-base-content) 70%, transparent); }
+.console-art__steps .step.done svg { color: var(--color-primary); }
+.console-art__steps .step.run { color: var(--color-base-content); }
+.console-art__steps .step.run .spin {
+	width: 8px;
+	height: 8px;
+	border: 1.5px solid var(--color-base-300);
+	border-top-color: var(--color-primary);
+	border-radius: 999px;
+	animation: console-spin 0.8s linear infinite;
+}
+
+.console-art__steps .step.todo .dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	border: 1px solid var(--color-base-300);
+	display: inline-block;
+}
+
+.console-art__meta {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10.5px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	margin-bottom: 8px;
+}
+
+.console-art__btns { display: flex; gap: 4px; }
+.console-art__btns button {
+	font: inherit;
+	font-size: 11px;
+	font-weight: 500;
+	padding: 4px 9px;
+	border-radius: 4px;
+	cursor: pointer;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	color: var(--color-base-content);
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-art__btns .ghost {
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+.console-art__btns .ghost:hover {
+	background: var(--color-base-300);
+	color: var(--color-base-content);
+}
+
+.console-art__btns .primary {
+	background: var(--color-primary);
+	color: var(--color-primary-content);
+	border-color: var(--color-primary);
+}
+
+/* Files tab */
+.console-files__branch {
+	margin: 4px 12px 8px;
+	padding: 10px 12px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 6px;
+	border-left: 2px solid var(--color-primary);
+}
+
+.console-files__branch .row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 4px;
+}
+
+.console-files__branch .b {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11.5px;
+	color: var(--color-base-content);
+	font-weight: 500;
+}
+
+.console-files__branch .b svg { color: var(--color-primary); }
+
+.console-files__branch .ahead {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: var(--color-primary);
+	background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+	padding: 1px 6px;
+	border-radius: 3px;
+}
+
+.console-files__branch .sub {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	margin-bottom: 8px;
+}
+
+.console-files__btns { display: flex; gap: 4px; }
+.console-files__btns button {
+	font: inherit;
+	font-size: 11px;
+	font-weight: 500;
+	padding: 4px 9px;
+	border-radius: 4px;
+	cursor: pointer;
+	border: 1px solid var(--color-base-300);
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+}
+
+.console-files__btns .ghost { background: transparent; color: color-mix(in oklab, var(--color-base-content) 70%, transparent); }
+.console-files__btns .ghost:hover { background: var(--color-base-300); color: var(--color-base-content); }
+
+/* Stats footer */
+.console-stats {
+	border-top: 1px solid var(--color-base-300);
+	background: var(--color-base-100);
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-stats__ctx {
+	padding: 9px 12px 8px;
+	border-bottom: 1px solid var(--color-base-300);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.console-stats__ctx-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	font-size: 11px;
+}
+
+.console-meter {
+	height: 4px;
+	border-radius: 2px;
+	background: var(--color-base-200);
+	overflow: hidden;
+	position: relative;
+}
+
+.console-meter > .fill {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	background: linear-gradient(90deg, var(--color-primary), color-mix(in oklab, var(--color-primary) 70%, var(--color-secondary)));
+	z-index: 1;
+}
+
+.console-meter > .reserved {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: repeating-linear-gradient(
+		-45deg,
+		color-mix(in oklab, var(--color-primary) 35%, transparent),
+		color-mix(in oklab, var(--color-primary) 35%, transparent) 2px,
+		transparent 2px,
+		transparent 5px
+	);
+	z-index: 0;
+}
+
+.console-stats__row {
+	display: grid;
+	grid-template-columns: 1fr 1fr 1fr;
+	gap: 1px;
+	background: var(--color-base-300);
+}
+
+.console-stats__row > div {
+	background: var(--color-base-100);
+	padding: 8px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.console-stats .l {
+	font-size: 9.5px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	text-transform: uppercase;
+	letter-spacing: 0.14em;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-weight: 600;
+}
+
+.console-stats .v {
+	font-size: 13px;
+	color: var(--color-base-content);
+	font-weight: 500;
+}
+
+.console-stats .v.lime { color: var(--color-primary); }
+.console-stats__ctx .v { font-size: 11px; }
+
+/* ── Topbar / breadcrumb ─────────────────────────────────────── */
+.console-topbar {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	align-items: center;
+	gap: 14px;
+	min-height: var(--c-header-h, 49px);
+	box-sizing: border-box;
+	padding: 10px 18px;
+	border-bottom: 1px solid var(--color-base-300);
+	font-size: 12px;
+}
+
+.console-crumbs {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	min-width: 0;
+}
+
+.console-crumbs__cur {
+	color: var(--color-base-content);
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.console-crumbs__seg {
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	white-space: nowrap;
+	text-decoration: none;
+}
+a.console-crumbs__seg:hover {
+	color: var(--color-base-content);
+	text-decoration: underline;
+}
+
+.console-crumbs__sep {
+	color: color-mix(in oklab, var(--color-base-content) 30%, transparent);
+	user-select: none;
+}
+
+.console-topbar__chips {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+	justify-self: end;
+	flex-wrap: nowrap;
+	overflow: hidden;
+}
+
+.console-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	border-radius: 4px;
+	border: 1px solid var(--color-base-300);
+	background: var(--color-base-200);
+	font-size: 10.5px;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	letter-spacing: 0.02em;
+}
+
+.console-chip.is-run {
+	color: var(--color-primary);
+	border-color: color-mix(in oklab, var(--color-primary) 35%, var(--color-base-300));
+}
+
+.console-chip.is-warn {
+	color: var(--color-warning);
+	border-color: color-mix(in oklab, var(--color-warning) 35%, var(--color-base-300));
+}
+
+.console-chip .pulse-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: currentColor;
+	animation: console-pulse 1.6s ease-in-out infinite;
+}
+
+.console-topbar__actions { display: flex; gap: 4px; justify-self: end; }
+
+.console-iconbtn {
+	width: 28px;
+	height: 28px;
+	border-radius: 6px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 1px solid transparent;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	cursor: pointer;
+}
+
+.console-iconbtn:hover {
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+	border-color: var(--color-base-300);
+}
+
+/* ── Thread / messages ───────────────────────────────────────── */
+.console-thread {
+	flex: 1;
+	overflow-y: auto;
+	padding: 18px 24px 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-base-300) transparent;
+}
+
+.console-thread::-webkit-scrollbar { width: 8px; }
+.console-thread::-webkit-scrollbar-thumb { background: var(--color-base-300); border-radius: 4px; }
+
+.console-msg__head {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	margin-bottom: 4px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-msg__time { font-size: 10px; color: color-mix(in oklab, var(--color-base-content) 35%, transparent); }
+.console-msg__model {
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	border: 1px solid var(--color-base-300);
+	padding: 0 5px;
+	border-radius: 3px;
+}
+
+/* ── Message bubble ──────────────────────────────────────────── */
+.console-msg { display: block; width: 100%; }
+
+.console-msg--user {
+	display: flex;
+	justify-content: flex-end;
+	margin: 4px 0;
+}
+
+.console-msg__user-wrap {
+	max-width: 78%;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+}
+
+.console-msg__user-wrap .console-msg__head {
+	flex-direction: row-reverse;
+}
+
+.console-msg__user-bubble {
+	background: color-mix(in oklab, var(--color-primary) 14%, var(--color-base-200));
+	border: 1px solid color-mix(in oklab, var(--color-primary) 30%, var(--color-base-300));
+	border-radius: 10px 10px 2px 10px;
+	padding: 8px 12px;
+	color: var(--color-base-content);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 13px;
+	line-height: 1.55;
+}
+
+.console-msg__user-bubble p { margin: 0; white-space: pre-wrap; }
+
+.console-msg--assist {
+	display: flex;
+	flex-direction: column;
+}
+
+.console-msg--assist .markdown-body {
+	font-size: 13px;
+	line-height: 1.55;
+	color: var(--color-base-content);
+}
+
+.console-msg__edit {
+	max-width: 78%;
+	margin-left: auto;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 10px 10px 2px 10px;
+	padding: 10px 12px;
+}
+
+.console-msg__edit-ta {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	resize: none;
+	font: inherit;
+	outline: none;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 13px;
+	line-height: 1.55;
+	min-height: 60px;
+}
+
+.console-msg__edit-row {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.console-pill--primary {
+	background: var(--color-primary);
+	color: var(--color-primary-content);
+	border-color: var(--color-primary);
+}
+
+.console-pill--primary:hover { filter: brightness(1.05); background: var(--color-primary); color: var(--color-primary-content); }
+
+/* ── Thinking ─────────────────────────────────────────────────── */
+.console-think {
+	border-left: 2px solid var(--color-base-300);
+	padding: 6px 0 6px 12px;
+	margin: 4px 0 8px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 12px;
+	font-style: italic;
+}
+
+.console-think summary {
+	list-style: none;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	font-style: normal;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 11.5px;
+}
+
+.console-think summary::-webkit-details-marker { display: none; }
+.console-think summary:hover { color: var(--color-base-content); }
+
+.console-think__caret {
+	display: inline-flex;
+	transition: transform 160ms;
+}
+
+.console-think[open] .console-think__caret { transform: rotate(90deg); }
+
+.console-think__body {
+	margin-top: 6px;
+	line-height: 1.65;
+}
+
+.console-think__body .markdown-body {
+	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+	font-size: 12px;
+	font-style: italic;
+}
+
+/* ── Composer ─────────────────────────────────────────────────── */
+.console-composer-wrap {
+	padding: 0;
+	border-top: 1px solid var(--color-base-300);
+	background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--color-primary) 2%, transparent));
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.console-composer {
+	border: 0;
+	background: var(--color-base-200);
+	border-radius: 0;
+	padding: 14px 18px 12px;
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 168px;
+	transition: background 120ms;
+}
+
+.console-composer:focus-within {
+	box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-primary) 30%, transparent);
+}
+
+.console-composer__ta {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	resize: none;
+	font: inherit;
+	outline: none;
+	padding: 4px 4px 0;
+	line-height: 1.55;
+	font-size: 13.5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	flex: 1 1 auto;
+	min-height: 110px;
+}
+
+.console-composer__ta::placeholder { color: color-mix(in oklab, var(--color-base-content) 30%, transparent); }
+
+.console-composer__row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 4px 2px 0;
+	gap: 6px;
+}
+
+.console-composer__l, .console-composer__r {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+}
+
+.console-composer__r {
+	justify-content: flex-end;
+}
+
+.console-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	background: transparent;
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	padding: 3px 8px;
+	border-radius: 4px;
+	font-size: 11px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.console-pill:hover { background: var(--color-base-300); color: var(--color-base-content); }
+.console-pill:disabled { opacity: 0.5; cursor: not-allowed; }
+.console-pill .ar { color: color-mix(in oklab, var(--color-base-content) 35%, transparent); font-size: 9px; }
+
+.console-send {
+	width: 28px;
+	height: 28px;
+	border-radius: 5px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--color-primary);
+	color: var(--color-primary-content);
+	border: 0;
+	cursor: pointer;
+	flex: 0 0 auto;
+}
+
+.console-send:disabled {
+	background: var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	cursor: not-allowed;
+}
+
+.console-send.cancel { background: var(--color-error); color: var(--color-error-content); }
+
+/* ── Tool call dense strip ────────────────────────────────────── */
+.tool-call-card.console-tool {
+	display: block;
+	margin: 6px 0;
+	padding: 0;
+	border-radius: 6px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	font-size: 12px;
+	position: relative;
+	overflow: hidden;
+}
+
+.tool-call-card.console-tool.ok { border-left: 2px solid var(--color-primary); }
+.tool-call-card.console-tool.warn {
+	border-left: 2px solid var(--color-warning);
+	background: color-mix(in oklab, var(--color-warning) 5%, var(--color-base-200));
+}
+.tool-call-card.console-tool.err { border-left: 2px solid var(--color-error); }
+
+.tool-call-card.console-tool > summary {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 7px 10px;
+	cursor: pointer;
+	list-style: none;
+}
+
+.tool-call-card.console-tool > summary::-webkit-details-marker { display: none; }
+.tool-call-card.console-tool > summary::marker { display: none; content: ''; }
+.tool-call-card.console-tool > summary > div:first-child { flex: 1; min-width: 0; }
+.tool-call-card.console-tool > summary svg { color: color-mix(in oklab, var(--color-base-content) 50%, transparent); }
+.tool-call-card.console-tool.ok > summary svg:first-child { color: var(--color-primary); }
+.tool-call-card.console-tool.warn > summary svg:first-child { color: var(--color-warning); }
+.tool-call-card.console-tool.err > summary svg:first-child { color: var(--color-error); }
+
+.tool-call-card.console-tool > div {
+	padding: 0 10px 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+/* ── Mobile chips row (below header) ─────────────────────────── */
+.console-mobile-chips {
+	display: none;
+	gap: 5px;
+	overflow-x: auto;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--color-base-300);
+	scrollbar-width: none;
+}
+
+.console-mobile-chips::-webkit-scrollbar { display: none; }
+
+.console-mobile-chips .console-chip {
+	border-radius: 999px;
+	padding: 3px 8px;
+	flex: 0 0 auto;
+}
+
+/* Mobile quick-chips above composer (Attach / @ Context / / Commands) */
+.console-quick {
+	display: none;
+	gap: 6px;
+	padding: 6px 12px 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+	border-top: 1px solid var(--color-base-300);
+	background: var(--color-base-200);
+}
+
+.console-quick::-webkit-scrollbar { display: none; }
+
+.console-quick button {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+	padding: 4px 9px;
+	border-radius: 999px;
+	font: inherit;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.console-quick button:hover {
+	color: var(--color-base-content);
+	border-color: color-mix(in oklab, var(--color-primary) 40%, var(--color-base-300));
+}
+
+/* Mobile header sub (running status) — applied to the existing in-page mobile header */
+.console-mobile-sub {
+	display: none;
+	align-items: center;
+	gap: 5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	color: var(--color-primary);
+	margin-top: 1px;
+}
+
+.console-mobile-sub .pulse-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 999px;
+	background: currentColor;
+	animation: console-pulse 1.6s ease-in-out infinite;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────── */
+@media (max-width: 47.99rem) {
+	.console-mobile-chips,
+	.console-quick,
+	.console-mobile-sub {
+		display: flex;
+	}
+
+	/* Hide the desktop-only Console topbar on mobile (the in-page mobile header replaces it) */
+	.console-topbar { display: none !important; }
+
+	/* Hide the inline left pills on mobile — they're now in the quick row above */
+	.console-composer__l { display: none !important; }
+	.console-composer__row { justify-content: flex-end; flex-wrap: wrap; }
+
+
+	.console-grid {
+		grid-template-columns: 1fr !important;
+	}
+
+	.console-sb,
+	.console-rail,
+	.console-resize {
+		display: none !important;
+	}
+
+	.console-topbar {
+		grid-template-columns: 36px 1fr 36px;
+		gap: 8px;
+		padding: 8px 12px;
+	}
+
+	.console-thread { padding: 12px 12px 6px; }
+	.console-composer { padding: 6px 12px 8px; min-height: 0; }
+	.console-composer__ta { min-height: 32px; max-height: 120px; font-size: 14px; padding: 4px 0 0; }
+	.console-composer__row { padding: 4px 0 0; }
+	.console-send { width: 32px; height: 32px; border-radius: 8px; }
+	.console-composer-wrap { padding: 0 !important; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+	.console-chatrow .pulse-dot,
+	.console-chip .pulse-dot,
+	.console-art__steps .step.run .spin,
+	.console-act .spin {
+		animation: none;
+	}
+}

@@ -16,6 +16,7 @@
 	import { BUILTIN_TOOLS } from '$lib/tools/tools';
 	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
 	import ToolToggleChip from '$lib/settings/ToolToggleChip.svelte';
 
@@ -62,7 +63,7 @@
 	// loaded on-demand via `search_tools`. The UI groups tools by tier so operators can bulk-
 	// approve a tier (e.g. require approval for every searchable tool but waive the always set).
 	const TIER_META: Array<{ tierKey: 'always' | 'searchable'; label: string; description: string; alwaysOn: boolean }> = [
-		{ tierKey: 'always', label: 'Always loaded', description: 'Tools shipped in the model surface on every request (web_search, ask_user, propose_plan, run_code, search_tools).', alwaysOn: true },
+		{ tierKey: 'always', label: 'Always loaded', description: 'Tools shipped in the model surface on every request (web_search, ask_user, run_code, search_tools).', alwaysOn: true },
 		{ tierKey: 'searchable', label: 'Searchable', description: 'The long tail of tools — loaded only after the model invokes `search_tools(query)`.', alwaysOn: false },
 	];
 	const toolsByTier = TIER_META
@@ -370,31 +371,25 @@
 	}
 </script>
 
-<section class="flex min-h-full flex-col">
-	<!-- ─── Fixed Header ─── -->
-	<ContentPanel>
-		{#snippet header()}
-			<div class="min-w-0">
-				<h1 class="text-xl font-bold sm:text-3xl">Settings</h1>
-				<p class="text-xs text-base-content/70 sm:text-sm">
-					{#if statusMessage}
-						<span class="text-success">{statusMessage}</span>
-					{:else}
-						Configure models, prompts, notifications, and system behavior.
-					{/if}
-				</p>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Settings" subtitle={statusMessage ?? 'Configure models, prompts, notifications, and system behavior'}>
+		{#snippet chips()}
+			{#if statusMessage}
+				<span class="console-chip is-run">{statusMessage}</span>
+			{/if}
 		{/snippet}
 		{#snippet actions()}
-			<button class="btn btn-ghost btn-sm" type="button" onclick={resetSettingsToDefault} disabled={busy}>Reset</button>
-			<button class="btn btn-primary btn-sm" type="button" onclick={saveSettings} disabled={busy}>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={resetSettingsToDefault} disabled={busy}>Reset</button>
+			<button class="btn btn-primary btn-xs" type="button" onclick={saveSettings} disabled={busy}>
 				{#if busy}
 					<span class="loading loading-spinner loading-xs"></span>
 				{/if}
 				Save
 			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 flex flex-col overflow-hidden px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 
 	<!-- ─── Search (fixed below header) ─── -->
 	<div class="mt-2 mb-1 px-1 sm:px-0">
@@ -886,4 +881,5 @@
 			</div>
 		</div>
 	</div>
-</section>
+	</div>
+</div>

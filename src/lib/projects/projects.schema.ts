@@ -1,5 +1,6 @@
 import {
 	boolean,
+	check,
 	index,
 	integer,
 	numeric,
@@ -8,24 +9,28 @@ import {
 	text,
 	timestamp,
 	unique,
+	uniqueIndex,
 	uuid,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { users } from '$lib/auth/auth.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 
 /**
- * Wave 4 #15 phase 1 — Projects + Artifacts + Versions.
+ * Projects + Artifacts + Versions.
  *
  * Three tables that promote artifacts from "ephemeral SSE block in chat" to first-class
  * durable entities with stable IDs and append-only version history.
  *
  *   projects → containers a user creates ("efoil rebuild", "tax research")
- *   artifacts → named documents within a project (each has a current version pointer)
+ *   artifacts → named documents bound to either a project OR a conversation
  *   artifactVersions → immutable per-edit snapshot; rollback = copy old seq forward
  *
  * Identity rules:
  *   - `(userId, slug)` is unique on projects so URLs are stable.
- *   - `(projectId, slug)` is unique on artifacts so each artifact has one stable name in
- *     its project.
+ *   - Artifacts are scoped to either a project or a conversation. Slug uniqueness is
+ *     partial — `(project_id, slug)` when project-scoped, `(conversation_id, slug)`
+ *     when conversation-scoped.
  *   - `(artifactId, seq)` is unique on artifactVersions so the version number is the
  *     canonical "v3" UI label.
  *
@@ -74,9 +79,11 @@ export const artifacts = pgTable(
 	'artifacts',
 	{
 		id: uuid('id').primaryKey().defaultRandom(),
-		projectId: uuid('project_id')
-			.notNull()
-			.references(() => projects.id, { onDelete: 'cascade' }),
+		// An artifact is scoped to either a project or a conversation. Exactly one of these
+		// must be set (CHECK constraint). Project-scoped artifacts live in /projects;
+		// conversation-scoped artifacts are the lightweight in-chat plan/todo/document.
+		projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+		conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
 		name: text('name').notNull(),
 		slug: text('slug').notNull(),
 		contentType: artifactContentTypeEnum('content_type').notNull().default('markdown'),
@@ -89,9 +96,20 @@ export const artifacts = pgTable(
 		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 	},
 	(t) => ({
-		projectSlugUnique: unique('artifacts_project_slug_unique').on(t.projectId, t.slug),
+		// Partial uniques so each scope has its own slug namespace.
+		projectSlugUnique: uniqueIndex('artifacts_project_slug_unique')
+			.on(t.projectId, t.slug)
+			.where(sql`${t.projectId} is not null`),
+		conversationSlugUnique: uniqueIndex('artifacts_conversation_slug_unique')
+			.on(t.conversationId, t.slug)
+			.where(sql`${t.conversationId} is not null`),
 		projectIdx: index('artifacts_project_idx').on(t.projectId),
+		conversationIdx: index('artifacts_conversation_idx').on(t.conversationId),
 		activeIdx: index('artifacts_active_idx').on(t.isActive),
+		scopeCheck: check(
+			'artifacts_scope_check',
+			sql`(${t.projectId} is not null) or (${t.conversationId} is not null)`,
+		),
 	}),
 )
 

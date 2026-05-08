@@ -33,11 +33,9 @@ const STATIC_ROUTES: SmokeRoute[] = [
 	{ name: 'agents/new', path: '/agents/new' },
 	{ name: 'skills', path: '/skills' },
 	{ name: 'automations', path: '/automations' },
-	{ name: 'tasks', path: '/tasks' },
 	{ name: 'projects', path: '/projects' },
 	{ name: 'source-control', path: '/source-control' },
 	{ name: 'activity', path: '/activity' },
-	{ name: 'cost', path: '/cost' },
 	{ name: 'memory', path: '/memory' },
 	{ name: 'research', path: '/research' },
 	{ name: 'users', path: '/users' },
@@ -46,7 +44,6 @@ const STATIC_ROUTES: SmokeRoute[] = [
 	{ name: 'settings/hooks', path: '/settings/hooks' },
 	{ name: 'settings/jobs', path: '/settings/jobs' },
 	{ name: 'review', path: '/review' },
-	{ name: 'review/health', path: '/review/health' },
 ]
 
 let dynamicRoutes: SmokeRoute[] = []
@@ -83,11 +80,6 @@ test.beforeAll(async () => {
 		'project',
 		() => sql<{ id: string }[]>`select id from projects order by created_at desc limit 1`,
 		(id) => ({ name: 'projects/[id]', path: `/projects/${id}` }),
-	)
-	await probe(
-		'task',
-		() => sql<{ id: string }[]>`select id from tasks order by created_at desc limit 1`,
-		(id) => ({ name: 'tasks/[id]', path: `/tasks/${id}` }),
 	)
 	await probe(
 		'research',

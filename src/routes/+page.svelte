@@ -9,6 +9,7 @@
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
@@ -259,15 +260,14 @@
 
 	async function handleComposerSubmit(content: string) {
 		// All agents — including Research — go through handleNewChat. The Research agent
-		// proposes a plan via the propose_research_plan tool inside the chat stream; the
-		// chat page renders the plan in the right sidebar with Approve / Decline buttons.
-		// (The legacy direct-research path is still available via the /research index page
-		// form for programmatic / ad-hoc creation without a chat.)
+		// drafts a plan as a markdown artifact, surfaces it via present_artifact, and hands
+		// off via request_plan_approval to a research-runner agent on approval.
 		await handleNewChat(content);
 	}
 </script>
 
 <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+<PageHeader title="New chat" subtitle={greeting} />
 <!-- Default new-chat view (always rendered) -->
 <div class="flex flex-1 flex-col items-center px-2 pt-12 tablet:justify-center tablet:px-0 tablet:pt-0">
 	<div class="w-full max-w-2xl space-y-4 text-center tablet:space-y-8">

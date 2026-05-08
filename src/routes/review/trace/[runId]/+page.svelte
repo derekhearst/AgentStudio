@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { getRunTraceQuery } from '$lib/observability/review.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Result = Awaited<ReturnType<typeof getRunTraceQuery>>;
 
@@ -105,24 +106,22 @@
 	}
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Run Trace</h1>
-					<p class="font-mono text-xs text-base-content/55">{runId}</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<a class="btn btn-ghost btn-xs" href="/review">← Inbox</a>
-					<a class="btn btn-ghost btn-xs" href="/runs/{runId}">Run detail</a>
-					<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
-						{loading ? 'Loading…' : 'Refresh'}
-					</button>
-				</div>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Run trace"
+		crumbs={[{ label: 'Review', href: '/review' }]}
+		backHref="/review"
+		subtitle={runId}
+	>
+		{#snippet actions()}
+			<a class="btn btn-ghost btn-xs" href="/runs/{runId}">Run detail</a>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
 	{#if !result}
 		<div class="flex justify-center py-20">
@@ -229,7 +228,7 @@
 			{/if}
 		</ContentPanel>
 
-		{#if tr.taskId || tr.sessionId || tr.jobId}
+		{#if tr.sessionId || tr.jobId}
 			<ContentPanel>
 				{#snippet header()}
 					<h2 class="font-semibold">Linked records</h2>
@@ -239,14 +238,6 @@
 						<div class="flex items-center gap-2">
 							<dt class="w-20 font-semibold uppercase tracking-wide opacity-50">Session</dt>
 							<dd class="font-mono">{tr.sessionId}</dd>
-						</div>
-					{/if}
-					{#if tr.taskId}
-						<div class="flex items-center gap-2">
-							<dt class="w-20 font-semibold uppercase tracking-wide opacity-50">Task</dt>
-							<dd>
-								<a href="/tasks/{tr.taskId}" class="link link-hover font-mono">{tr.taskId}</a>
-							</dd>
 						</div>
 					{/if}
 					{#if tr.jobId}
@@ -261,4 +252,5 @@
 			</ContentPanel>
 		{/if}
 	{/if}
+	</div>
 </div>

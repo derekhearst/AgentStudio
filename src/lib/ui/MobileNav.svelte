@@ -11,10 +11,10 @@
 	}
 
 	const moreItems = [
+		{ href: '/review', label: 'Review' },
 		{ href: '/activity', label: 'Activity' },
 		{ href: '/skills', label: 'Skills' },
-		{ href: '/automations', label: 'Automations' },
-		{ href: '/cost', label: 'Cost' }
+		{ href: '/automations', label: 'Automations' }
 	] as const;
 
 	let moreActive = $derived(moreItems.some((m) => activePath.startsWith(m.href)));

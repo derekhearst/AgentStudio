@@ -9,12 +9,10 @@
 		updateAutomationCommand,
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
-	import { getSourceControlOverviewQuery } from '$lib/source-control/source-control.remote';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
-	type AutomationMode = 'chat_followup' | 'research' | 'code' | 'maintenance';
-	type AutomationOutputTarget = 'chat_session' | 'task' | 'artifact' | 'review_inbox';
-	type RepoChoice = Awaited<ReturnType<typeof getSourceControlOverviewQuery>>['repositories'][number];
+	type AutomationMode = 'chat_followup' | 'research' | 'maintenance';
+	type AutomationOutputTarget = 'chat_session' | 'artifact' | 'review_inbox';
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
@@ -44,10 +42,8 @@
 	let conversationMode = $state<'new_each_run' | 'reuse'>('new_each_run');
 	let mode = $state<AutomationMode>('chat_followup');
 	let outputTarget = $state<AutomationOutputTarget>('chat_session');
-	let selectedRepositoryId = $state<string>('');
 	let enabled = $state(true);
 	let selectedAgentId = $state('orchestrator');
-	let repositories = $state<RepoChoice[]>([]);
 
 	const enabledCount = $derived(rows.filter((row) => row.enabled).length);
 	const dueSoonCount = $derived(rows.filter((row) => isDueSoon(row.nextRunAt)).length);
@@ -81,14 +77,12 @@
 		loading = true;
 		formError = null;
 		try {
-			const [automations, agentChoices, sourceControlOverview] = await Promise.all([
+			const [automations, agentChoices] = await Promise.all([
 				listAutomationsQuery(),
 				getAgentChoices(),
-				getSourceControlOverviewQuery().catch(() => ({ repositories: [] as RepoChoice[] })),
 			]);
 			rows = automations;
 			agents = agentChoices;
-			repositories = sourceControlOverview.repositories;
 		} catch {
 			formError = 'Unable to load automations right now. Try again in a moment.';
 		} finally {
@@ -156,17 +150,9 @@
 		return null;
 	}
 
-	function validateModeSpecific(): string | null {
-		if (mode === 'code') {
-			if (!selectedRepositoryId) return 'Code mode requires a connected repository — pick one or sync at /source-control.';
-			if (selectedAgentId === 'orchestrator') return 'Code mode requires a coding agent — assign one before creating.';
-		}
-		return null;
-	}
-
 	async function createAutomation() {
 		clearCreateMessage();
-		formError = validateCreateForm() ?? validateModeSpecific();
+		formError = validateCreateForm();
 		if (formError) return;
 
 		saving = true;
@@ -180,12 +166,10 @@
 				conversationMode,
 				mode,
 				outputTarget,
-				repositoryId: mode === 'code' && selectedRepositoryId ? selectedRepositoryId : null,
 			});
 
 			await loadPageData();
 			description = '';
-			selectedRepositoryId = '';
 			createMessage = 'Automation created successfully.';
 		} catch {
 			formError = 'Failed to create automation. Check values and try again.';
@@ -226,41 +210,41 @@
 	}
 </script>
 
-<section class="space-y-5">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex min-w-0 flex-1 items-start justify-between gap-3">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Automations</h1>
-					<p class="mt-0.5 text-xs text-base-content/60 sm:text-sm">
-						{rows.length} total
-						<span class="mx-1.5">•</span>
-						{enabledCount} enabled
-						{#if dueSoonCount > 0}
-							<span class="ml-2 inline-flex items-center gap-1 text-warning">
-								<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-warning"></span>
-								{dueSoonCount} due soon
-							</span>
-						{/if}
-					</p>
-				</div>
-				<div class="join shrink-0">
-					<button
-						class="btn join-item btn-xs {sortMode === 'next_run' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'next_run')}
-					>Next run</button>
-					<button
-						class="btn join-item btn-xs {sortMode === 'updated' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'updated')}
-					>Updated</button>
-					<button
-						class="btn join-item btn-xs {sortMode === 'status' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'status')}
-					>Status</button>
-				</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Automations"
+		subtitle={`${rows.length} total • ${enabledCount} enabled${dueSoonCount > 0 ? ` • ${dueSoonCount} due soon` : ''}`}
+		live={dueSoonCount > 0}
+	>
+		{#snippet chips()}
+			<span class="console-chip">{rows.length} total</span>
+			<span class="console-chip">{enabledCount} enabled</span>
+			{#if dueSoonCount > 0}
+				<span class="console-chip is-warn">
+					<span class="pulse-dot"></span>
+					{dueSoonCount} due soon
+				</span>
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			<div class="join">
+				<button
+					class="btn join-item btn-xs {sortMode === 'next_run' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'next_run')}
+				>Next run</button>
+				<button
+					class="btn join-item btn-xs {sortMode === 'updated' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'updated')}
+				>Updated</button>
+				<button
+					class="btn join-item btn-xs {sortMode === 'status' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'status')}
+				>Status</button>
 			</div>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-5">
 
 	{#if formError}
 		<div class="alert alert-error py-2 text-sm">{formError}</div>
@@ -452,36 +436,8 @@
 						>
 							<option value="chat_followup">Chat followup — append prompt to a conversation (default)</option>
 							<option value="research">Research — open a research run with citations</option>
-							<option value="code">Code — clone a repo + create a coding task for an agent</option>
 							<option value="maintenance">Maintenance — run hygiene work, no chat surface</option>
 						</select>
-
-						{#if mode === 'code'}
-							<div class="mt-2 space-y-1">
-								<p class="text-xs text-base-content/70">Target repository</p>
-								{#if repositories.length === 0}
-									<p class="text-xs text-warning">
-										No connected repositories. <a class="link" href="/source-control">Connect GitHub</a> to enable code mode.
-									</p>
-								{:else}
-									<select
-										data-testid="automation-repo-select"
-										class="select select-bordered select-sm w-full font-mono"
-										bind:value={selectedRepositoryId}
-										onchange={clearCreateMessage}
-									>
-										<option value="">Pick a repository…</option>
-										{#each repositories as repo (repo.id)}
-											<option value={repo.id}>{repo.owner}/{repo.name}</option>
-										{/each}
-									</select>
-								{/if}
-								<p class="text-xs text-base-content/55">
-									Code-mode automations create a task with the repo attached. The task runner provisions
-									a per-attempt worktree; an operator opens the task to review + push.
-								</p>
-							</div>
-						{/if}
 
 						{#if mode === 'maintenance'}
 							<div class="mt-2 space-y-1">
@@ -494,7 +450,6 @@
 								>
 									<option value="chat_session">Chat session — assistant message in the conversation</option>
 									<option value="review_inbox">Review inbox — automation_summary item</option>
-									<option value="task">Task — create a pending task with the summary</option>
 									<option value="artifact">Artifact — write a versioned artifact (project must be bound)</option>
 								</select>
 							</div>
@@ -528,7 +483,8 @@
 			</div>
 		</div>
 	</div>
-</section>
+	</div>
+</div>
 
 <style>
 	.shimmer-bar {

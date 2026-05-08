@@ -1,16 +1,17 @@
 <script lang="ts">
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 	import AgentSelector, { type AgentChoice } from '$lib/chat/AgentSelector.svelte'
+	import Icon from '$lib/chat-console/Icon.svelte'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
 	const REASONING_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
-		{ value: 'none', label: 'Reasoning off' },
-		{ value: 'minimal', label: 'Reasoning min' },
-		{ value: 'low', label: 'Reasoning low' },
-		{ value: 'medium', label: 'Reasoning med' },
-		{ value: 'high', label: 'Reasoning high' },
-		{ value: 'xhigh', label: 'Reasoning max' },
+		{ value: 'none', label: 'off' },
+		{ value: 'minimal', label: 'min' },
+		{ value: 'low', label: 'low' },
+		{ value: 'medium', label: 'med' },
+		{ value: 'high', label: 'high' },
+		{ value: 'xhigh', label: 'max' },
 	]
 
 	let {
@@ -20,7 +21,7 @@
 		reasoningEffort = 'none',
 		agentId = null,
 		agentChoices = [],
-		placeholder = 'Message AgentStudio...',
+		placeholder = 'Message AgentStudio…',
 		recording = false,
 		transcribing = false,
 		speechSupported = false,
@@ -45,9 +46,6 @@
 		transcribing?: boolean
 		speechSupported?: boolean
 		onSubmit?: ((content: string) => Promise<void> | void) | undefined
-		// Wave 4 #18 phase 4 — when present, the magnifying-glass "Research" button submits the
-		// current text as a Deep Research request (creates a research row + enqueues a job)
-		// instead of streaming as a chat message.
 		onResearchSubmit?: ((content: string) => Promise<void> | void) | undefined
 		onModelChange?: ((modelId: string) => Promise<void> | void) | undefined
 		onReasoningEffortChange?: ((effort: ReasoningEffort) => Promise<void> | void) | undefined
@@ -60,7 +58,7 @@
 
 	let reasoningMenuOpen = $state(false)
 	const selectedReasoningLabel = $derived(
-		REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'Reasoning off'
+		REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'off'
 	)
 
 	async function submit(e: SubmitEvent) {
@@ -68,16 +66,6 @@
 		const trimmed = value.trim()
 		if (!trimmed || busy) return
 		await onSubmit?.(trimmed)
-	}
-
-	async function submitResearch() {
-		const trimmed = value.trim()
-		if (!trimmed || busy) return
-		// Clear the textarea optimistically — the chat page handler will show a system
-		// message bubble linking to the new research run as the visual ack.
-		const captured = trimmed
-		value = ''
-		await onResearchSubmit?.(captured)
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -88,44 +76,37 @@
 	}
 </script>
 
-<form
-	onsubmit={submit}
-	class="card bg-base-100 border-base-300 rounded-2xl border p-2 shadow-sm sm:rounded-3xl sm:p-3 {className}"
->
-	<label class="sr-only" for="chat-composer-textarea">Message</label>
-	<textarea
-		id="chat-composer-textarea"
-		class="textarea textarea-ghost w-full resize-none bg-transparent px-1.5 py-1 text-base leading-6 focus:outline-none sm:px-2"
-		rows="2"
-		{placeholder}
-		bind:value
-		onkeydown={handleKeydown}
-		disabled={busy}
-	></textarea>
+<form onsubmit={submit} class="console-composer-wrap {className}">
+	<div class="console-composer">
+		<label class="sr-only" for="chat-composer-textarea">Message</label>
+		<textarea
+			id="chat-composer-textarea"
+			class="console-composer__ta"
+			rows="5"
+			{placeholder}
+			bind:value
+			onkeydown={handleKeydown}
+			disabled={busy}
+		></textarea>
 
-	<div class="mt-1.5 flex items-center justify-between gap-1 px-0.5 sm:mt-2 sm:gap-2 sm:px-1">
-		<div class="flex items-center gap-1">
-			{#if onAddFiles}
-				<button
-					type="button"
-					class="btn btn-ghost btn-sm gap-1 rounded-full px-2 sm:gap-2"
-					disabled={busy}
-					onclick={() => onAddFiles?.()}
-				>
-					<span class="text-lg leading-none">+</span>
-					<span class="hidden sm:inline">Add files</span>
-				</button>
-			{/if}
-		</div>
+		<div class="console-composer__row">
+			<div class="console-composer__l">
+				{#if onAddFiles}
+					<button type="button" class="console-pill" disabled={busy} onclick={() => onAddFiles?.()}>
+						<Icon name="plus" size={12} /> Attach
+					</button>
+				{/if}
+				<button type="button" class="console-pill" disabled>@ Context</button>
+				<button type="button" class="console-pill" disabled>/ Commands</button>
+			</div>
 
-		<div class="flex items-center gap-1">
-			<AgentSelector
-				{agentId}
-				{agentChoices}
-				{busy}
-				onAgentChange={(next) => onAgentChange?.(next)}
-			/>
-			<div>
+			<div class="console-composer__r">
+				<AgentSelector
+					{agentId}
+					{agentChoices}
+					{busy}
+					onAgentChange={(next) => onAgentChange?.(next)}
+				/>
 				<ModelSelector
 					value={model}
 					variant="inline"
@@ -133,143 +114,93 @@
 					showChevron={true}
 					onchange={(id: string) => onModelChange?.(id)}
 				/>
-			</div>
-			<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={reasoningMenuOpen}>
-				<button
-					type="button"
-					class="btn btn-ghost btn-xs gap-1"
-					title="Reasoning effort"
-					aria-label="Reasoning effort"
-					aria-expanded={reasoningMenuOpen}
-					disabled={busy}
-					onclick={() => {
-						reasoningMenuOpen = !reasoningMenuOpen
-					}}
-				>
-					<span class="truncate">{selectedReasoningLabel}</span>
-					<span class="opacity-70">▾</span>
-				</button>
-				{#if reasoningMenuOpen}
-					<ul
-						class="menu dropdown-content bg-base-100 border-base-300 rounded-box z-30 mb-2 w-40 border p-1 shadow-xl"
-					>
-						{#each REASONING_OPTIONS as option (option.value)}
-							<li>
-								<button
-									type="button"
-									class:menu-active={option.value === reasoningEffort}
-									onclick={() => {
-										reasoningMenuOpen = false
-										onReasoningEffortChange?.(option.value)
-									}}
-								>
-									{option.label}
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-			{#if speechSupported}
-				<div class="relative flex items-center justify-center">
-					{#if recording}
-						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-error" style="animation-delay: 0s"></span>
-						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-error" style="animation-delay: 0.4s"></span>
-						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-error" style="animation-delay: 0.8s"></span>
-					{/if}
-					{#if transcribing}
-						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-info" style="animation-delay: 0s"></span>
-						<span class="mic-ripple absolute h-8 w-8 rounded-full border-2 border-info" style="animation-delay: 0.4s"></span>
-					{/if}
+				<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={reasoningMenuOpen}>
 					<button
 						type="button"
-						class="btn btn-sm btn-circle relative z-10 {recording ? 'btn-error text-error-content mic-pulse' : transcribing ? 'btn-info text-info-content' : 'btn-ghost'}"
-						aria-label={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
-						title={recording ? 'Stop recording' : transcribing ? 'Transcribing...' : 'Voice input'}
+						class="console-pill"
+						title="Reasoning effort"
+						aria-label="Reasoning effort"
+						aria-expanded={reasoningMenuOpen}
+						disabled={busy}
+						onclick={() => { reasoningMenuOpen = !reasoningMenuOpen }}
+					>
+						<span class="truncate">reasoning:{selectedReasoningLabel}</span>
+						<span class="ar">▾</span>
+					</button>
+					{#if reasoningMenuOpen}
+						<ul class="menu dropdown-content bg-base-200 border-base-300 rounded-md z-30 mb-2 w-32 border p-1 shadow-xl">
+							{#each REASONING_OPTIONS as option (option.value)}
+								<li>
+									<button
+										type="button"
+										class:menu-active={option.value === reasoningEffort}
+										onclick={() => {
+											reasoningMenuOpen = false
+											onReasoningEffortChange?.(option.value)
+										}}
+									>
+										{option.label}
+									</button>
+								</li>
+							{/each}
+						</ul>
+					{/if}
+				</div>
+
+				{#if speechSupported}
+					<button
+						type="button"
+						class="console-pill"
+						aria-label={recording ? 'Stop recording' : transcribing ? 'Transcribing…' : 'Voice input'}
+						title={recording ? 'Stop recording' : transcribing ? 'Transcribing…' : 'Voice input'}
 						disabled={busy || transcribing}
 						onclick={() => onMicClick?.()}
 					>
-						<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-							<rect x="9" y="2" width="6" height="12" rx="3"></rect>
-							<path d="M5 10a7 7 0 0 0 14 0"></path>
-							<line x1="12" y1="17" x2="12" y2="22"></line>
-							<line x1="8" y1="22" x2="16" y2="22"></line>
-						</svg>
+						<Icon name="mic" size={12} />
 					</button>
-				</div>
-			{:else}
-				<button
-					type="button"
-					class="btn btn-ghost btn-sm btn-circle opacity-30 cursor-not-allowed"
-					aria-label="Voice input unavailable"
-					title="Voice input not supported in this browser. Use Chrome, Edge, or Safari."
-					disabled
-				>
-					<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<rect x="9" y="2" width="6" height="12" rx="3"></rect>
-						<path d="M5 10a7 7 0 0 0 14 0"></path>
-						<line x1="12" y1="17" x2="12" y2="22"></line>
-						<line x1="8" y1="22" x2="16" y2="22"></line>
-						<line x1="3" y1="3" x2="21" y2="21"></line>
-					</svg>
-				</button>
-			{/if}
-			{#if busy}
-				<button
-					type="button"
-					class="btn btn-primary btn-sm btn-circle"
-					aria-label="Stop generating"
-					title="Stop generating"
-					onclick={() => onCancelGeneration?.()}
-				>
-					<span class="h-3 w-3 rounded-sm bg-current"></span>
-				</button>
-			{:else}
-				<button
-					type="submit"
-					class="btn btn-primary btn-sm btn-circle"
-					aria-label="Send message"
-					title="Send message"
-					disabled={value.trim().length === 0}
-				>
-					<svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<path d="M5 12h14"></path>
-						<path d="m12 5 7 7-7 7"></path>
-					</svg>
-				</button>
-			{/if}
+				{/if}
+
+				{#if onResearchSubmit}
+					<button
+						type="button"
+						class="console-pill"
+						aria-label="Research"
+						title="Submit as research request"
+						disabled={busy || value.trim().length === 0}
+						onclick={async () => {
+							const trimmed = value.trim()
+							if (!trimmed || busy) return
+							const captured = trimmed
+							value = ''
+							await onResearchSubmit?.(captured)
+						}}
+					>
+						<Icon name="search" size={12} /> Research
+					</button>
+				{/if}
+
+				{#if busy}
+					<button
+						type="button"
+						class="console-send cancel"
+						aria-label="Stop generating"
+						title="Stop generating"
+						onclick={() => onCancelGeneration?.()}
+					>
+						<span style="width:10px;height:10px;background:currentColor;border-radius:1px;display:inline-block;"></span>
+					</button>
+				{:else}
+					<button
+						type="submit"
+						class="console-send"
+						aria-label="Send message"
+						title="Send message"
+						disabled={value.trim().length === 0}
+					>
+						<Icon name="send" size={14} />
+					</button>
+				{/if}
+			</div>
 		</div>
 	</div>
 </form>
-
-<style>
-	@keyframes mic-ripple {
-		0% {
-			transform: scale(1);
-			opacity: 0.6;
-		}
-		100% {
-			transform: scale(2.5);
-			opacity: 0;
-		}
-	}
-
-	@keyframes mic-pulse {
-		0%, 100% {
-			transform: scale(1);
-		}
-		50% {
-			transform: scale(1.1);
-		}
-	}
-
-	:global(.mic-ripple) {
-		animation: mic-ripple 1.5s ease-out infinite;
-		pointer-events: none;
-	}
-
-	:global(.mic-pulse) {
-		animation: mic-pulse 1s ease-in-out infinite;
-	}
-</style>
-

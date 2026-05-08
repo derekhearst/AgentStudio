@@ -9,6 +9,7 @@
 		rollbackArtifactCommand,
 	} from '$lib/projects/projects.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getArtifactQuery>>>;
 
@@ -100,6 +101,25 @@
 	}
 </script>
 
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title={detail?.artifact.name ?? 'Artifact'}
+		crumbs={[
+			{ label: 'Projects', href: '/projects' },
+			{ label: detail?.project?.name ?? 'Project', href: `/projects/${projectId}` },
+		]}
+		backHref={`/projects/${projectId}`}
+		subtitle={detail ? `/${detail.artifact.slug} · ${detail.artifact.contentType} · ${detail.versions.length} v` : ''}
+	>
+		{#snippet actions()}
+			{#if detail && !editing && isViewingLatest}
+				<button class="btn btn-xs btn-primary" type="button" onclick={startEdit}>Edit</button>
+			{/if}
+		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+
 {#if loading}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
@@ -109,23 +129,6 @@
 {:else}
 	{@const a = detail.artifact}
 	<section class="space-y-3 sm:space-y-4">
-		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/projects/{projectId}">← Back to project</a>
-
-		<ContentPanel>
-			{#snippet header()}
-				<div class="flex flex-1 flex-wrap items-start justify-between gap-2">
-					<div class="min-w-0 flex-1">
-						<h1 class="text-lg font-bold leading-tight sm:text-2xl">{a.name}</h1>
-						<p class="mt-0.5 font-mono text-xs text-base-content/55">
-							/{a.slug} · {a.contentType} · {detail?.versions.length ?? 0} version{(detail?.versions.length ?? 0) === 1 ? '' : 's'}
-						</p>
-					</div>
-					{#if !editing && isViewingLatest}
-						<button class="btn btn-sm btn-primary" type="button" onclick={startEdit}>Edit</button>
-					{/if}
-				</div>
-			{/snippet}
-		</ContentPanel>
 
 		<div class="grid gap-3 lg:grid-cols-[1fr_280px]">
 			<ContentPanel>
@@ -217,3 +220,5 @@
 		</div>
 	</section>
 {/if}
+	</div>
+</div>

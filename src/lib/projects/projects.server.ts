@@ -50,11 +50,15 @@ async function uniqueProjectSlug(userId: string | null, baseSlug: string): Promi
 	throw new Error(`unable to find a unique slug for "${baseSlug}" after 1000 attempts`)
 }
 
-async function uniqueArtifactSlug(projectId: string, baseSlug: string): Promise<string> {
-	const existing = await db
-		.select({ slug: artifacts.slug })
-		.from(artifacts)
-		.where(eq(artifacts.projectId, projectId))
+async function uniqueArtifactSlug(
+	scope: { projectId: string } | { conversationId: string },
+	baseSlug: string,
+): Promise<string> {
+	const where =
+		'projectId' in scope
+			? eq(artifacts.projectId, scope.projectId)
+			: eq(artifacts.conversationId, scope.conversationId)
+	const existing = await db.select({ slug: artifacts.slug }).from(artifacts).where(where)
 	const taken = new Set(existing.map((r) => r.slug))
 	if (!taken.has(baseSlug)) return baseSlug
 	for (let i = 2; i < 1000; i++) {
@@ -133,7 +137,8 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 // ─────────── Artifact CRUD + versions ───────────
 
 export type CreateArtifactInput = {
-	projectId: string
+	projectId?: string | null
+	conversationId?: string | null
 	name: string
 	content: string
 	contentType?: ArtifactContentType
@@ -148,18 +153,27 @@ export type ArtifactWithCurrent = ArtifactRow & {
 }
 
 /**
- * Create a new artifact in a project, seeding it with version 1 in a single transaction so the
- * artifact never exists without its initial version.
+ * Create a new artifact, seeding it with version 1 in a single transaction so the artifact
+ * never exists without its initial version. The artifact is scoped to either a project or a
+ * conversation — exactly one must be supplied.
  */
 export async function createArtifact(input: CreateArtifactInput): Promise<ArtifactWithCurrent> {
+	if ((input.projectId == null) === (input.conversationId == null)) {
+		throw new Error('createArtifact: exactly one of projectId or conversationId must be set')
+	}
+
 	const baseSlug = slugify(input.name)
-	const slug = await uniqueArtifactSlug(input.projectId, baseSlug)
+	const slug = await uniqueArtifactSlug(
+		input.projectId ? { projectId: input.projectId } : { conversationId: input.conversationId! },
+		baseSlug,
+	)
 
 	return db.transaction(async (tx) => {
 		const [artifact] = await tx
 			.insert(artifacts)
 			.values({
-				projectId: input.projectId,
+				projectId: input.projectId ?? null,
+				conversationId: input.conversationId ?? null,
 				name: input.name,
 				slug,
 				contentType: input.contentType ?? 'markdown',
@@ -184,6 +198,22 @@ export async function createArtifact(input: CreateArtifactInput): Promise<Artifa
 			.returning()
 		return { ...updated, currentVersion: version }
 	})
+}
+
+/**
+ * List artifacts scoped to a conversation (lightweight in-chat plans/todos/docs).
+ */
+export async function listArtifactsForConversation(
+	conversationId: string,
+	opts: { includeInactive?: boolean } = {},
+): Promise<ArtifactRow[]> {
+	const filters = [eq(artifacts.conversationId, conversationId)]
+	if (!opts.includeInactive) filters.push(eq(artifacts.isActive, true))
+	return db
+		.select()
+		.from(artifacts)
+		.where(and(...filters))
+		.orderBy(desc(artifacts.updatedAt))
 }
 
 export type EditArtifactInput = {

@@ -15,7 +15,7 @@
 		pullRepositoryCommand,
 	} from '$lib/source-control/source-control.remote';
 	import { listProjectsQuery } from '$lib/projects/projects.remote';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Overview = Awaited<ReturnType<typeof getSourceControlOverviewQuery>>;
 	type RepoRow = Overview['repositories'][number];
@@ -335,21 +335,16 @@
 	);
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Source control</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						Repos you've imported into AgentStudio. Each one auto-creates a project and surfaces commits, chats, and PRs.
-					</p>
-				</div>
-				<button class="btn btn-sm btn-primary" type="button" onclick={() => openImportModal('github')}>
-					+ Import repository
-				</button>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Source control" subtitle="Repos imported into AgentStudio">
+		{#snippet actions()}
+			<button class="btn btn-xs btn-primary" type="button" onclick={() => openImportModal('github')}>
+				+ Import repository
+			</button>
 		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
 		{#if errorParam}
 			<div class="alert alert-error mb-3 text-sm">
@@ -646,7 +641,7 @@
 				{/if}
 			</div>
 		{/if}
-	</ContentPanel>
+	</div>
 </div>
 
 <!-- ── Import modal ──────────────────────────────────────────────────────────── -->

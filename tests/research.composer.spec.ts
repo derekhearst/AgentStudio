@@ -2,15 +2,14 @@ import { expect, test } from '@playwright/test'
 import { authenticateContext, getSql, uniquePrefix } from './helpers'
 
 /**
- * Wave 4 #18 phase 4 (revised) — Deep Research is now triggered through the Research agent's
- * `propose_research_plan` tool surface, not via a separate magnifying-glass button on the
- * composer. These tests assert the new contract:
+ * Deep Research is triggered by the Research agent drafting a plan as a markdown artifact
+ * (create_artifact + present_artifact + request_plan_approval), not via a separate composer
+ * button. These tests assert:
  *
- *   - The home page composer does NOT surface a "Start Deep Research" button (the agent
- *     drives the flow via the AgentSelector + chat stream now).
+ *   - The home page composer does NOT surface a "Start Deep Research" button.
  *   - The /research index page still renders (legacy / direct-creation entry point).
- *   - The research row schema still matches what `startResearchCommand` and the new
- *     `propose_research_plan` tool handler write.
+ *   - The research row schema still accepts a pre-seeded plan (what a runner agent writes
+ *     after a request_plan_approval handoff).
  */
 
 async function cleanupResearchPrefix(prefix: string) {
@@ -24,8 +23,8 @@ test.describe('research/composer — agent-driven trigger', () => {
 		await authenticateContext(page.context())
 		await page.goto('/')
 		// Negative assertion — the magnifying-glass button was removed; research now flows
-		// through the Research agent's propose_research_plan tool. The AgentSelector drop-down
-		// is the way users opt into the research workflow.
+		// through the Research agent's plan-artifact + request_plan_approval handoff. The
+		// AgentSelector drop-down is the way users opt into the research workflow.
 		const researchBtn = page.getByRole('button', { name: /Start Deep Research/i })
 		await expect(researchBtn).toHaveCount(0)
 	})
@@ -34,7 +33,7 @@ test.describe('research/composer — agent-driven trigger', () => {
 		await authenticateContext(page.context())
 		await page.goto('/')
 		// The agent picker is what the user clicks to switch to the Research agent. Once
-		// switched, the chat-stream flow handles propose_research_plan automatically.
+		// switched, the chat flow handles plan drafting + handoff automatically.
 		const agentPicker = page.getByRole('button', { name: /agent/i }).first()
 		await expect(agentPicker).toBeVisible()
 	})
@@ -46,11 +45,11 @@ test.describe('research/composer — agent-driven trigger', () => {
 		await expect(page.getByText(/Multi-step Deep Research runs/i)).toBeVisible()
 	})
 
-	test('research row schema accepts a pre-seeded plan (the propose_research_plan handler path)', async () => {
-		// The new tool handler creates a research row with `plan` already populated from the
-		// user-approved sub-questions, so the orchestrator skips its Phase-1 planner LLM call.
-		// This asserts the schema accepts that shape so a regression in the column types or
-		// jsonb default gets caught immediately, even without the live agent flow.
+	test('research row schema accepts a pre-seeded plan (post-handoff runner path)', async () => {
+		// After a request_plan_approval handoff the runner agent can create a research row
+		// with `plan` already populated from the approved plan artifact's sub-questions, so the
+		// orchestrator skips its Phase-1 planner LLM call. This asserts the schema accepts that
+		// shape so a regression in the column types or jsonb default gets caught immediately.
 		const prefix = uniquePrefix('agent-driven-shape')
 		const sql = getSql()
 		try {

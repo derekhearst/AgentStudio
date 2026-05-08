@@ -33,7 +33,6 @@ type LogInput = {
 	costOverride?: number
 	userId?: string | null
 	runId?: string | null
-	taskId?: string | null
 	agentId?: string | null
 }
 
@@ -96,7 +95,6 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 			cost,
 			userId: input.userId ?? null,
 			runId: input.runId ?? null,
-			taskId: input.taskId ?? null,
 			agentId: input.agentId ?? null,
 			metadata: input.metadata ?? {},
 		})
@@ -118,7 +116,6 @@ export type LogToolUsageInput = {
 	costPerUnit?: number
 	userId?: string | null
 	runId?: string | null
-	taskId?: string | null
 	agentId?: string | null
 	metadata?: Record<string, unknown>
 }
@@ -136,7 +133,6 @@ export async function logToolUsage(input: LogToolUsageInput): Promise<string> {
 			cost: costStr,
 			userId: input.userId ?? null,
 			runId: input.runId ?? null,
-			taskId: input.taskId ?? null,
 			agentId: input.agentId ?? null,
 			metadata: input.metadata ?? {},
 		})

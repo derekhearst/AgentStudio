@@ -15,10 +15,10 @@ type ToolName = string
 export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
 	'push_branch',
 	'create_pull_request',
-	// Research plan approval — the user reviews the proposed sub-questions in the sidebar
-	// before the orchestrator burns LLM/web budget on a 10-15 minute background run. Always
-	// requires approval; in detached/automation runs the tool fails closed.
-	'propose_research_plan',
+	// Plan-approval handoff: the planner asks the user to confirm the plan artifact and switch
+	// the conversation's bound agent to the implementer. Always requires explicit approval —
+	// in detached/automation runs the tool fails closed.
+	'request_plan_approval',
 ]
 
 // Tool tier organization (always-loaded vs searchable) lives in `tool-schemas.ts:toolDisclosure`.

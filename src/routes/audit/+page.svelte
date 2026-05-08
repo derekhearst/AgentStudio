@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listAuditEventsQuery } from '$lib/governance/governance.remote';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Result = Awaited<ReturnType<typeof listAuditEventsQuery>>;
 	type Event = Result extends { events: infer E } ? (E extends Array<infer R> ? R : never) : never;
@@ -67,42 +67,34 @@
 	}
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Audit log</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						Sensitive write paths recorded for compliance & forensics. Admin only.
-					</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<select
-						class="select select-sm select-bordered text-xs"
-						bind:value={actionFilter}
-						onchange={() => void load()}
-					>
-						{#each ACTIONS as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-					<select
-						class="select select-sm select-bordered text-xs"
-						bind:value={targetTypeFilter}
-						onchange={() => void load()}
-					>
-						{#each TARGET_TYPES as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-					<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
-						{loading ? 'Loading…' : 'Refresh'}
-					</button>
-				</div>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Audit log" subtitle="Sensitive write paths recorded for compliance & forensics. Admin only.">
+		{#snippet actions()}
+			<select
+				class="select select-xs select-bordered text-xs"
+				bind:value={actionFilter}
+				onchange={() => void load()}
+			>
+				{#each ACTIONS as opt (opt.value)}
+					<option value={opt.value}>{opt.label}</option>
+				{/each}
+			</select>
+			<select
+				class="select select-xs select-bordered text-xs"
+				bind:value={targetTypeFilter}
+				onchange={() => void load()}
+			>
+				{#each TARGET_TYPES as opt (opt.value)}
+					<option value={opt.value}>{opt.label}</option>
+				{/each}
+			</select>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 flex flex-col overflow-hidden px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
 	{#if !result}
 		<div class="flex justify-center py-20">
@@ -172,4 +164,5 @@
 			</ul>
 		</div>
 	{/if}
+	</div>
 </div>

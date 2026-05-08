@@ -2,7 +2,7 @@
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import SubagentBlockCard from './SubagentBlockCard.svelte';
-	import PlanProposalCard from './PlanProposalCard.svelte';
+	import ArtifactCard from './ArtifactCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 
 	type MessageRow = {
@@ -159,49 +159,30 @@
 		return trimmed.length > 0 ? trimmed : null;
 	}
 
-	type PlanStep = {
-		title: string;
-		detail?: string;
-		estimatedDurationMin?: number;
-		estimatedCostUsd?: number;
-		blastRadius?: 'local' | 'shared' | 'production';
-		reversible?: boolean;
-	};
-	type PlanProposal = {
-		summary: string;
-		steps: PlanStep[];
-		risks?: string[];
-		rollback?: string;
-		totalEstimatedCostUsd?: number;
-		totalEstimatedDurationMin?: number;
+	type ArtifactCardProps = {
+		artifactId: string;
+		name: string;
+		contentType: 'markdown' | 'code' | 'json' | 'yaml' | 'plaintext';
+		versionSeq: number;
+		content: string;
+		focus: 'plan' | 'todo' | 'document' | 'data' | null;
+		note: string | null;
 	};
 
-	function getPlanProposal(argumentsValue: unknown): PlanProposal | null {
-		const args = asRecord(argumentsValue);
-		if (!args) return null;
-		if (typeof args.summary !== 'string' || !Array.isArray(args.steps)) return null;
-		const steps: PlanStep[] = (args.steps as Array<unknown>)
-			.map((raw) => {
-				const s = asRecord(raw);
-				if (!s || typeof s.title !== 'string') return null;
-				const step: PlanStep = { title: s.title };
-				if (typeof s.detail === 'string') step.detail = s.detail;
-				if (typeof s.estimatedDurationMin === 'number') step.estimatedDurationMin = s.estimatedDurationMin;
-				if (typeof s.estimatedCostUsd === 'number') step.estimatedCostUsd = s.estimatedCostUsd;
-				if (s.blastRadius === 'local' || s.blastRadius === 'shared' || s.blastRadius === 'production') {
-					step.blastRadius = s.blastRadius;
-				}
-				if (typeof s.reversible === 'boolean') step.reversible = s.reversible;
-				return step;
-			})
-			.filter((s): s is PlanStep => s !== null);
-		if (steps.length === 0) return null;
-		const plan: PlanProposal = { summary: args.summary, steps };
-		if (Array.isArray(args.risks)) plan.risks = args.risks.filter((r): r is string => typeof r === 'string');
-		if (typeof args.rollback === 'string') plan.rollback = args.rollback;
-		if (typeof args.totalEstimatedCostUsd === 'number') plan.totalEstimatedCostUsd = args.totalEstimatedCostUsd;
-		if (typeof args.totalEstimatedDurationMin === 'number') plan.totalEstimatedDurationMin = args.totalEstimatedDurationMin;
-		return plan;
+	function getArtifactCardProps(resultValue: unknown): ArtifactCardProps | null {
+		const result = asRecord(resultValue);
+		if (!result) return null;
+		const artifactId = typeof result.artifactId === 'string' ? result.artifactId : null;
+		const name = typeof result.name === 'string' ? result.name : null;
+		const content = typeof result.content === 'string' ? result.content : null;
+		const versionSeq = typeof result.versionSeq === 'number' ? result.versionSeq : null;
+		if (!artifactId || !name || content === null || versionSeq === null) return null;
+		const contentType = (typeof result.contentType === 'string' ? result.contentType : 'markdown') as ArtifactCardProps['contentType'];
+		const focus = result.focus === 'plan' || result.focus === 'todo' || result.focus === 'document' || result.focus === 'data'
+			? result.focus
+			: null;
+		const note = typeof result.note === 'string' && result.note.trim() ? result.note : null;
+		return { artifactId, name, contentType, versionSeq, content, focus, note };
 	}
 
 	function normalizeText(value: string): string {
@@ -314,32 +295,43 @@
 </script>
 
 {#if hasRenderableContent}
-<article class={`chat-message w-full ${isUser ? 'chat chat-end' : 'flex flex-col'}`}>
+{@const ts = (() => { try { const d = new Date(message.createdAt); return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); } catch { return ''; } })()}
+<article class={`console-msg ${isUser ? 'console-msg--user' : 'console-msg--assist'}`}>
 	{#if isUser}
 		{#if editing}
-			<div bind:this={editorRoot} class="card bg-base-100 border-base-300 max-w-[90%] border p-2 shadow-sm sm:p-3">
+			<div bind:this={editorRoot} class="console-msg__edit">
 				<textarea
-					class="textarea textarea-ghost w-full resize-none px-1.5 py-1 text-base leading-6 focus:outline-none"
+					class="console-msg__edit-ta"
 					rows="3"
 					bind:value={draft}
 					onkeydown={handleEditorKeydown}
 					disabled={editingBusy}
 				></textarea>
-				<div class="mt-2 flex items-center justify-end gap-2 px-1">
-					<button class="btn btn-ghost btn-sm" type="button" onclick={cancelEditing} disabled={editingBusy}>
+				<div class="console-msg__edit-row">
+					<button class="console-pill" type="button" onclick={cancelEditing} disabled={editingBusy}>
 						Cancel
 					</button>
-					<button class="btn btn-primary btn-sm" type="button" onclick={submitEdit} disabled={!draft.trim() || editingBusy}>
+					<button class="console-pill console-pill--primary" type="button" onclick={submitEdit} disabled={!draft.trim() || editingBusy}>
 						{editingBusy ? 'Updating…' : 'Save & regenerate'}
 					</button>
 				</div>
 			</div>
 		{:else}
-			<div class="user-bubble bg-base-200/80 text-base-content max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm">
-				<p class="whitespace-pre-wrap">{message.content}</p>
+			<div class="console-msg__user-wrap">
+				{#if ts}<div class="console-msg__head"><span class="console-msg__time">{ts}</span></div>{/if}
+				<div class="console-msg__user-bubble">
+					<p class="whitespace-pre-wrap">{message.content}</p>
+				</div>
 			</div>
 		{/if}
-	{:else if savedBlocks}
+	{:else}
+		{#if ts || message.model}
+			<div class="console-msg__head">
+				{#if ts}<span class="console-msg__time">{ts}</span>{/if}
+				{#if message.model}<span class="console-msg__model">{message.model}{message.tokensOut ? ` · ${message.tokensOut} tok` : ''}{Number.parseFloat(message.cost || '0') > 0 ? ` · $${formattedCost}` : ''}</span>{/if}
+			</div>
+		{/if}
+		{#if savedBlocks}
 		{#each savedBlocks as block, idx (`${message.id}-block-${idx}`)}
 			{#if block.kind === 'tool' && block.name === 'ask_user'}
 				{@const askQuestions = getAskUserQuestions(block.arguments, block.result)}
@@ -360,11 +352,11 @@
 						{/if}
 					{/each}
 				{/if}
-			{:else if block.kind === 'tool' && block.name === 'propose_plan'}
-				{@const plan = getPlanProposal(block.arguments)}
-				{#if plan}
+			{:else if block.kind === 'tool' && block.name === 'present_artifact'}
+				{@const card = getArtifactCardProps(block.result)}
+				{#if card}
 					<div class="mb-1.5 w-full">
-						<PlanProposalCard {plan} status={block.success === false ? 'denied' : 'completed'} />
+						<ArtifactCard {...card} />
 					</div>
 				{:else}
 					<div class="mb-1.5 w-full">
@@ -426,21 +418,23 @@
 							{/if}
 							{@const answer = getAskUserAnswer(call.result, q.header)}
 							{#if answer}
-								<div class="mb-2 ml-auto w-fit max-w-[85%]">
-									<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
-										<p class="whitespace-pre-wrap">{answer}</p>
+								<div class="console-msg console-msg--user">
+									<div class="console-msg__user-wrap">
+										<div class="console-msg__user-bubble">
+											<p class="whitespace-pre-wrap">{answer}</p>
+										</div>
 									</div>
 								</div>
 							{/if}
 						{/each}
 					{/if}
-				{:else if call.name === 'propose_plan'}
-					{@const plan = getPlanProposal(call.arguments)}
-					{#if plan}
-						<PlanProposalCard {plan} status="completed" />
+				{:else if call.name === 'present_artifact'}
+					{@const card = getArtifactCardProps(call.result)}
+					{#if card}
+						<ArtifactCard {...card} />
 					{:else}
 						<ToolCallCard
-							name="propose_plan"
+							name="present_artifact"
 							argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
 							result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
 						/>
@@ -459,6 +453,7 @@
 			<div class="assistant-message">
 				<div class="markdown-body">{@html renderedAssistantMarkdown}</div>
 			</div>
+		{/if}
 		{/if}
 	{/if}
 

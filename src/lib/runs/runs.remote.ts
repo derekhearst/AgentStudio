@@ -5,17 +5,16 @@ import { db } from '$lib/db.server'
 import { chatRuns, runEvents } from '$lib/runs/runs.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { tasks } from '$lib/tasks/tasks.schema'
 import { listEvaluationsForRun } from '$lib/evaluations/evaluations.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { dismissStuckRun } from '$lib/runs/runs.server'
 
 /**
- * Wave 2 #11 follow-up — single-run detail viewer.
+ * Single-run detail viewer.
  *
- * Returns the chat_run row, its linked conversation + agent + task (when present), AND the
+ * Returns the chat_run row, its linked conversation + agent (when present), AND the
  * full ordered event timeline. The `/runs/[id]` page renders this as a chronological trace
- * for debugging task runs, automation ticks, and resumed chat streams.
+ * for debugging automation ticks and resumed chat streams.
  *
  * Per-token `delta` and `reasoning` events ARE persisted to run_events but they're noisy in
  * a debug view; the caller can opt to filter them by passing `includeNoisyEvents: false`.
@@ -52,16 +51,6 @@ export const getRunDetailQuery = query(detailSchema, async ({ runId, includeNois
 		agent = a ?? null
 	}
 
-	let task: { id: string; title: string; status: string } | null = null
-	if (run.taskId) {
-		const [t] = await db
-			.select({ id: tasks.id, title: tasks.title, status: tasks.status })
-			.from(tasks)
-			.where(eq(tasks.id, run.taskId))
-			.limit(1)
-		task = t ?? null
-	}
-
 	const eventRows = await db
 		.select({
 			id: runEvents.id,
@@ -88,7 +77,6 @@ export const getRunDetailQuery = query(detailSchema, async ({ runId, includeNois
 		run,
 		conversation: conversation ?? null,
 		agent,
-		task,
 		events,
 		evaluations,
 		eventCount: eventRows.length,

@@ -47,7 +47,7 @@ test.describe('mobile — navigation + layout', () => {
 			await expect(dropdown).toBeVisible({ timeout: 3_000 })
 			await expect(dropdown.getByRole('link', { name: 'Activity' })).toBeVisible()
 			await expect(dropdown.getByRole('link', { name: 'Skills' })).toBeVisible()
-			await expect(dropdown.getByRole('link', { name: 'Cost' })).toBeVisible()
+			await expect(dropdown.getByRole('link', { name: 'Review' })).toBeVisible()
 			await expect(dropdown.getByRole('link', { name: 'Settings' })).toBeVisible()
 		})
 	})
@@ -55,7 +55,7 @@ test.describe('mobile — navigation + layout', () => {
 	test('static read-only pages do not horizontally overflow on mobile', async ({ page, context }) => {
 		await authenticateContext(context)
 		// Routes that should fit cleanly on a 412px-wide viewport.
-		const safeRoutes = ['/agents', '/skills', '/automations', '/tasks', '/projects', '/cost', '/audit', '/users', '/source-control']
+		const safeRoutes = ['/agents', '/skills', '/automations', '/tasks', '/projects', '/review', '/audit', '/users', '/source-control']
 		for (const route of safeRoutes) {
 			await test.step(route, async () => {
 				await withErrorCapture(page, async () => {

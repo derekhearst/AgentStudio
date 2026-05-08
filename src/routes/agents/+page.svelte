@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
-	import ContentPanel from '$lib/ui/ContentPanel.svelte'
+	import PageHeader from '$lib/ui/PageHeader.svelte'
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number]
 	type StreamEntry = { conversationId: string; agentId: string; delta: string }
@@ -111,41 +111,40 @@
 	}
 </script>
 
-<section class="space-y-5">
-	<!-- ── Header ─────────────────────────────────────────────────────────── -->
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex min-w-0 flex-1 items-start justify-between gap-3">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Agents</h1>
-					<p class="mt-0.5 text-xs text-base-content/60 sm:text-sm">
-						{agents.length} agent{agents.length !== 1 ? 's' : ''}
-						{#if activeAgentIds.length > 0}
-							<span class="ml-1.5 inline-flex items-center gap-1 text-primary">
-								<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
-								{activeAgentIds.length} streaming
-							</span>
-						{/if}
-					</p>
-				</div>
-				<div class="join shrink-0">
-					<button
-						class="btn join-item btn-xs {sortMode === 'last_active' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'last_active')}
-					>Recent</button>
-					<button
-						class="btn join-item btn-xs {sortMode === 'sessions' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'sessions')}
-					>Sessions</button>
-					<button
-						class="btn join-item btn-xs {sortMode === 'cost' ? 'btn-neutral' : 'btn-ghost'}"
-						onclick={() => (sortMode = 'cost')}
-					>Cost</button>
-				</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Agents"
+		subtitle={`${agents.length} agent${agents.length !== 1 ? 's' : ''}${activeAgentIds.length > 0 ? ` • ${activeAgentIds.length} streaming` : ''}`}
+		live={activeAgentIds.length > 0}
+	>
+		{#snippet chips()}
+			<span class="console-chip">{agents.length} total</span>
+			{#if activeAgentIds.length > 0}
+				<span class="console-chip is-run">
+					<span class="pulse-dot"></span>
+					{activeAgentIds.length} streaming
+				</span>
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			<div class="join">
+				<button
+					class="btn join-item btn-xs {sortMode === 'last_active' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'last_active')}
+				>Recent</button>
+				<button
+					class="btn join-item btn-xs {sortMode === 'sessions' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'sessions')}
+				>Sessions</button>
+				<button
+					class="btn join-item btn-xs {sortMode === 'cost' ? 'btn-neutral' : 'btn-ghost'}"
+					onclick={() => (sortMode = 'cost')}
+				>Cost</button>
 			</div>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
 
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-5">
 	<!-- ── Grid ───────────────────────────────────────────────────────────── -->
 	{#if loading}
 		<div class="flex justify-center py-16">
@@ -247,7 +246,8 @@
 			{/each}
 		</div>
 	{/if}
-</section>
+	</div>
+</div>
 
 <style>
 	.shimmer-bar {

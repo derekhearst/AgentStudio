@@ -38,7 +38,6 @@ export type EnqueueJobInput = {
 	scheduledAt?: Date
 	maxAttempts?: number
 	runId?: string | null
-	taskId?: string | null
 	sessionId?: string | null
 	projectId?: string | null
 	userId?: string | null
@@ -60,7 +59,6 @@ export async function enqueueJob(input: EnqueueJobInput): Promise<JobRow> {
 		maxAttempts: input.maxAttempts ?? policy?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
 		payload: input.payload ?? {},
 		runId: input.runId ?? null,
-		taskId: input.taskId ?? null,
 		sessionId: input.sessionId ?? null,
 		projectId: input.projectId ?? null,
 		userId: input.userId ?? null,
@@ -304,7 +302,6 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 						error: opts.error,
 					},
 					runId: row.runId,
-					taskId: row.taskId,
 					jobId: row.id,
 					dedupeKey: `job:${row.id}`,
 				})
@@ -381,7 +378,6 @@ export type ListJobsFilters = {
 	queue?: string
 	userId?: string
 	runId?: string
-	taskId?: string
 	limit?: number
 	since?: Date
 }
@@ -398,7 +394,6 @@ export async function listJobs(filters: ListJobsFilters = {}): Promise<JobRow[]>
 	if (filters.queue) where.push(eq(jobs.queue, filters.queue))
 	if (filters.userId) where.push(eq(jobs.userId, filters.userId))
 	if (filters.runId) where.push(eq(jobs.runId, filters.runId))
-	if (filters.taskId) where.push(eq(jobs.taskId, filters.taskId))
 	if (filters.since) where.push(gte(jobs.createdAt, filters.since))
 
 	return db

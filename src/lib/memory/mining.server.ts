@@ -10,8 +10,8 @@
  *   5. Embed each turn verbatim, encode AAAK, insert as a drawer.
  */
 
-import { count, eq } from 'drizzle-orm'
-import { chat } from '$lib/llm/chat.server'
+import { count, desc, eq } from 'drizzle-orm'
+import { DEFAULT_MODEL, chat } from '$lib/llm/chat.server'
 import { db } from '$lib/db.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
@@ -41,9 +41,7 @@ export type MineResult = {
 	drawerIds: string[]
 }
 
-const EXTRACTOR_MODEL = 'openai/gpt-4o-mini'
-
-const EXTRACTOR_SYSTEM = `You are an information extractor for a hierarchical memory system.
+const EXTRACTOR_BASE = `You are an information extractor for a hierarchical memory system.
 
 Given a conversation session, return STRICT JSON describing:
 1. The primary wing — the dominant subject of the session. Pick a kind ("person", "project", or "topic") and a stable canonical name.
@@ -61,6 +59,26 @@ Schema:
   "primaryWing": { "kind": "person|project|topic", "name": "<canonical>", "aliases": ["..."] },
   "turns": [ { "topic": "<short>", "tags": { "p": [], "l": [], "e": [], "i": [], "t": [] } } ]
 }`
+
+export type ExtractorWingCandidate = {
+	name: string
+	kind: string
+	aliases: string[]
+}
+
+function buildExtractorSystem(existingWings: ExtractorWingCandidate[]): string {
+	if (existingWings.length === 0) return EXTRACTOR_BASE
+	const lines = existingWings.map((wing) => {
+		const aliasPart = wing.aliases.length > 0 ? `, aliases: ${wing.aliases.join(', ')}` : ''
+		return `- "${wing.name}" (${wing.kind}${aliasPart})`
+	})
+	return `${EXTRACTOR_BASE}
+
+The user already has these wings — STRONGLY PREFER reusing one of these exact names if the session's primary subject matches:
+${lines.join('\n')}
+
+Only invent a new wing name if the primary subject is genuinely not represented above. When reusing, return the name verbatim.`
+}
 
 type ExtractorOutput = {
 	primaryWing: { kind: WingKind; name: string; aliases?: string[] }
@@ -90,7 +108,10 @@ function tryParseExtractor(content: string): ExtractorOutput | null {
 	return null
 }
 
-async function extractSession(session: MiningSession): Promise<ExtractorOutput> {
+async function extractSession(
+	session: MiningSession,
+	existingWings: ExtractorWingCandidate[] = [],
+): Promise<ExtractorOutput> {
 	if (session.turns.length === 0) {
 		return fallbackExtraction(session)
 	}
@@ -98,17 +119,14 @@ async function extractSession(session: MiningSession): Promise<ExtractorOutput> 
 	const transcript = session.turns.map((turn, i) => `[${i + 1}] ${turn.role.toUpperCase()}: ${turn.content}`).join('\n')
 
 	try {
-		const result = await chat(
-			[
-				{ role: 'system', content: EXTRACTOR_SYSTEM },
-				{ role: 'user', content: transcript },
-			],
-			EXTRACTOR_MODEL,
-		)
+		const result = await chat([
+			{ role: 'system', content: buildExtractorSystem(existingWings) },
+			{ role: 'user', content: transcript },
+		])
 
 		await logLlmUsage({
 			source: 'memory_extract',
-			model: EXTRACTOR_MODEL,
+			model: DEFAULT_MODEL,
 			tokensIn: result.usage?.promptTokens ?? 0,
 			tokensOut: result.usage?.completionTokens ?? 0,
 			metadata: { conversationId: session.conversationId ?? null, turns: session.turns.length },
@@ -175,7 +193,20 @@ export async function mineSession(opts: {
 		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [] }
 	}
 
-	const extraction = await extractSession(session)
+	const recentWings = await db
+		.select({ name: memoryWings.name, kind: memoryWings.kind, aliases: memoryWings.aliases })
+		.from(memoryWings)
+		.where(eq(memoryWings.userId, userId))
+		.orderBy(desc(memoryWings.createdAt))
+		.limit(30)
+	const candidates: ExtractorWingCandidate[] = recentWings.map((w) => ({
+		name: w.name,
+		kind: w.kind,
+		aliases: w.aliases ?? [],
+	}))
+	logger.debug('[memory] extractor candidates', { count: candidates.length })
+
+	const extraction = await extractSession(session, candidates)
 
 	const allowedKinds: WingKind[] = ['person', 'project', 'topic', 'agent']
 	const wingKind: WingKind = allowedKinds.includes(extraction.primaryWing.kind as WingKind)

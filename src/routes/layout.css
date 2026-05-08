@@ -56,18 +56,18 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────
- * Dark theme — primary brightened to lime-400-ish for contrast
+ * Dark theme — Console default. Lime brightened for contrast on near-black.
  * ───────────────────────────────────────────────────────────────── */
 @plugin 'daisyui/theme' {
 	name: 'AgentStudio-night';
 	prefersdark: true;
 	color-scheme: dark;
-	--color-base-100: oklch(18% 0.02 250);
-	--color-base-200: oklch(22% 0.03 250);
-	--color-base-300: oklch(28% 0.03 250);
+	--color-base-100: oklch(16% 0.012 200);
+	--color-base-200: oklch(20% 0.014 200);
+	--color-base-300: oklch(26% 0.014 200);
 	--color-base-content: oklch(93% 0.02 120);
-	--color-primary: oklch(78% 0.20 131);
-	--color-primary-content: oklch(20% 0.05 131);
+	--color-primary: oklch(82% 0.20 131);
+	--color-primary-content: oklch(15% 0.04 131);
 	--color-secondary: oklch(70% 0.16 155);
 	--color-secondary-content: oklch(18% 0.04 155);
 	--color-accent: oklch(72% 0.13 195);
@@ -92,24 +92,6 @@
 	--noise: 0;
 }
 
-:root {
-	--cursor-x: 50vw;
-	--cursor-y: 50vh;
-	--cursor-energy: 0;
-	background:
-		radial-gradient(circle at 10% 8%, color-mix(in oklab, var(--color-primary) 20%, transparent), transparent 42%),
-		radial-gradient(circle at 86% 12%, color-mix(in oklab, var(--color-accent) 18%, transparent), transparent 46%),
-		radial-gradient(circle at 56% 86%, color-mix(in oklab, var(--color-secondary) 10%, transparent), transparent 40%),
-		linear-gradient(145deg, var(--color-base-200), var(--color-base-100));
-	background-size:
-		130% 130%,
-		140% 140%,
-		110% 110%,
-		100% 100%;
-	animation: ambient-shift 24s ease-in-out infinite alternate;
-	min-height: 100%;
-}
-
 html,
 body {
 	height: 100vh;
@@ -117,225 +99,9 @@ body {
 }
 
 body {
-	font-family: 'Segoe UI Variable Text', 'Aptos', 'Trebuchet MS', sans-serif;
-	background: transparent;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	background: var(--color-base-100);
 	color: var(--color-base-content);
-	animation: shell-fade 280ms ease-out;
-}
-
-body::before {
-	content: '';
-	position: fixed;
-	inset: 0;
-	pointer-events: none;
-	z-index: 0;
-	background:
-		radial-gradient(
-			circle 220px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-primary) 32%, transparent) 0%,
-			color-mix(in oklab, var(--color-primary) 29%, transparent) 8%,
-			color-mix(in oklab, var(--color-primary) 26%, transparent) 16%,
-			color-mix(in oklab, var(--color-primary) 22%, transparent) 24%,
-			color-mix(in oklab, var(--color-primary) 18%, transparent) 32%,
-			color-mix(in oklab, var(--color-primary) 14%, transparent) 42%,
-			color-mix(in oklab, var(--color-primary) 10%, transparent) 52%,
-			color-mix(in oklab, var(--color-primary) 6%, transparent) 64%,
-			color-mix(in oklab, var(--color-primary) 3%, transparent) 78%,
-			color-mix(in oklab, var(--color-primary) 1%, transparent) 90%,
-			transparent 100%
-		),
-		radial-gradient(
-			circle 500px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-secondary) 9%, transparent) 0%,
-			color-mix(in oklab, var(--color-secondary) 8%, transparent) 10%,
-			color-mix(in oklab, var(--color-secondary) 7%, transparent) 20%,
-			color-mix(in oklab, var(--color-secondary) 5%, transparent) 30%,
-			color-mix(in oklab, var(--color-accent) 4%, transparent) 40%,
-			color-mix(in oklab, var(--color-accent) 3%, transparent) 50%,
-			color-mix(in oklab, var(--color-accent) 2%, transparent) 62%,
-			color-mix(in oklab, var(--color-accent) 1%, transparent) 75%,
-			color-mix(in oklab, var(--color-accent) 0.5%, transparent) 88%,
-			transparent 100%
-		);
-	filter: blur(60px) saturate(120%);
-	opacity: calc(var(--cursor-energy) * 0.7);
-	transition: opacity 300ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-body::after {
-	content: '';
-	position: fixed;
-	inset: 0;
-	pointer-events: none;
-	z-index: 1;
-	background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-	background-size: 200px 200px;
-	opacity: 0.025;
-	mix-blend-mode: overlay;
-}
-
-/* ─────────────────────────────────────────────────────────────────
- * Light-theme overrides — soften FX coupled to dark assumptions
- * ───────────────────────────────────────────────────────────────── */
-[data-theme='AgentStudio'] body::before {
-	background:
-		radial-gradient(
-			circle 220px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-primary) 18%, transparent) 0%,
-			color-mix(in oklab, var(--color-primary) 16%, transparent) 8%,
-			color-mix(in oklab, var(--color-primary) 14%, transparent) 16%,
-			color-mix(in oklab, var(--color-primary) 12%, transparent) 24%,
-			color-mix(in oklab, var(--color-primary) 10%, transparent) 32%,
-			color-mix(in oklab, var(--color-primary) 8%, transparent) 42%,
-			color-mix(in oklab, var(--color-primary) 6%, transparent) 52%,
-			color-mix(in oklab, var(--color-primary) 4%, transparent) 64%,
-			color-mix(in oklab, var(--color-primary) 2%, transparent) 78%,
-			color-mix(in oklab, var(--color-primary) 1%, transparent) 90%,
-			transparent 100%
-		),
-		radial-gradient(
-			circle 500px at var(--cursor-x) var(--cursor-y),
-			color-mix(in oklab, var(--color-accent) 5%, transparent) 0%,
-			color-mix(in oklab, var(--color-accent) 4%, transparent) 30%,
-			color-mix(in oklab, var(--color-accent) 2%, transparent) 60%,
-			transparent 100%
-		);
-	opacity: calc(var(--cursor-energy) * 0.5);
-}
-
-[data-theme='AgentStudio'] body::after {
-	opacity: 0.015;
-}
-
-.chat-composer-transition {
-	view-transition-name: chat-composer-shell;
-}
-
-/* Mobile + tablet: keep composer full-width with small side padding */
-@media (max-width: 79.99875rem) {
-	.chat-composer-transition {
-		max-width: none;
-		min-width: 0;
-		margin-inline: 0;
-		padding-inline: 0.5rem;
-	}
-}
-
-/* Below desktop: chat and home pages go truly edge-to-edge */
-@media (max-width: 79.99875rem) {
-	.mobile-chat-main {
-		padding: 0.5rem 0 0 !important;
-		border: none !important;
-		border-radius: 0 !important;
-		background: transparent !important;
-		box-shadow: none !important;
-	}
-}
-
-@media (prefers-reduced-motion: no-preference) {
-	::view-transition-group(chat-composer-shell),
-	::view-transition-old(chat-composer-shell),
-	::view-transition-new(chat-composer-shell) {
-		animation-duration: 360ms;
-		animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
-	}
-
-	::view-transition-old(root) {
-		animation: vt-fade-out 200ms ease-in;
-	}
-
-	::view-transition-new(root) {
-		animation: vt-fade-in 260ms ease-out;
-	}
-}
-
-@keyframes vt-fade-out {
-	from {
-		opacity: 1;
-	}
-	to {
-		opacity: 0;
-	}
-}
-
-@keyframes vt-fade-in {
-	from {
-		opacity: 0;
-	}
-	to {
-		opacity: 1;
-	}
-}
-
-@keyframes shell-fade {
-	from {
-		opacity: 0;
-		transform: translateY(3px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
-/* Staggered chat list entrance */
-@keyframes chat-item-in {
-	from {
-		opacity: 0;
-		transform: translateY(8px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
-}
-
-.chat-list-item {
-	animation: chat-item-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* Stagger each item by 30ms via nth-child */
-.chat-list-item:nth-child(1) {
-	animation-delay: 0ms;
-}
-.chat-list-item:nth-child(2) {
-	animation-delay: 30ms;
-}
-.chat-list-item:nth-child(3) {
-	animation-delay: 60ms;
-}
-.chat-list-item:nth-child(4) {
-	animation-delay: 90ms;
-}
-.chat-list-item:nth-child(5) {
-	animation-delay: 120ms;
-}
-.chat-list-item:nth-child(6) {
-	animation-delay: 150ms;
-}
-.chat-list-item:nth-child(7) {
-	animation-delay: 180ms;
-}
-.chat-list-item:nth-child(8) {
-	animation-delay: 210ms;
-}
-.chat-list-item:nth-child(9) {
-	animation-delay: 240ms;
-}
-.chat-list-item:nth-child(10) {
-	animation-delay: 270ms;
-}
-.chat-list-item:nth-child(n + 11) {
-	animation-delay: 300ms;
-}
-
-/* View all button pulse */
-.view-all-btn {
-	transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.view-all-btn:hover {
-	letter-spacing: 0.02em;
 }
 
 /* Bottom-sheet scrim (dark default) — used by mobile drawer/SidePanel overlay */
@@ -372,6 +138,7 @@ body::after {
 .markdown-body {
 	line-height: 1.6;
 	word-break: break-word;
+	font-family: Consolas, 'Cascadia Code', monospace;
 }
 
 .markdown-body h1,
@@ -484,7 +251,7 @@ body::after {
 	color: oklch(40% 0.16 250);
 }
 
-/* Light-theme overrides for highlight.js syntax colors (defaults are tuned for dark) */
+/* Light-theme overrides for highlight.js syntax colors */
 [data-theme='AgentStudio'] .markdown-body .hljs-keyword,
 [data-theme='AgentStudio'] .markdown-body .hljs-selector-tag,
 [data-theme='AgentStudio'] .markdown-body .hljs-literal,
@@ -509,43 +276,23 @@ body::after {
 	color: oklch(35% 0.18 250);
 }
 
-@keyframes ambient-shift {
-	0% {
-		background-position:
-			0% 0%,
-			100% 0%,
-			60% 90%,
-			0% 0%;
+/* Staggered chat list entrance */
+@keyframes chat-item-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
 	}
-	50% {
-		background-position:
-			20% 16%,
-			84% 18%,
-			46% 82%,
-			0% 0%;
-	}
-	100% {
-		background-position:
-			10% 8%,
-			90% 10%,
-			55% 88%,
-			0% 0%;
+	to {
+		opacity: 1;
+		transform: translateY(0);
 	}
 }
 
+.chat-list-item {
+	animation: chat-item-in 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-	:root {
-		animation: none;
-	}
-
-	body::before {
-		transition: opacity 120ms linear;
-	}
-
-	body::after {
-		opacity: 0;
-	}
-
 	.chat-list-item {
 		animation: none;
 	}

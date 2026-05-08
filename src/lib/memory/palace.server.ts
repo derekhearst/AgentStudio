@@ -65,6 +65,15 @@ export async function getOrCreateWing(opts: {
 		if (aliasMatch) return aliasMatch
 	}
 
+	// 3) case-insensitive name match — catches LLM whitespace/punctuation drift
+	// the slugifier already normalizes to the same slug.
+	const [nameMatch] = await db
+		.select()
+		.from(memoryWings)
+		.where(and(eq(memoryWings.userId, opts.userId), sql`lower(${memoryWings.name}) = lower(${opts.name})`))
+		.limit(1)
+	if (nameMatch) return nameMatch
+
 	const [created] = await db
 		.insert(memoryWings)
 		.values({

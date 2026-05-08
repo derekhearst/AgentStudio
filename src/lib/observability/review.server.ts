@@ -28,7 +28,6 @@ export type OpenReviewItemInput = {
 	payload?: Record<string, unknown>
 	runId?: string | null
 	sessionId?: string | null
-	taskId?: string | null
 	jobId?: string | null
 	projectId?: string | null
 	artifactId?: string | null
@@ -70,7 +69,6 @@ export async function openReviewItem(input: OpenReviewItemInput): Promise<Review
 				payload,
 				runId: input.runId ?? null,
 				sessionId: input.sessionId ?? null,
-				taskId: input.taskId ?? null,
 				jobId: input.jobId ?? null,
 				projectId: input.projectId ?? null,
 				artifactId: input.artifactId ?? null,
@@ -90,7 +88,6 @@ export type ListReviewItemsFilters = {
 	severity?: ReviewItemSeverity
 	assignedTo?: string
 	runId?: string
-	taskId?: string
 	limit?: number
 }
 
@@ -106,7 +103,6 @@ export async function listReviewItems(filters: ListReviewItemsFilters = {}): Pro
 	if (filters.severity) where.push(eq(reviewItems.severity, filters.severity))
 	if (filters.assignedTo) where.push(eq(reviewItems.assignedTo, filters.assignedTo))
 	if (filters.runId) where.push(eq(reviewItems.runId, filters.runId))
-	if (filters.taskId) where.push(eq(reviewItems.taskId, filters.taskId))
 
 	return db
 		.select()

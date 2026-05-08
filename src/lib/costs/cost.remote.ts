@@ -6,7 +6,6 @@ import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { budgetAlerts, budgetLimits, llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
-import { tasks } from '$lib/tasks/tasks.schema'
 import { auditBudgetLimitChange } from '$lib/governance'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
@@ -38,7 +37,6 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		dailyBreakdown,
 		byRun,
 		byAgent,
-		byTask,
 		toolSpend,
 		byTool,
 	] = await Promise.all([
@@ -144,25 +142,6 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
 			.limit(10),
 
-		// Top tasks by cost. Joins the tasks domain (#11 phase 1+) so the dashboard can render
-		// the task TITLE + STATUS instead of just the UUID.
-		db
-			.select({
-				taskId: llmUsage.taskId,
-				title: tasks.title,
-				status: tasks.status,
-				cost: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text`,
-				tokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
-				tokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
-				count: sql<number>`count(*)::int`,
-			})
-			.from(llmUsage)
-			.leftJoin(tasks, eq(tasks.id, llmUsage.taskId))
-			.where(and(gte(llmUsage.createdAt, since), isNotNull(llmUsage.taskId)))
-			.groupBy(llmUsage.taskId, tasks.title, tasks.status)
-			.orderBy(sql`sum(${llmUsage.cost}::numeric) desc`)
-			.limit(10),
-
 		// Total non-LLM tool spend (web search credits, browser sessions, etc.)
 		db
 			.select({
@@ -205,7 +184,6 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		dailyBreakdown,
 		byRun,
 		byAgent,
-		byTask,
 		// Non-LLM tool spend (Phase 2 of #5)
 		toolSpend: toolSpend[0]?.total ?? '0',
 		toolCallCount: toolSpend[0]?.callCount ?? 0,

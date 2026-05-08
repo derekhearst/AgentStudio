@@ -11,35 +11,29 @@
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
-	import { getActiveTaskForConversationQuery } from '$lib/tasks/tasks.remote';
 
 	type AgentChoice = Awaited<ReturnType<typeof listAgentsForPicker>>[number];
 	import { getAvailableModels } from '$lib/llm';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
+	import { consoleState } from '$lib/chat-console/console-state.svelte';
+	import Icon from '$lib/chat-console/Icon.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
-	import PlanProposalCard from '$lib/chat/PlanProposalCard.svelte';
-	import ResearchInlineCard from '$lib/research/ResearchInlineCard.svelte';
-	import { listResearchForConversationQuery } from '$lib/research/research.remote';
+	import ArtifactCard from '$lib/chat/ArtifactCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
-		getPlanProposalFromTool,
-		getResearchPlanFromTool,
-		getResearchPlanResultFromTool,
 		getAskUserAnswersFromTool,
+		getArtifactCardFromTool,
 		type AskUserOption,
 		type AskUserQuestion,
-		type PlanStep,
-		type PlanProposal,
-		type ResearchPlanProposal,
 	} from '$lib/chat/tool-block-helpers';
 
 	type ChatAttachment = {
@@ -124,8 +118,6 @@
 		systemPromptTokens: number | null;
 	};
 	let liveContextStats = $state<LiveContextStats | null>(null);
-	type ActiveTaskBadge = { id: string; title: string; status: string };
-	let activeTask = $state<ActiveTaskBadge | null>(null);
 	let availableModels = $derived(await getAvailableModels());
 	let appSettings = $derived(await getSettings());
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
@@ -140,26 +132,6 @@
 	let pendingAskUser = $state<{ token: string; questions: AskUserQuestion[] } | null>(null);
 	let askUserModalOpen = $state(false);
 
-	// ── Research inline card wiring ───────────────────────────────────────────────────
-	// activeResearchId tracks the most recent research run linked to this conversation.
-	// Refreshed on conversation load and after each propose_research_plan tool resolves.
-	let activeResearchId = $state<string | null>(null);
-
-	async function refreshActiveResearch() {
-		if (!conversationId) return;
-		try {
-			const rows = await listResearchForConversationQuery({ conversationId, limit: 5 });
-			// Prefer the newest non-canceled / non-failed run; otherwise newest of any kind.
-			const inFlightOrComplete = rows.find((r) =>
-				['planning', 'searching', 'fetching', 'reflecting', 'synthesizing', 'complete'].includes(r.status),
-			);
-			activeResearchId = (inFlightOrComplete ?? rows[0])?.id ?? null;
-		} catch (err) {
-			logChatUi('warn', 'Active research refresh failed', {
-				error: err instanceof Error ? err.message : String(err),
-			});
-		}
-	}
 
 	type RetryIntent =
 		| {
@@ -684,25 +656,6 @@
 		return combined;
 	});
 
-	// Pending research plan: derived from the live streamingBlocks. A propose_research_plan
-	// tool block in 'pending' status means the user hasn't clicked Approve / Decline yet.
-	// The sidebar uses this to render the plan card with the approve/decline buttons.
-	const pendingResearchBlock = $derived.by(() => {
-		for (let i = streamingBlocks.length - 1; i >= 0; i -= 1) {
-			const b = streamingBlocks[i];
-			if (b.kind === 'tool' && b.name === 'propose_research_plan' && b.status === 'pending') {
-				return b;
-			}
-		}
-		return null;
-	});
-
-	const pendingResearchPlan = $derived<ResearchPlanProposal | null>(
-		pendingResearchBlock ? getResearchPlanFromTool(pendingResearchBlock) : null,
-	);
-	const pendingResearchToken = $derived<string | null>(pendingResearchBlock?.token ?? null);
-	const pendingResearchStatus = $derived<ToolStatus | null>(pendingResearchBlock?.status ?? null);
-
 	const lastUserMessageId = $derived.by(() => {
 		for (let i = displayedMessages.length - 1; i >= 0; i -= 1) {
 			if (displayedMessages[i].role === 'user') return displayedMessages[i].id;
@@ -889,7 +842,6 @@
 		if (!conversationId) {
 			conversationData = null;
 			stats = [];
-			activeTask = null;
 			return;
 		}
 
@@ -902,15 +854,12 @@
 			getConversation(conversationId).refresh(),
 			getMessageStats(conversationId).refresh(),
 		]);
-		const [conversationResult, statsResult, taskResult] = await Promise.all([
+		const [conversationResult, statsResult] = await Promise.all([
 			getConversation(conversationId),
 			getMessageStats(conversationId),
-			// Wave 2 #11 phase 4 follow-up — surface the linked task as a badge near the title.
-			getActiveTaskForConversationQuery(conversationId).catch(() => null),
 		]);
 		conversationData = conversationResult;
 		stats = statsResult;
-		activeTask = taskResult ?? null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
 		// Reconcile pendingAskUser with the server's view: if mid-stream there's a live token
 		// the SSE stream owns it and we don't touch it; otherwise (cold-load OR after a
@@ -925,9 +874,6 @@
 				: null;
 		}
 
-		// Refresh the conversation's active research so the sidebar reflects whatever the
-		// orchestrator has been doing while the page was closed.
-		await refreshActiveResearch();
 	}
 
 	async function refreshAll() {
@@ -1048,21 +994,6 @@
 				if (Object.keys(freeformAnswers).length === 0) return;
 				await resolveAskUser(freeformAnswers);
 				return;
-			}
-
-			// Refine-via-reply: when there's an unanswered research plan in the sidebar and
-			// the user types a normal chat message, treat the message as feedback. Decline
-			// the pending approval first so the runtime loop unblocks (the agent receives a
-			// "Tool execution was denied by user" tool-result), then ship the user's message
-			// as the next turn — the agent reads the feedback and proposes a revised plan.
-			if (pendingResearchToken) {
-				try {
-					await denyToolCall(pendingResearchToken);
-				} catch (err) {
-					logChatUi('warn', 'Auto-decline of pending research plan failed', {
-						error: err instanceof Error ? err.message : String(err),
-					});
-				}
 			}
 
 			await streamMessage(content, false, attachments);
@@ -1356,12 +1287,6 @@
 						if (payload.name === 'ask_user') {
 							pendingAskUser = null;
 							askUserModalOpen = false;
-						}
-						// propose_research_plan completed — its result carries the new researchId.
-						// Refresh the sidebar's active-research lookup so the running state appears
-						// as soon as the orchestrator job has been enqueued.
-						if (payload.name === 'propose_research_plan' && payload.success) {
-							void refreshActiveResearch();
 						}
 						const finalStatus = payload.success ? ('completed' as const) : ('failed' as const);
 						const resultText =
@@ -1674,27 +1599,134 @@
 		const compactionPrompt = `Please compact this conversation. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary so we can continue from a smaller context.`;
 		await streamMessage(compactionPrompt, false);
 	}
+
+	// Console-redesign — surface streaming/context data to the right rail.
+	$effect(() => {
+		consoleState.conversationId = conversationId || null;
+		consoleState.conversationTitle = conversationData?.conversation.title ?? null;
+	});
+
+	$effect(() => {
+		consoleState.streamingBlocks = streamingBlocks.map((b) => {
+			if (b.kind === 'tool') {
+				return {
+					kind: 'tool',
+					id: b.id,
+					name: b.name,
+					arguments: b.arguments,
+					status: b.status,
+					result: b.result,
+					executionMs: b.executionMs ?? null,
+				};
+			}
+			if (b.kind === 'thinking') {
+				return { kind: 'thinking', id: b.id, content: b.content };
+			}
+			if (b.kind === 'text') {
+				return { kind: 'text', id: b.id, content: b.content };
+			}
+			return {
+				kind: 'subagent',
+				id: b.id,
+				agentName: b.agentName,
+				task: b.task,
+				status: b.status,
+			};
+		});
+
+		const persisted = (conversationData?.messages ?? [])
+			.flatMap((m) => Array.isArray((m as { toolCalls?: unknown[] }).toolCalls) ? (m as { toolCalls: Array<{ name?: string; success?: boolean }> }).toolCalls : [])
+			.slice(-12)
+			.reverse()
+			.map((tc) => ({
+				name: typeof tc.name === 'string' ? tc.name : 'tool',
+				success: tc.success,
+				ageMin: 0,
+			}));
+		consoleState.persistedToolCalls = persisted;
+	});
+
+	$effect(() => {
+		const lc = liveContextStats;
+		consoleState.liveContext = lc
+			? {
+					tokenEstimate: lc.tokenEstimate,
+					contextWindow: lc.contextWindow,
+					didCompact: lc.didCompact,
+				}
+			: null;
+	});
+
+	$effect(() => {
+		const totalTokens = (stats ?? []).reduce((sum, s) => sum + (s.tokensIn ?? 0) + (s.tokensOut ?? 0), 0);
+		const totalCost = (stats ?? []).reduce((sum, s) => sum + Number.parseFloat(s.cost ?? '0'), 0);
+		consoleState.totalTokens = totalTokens;
+		consoleState.totalCostUsd = totalCost;
+		const ttftCandidate = (stats ?? []).filter((s) => typeof s.ttftMs === 'number').slice(-1)[0];
+		consoleState.lastTtftMs = ttftCandidate?.ttftMs ?? null;
+	});
+
+	$effect(() => {
+		const isStreaming = streaming || (pendingMessageId !== null);
+		consoleState.runStatus = {
+			state: isStreaming ? 'streaming' : 'idle',
+			startedAt: isStreaming && consoleState.runStatus.startedAt === null
+				? Date.now()
+				: !isStreaming
+					? null
+					: consoleState.runStatus.startedAt,
+			pendingApprovals: pendingAskUser ? 1 : 0,
+		};
+	});
 </script>
 
-<div class="flex min-h-0 w-full flex-1 gap-0">
-	<section class="relative flex min-h-0 flex-1 flex-col gap-1 px-0 pt-0 pb-0 desktop:px-1 desktop:pb-1">
+<div class="flex min-h-0 min-w-0 w-full flex-1 gap-0 overflow-hidden">
+	<section class="relative flex min-h-0 min-w-0 flex-1 flex-col gap-1 px-0 pt-0 pb-0 overflow-hidden desktop:px-1 desktop:pb-1">
 		{#if !conversationData}
 			<div class="flex flex-1 items-center justify-center">
 				<span class="loading loading-spinner loading-sm opacity-50"></span>
 			</div>
 		{:else}
 
-			<!-- Header: mobile/tablet only. Desktop uses the RecentChats sidebar panel. -->
-			<!-- relative+z-20 lifts the header into its own stacking context so the ContextWindow dropdown can layer above the messages container below it. -->
-			<div class="relative z-20 flex shrink-0 items-center gap-1.5 border-b border-base-300/50 bg-base-100/85 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 backdrop-blur-sm desktop:hidden tablet:rounded-t-[calc(1.5rem-1px)] tablet:px-4 tablet:pt-2">
-				<a href="/" class="btn btn-ghost btn-square min-h-10 h-10 w-10 tablet:min-h-9 tablet:h-9 tablet:w-9" aria-label="Back to chats">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+			<!-- Console topbar: breadcrumb + status chips + action icons (desktop) -->
+			<div class="console-topbar hidden desktop:grid">
+				<div class="console-crumbs">
+					<span class="console-crumbs__cur">{conversationData.conversation.title}</span>
+				</div>
+				<div class="console-topbar__chips">
+					{#if streaming}
+						<span class="console-chip is-run">
+							<span class="pulse-dot"></span>
+							running
+						</span>
+					{/if}
+					{#if pendingAskUser}
+						<span class="console-chip is-warn">awaiting your input</span>
+					{/if}
+					{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
+						<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
+					{/if}
+				</div>
+			</div>
+
+			<!-- Mobile/tablet header: Console design's am-top (menu | title+sub | actions) -->
+			<div class="relative z-20 flex shrink-0 items-center gap-2 border-b border-base-300/50 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 desktop:hidden tablet:px-4 tablet:pt-2">
+				<a href="/" class="console-iconbtn" aria-label="Back to chats" title="Back to chats" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
 					</svg>
 				</a>
-				<h1 class="min-w-0 flex-1 truncate text-sm leading-tight font-semibold">
-					{conversationData.conversation.title}
-				</h1>
+				<div class="min-w-0 flex-1 text-center">
+					<h1 class="m-0 truncate text-sm font-semibold leading-tight">
+						{conversationData.conversation.title}
+					</h1>
+					{#if streaming}
+						<span class="console-mobile-sub">
+							<span class="pulse-dot"></span>
+							running
+						</span>
+					{/if}
+				</div>
 				<ContextWindow
 					used={contextMetrics.used}
 					total={contextMetrics.total}
@@ -1705,31 +1737,33 @@
 				/>
 			</div>
 
+			<!-- Mobile chips row: running, pending, context, cost -->
+			<div class="console-mobile-chips">
+				{#if streaming}
+					<span class="console-chip is-run">
+						<span class="pulse-dot" style="width:5px;height:5px;border-radius:999px;background:currentColor;display:inline-block;"></span>
+						running
+					</span>
+				{/if}
+				{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
+					<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
+				{/if}
+				{#if contextMetrics.total > 0}
+					<span class="console-chip">{(contextMetrics.used / 1000).toFixed(1)}K / {(contextMetrics.total / 1000).toFixed(0)}K</span>
+				{/if}
+				{#if conversationData.conversation.totalCost && Number.parseFloat(String(conversationData.conversation.totalCost)) > 0}
+					<span class="console-chip">${Number.parseFloat(String(conversationData.conversation.totalCost)).toFixed(4)}</span>
+				{/if}
+			</div>
+
 			{#if modelSwitchNotice}
 				<div class="alert alert-info mt-1 mb-1 py-2 text-sm">
 					<span>{modelSwitchNotice}</span>
 				</div>
 			{/if}
 
-			{#if activeTask}
-				<a
-					href="/tasks/{activeTask.id}"
-					class="mb-1 mt-1 flex items-center gap-2 rounded-xl border border-info/40 bg-info/10 px-3 py-1.5 text-xs leading-snug transition-colors hover:border-info/60 hover:bg-info/15"
-					title="Open the linked task"
-				>
-					<svg xmlns="http://www.w3.org/2000/svg" class="size-4 shrink-0 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-						<rect x="8" y="2" width="8" height="4" rx="1"/>
-						<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-						<path d="m9 14 2 2 4-4"/>
-					</svg>
-					<span class="font-semibold uppercase tracking-wide opacity-70">Task</span>
-					<span class="line-clamp-1 flex-1 font-medium">{activeTask.title}</span>
-					<span class="badge badge-xs badge-outline">{activeTask.status}</span>
-				</a>
-			{/if}
-
-			<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-0.5 desktop:py-1">
-				<div class="mx-auto w-full max-w-[78ch] desktop:max-w-[82ch] space-y-2">
+			<div bind:this={messagesEl} class="min-h-0 flex-1 overflow-y-auto px-2 py-2 tablet:px-4 tablet:py-3 desktop:px-4 desktop:py-2">
+				<div class="w-full space-y-2">
 				{#if displayedMessages.length === 0 && !streaming && !waitingForFirstToken}
 					<div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-base-content/45">
 						<svg class="size-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1767,27 +1801,12 @@
 									onSubmit={resolveAskUser}
 								/>
 							{/if}
-						{:else if block.kind === 'tool' && block.name === 'propose_plan'}
-							{@const plan = getPlanProposalFromTool(block)}
-							{#if plan}
-								<PlanProposalCard
-									{plan}
-									status={block.status}
-									token={block.token ?? null}
-									onApprove={approveToolCall}
-									onDeny={denyToolCall}
-								/>
+						{:else if block.kind === 'tool' && block.name === 'present_artifact'}
+							{@const card = getArtifactCardFromTool(block)}
+							{#if card}
+								<ArtifactCard {...card} />
 							{/if}
-						{:else if block.kind === 'tool' && block.name === 'propose_research_plan'}
-							<ResearchInlineCard
-								pendingPlan={pendingResearchPlan}
-								pendingToken={pendingResearchToken}
-								pendingStatus={pendingResearchStatus}
-								{activeResearchId}
-								onApprove={approveToolCall}
-								onDeny={denyToolCall}
-							/>
-						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'propose_plan' && block.name !== 'propose_research_plan'}
+						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'present_artifact'}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}
@@ -1856,7 +1875,14 @@
 			{/if}
 		{/if}
 
-		<div class="chat-composer-transition mx-auto w-full max-w-[78ch] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] tablet:px-4 tablet:pb-4 desktop:max-w-[82ch] desktop:px-0 desktop:pb-0">
+		<!-- Mobile quick chips above composer -->
+		<div class="console-quick">
+			<button type="button"><Icon name="plus" size={12} /> Attach</button>
+			<button type="button">@ Context</button>
+			<button type="button">/ Commands</button>
+		</div>
+
+		<div class="chat-composer-transition w-full">
 
 			<AskUserModal
 				open={askUserModalOpen && !!pendingAskUser}

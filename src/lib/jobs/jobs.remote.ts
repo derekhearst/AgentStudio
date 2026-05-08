@@ -51,7 +51,6 @@ export const listJobsQuery = query(listSchema, async (input) => {
 			leaseExpiresAt: jobs.leaseExpiresAt,
 			error: jobs.error,
 			runId: jobs.runId,
-			taskId: jobs.taskId,
 			createdAt: jobs.createdAt,
 		})
 		.from(jobs)

@@ -72,11 +72,14 @@ export type AgentSwitchResult = {
  * anchor message into history so the model's posture is unambiguous after compaction. Anchor
  * text comes from `agents.anchor_prompt` (built-ins seed it) with a generic fallback for
  * user agents.
+ *
+ * Optional `approvedArtifactId` extends the anchor metadata so the implementer's first round
+ * knows which plan artifact it should read before acting (used by request_plan_approval).
  */
 export async function setConversationAgent(
 	conversationId: string,
 	agentId: string,
-	options: { userId?: string } = {},
+	options: { userId?: string; approvedArtifactId?: string | null } = {},
 ): Promise<AgentSwitchResult> {
 	const [conversation] = await db
 		.select({ id: conversations.id, agentId: conversations.agentId, userId: conversations.userId })
@@ -106,8 +109,11 @@ export async function setConversationAgent(
 		throw new Error(`Agent not found: ${agentId}`)
 	}
 
-	const anchorContent =
+	const baseAnchor =
 		agent.anchorPrompt ?? `[Agent changed to ${agent.name}] You are now acting as ${agent.name}. ${agent.role}`
+	const anchorContent = options.approvedArtifactId
+		? `${baseAnchor}\n\nThe user approved plan artifact ${options.approvedArtifactId}. Call read_artifact with that id before taking any action so you implement against the approved plan.`
+		: baseAnchor
 
 	const anchorMessageId = await db.transaction(async (tx) => {
 		await tx
@@ -120,7 +126,12 @@ export async function setConversationAgent(
 				conversationId,
 				role: 'system',
 				content: anchorContent,
-				metadata: { type: 'agent_anchor', previousAgentId, agentId },
+				metadata: {
+					type: 'agent_anchor',
+					previousAgentId,
+					agentId,
+					...(options.approvedArtifactId ? { approvedArtifactId: options.approvedArtifactId } : {}),
+				},
 			},
 			tx,
 		)

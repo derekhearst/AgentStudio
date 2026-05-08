@@ -52,10 +52,10 @@
 
 	const accentClass = $derived(
 		isDenied || isFailed
-			? 'border-l-2 border-error/60 pl-1.5'
+			? 'console-tool err'
 			: isPending
-				? 'border-l-2 border-warning/60 pl-1.5'
-				: '',
+				? 'console-tool warn'
+				: 'console-tool ok',
 	);
 
 	const statusIcon = $derived(
@@ -76,8 +76,8 @@
 	});
 </script>
 
-<details class={`collapse collapse-arrow tool-call-card rounded-md ${accentClass}`} open={isOpen}>
-	<summary class="collapse-title flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm font-normal min-h-0 select-none rounded-md transition-colors hover:bg-base-200/50">
+<details class={`tool-call-card ${accentClass}`} open={isOpen}>
+	<summary class="select-none transition-colors hover:bg-base-200/50">
 		<div class="flex min-w-0 flex-1 items-center gap-2">
 			{#if statusIcon === 'pending'}
 				<svg class="h-3.5 w-3.5 shrink-0 text-warning/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

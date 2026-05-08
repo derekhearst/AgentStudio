@@ -12,6 +12,7 @@
 	import { suggestCompanionsForRole } from '$lib/agents/role-companions';
 	import { listFragmentImports } from '$lib/agents/fragment-expand';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Identity = NonNullable<Awaited<ReturnType<typeof getAgentIdentityQuery>>>;
 
@@ -92,26 +93,25 @@
 	onMount(load);
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">
-						{identity?.agent.name ?? 'Agent'} <span class="opacity-50">— Identity</span>
-					</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						The identity prompt is the first thing the model reads on every run. Edits land in the linked skill — the next chat picks them up without a redeploy.
-					</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<a class="btn btn-sm btn-ghost" href="/agents/{agentId}">← Back to agent</a>
-					{#if identity?.skill}
-						<a class="btn btn-sm btn-outline" href="/skills/{identity.skill.id}">Open skill</a>
-					{/if}
-				</div>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Identity"
+		crumbs={[
+			{ label: 'Agents', href: '/agents' },
+			{ label: identity?.agent.name ?? 'Agent', href: `/agents/${agentId}` },
+		]}
+		backHref={`/agents/${agentId}`}
+		subtitle="System prompt skill"
+	>
+		{#snippet actions()}
+			{#if identity?.skill}
+				<a class="btn btn-ghost btn-xs" href="/skills/{identity.skill.id}">Open skill</a>
+			{/if}
 		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+	<ContentPanel>
 
 		{#if loading}
 			<p class="opacity-70">Loading…</p>
@@ -236,4 +236,5 @@
 			</div>
 		{/if}
 	</ContentPanel>
+	</div>
 </div>

@@ -110,6 +110,39 @@ async function resolveConversationFromRunId(runId: string | null): Promise<strin
 	}
 }
 
+/**
+ * Verify that the user owns the project (project-scoped) or conversation (conversation-scoped)
+ * an artifact belongs to. Returns an OK marker (with project name when applicable) or an error
+ * string the caller surfaces back to the agent.
+ */
+async function assertArtifactAccessible(
+	artifact: { projectId: string | null; conversationId: string | null; id: string },
+	userId: string,
+): Promise<{ ok: true; projectName: string | null } | { ok: false; error: string }> {
+	if (artifact.projectId) {
+		const projectsModule = await import('$lib/projects/projects.server')
+		const project = await projectsModule.getProjectById(artifact.projectId)
+		if (!project || project.userId !== userId) {
+			return { ok: false, error: `Artifact ${artifact.id} not accessible` }
+		}
+		return { ok: true, projectName: project.name }
+	}
+	if (artifact.conversationId) {
+		const { conversations } = await import('$lib/sessions/sessions.schema')
+		const { eq } = await import('drizzle-orm')
+		const [conv] = await db
+			.select({ userId: conversations.userId })
+			.from(conversations)
+			.where(eq(conversations.id, artifact.conversationId))
+			.limit(1)
+		if (!conv || conv.userId !== userId) {
+			return { ok: false, error: `Artifact ${artifact.id} not accessible` }
+		}
+		return { ok: true, projectName: null }
+	}
+	return { ok: false, error: `Artifact ${artifact.id} has no scope` }
+}
+
 function buildAuthHeader() {
 	if (!process.env.SEARXNG_PASSWORD) return undefined
 	const username = process.env.SEARXNG_USERNAME || 'derek'
@@ -467,41 +500,6 @@ function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 /**
- * Wave 2 #11 phase 2 helper — render a propose_plan input as markdown for the parent task's
- * `spec` column. This is the durable, human-readable description of what the orchestrator
- * committed to; the structured fields stay on the task's metadata for programmatic use.
- */
-type ProposePlanInput = z.infer<typeof toolSchemas.propose_plan>
-function stringifyPlanForSpec(plan: ProposePlanInput): string {
-	const lines: string[] = []
-	lines.push(`# ${plan.summary}`, '')
-	lines.push('## Steps', '')
-	plan.steps.forEach((step, idx) => {
-		lines.push(`${idx + 1}. **${step.title}**`)
-		if (step.detail) lines.push(`   ${step.detail}`)
-		const meta: string[] = []
-		if (step.estimatedDurationMin !== undefined) meta.push(`~${step.estimatedDurationMin}m`)
-		if (step.estimatedCostUsd !== undefined) meta.push(`$${step.estimatedCostUsd.toFixed(2)}`)
-		if (step.blastRadius) meta.push(step.blastRadius)
-		if (step.reversible === false) meta.push('irreversible')
-		if (meta.length > 0) lines.push(`   _(${meta.join(' · ')})_`)
-	})
-	if (plan.risks?.length) {
-		lines.push('', '## Risks', ...plan.risks.map((r) => `- ${r}`))
-	}
-	if (plan.rollback) {
-		lines.push('', '## Rollback', plan.rollback)
-	}
-	if (plan.totalEstimatedCostUsd !== undefined || plan.totalEstimatedDurationMin !== undefined) {
-		const totals: string[] = []
-		if (plan.totalEstimatedDurationMin !== undefined) totals.push(`~${plan.totalEstimatedDurationMin}m`)
-		if (plan.totalEstimatedCostUsd !== undefined) totals.push(`$${plan.totalEstimatedCostUsd.toFixed(2)}`)
-		lines.push('', `_Total: ${totals.join(' · ')}_`)
-	}
-	return lines.join('\n')
-}
-
-/**
  * Returns tool definitions for the LLM.
  * When `onlyTools` is provided, only those tools are included (capability filtering).
  * When omitted, all tools are returned (backwards compatible).
@@ -841,7 +839,8 @@ export async function executeTool(
 				call.name === 'list_artifacts' ||
 				call.name === 'read_artifact' ||
 				call.name === 'create_artifact' ||
-				call.name === 'edit_artifact'
+				call.name === 'edit_artifact' ||
+				call.name === 'present_artifact'
 			) {
 				const projectsModule = await import('$lib/projects/projects.server')
 				if (call.name === 'list_projects') {
@@ -880,17 +879,48 @@ export async function executeTool(
 				}
 				if (call.name === 'list_artifacts') {
 					const input = toolSchemas.list_artifacts.parse(call.arguments)
-					// Ownership check — only list artifacts in projects the user owns.
-					const project = await projectsModule.getProjectById(input.projectId)
-					if (!project || project.userId !== userId) {
+
+					if (input.projectId) {
+						const project = await projectsModule.getProjectById(input.projectId)
+						if (!project || project.userId !== userId) {
+							return {
+								success: false,
+								tool: call.name,
+								error: `Project ${input.projectId} not found or not accessible`,
+								executionMs: Date.now() - startedAt,
+							}
+						}
+						const rows = await projectsModule.listArtifactsForProject(input.projectId, {
+							includeInactive: input.includeInactive,
+						})
 						return {
-							success: false,
+							success: true,
 							tool: call.name,
-							error: `Project ${input.projectId} not found or not accessible`,
+							input,
+							result: rows.map((a) => ({
+								id: a.id,
+								name: a.name,
+								slug: a.slug,
+								contentType: a.contentType,
+								isActive: a.isActive,
+								updatedAt: a.updatedAt,
+							})),
 							executionMs: Date.now() - startedAt,
 						}
 					}
-					const rows = await projectsModule.listArtifactsForProject(input.projectId, {
+
+					// Conversation-scoped: explicit conversationId, or fall back to the current chat run.
+					const conversationId =
+						input.conversationId ?? (await resolveConversationFromRunId(toolUserContext.getStore()?.runId ?? null))
+					if (!conversationId) {
+						return {
+							success: false,
+							tool: call.name,
+							error: 'No projectId provided and no conversation context — pass projectId or conversationId.',
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const rows = await projectsModule.listArtifactsForConversation(conversationId, {
 						includeInactive: input.includeInactive,
 					})
 					return {
@@ -919,12 +949,12 @@ export async function executeTool(
 							executionMs: Date.now() - startedAt,
 						}
 					}
-					const project = await projectsModule.getProjectById(artifact.projectId)
-					if (!project || project.userId !== userId) {
+					const ownership = await assertArtifactAccessible(artifact, userId)
+					if (!ownership.ok) {
 						return {
 							success: false,
 							tool: call.name,
-							error: `Artifact ${input.artifactId} not accessible`,
+							error: ownership.error,
 							executionMs: Date.now() - startedAt,
 						}
 					}
@@ -938,8 +968,9 @@ export async function executeTool(
 							slug: artifact.slug,
 							contentType: artifact.contentType,
 							projectId: artifact.projectId,
-							projectName: project.name,
-							versionSeq: artifact.currentVersion ? 1 : 0, // currentVersion presence indicates loaded
+							conversationId: artifact.conversationId,
+							projectName: ownership.projectName,
+							versionSeq: artifact.currentVersion ? 1 : 0,
 							currentVersionId: artifact.currentVersionId,
 							content: artifact.currentVersion?.content ?? '',
 						},
@@ -948,17 +979,38 @@ export async function executeTool(
 				}
 				if (call.name === 'create_artifact') {
 					const input = toolSchemas.create_artifact.parse(call.arguments)
-					const project = await projectsModule.getProjectById(input.projectId)
-					if (!project || project.userId !== userId) {
-						return {
-							success: false,
-							tool: call.name,
-							error: `Project ${input.projectId} not found or not accessible`,
-							executionMs: Date.now() - startedAt,
+
+					let scopedProjectId: string | null = null
+					let scopedConversationId: string | null = null
+
+					if (input.projectId) {
+						const project = await projectsModule.getProjectById(input.projectId)
+						if (!project || project.userId !== userId) {
+							return {
+								success: false,
+								tool: call.name,
+								error: `Project ${input.projectId} not found or not accessible`,
+								executionMs: Date.now() - startedAt,
+							}
+						}
+						scopedProjectId = project.id
+					} else {
+						scopedConversationId =
+							input.conversationId ??
+							(await resolveConversationFromRunId(toolUserContext.getStore()?.runId ?? null))
+						if (!scopedConversationId) {
+							return {
+								success: false,
+								tool: call.name,
+								error: 'No projectId provided and no conversation context — pass projectId or conversationId.',
+								executionMs: Date.now() - startedAt,
+							}
 						}
 					}
+
 					const created = await projectsModule.createArtifact({
-						projectId: input.projectId,
+						projectId: scopedProjectId,
+						conversationId: scopedConversationId,
 						name: input.name,
 						content: input.content,
 						contentType: input.contentType,
@@ -975,7 +1027,61 @@ export async function executeTool(
 							name: created.name,
 							slug: created.slug,
 							contentType: created.contentType,
+							projectId: created.projectId,
+							conversationId: created.conversationId,
 							versionSeq: 1,
+						},
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (call.name === 'present_artifact') {
+					const input = toolSchemas.present_artifact.parse(call.arguments)
+					const artifact = await projectsModule.getArtifactById(input.artifactId)
+					if (!artifact) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} not found`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					const ownership = await assertArtifactAccessible(artifact, userId)
+					if (!ownership.ok) {
+						return {
+							success: false,
+							tool: call.name,
+							error: ownership.error,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					let version = artifact.currentVersion
+					if (input.versionSeq && (!version || version.seq !== input.versionSeq)) {
+						const history = await projectsModule.getVersionHistory(artifact.id)
+						version = history.find((v) => v.seq === input.versionSeq) ?? null
+					}
+					if (!version) {
+						return {
+							success: false,
+							tool: call.name,
+							error: `Artifact ${input.artifactId} has no version content`,
+							executionMs: Date.now() - startedAt,
+						}
+					}
+					return {
+						success: true,
+						tool: call.name,
+						input,
+						result: {
+							artifactId: artifact.id,
+							name: artifact.name,
+							slug: artifact.slug,
+							contentType: artifact.contentType,
+							projectId: artifact.projectId,
+							conversationId: artifact.conversationId,
+							versionSeq: version.seq,
+							content: version.content,
+							focus: input.focus ?? null,
+							note: input.note ?? null,
 						},
 						executionMs: Date.now() - startedAt,
 					}
@@ -991,12 +1097,12 @@ export async function executeTool(
 							executionMs: Date.now() - startedAt,
 						}
 					}
-					const project = await projectsModule.getProjectById(artifact.projectId)
-					if (!project || project.userId !== userId) {
+					const ownership = await assertArtifactAccessible(artifact, userId)
+					if (!ownership.ok) {
 						return {
 							success: false,
 							tool: call.name,
-							error: `Artifact ${input.artifactId} not accessible`,
+							error: ownership.error,
 							executionMs: Date.now() - startedAt,
 						}
 					}
@@ -1347,7 +1453,6 @@ export async function executeTool(
 						baseBranch: pr.baseBranch,
 						providerUrl: pr.providerUrl,
 						runId: pr.runId,
-						taskId: pr.taskId,
 						createdBy: pr.createdBy,
 						createdAt: pr.createdAt,
 						updatedAt: pr.updatedAt,
@@ -1844,176 +1949,98 @@ export async function executeTool(
 				}
 			}
 
-			if (call.name === 'propose_plan') {
-				const input = toolSchemas.propose_plan.parse(call.arguments)
-				// The plan-approval flow runs through the standard tool approval pipeline (the
-				// stream handler emits tool_pending, blocks on user decision, then calls executeTool
-				// only on approve). By the time we get here, the user has already approved.
-				//
-				// Wave 2 #11 phase 2 — persist the approved plan as a durable parent task plus one
-				// child task per step. The current chat_run is linked to the parent so future runs
-				// can show "this run materialized task <X>" in the UI. Best-effort: a failure in
-				// task persistence does NOT fail the tool call (the orchestrator can still execute
-				// the plan); we just lose the task linkage and log a warning.
-				const ctx = toolUserContext.getStore()
-				let parentTaskId: string | null = null
-				const childTaskIds: string[] = []
-				if (ctx?.userId && ctx?.runId) {
-					try {
-						const { chatRuns } = await import('$lib/runs/runs.schema')
-						const { createTask } = await import('$lib/tasks/tasks.server')
-						const { eq } = await import('drizzle-orm')
-						const { db } = await import('$lib/db.server')
-						const [run] = await db
-							.select({ conversationId: chatRuns.conversationId, agentId: chatRuns.agentId })
-							.from(chatRuns)
-							.where(eq(chatRuns.id, ctx.runId))
-							.limit(1)
-
-						const parent = await createTask({
-							title: input.summary,
-							spec: stringifyPlanForSpec(input),
-							status: 'running',
-							ownerAgentId: run?.agentId ?? null,
-							rootConversationId: run?.conversationId ?? null,
-							createdBy: ctx.userId,
-							metadata: {
-								source: 'propose_plan',
-								originRunId: ctx.runId,
-								totalEstimatedCostUsd: input.totalEstimatedCostUsd,
-								totalEstimatedDurationMin: input.totalEstimatedDurationMin,
-								risks: input.risks,
-								rollback: input.rollback,
-							},
-						})
-						parentTaskId = parent.id
-
-						for (let i = 0; i < input.steps.length; i++) {
-							const step = input.steps[i]
-							const child = await createTask({
-								title: step.title,
-								spec: step.detail ?? step.title,
-								status: 'pending',
-								parentTaskId: parent.id,
-								ownerAgentId: run?.agentId ?? null,
-								rootConversationId: run?.conversationId ?? null,
-								priority: i,
-								createdBy: ctx.userId,
-								metadata: {
-									source: 'propose_plan',
-									originRunId: ctx.runId,
-									stepIndex: i,
-									estimatedDurationMin: step.estimatedDurationMin,
-									estimatedCostUsd: step.estimatedCostUsd,
-									blastRadius: step.blastRadius,
-									reversible: step.reversible,
-								},
-							})
-							childTaskIds.push(child.id)
-						}
-
-						// Back-link the originating run to the parent task so the UI can show the
-						// task badge / drill into the plan from the run trace.
-						await db.update(chatRuns).set({ taskId: parent.id }).where(eq(chatRuns.id, ctx.runId))
-					} catch (err) {
-						logger.warn('[propose_plan] task persistence failed; orchestrator will proceed without task linkage', { err })
-						parentTaskId = null
-						childTaskIds.length = 0
-					}
-				}
-
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: {
-						approved: true,
-						summary: input.summary,
-						stepCount: input.steps.length,
-						parentTaskId,
-						childTaskIds,
-					},
-					executionMs: Date.now() - startedAt,
-				}
-			}
-
-			if (call.name === 'propose_research_plan') {
-				const input = toolSchemas.propose_research_plan.parse(call.arguments)
-				// Like propose_plan, this tool runs through MANDATORY_APPROVAL_TOOLS — the stream
-				// handler emits tool_pending, blocks on the user's decision, and only invokes
-				// executeTool when the user approved in the sidebar. By the time we get here, the
-				// user has approved the sub-questions and we can spend LLM/web-fetch budget.
+			if (call.name === 'request_plan_approval') {
+				const input = toolSchemas.request_plan_approval.parse(call.arguments)
+				// Mandatory-approval tool — by the time the executor runs, the user has approved
+				// in the inline card. Switch the conversation's bound agent to the implementer so
+				// the next round runs under that agent.
 				const ctx = toolUserContext.getStore()
 				if (!ctx?.userId) {
 					return {
 						success: false,
 						tool: call.name,
-						error: 'propose_research_plan requires an authenticated userId in the tool execution context.',
+						error: 'request_plan_approval requires an authenticated userId in the tool execution context.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (!ctx.runId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'request_plan_approval can only run inside a chat run.',
 						executionMs: Date.now() - startedAt,
 					}
 				}
 
-				// Resolve the conversationId from the run so the research is back-linked to this chat.
-				let conversationId: string | null = null
-				if (ctx.runId) {
-					try {
-						const { chatRuns } = await import('$lib/runs/runs.schema')
-						const [run] = await db
-							.select({ conversationId: chatRuns.conversationId })
-							.from(chatRuns)
-							.where(eq(chatRuns.id, ctx.runId))
-							.limit(1)
-						conversationId = run?.conversationId ?? null
-					} catch (err) {
-						logger.warn('[propose_research_plan] run lookup failed', { err })
+				const projectsModule = await import('$lib/projects/projects.server')
+				const artifact = await projectsModule.getArtifactById(input.artifactId)
+				if (!artifact) {
+					return {
+						success: false,
+						tool: call.name,
+						error: `Artifact ${input.artifactId} not found`,
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				const conversationId = await resolveConversationFromRunId(ctx.runId)
+				if (!conversationId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'Unable to resolve the conversation for this run.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+				if (artifact.conversationId && artifact.conversationId !== conversationId) {
+					return {
+						success: false,
+						tool: call.name,
+						error: 'Artifact does not belong to this conversation.',
+						executionMs: Date.now() - startedAt,
+					}
+				}
+
+				const { agents: agentsTable } = await import('$lib/agents/agents.schema')
+				const [implementer] = await db
+					.select({ id: agentsTable.id, name: agentsTable.name })
+					.from(agentsTable)
+					.where(eq(agentsTable.id, input.implementerAgentId))
+					.limit(1)
+				if (!implementer) {
+					return {
+						success: false,
+						tool: call.name,
+						error: `Implementer agent ${input.implementerAgentId} not found`,
+						executionMs: Date.now() - startedAt,
 					}
 				}
 
 				try {
-					const { createResearch, updateResearch } = await import('$lib/research/research.server')
-					const { enqueueJob } = await import('$lib/jobs/jobs.server')
-					const research = await createResearch({
+					const { setConversationAgent } = await import('$lib/chat/agent-switch.server')
+					const result = await setConversationAgent(conversationId, input.implementerAgentId, {
 						userId: ctx.userId,
-						query: input.summary,
-						conversationId,
-						runId: ctx.runId ?? null,
-						// Per-agent / DEFAULT_RESEARCH_CONFIG drives the model. The composer-selected
-						// model is applied later if/when a future entry-point passes it in.
-						model: null,
+						approvedArtifactId: input.artifactId,
 					})
-					// Pre-seed the plan so the orchestrator skips its own Phase-1 planner LLM call
-					// (we already have user-approved sub-questions). Mark status='searching' so the
-					// detail page jumps straight to the searching state without flashing 'planning'.
-					await updateResearch(research.id, { plan: input.subQuestions })
-					const job = await enqueueJob({
-						type: 'research_run',
-						queue: 'default',
-						priority: 150,
-						payload: { researchId: research.id },
-						userId: ctx.userId,
-						runId: ctx.runId ?? null,
-					})
-					await updateResearch(research.id, { jobId: job.id })
-
 					return {
 						success: true,
 						tool: call.name,
 						input,
 						result: {
-							researchId: research.id,
-							jobId: job.id,
-							status: 'queued',
-							subQuestionCount: input.subQuestions.length,
-							note: `Research run started (id ${research.id}). The user will be notified when the cited report is ready (~10-15 min). Tell the user concisely that you've kicked off the run; do not call propose_research_plan again unless the user asks for revisions.`,
+							approved: true,
+							switchedToAgentId: result.agentId,
+							previousAgentId: result.previousAgentId,
+							artifactId: input.artifactId,
+							implementerName: implementer.name,
 						},
 						executionMs: Date.now() - startedAt,
 					}
 				} catch (err) {
-					logger.error('[propose_research_plan] failed to start research', { err })
+					logger.error('[request_plan_approval] agent switch failed', { err })
 					return {
 						success: false,
 						tool: call.name,
-						error: err instanceof Error ? err.message : 'Failed to start research run',
+						error: err instanceof Error ? err.message : 'Agent switch failed',
 						executionMs: Date.now() - startedAt,
 					}
 				}

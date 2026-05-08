@@ -64,14 +64,19 @@ export const toolSchemas = {
 		description: z.string().trim().max(1000).optional(),
 	}),
 	list_artifacts: z.object({
-		projectId: z.string().uuid(),
+		// Provide projectId for project-scoped artifacts, conversationId for in-chat artifacts,
+		// or omit both to list artifacts in the current conversation.
+		projectId: z.string().uuid().optional(),
+		conversationId: z.string().uuid().optional(),
 		includeInactive: z.boolean().default(false).optional(),
 	}),
 	read_artifact: z.object({
 		artifactId: z.string().uuid(),
 	}),
 	create_artifact: z.object({
-		projectId: z.string().uuid(),
+		// Either projectId, conversationId, or neither (defaults to the current chat).
+		projectId: z.string().uuid().optional(),
+		conversationId: z.string().uuid().optional(),
 		name: z.string().trim().min(1).max(160),
 		content: z.string(),
 		contentType: z.enum(['markdown', 'code', 'json', 'yaml', 'plaintext']).optional(),
@@ -81,6 +86,23 @@ export const toolSchemas = {
 		artifactId: z.string().uuid(),
 		content: z.string(),
 		changeNote: z.string().trim().max(500).optional(),
+	}),
+	// Generic in-chat artifact presenter — loads an artifact's current (or pinned) version and
+	// returns the full content so the chat UI can render an ArtifactCard inline. The `focus`
+	// hint adjusts the badge colour/label (Plan / Todo / Document / Data).
+	present_artifact: z.object({
+		artifactId: z.string().uuid(),
+		versionSeq: z.number().int().positive().optional(),
+		focus: z.enum(['plan', 'todo', 'document', 'data']).optional(),
+		note: z.string().max(500).optional(),
+	}),
+	// Mandatory-approval handoff: the planner asks the user to approve the plan artifact and
+	// switch the conversation to the implementer agent. On approve, the conversation's bound
+	// agent flips so the next round runs as the implementer.
+	request_plan_approval: z.object({
+		artifactId: z.string().uuid(),
+		implementerAgentId: z.string().uuid(),
+		rationale: z.string().trim().max(1000).optional(),
 	}),
 	// Wave 4 #15 phase 2 finish — bind a project to the current conversation so subsequent
 	// edits target the right project by default. Pass projectId=null (or omit) to unbind.
@@ -236,31 +258,6 @@ export const toolSchemas = {
 		query: z.string().trim().min(1).max(200),
 		limit: z.number().int().min(1).max(20).optional(),
 	}),
-	propose_plan: z.object({
-		summary: z.string().min(1).max(500),
-		steps: z
-			.array(
-				z.object({
-					title: z.string().min(1).max(200),
-					detail: z.string().max(1000).optional(),
-					estimatedDurationMin: z.number().int().positive().max(10_000).optional(),
-					estimatedCostUsd: z.number().nonnegative().max(1000).optional(),
-					blastRadius: z.enum(['local', 'shared', 'production']).optional(),
-					reversible: z.boolean().optional(),
-				}),
-			)
-			.min(1)
-			.max(20),
-		risks: z.array(z.string().min(1).max(280)).max(10).optional(),
-		rollback: z.string().max(1000).optional(),
-		totalEstimatedCostUsd: z.number().nonnegative().max(1000).optional(),
-		totalEstimatedDurationMin: z.number().int().positive().max(10_000).optional(),
-	}),
-	propose_research_plan: z.object({
-		summary: z.string().trim().min(1).max(500),
-		subQuestions: z.array(z.string().trim().min(1).max(300)).min(2).max(12),
-		rationale: z.string().trim().max(800).optional(),
-	}),
 	run_code: z.object({
 		code: z.string().min(1).max(64_000),
 		timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
@@ -311,9 +308,9 @@ export const toolDescriptions: Record<ToolName, string> = {
 	list_pull_requests: 'List pull requests recorded for a repository (the user must have synced the repo via sync_my_repos first). Returns up to `limit` rows (default 50) ordered by most recently updated, each with {id, providerPrNumber, title, status, headBranch, baseBranch, providerUrl, runId, taskId, createdBy, createdAt, updatedAt}. Read-only. Returns an empty list when the repo has no recorded PRs yet.',
 	get_pull_request: 'Fetch a single pull request by its AgentStudio id (the `recordedId` returned by create_pull_request, or any id from list_pull_requests). Returns the full row including title, body, status, head/base branches, providerUrl, runId, taskId, metadata. Read-only. Returns null when the id is unknown.',
 	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox (`${SANDBOX_WORKSPACE}/<userId>/repos/<owner>/<repo>`). Idempotent — if the path already has a clone, runs `git fetch --prune` instead of re-cloning. Authenticated via the user\'s stored OAuth token (private repos work without the agent ever seeing the token). Returns {path, fresh, branch} where `fresh=true` indicates a brand-new clone vs. an updated existing one. Refuses repos the user has not connected (i.e., not present in the sync\'d list). After clone, use prepare_commit / push_branch / create_pull_request against the returned path.',
-	list_artifacts: 'List artifacts in a project. Returns id, name, slug, contentType, isActive for each artifact (active by default; pass includeInactive to see soft-deleted).',
-	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s project info. Use to load an artifact before editing.',
-	create_artifact: 'Create a new artifact in a project (saves the initial content as v1). Slug auto-generated from name. Optional changeNote describes what this initial version contains.',
+	list_artifacts: 'List artifacts. Pass projectId for project-scoped artifacts, conversationId for in-chat artifacts, or omit both to list artifacts in the current conversation. Returns id, name, slug, contentType, isActive (active by default; pass includeInactive to see soft-deleted).',
+	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s scope (project or conversation). Use to load an artifact before editing or implementing against it.',
+	create_artifact: 'Create a new artifact (saves the initial content as v1). Pass projectId for a project-scoped artifact, conversationId for a chat-scoped artifact, or omit both to scope to the current conversation. Slug auto-generated from name. Use this to write a plan/todo/document the agent (or a downstream agent) can re-read.',
 	edit_artifact: 'Append a new version to an existing artifact (append-only, preserves the full history). Optional changeNote describes what changed in this version. Use read_artifact first to see the current content.',
 	set_project_context: 'Bind a project to the current conversation so subsequent agent edits know which project to target by default. Pass projectId=null (or omit) to unbind. The bound project shows up in the conversation\'s system-prompt context slot so the agent has continuous awareness of which project is "in scope".',
 	run_subagent:
@@ -347,12 +344,12 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Show recent commits with subject, author, and date (read-only). Optional `paths` filter scopes the log to specific files. Only available in worktree mode.',
 	git_diff:
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
-	propose_plan:
-		'Propose a structured execution plan to the user with ordered steps, estimated cost/time, risks, and rollback. The user explicitly approves or denies before you call any non-readonly tool. Required in plan mode; should be called before taking any destructive or expensive action.',
-	propose_research_plan:
-		'Propose a Deep Research plan to the user. Pass `summary` (1-2 sentence framing of what you intend to investigate), `subQuestions` (4-8 concrete, googleable sub-questions covering definitions, mechanisms, evidence, edge cases, and recent developments), and an optional `rationale` (why this decomposition). The user explicitly approves or denies in the right sidebar; on approve, a background research run starts (plan→search→fetch→reflect→synthesize, ~10-15 minutes) and the user is notified when the cited report is ready. On deny, the user will likely reply with feedback — call this tool again with a revised plan. Use ONLY when the user actually wants a deep, cited research run; for trivial lookups, use web_search/web_fetch directly.',
+	present_artifact:
+		'Surface an artifact in the chat as a focused inline card. Pass the artifactId from create_artifact (or list_artifacts). Optional `focus` is a hint for the renderer (\'plan\' badge, \'todo\' badge, \'document\', \'data\'); `note` is a one-liner shown above the card; `versionSeq` pins to a specific version (defaults to current). Use this after writing a plan/todo via create_artifact so the user can see and reference it.',
+	request_plan_approval:
+		'Ask the user to approve a plan artifact and hand off the conversation to an implementer agent. Mandatory approval — the user must approve in the inline card before this tool runs. On approve: the conversation\'s bound agent flips to `implementerAgentId` and the next round runs under that agent (which can read the artifact via read_artifact). On deny: the planner stays bound. Pass the plan artifactId, the implementer agent id (use list_agents to find one), and an optional rationale for picking that implementer.',
 	search_tools:
-		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, propose_plan, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
+		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
 	run_code:
 		'Run a JavaScript program in the sandboxed Bun runtime. Inside the script every tool currently available to you is callable as `await tools.<name>(args)` — same arguments, return shape, approvals, capabilities, and policies as a direct tool call. Use this when you need to fan out many tool calls in parallel, post-process their results, or branch on intermediate values without spending a round-trip per call. PREFER `return` OVER `console.log` for output the model should see: when the script returns a value, that becomes `returnValue` and stdout is omitted from the result to keep your context tight. console.log is for debugging only and is truncated to 8KB in the model-facing result. Run tool calls in parallel with `Promise.all` whenever they are independent — that\'s the main reason to use run_code over individual tool calls. The script\'s working directory is the same persistent sandbox as `shell`, so files persist. Throw to surface an error. The returned value must be JSON-serializable. Default timeout 60s, max 300s. Cannot recursively call `run_code`. Example pattern: `const [a, b, c] = await Promise.all([tools.web_search({query: "x"}), tools.web_search({query: "y"}), tools.web_search({query: "z"})]); return {a: a.length, b: b.length, c: c.length}` — three searches batched into one round-trip, model sees only the summary.',
 }
@@ -394,28 +391,23 @@ export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
 return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.title } }`,
 		},
 	],
-	propose_plan: [
+	create_artifact: [
 		{
-			summary: 'Migrate the auth middleware to drop session-token storage in cookies.',
-			steps: [
-				{ title: 'Audit current cookie reads/writes', detail: 'Grep for `Set-Cookie` / `cookie.session` across the codebase' },
-				{ title: 'Add token-rotation endpoint', estimatedDurationMin: 60 },
-				{ title: 'Migrate clients to fetch + Authorization header' },
-				{ title: 'Remove cookie-write paths and run integration tests' },
-			],
+			name: 'Plan: drop session cookies',
+			content:
+				'# Plan\n\n1. Audit cookie reads/writes across the codebase\n2. Add a token-rotation endpoint\n3. Migrate clients to Authorization header\n4. Remove cookie-write paths and run integration tests',
+			contentType: 'markdown',
+			changeNote: 'Initial plan',
 		},
 	],
-	propose_research_plan: [
-		// Tighter 4-question plan for a focused topic
+	present_artifact: [
+		{ artifactId: '00000000-0000-0000-0000-000000000000', focus: 'plan', note: 'Plan ready for review.' },
+	],
+	request_plan_approval: [
 		{
-			summary: 'Compare HNSW vs IVF-Flat for pgvector at the 5M-row scale.',
-			subQuestions: [
-				'What recall and latency does HNSW deliver at 5M rows for typical embedding sizes (1024, 1536, 3072)?',
-				'How does IVF-Flat compare under the same load and probe counts?',
-				'What index build times and memory overhead should we plan for?',
-				'Are there known issues with either index type on Postgres 16+?',
-			],
-			rationale: 'Picking the right index up front avoids a costly re-index later.',
+			artifactId: '00000000-0000-0000-0000-000000000000',
+			implementerAgentId: '00000000-0000-0000-0000-000000000000',
+			rationale: 'Hand off to the coding agent to implement the approved plan.',
 		},
 	],
 }
@@ -430,7 +422,7 @@ return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.
  *     rounds' tools arrays. ~85% of the registry lives here.
  *
  * Approval gating is orthogonal to this tier — sensitive tools (push_branch,
- * create_pull_request, propose_research_plan) live in `searchable` and rely on the
+ * create_pull_request, request_plan_approval) live in `searchable` and rely on the
  * existing `MANDATORY_APPROVAL_TOOLS` enforcement at execution time. Loading a tool ≠
  * permission to use it without approval.
  */
@@ -439,7 +431,6 @@ export type ToolDisclosure = 'always' | 'searchable'
 const ALWAYS_LOADED: ToolName[] = [
 	'web_search',
 	'ask_user',
-	'propose_plan',
 	'run_code',
 	'search_tools',
 ]

@@ -6,7 +6,7 @@ import { runTraces, type RunTraceRow, type RunTraceStatus } from './observabilit
  * Wave 5 #20 phase 2 — run-trace span recording.
  *
  * Lightweight append-on-event API for the runtime + jobs:
- *   - `startRunTrace({runId, sessionId?, taskId?, jobId?})` upserts a row in `running` state
+ *   - `startRunTrace({runId, sessionId?, jobId?})` upserts a row in `running` state
  *   - `appendTraceSpan({runId, span})` pushes a span object onto the trace jsonb array
  *   - `finishRunTrace({runId, status, costUsd?})` flips the row to terminal + records cost
  *
@@ -34,7 +34,6 @@ export type TraceSpan = {
 export type StartRunTraceInput = {
 	runId: string
 	sessionId?: string | null
-	taskId?: string | null
 	jobId?: string | null
 }
 
@@ -48,7 +47,6 @@ export async function startRunTrace(input: StartRunTraceInput): Promise<RunTrace
 			.values({
 				runId: input.runId,
 				sessionId: input.sessionId ?? null,
-				taskId: input.taskId ?? null,
 				jobId: input.jobId ?? null,
 				status: 'running',
 				trace: [],
@@ -115,4 +113,79 @@ export async function finishRunTrace(input: FinishRunTraceInput): Promise<RunTra
 export async function getRunTraceByRunId(runId: string): Promise<RunTraceRow | null> {
 	const [row] = await db.select().from(runTraces).where(eq(runTraces.runId, runId)).limit(1)
 	return row ?? null
+}
+
+export type RecentFailure = {
+	runId: string
+	kind: 'run_failed' | 'tool_failed'
+	label: string
+	occurredAt: Date
+	costUsd: string | null
+}
+
+/**
+ * Pull recent run/tool failures for the consolidated /review dashboard. Returns one row per
+ * failed tool span plus one row per run-level failure (status='failed'). Ordered by
+ * occurredAt desc, capped to `limit`.
+ *
+ * Run-level failures use `finishedAt` (or `updatedAt` fallback) as the occurredAt; tool-call
+ * failures use the span's `startedAt`.
+ */
+export async function listRecentFailures(hours = 24, limit = 20): Promise<RecentFailure[]> {
+	const rows = await db.execute<{
+		run_id: string
+		kind: 'run_failed' | 'tool_failed'
+		label: string
+		occurred_at: string
+		cost_usd: string | null
+	}>(drizzleSql`
+		with run_window as (
+			select run_id, status, finished_at, updated_at, cost_usd, trace
+			from run_traces
+			where coalesce(finished_at, updated_at) >= now() - (${hours}::int * interval '1 hour')
+		),
+		run_level as (
+			select
+				run_id,
+				'run_failed'::text as kind,
+				'Run failed'::text as label,
+				coalesce(finished_at, updated_at) as occurred_at,
+				cost_usd::text as cost_usd
+			from run_window
+			where status = 'failed'
+		),
+		tool_level as (
+			select
+				rw.run_id,
+				'tool_failed'::text as kind,
+				coalesce(span->>'toolName', span->>'kind', 'tool')::text as label,
+				coalesce(
+					(span->>'startedAt')::timestamptz,
+					rw.finished_at,
+					rw.updated_at
+				) as occurred_at,
+				rw.cost_usd::text as cost_usd
+			from run_window rw,
+				lateral jsonb_array_elements(rw.trace) as span
+			where span->>'kind' = 'tool_call' and (span->>'success')::boolean is false
+		)
+		select * from run_level
+		union all
+		select * from tool_level
+		order by occurred_at desc
+		limit ${limit}
+	`)
+	return (rows as unknown as Array<{
+		run_id: string
+		kind: 'run_failed' | 'tool_failed'
+		label: string
+		occurred_at: string | Date
+		cost_usd: string | null
+	}>).map((r) => ({
+		runId: r.run_id,
+		kind: r.kind,
+		label: r.label,
+		occurredAt: new Date(r.occurred_at),
+		costUsd: r.cost_usd,
+	}))
 }

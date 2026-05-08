@@ -24,9 +24,6 @@ export const llmUsage = pgTable(
 		cost: numeric('cost', { precision: 18, scale: 12 }).notNull().default('0'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 		runId: uuid('run_id').references(() => chatRuns.id, { onDelete: 'set null' }),
-		// taskId is reserved for the future tasks domain (item #11). No FK yet because
-		// the tasks table does not exist; nullable column allows back-population later.
-		taskId: uuid('task_id'),
 		agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 		metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -34,7 +31,6 @@ export const llmUsage = pgTable(
 	(table) => ({
 		userIdx: index('llm_usage_user_idx').on(table.userId),
 		runIdx: index('llm_usage_run_idx').on(table.runId),
-		taskIdx: index('llm_usage_task_idx').on(table.taskId),
 		agentIdx: index('llm_usage_agent_idx').on(table.agentId),
 		createdIdx: index('llm_usage_created_idx').on(table.createdAt),
 	}),
@@ -46,7 +42,6 @@ export const toolUsage = pgTable(
 		id: uuid('id').primaryKey().defaultRandom(),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
 		runId: uuid('run_id').references(() => chatRuns.id, { onDelete: 'set null' }),
-		taskId: uuid('task_id'), // tasks table does not exist yet; back-populate when item #11 lands
 		agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 		toolName: text('tool_name').notNull(),
 		provider: text('provider'),
@@ -59,7 +54,6 @@ export const toolUsage = pgTable(
 	(table) => ({
 		userIdx: index('tool_usage_user_idx').on(table.userId),
 		runIdx: index('tool_usage_run_idx').on(table.runId),
-		taskIdx: index('tool_usage_task_idx').on(table.taskId),
 		agentIdx: index('tool_usage_agent_idx').on(table.agentId),
 		toolIdx: index('tool_usage_tool_idx').on(table.toolName),
 		createdIdx: index('tool_usage_created_idx').on(table.createdAt),

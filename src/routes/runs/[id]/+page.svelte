@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { getRunDetailQuery } from '$lib/runs/runs.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	const runId = $derived(page.params.id ?? '');
 
@@ -84,6 +85,23 @@
 	}
 </script>
 
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title={detail?.run.label ?? 'Run'}
+		crumbs={[{ label: 'Activity', href: '/activity' }]}
+		backHref={detail ? `/chat/${detail.run.conversationId}` : '/activity'}
+		subtitle={detail ? detail.run.id : ''}
+	>
+		{#snippet chips()}
+			{#if detail}
+				<span class="console-chip {detail.run.state === 'running' ? 'is-run' : detail.run.state === 'failed' ? 'is-warn' : ''}">{detail.run.state}</span>
+				<span class="console-chip">{detail.run.source}</span>
+			{/if}
+		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+
 {#if loading}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
@@ -95,7 +113,6 @@
 {:else}
 	{@const r = detail.run}
 	<section class="space-y-4">
-		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/chat/{r.conversationId}">← Back to chat</a>
 
 		<ContentPanel>
 			{#snippet header()}
@@ -126,13 +143,6 @@
 						<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Agent</p>
 						<a href="/agents/{detail.agent.id}" class="link link-hover">{detail.agent.name}</a>
 						<p class="text-xs text-base-content/55">{detail.agent.role}</p>
-					</div>
-				{/if}
-				{#if detail.task}
-					<div>
-						<p class="text-xs font-semibold uppercase tracking-wide text-base-content/45">Task</p>
-						<a href="/tasks/{detail.task.id}" class="link link-hover">{detail.task.title}</a>
-						<span class="badge badge-xs ml-1 {stateTone(detail.task.status)}">{detail.task.status}</span>
 					</div>
 				{/if}
 				<div>
@@ -239,3 +249,5 @@
 		</ContentPanel>
 	</section>
 {/if}
+	</div>
+</div>

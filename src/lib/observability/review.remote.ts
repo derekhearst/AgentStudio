@@ -9,7 +9,7 @@ import {
 	resolveReviewItem,
 	reviewInboxRollup,
 } from './review.server'
-import { getRunTraceByRunId } from './traces.server'
+import { getRunTraceByRunId, listRecentFailures } from './traces.server'
 import { listMetricSnapshotsWithSeries } from './metrics.server'
 
 /**
@@ -117,4 +117,22 @@ export const getOperationalSnapshotQuery = query(async () => {
 	requireAuthenticatedRequestUser()
 	const [entries, rollup] = await Promise.all([listMetricSnapshotsWithSeries(24), reviewInboxRollup()])
 	return { entries, rollup, adminOnly: false as const }
+})
+
+/**
+ * Recent run + tool failures for the consolidated /review dashboard. Backed by `run_traces`:
+ * each `success=false` tool-call span surfaces as one row, plus one row per run that ended
+ * in `failed` state. Cap small (<=50) — for full history, drill into the trace viewer.
+ */
+const recentFailuresSchema = z
+	.object({
+		hours: z.number().int().min(1).max(168).default(24),
+		limit: z.number().int().min(1).max(50).default(20),
+	})
+	.default(() => ({ hours: 24, limit: 20 }))
+
+export const listRecentFailuresQuery = query(recentFailuresSchema, async (input) => {
+	requireAuthenticatedRequestUser()
+	const failures = await listRecentFailures(input.hours, input.limit)
+	return { failures, adminOnly: false as const }
 })

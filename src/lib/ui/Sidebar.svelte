@@ -69,12 +69,6 @@
 				</a>
 			</li>
 			<li>
-				<a href="/tasks" class:menu-active={isActive('/tasks')} onclick={onNavigate}>
-					<i class="mdi mdi-clipboard-check-outline text-base shrink-0 opacity-60"></i>
-					Tasks
-				</a>
-			</li>
-			<li>
 				<a href="/projects" class:menu-active={isActive('/projects')} onclick={onNavigate}>
 					<i class="mdi mdi-folder-outline text-base shrink-0 opacity-60"></i>
 					Projects
@@ -92,15 +86,15 @@
 		<ul class="menu menu-sm w-full p-0 mb-4">
 			<li class="menu-title">Insights</li>
 			<li>
-				<a href="/activity" class:menu-active={isActive('/activity')} onclick={onNavigate}>
-					<i class="mdi mdi-lightning-bolt-outline text-base shrink-0 opacity-60"></i>
-					Activity
+				<a href="/review" class:menu-active={isActive('/review')} onclick={onNavigate}>
+					<i class="mdi mdi-view-dashboard-outline text-base shrink-0 opacity-60"></i>
+					Review
 				</a>
 			</li>
 			<li>
-				<a href="/cost" class:menu-active={isActive('/cost')} onclick={onNavigate}>
-					<i class="mdi mdi-currency-usd text-base shrink-0 opacity-60"></i>
-					Cost
+				<a href="/activity" class:menu-active={isActive('/activity')} onclick={onNavigate}>
+					<i class="mdi mdi-lightning-bolt-outline text-base shrink-0 opacity-60"></i>
+					Activity
 				</a>
 			</li>
 			<li>
@@ -137,12 +131,6 @@
 					<a href="/settings/jobs" class:menu-active={isActive('/settings/jobs')} onclick={onNavigate}>
 						<i class="mdi mdi-format-list-bulleted text-base shrink-0 opacity-60"></i>
 						Jobs
-					</a>
-				</li>
-				<li>
-					<a href="/review" class:menu-active={isActive('/review')} onclick={onNavigate}>
-						<i class="mdi mdi-inbox-outline text-base shrink-0 opacity-60"></i>
-						Review
 					</a>
 				</li>
 				<li>

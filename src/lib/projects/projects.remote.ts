@@ -38,7 +38,21 @@ async function ensureProjectOwned(projectId: string, userId: string) {
 async function ensureArtifactOwned(artifactId: string, userId: string) {
 	const artifact = await getArtifactById(artifactId)
 	if (!artifact) throw new Error(`Artifact ${artifactId} not found`)
-	await ensureProjectOwned(artifact.projectId, userId)
+	if (artifact.projectId) {
+		await ensureProjectOwned(artifact.projectId, userId)
+	} else if (artifact.conversationId) {
+		const { conversations } = await import('$lib/sessions/sessions.schema')
+		const { eq } = await import('drizzle-orm')
+		const { db } = await import('$lib/db.server')
+		const [conv] = await db
+			.select({ userId: conversations.userId })
+			.from(conversations)
+			.where(eq(conversations.id, artifact.conversationId))
+			.limit(1)
+		if (!conv || conv.userId !== userId) throw new Error('Not authorized')
+	} else {
+		throw new Error(`Artifact ${artifactId} has no scope`)
+	}
 	return artifact
 }
 

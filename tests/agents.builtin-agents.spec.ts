@@ -80,12 +80,16 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(byKey.autonomous?.toolPolicy?.kind).toBe('unrestricted')
 		expect(byKey.research?.toolPolicy?.kind).toBe('readOnly')
 		expect(byKey.plan?.toolPolicy?.kind).toBe('readOnly')
-		// Read-only agents must keep `propose_plan` (the whole point) and the read tools.
-		expect(byKey.research?.toolPolicy?.allow).toContain('propose_plan')
+		// Read-only agents must keep the artifact authoring + handoff tools (the whole point)
+		// and the read tools.
+		expect(byKey.research?.toolPolicy?.allow).toContain('present_artifact')
+		expect(byKey.research?.toolPolicy?.allow).toContain('request_plan_approval')
 		expect(byKey.research?.toolPolicy?.allow).toContain('web_search')
 		expect(byKey.research?.toolPolicy?.allow).toContain('file_read')
 		expect(byKey.research?.toolPolicy?.allow).not.toContain('shell')
-		expect(byKey.plan?.toolPolicy?.allow).toContain('propose_plan')
+		expect(byKey.plan?.toolPolicy?.allow).toContain('create_artifact')
+		expect(byKey.plan?.toolPolicy?.allow).toContain('present_artifact')
+		expect(byKey.plan?.toolPolicy?.allow).toContain('request_plan_approval')
 	})
 
 	test('built-in agents carry an anchor_prompt sentence persisted on agent flips', async ({ page, context }) => {

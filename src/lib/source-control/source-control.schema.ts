@@ -131,8 +131,6 @@ export const repositoryBranches = pgTable(
 			.notNull()
 			.references(() => repositories.id, { onDelete: 'cascade' }),
 		name: text('name').notNull(),
-		// Optional link to a task — set when an agent created the branch as part of a coding task.
-		taskId: uuid('task_id'),
 		// Optional link to the run that created the branch — for the audit chain.
 		createdByRunId: uuid('created_by_run_id'),
 		// SHA of the latest commit we know about (mirrored from provider).
@@ -146,7 +144,6 @@ export const repositoryBranches = pgTable(
 	(t) => ({
 		repoNameUnique: unique('repo_branches_repo_name_unique').on(t.repositoryId, t.name),
 		repoIdx: index('repo_branches_repo_idx').on(t.repositoryId),
-		taskIdx: index('repo_branches_task_idx').on(t.taskId),
 	}),
 )
 
@@ -164,9 +161,7 @@ export const pullRequests = pgTable(
 		headBranch: text('head_branch').notNull(),
 		baseBranch: text('base_branch').notNull(),
 		status: pullRequestStatusEnum('status').notNull().default('draft'),
-		// Cross-domain pointers — declared by-name. The PR record is the bridge between
-		// repos + tasks + runs, so the audit chain reads task → PR → checks → review_items.
-		taskId: uuid('task_id'),
+		// Cross-domain pointer — links the PR to the run that created it for audit chain.
 		runId: uuid('run_id'),
 		// User who created/triggered the PR — set-null on user delete so the audit chain survives.
 		createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -183,7 +178,6 @@ export const pullRequests = pgTable(
 		repoPrNumberUnique: unique('pull_requests_repo_pr_number_unique').on(t.repositoryId, t.providerPrNumber),
 		repoIdx: index('pull_requests_repo_idx').on(t.repositoryId),
 		statusIdx: index('pull_requests_status_idx').on(t.status),
-		taskIdx: index('pull_requests_task_idx').on(t.taskId),
 		runIdx: index('pull_requests_run_idx').on(t.runId),
 	}),
 )

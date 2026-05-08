@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listActivity } from '$lib/activity';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
 	type EventType = ActivityRow['type'];
@@ -75,18 +75,14 @@
 	};
 </script>
 
-<section class="space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div>
-				<h1 class="text-3xl font-bold">Activity Feed</h1>
-				<p class="text-sm text-base-content/70">Chronological stream of all system activity.</p>
-			</div>
-		{/snippet}
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Activity feed" subtitle="Chronological stream of all system activity">
 		{#snippet actions()}
-			<button class="btn btn-outline btn-sm" type="button" onclick={refresh}>Refresh</button>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={refresh}>Refresh</button>
 		{/snippet}
+	</PageHeader>
 
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-4">
 		<div class="flex flex-wrap gap-1">
 			{#each eventTypes as et (et.value)}
 				<button
@@ -99,7 +95,6 @@
 				</button>
 			{/each}
 		</div>
-	</ContentPanel>
 
 	{#if loading}
 		<div class="flex justify-center p-8"><span class="loading loading-spinner loading-lg"></span></div>
@@ -122,5 +117,6 @@
 			{/each}
 		</div>
 	{/if}
-</section>
+	</div>
+</div>
 

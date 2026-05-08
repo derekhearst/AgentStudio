@@ -46,7 +46,6 @@ import * as runsSchema from '$lib/runs/runs.schema'
 import * as memorySchema from '$lib/memory/memory.schema'
 import * as chatWorkbenchSchema from '$lib/chat/chat.workbench.schema'
 import * as contextSchema from '$lib/context/context.schema'
-import * as tasksSchema from '$lib/tasks/tasks.schema'
 import * as governanceSchema from '$lib/governance/governance.schema'
 import * as hooksSchema from '$lib/hooks/hooks.schema'
 import * as evaluationsSchema from '$lib/evaluations/evaluations.schema'
@@ -78,7 +77,6 @@ const schema = {
 	...runsSchema,
 	...chatWorkbenchSchema,
 	...contextSchema,
-	...tasksSchema,
 	...governanceSchema,
 	...hooksSchema,
 	...evaluationsSchema,
@@ -572,15 +570,6 @@ async function bootstrapDatabase() {
 			registerRunsJobHandlers()
 		} catch (err) {
 			console.warn('[db] Runs handler registration failed (non-fatal):', err)
-		}
-
-		// Wave 2 #11 phase 3 finish — register `task_run` + `tasks_dispatch` job handlers
-		// + the 90s scheduled tick that picks up pending top-level tasks with an ownerAgentId.
-		try {
-			const { registerTaskJobHandlers } = await import('$lib/tasks/task-handler.server')
-			registerTaskJobHandlers()
-		} catch (err) {
-			console.warn('[db] Task handler registration failed (non-fatal):', err)
 		}
 
 		// App-log retention + DB sink enable — must come after migrations so app_logs exists

@@ -250,7 +250,7 @@ export type TrimToolResultsOptions = {
 	/**
 	 * Tool names whose results are NEVER trimmed even when they're old. Use for tools whose
 	 * results are summary/decision output the model needs to reference indefinitely (e.g.
-	 * `propose_plan`, `propose_research_plan`).
+	 * `present_artifact`, `request_plan_approval`).
 	 */
 	preserveToolNames?: ReadonlySet<string>
 	/**

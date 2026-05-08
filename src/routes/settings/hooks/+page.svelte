@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { listHookInvocationsQuery } from '$lib/hooks/hooks.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Result = Awaited<ReturnType<typeof listHookInvocationsQuery>>;
 
@@ -67,51 +68,51 @@
 	}
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Hook invocations</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						Every hook dispatched in the last runs, with timing and failure status. Admin only.
-					</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<select
-						class="select select-sm select-bordered text-xs"
-						bind:value={eventFilter}
-						onchange={() => void load()}
-					>
-						{#each EVENTS as opt (opt.value)}
-							<option value={opt.value}>{opt.label}</option>
-						{/each}
-					</select>
-					<select
-						class="select select-sm select-bordered text-xs"
-						bind:value={kindFilter}
-						onchange={() => void load()}
-					>
-						<option value="">All kinds</option>
-						<option value="builtin">Built-in</option>
-						<option value="skill">Skill-based</option>
-					</select>
-					<label class="flex cursor-pointer items-center gap-1.5 text-xs">
-						<input
-							type="checkbox"
-							class="toggle toggle-xs toggle-error"
-							bind:checked={failuresOnly}
-							onchange={() => void load()}
-						/>
-						<span>Failures only</span>
-					</label>
-					<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
-						{loading ? 'Loading…' : 'Refresh'}
-					</button>
-				</div>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Hook invocations"
+		crumbs={[{ label: 'Settings', href: '/settings' }]}
+		backHref="/settings"
+		subtitle="Hooks dispatched in last runs · admin only"
+	>
+		{#snippet actions()}
+			<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
+
+		<div class="flex flex-wrap items-center gap-2">
+			<select
+				class="select select-xs select-bordered text-xs"
+				bind:value={eventFilter}
+				onchange={() => void load()}
+			>
+				{#each EVENTS as opt (opt.value)}
+					<option value={opt.value}>{opt.label}</option>
+				{/each}
+			</select>
+			<select
+				class="select select-xs select-bordered text-xs"
+				bind:value={kindFilter}
+				onchange={() => void load()}
+			>
+				<option value="">All kinds</option>
+				<option value="builtin">Built-in</option>
+				<option value="skill">Skill-based</option>
+			</select>
+			<label class="flex cursor-pointer items-center gap-1.5 text-xs">
+				<input
+					type="checkbox"
+					class="toggle toggle-xs toggle-error"
+					bind:checked={failuresOnly}
+					onchange={() => void load()}
+				/>
+				<span>Failures only</span>
+			</label>
+		</div>
 
 	{#if !result}
 		<div class="flex justify-center py-20">
@@ -210,4 +211,5 @@
 			</ContentPanel>
 		{/if}
 	{/if}
+	</div>
 </div>

@@ -144,10 +144,9 @@ export async function runResearchLoop(
 
 	try {
 		// ─────────── PHASE 1: PLAN ───────────
-		// Pre-seeded plan path: when the research row already has sub-questions (the user
-		// approved them via the propose_research_plan tool in the chat sidebar), skip the
-		// planner LLM call and use the seed directly. Records a 'plan' step with
-		// phase='preapproved' so the trace UI is honest about where the plan came from.
+		// Pre-seeded plan path: when the research row already has sub-questions (e.g. the user
+		// approved a plan artifact via request_plan_approval and the runner agent seeded the
+		// research row), skip the planner LLM call and use the seed directly.
 		let subQuestions: string[]
 		if (Array.isArray(r.plan) && r.plan.length > 0) {
 			subQuestions = r.plan

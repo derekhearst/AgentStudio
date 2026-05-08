@@ -75,16 +75,8 @@ export const chatRuns = pgTable(
 		streamBlocks: jsonb('stream_blocks').$type<StreamBlock[]>().notNull().default([]),
 		currentRound: integer('current_round').notNull().default(0),
 		nextEventSeq: integer('next_event_seq').notNull().default(0),
-		// Wave 2 #11 phase 1 — optional task linkage. Set when a run is the materialization of a
-		// planned task (post-orchestrator-emits-tasks integration in phase 2). Foreign keys point
-		// at tasks/task_attempts; declared by-name to avoid a circular import (tasks.schema also
-		// references runs).
-		taskId: uuid('task_id'),
-		taskAttemptId: uuid('task_attempt_id'),
 		// Wave 3 #14 phase 2 — when true, the runtime spawns an evaluator child run after the
-		// generator finishes. Evaluator's verdict gates whether the originating task can complete
-		// (Phase 4) or whether to spawn a re-plan retry (Phase 3). Default false so existing chats
-		// have no behavior change.
+		// generator finishes. Default false so existing chats have no behavior change.
 		evalRequired: boolean('eval_required').notNull().default(false),
 		// How many evaluator attempts have already happened for this run — incremented when a
 		// retry is spawned to prevent infinite re-plan loops.
@@ -101,8 +93,6 @@ export const chatRuns = pgTable(
 		agentIdx: index('chat_runs_agent_idx').on(table.agentId),
 		stateIdx: index('chat_runs_state_idx').on(table.state),
 		updatedIdx: index('chat_runs_updated_idx').on(table.updatedAt),
-		taskIdx: index('chat_runs_task_idx').on(table.taskId),
-		taskAttemptIdx: index('chat_runs_task_attempt_idx').on(table.taskAttemptId),
 	}),
 )
 

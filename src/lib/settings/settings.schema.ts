@@ -28,7 +28,7 @@ export const appSettings = pgTable('app_settings', {
 			/**
 			 * Tool names whose results should never be trimmed by trimHistoricalToolResults.
 			 * Use for tools whose output the model should be able to refer back to indefinitely
-			 * (e.g. propose_plan, propose_research_plan). Empty / unset = trim by default rules.
+			 * (e.g. present_artifact, request_plan_approval). Empty / unset = trim by default rules.
 			 */
 			preserveToolResults?: string[]
 		}>()

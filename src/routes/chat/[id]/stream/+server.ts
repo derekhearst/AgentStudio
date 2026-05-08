@@ -323,7 +323,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
 				'',
 				'Tool surface (deferred loading):',
-				'- A small core (web_search, ask_user, propose_plan, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
+				'- A small core (web_search, ask_user, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
 				'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
 				"- Don't search speculatively. Match what the user actually asked for.",
 				'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
@@ -339,7 +339,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
 				'',
 				'Tool surface (deferred loading):',
-				'- A small core (web_search, propose_plan, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
+				'- A small core (web_search, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
 			].join('\n'),
 		})
 	}

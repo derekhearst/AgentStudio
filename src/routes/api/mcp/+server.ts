@@ -87,8 +87,8 @@ const toolDescriptions: Record<ToolName, string> = {
 	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox. Idempotent (fetch-if-present). Refuses repos the user has not connected.',
 	git_log: 'Show recent commits with author/date/subject (read-only). Worktree mode only.',
 	git_diff: 'Show diff vs HEAD or a ref, optionally staged or path-scoped (read-only). Worktree mode only.',
-	propose_plan: 'Propose a structured execution plan to the user with ordered steps, risks, and rollback. Required in plan mode.',
-	propose_research_plan: 'Propose a Deep Research plan (sub-questions for the user to approve in the sidebar). On approve, a background research run produces a cited report.',
+	present_artifact: 'Surface an artifact in the chat as a focused inline card (plan/todo/document/data).',
+	request_plan_approval: 'Mandatory-approval handoff: ask the user to approve a plan artifact and switch the conversation to an implementer agent.',
 	search_tools: 'Search the tool registry by free-text query and load matching tools into the model surface for the next round.',
 	run_code: 'Run a JavaScript program in the sandbox; available tools are exposed as `await tools.<name>(args)`. Gated by the global Programmatic Tool Calling setting.',
 }

@@ -158,13 +158,11 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 	const startedAt = Date.now()
 	let success = true
 	try {
-		let result: { conversationId: string; runId?: string } | { conversationId: string | null; researchId?: string; jobId?: string; mode?: string } | { mode: 'maintenance'; summary: string; conversationId: null } | { mode: 'code'; taskId: string; conversationId: null }
+		let result: { conversationId: string; runId?: string } | { conversationId: string | null; researchId?: string; jobId?: string; mode?: string } | { mode: 'maintenance'; summary: string; conversationId: null }
 		if (automation.mode === 'research') {
 			result = await runResearchModeAutomation(automation)
 		} else if (automation.mode === 'maintenance') {
 			result = await runMaintenanceModeAutomation(automation, now)
-		} else if (automation.mode === 'code') {
-			result = await runCodeModeAutomation(automation)
 		} else {
 			result = await runAutomation(automation, now)
 		}
@@ -338,60 +336,6 @@ async function runResearchModeAutomation(automation: typeof automations.$inferSe
 }
 
 /**
- * Wave 5 #21 phase 4 finish — code-mode dispatch.
- *
- * Creates a task linked to the automation's repository so the task runner provisions a
- * per-attempt worktree (via #19 P2 finish: `provisionRepoBackedWorkspace`) before the
- * agent loop begins. The agent operates inside the cloned mirror, can call
- * `prepare_commit` to inspect changes, and — when run interactively from `/tasks/[id]` —
- * can call `push_branch` / `create_pull_request` (mandatory operator approval).
- *
- * Code-mode automations never auto-push: the destructive tools refuse outright in
- * non-chat_stream contexts (defense in depth on top of the mandatory-approval set). The
- * automation's job is to QUEUE the work; an operator opens the resulting task and
- * either re-runs interactively or reviews the agent's prepared commit and pushes
- * manually.
- *
- * Failure modes:
- *   - automation has no `repositoryId` → return a marker with `taskId: null` and log a
- *     warning; the operator either sets the repo on the automation or switches modes.
- *   - automation has no `agentId` → same: a coding agent is required.
- *   - repository_id stale (repo deleted post-create) → the task runner detects this at
- *     dispatch time and falls back to the agent's legacy workspace with a warning. We
- *     don't validate ownership here because cross-user automations aren't possible
- *     (the FK is via createdBy on the automation row).
- */
-async function runCodeModeAutomation(
-	automation: typeof automations.$inferSelect,
-): Promise<{ mode: 'code'; taskId: string; conversationId: null } | { mode: 'code'; taskId: null; conversationId: null }> {
-	if (!automation.agentId) {
-		logger.warn('[automations] code mode automation has no agentId; skipping', { automationId: automation.id })
-		return { mode: 'code', taskId: null, conversationId: null }
-	}
-	if (!automation.repositoryId) {
-		logger.warn('[automations] code mode automation has no repositoryId; skipping', { automationId: automation.id })
-		return { mode: 'code', taskId: null, conversationId: null }
-	}
-
-	const { createTask } = await import('$lib/tasks/tasks.server')
-	const task = await createTask({
-		title: automation.description.slice(0, 200),
-		spec: automation.prompt,
-		status: 'pending',
-		ownerAgentId: automation.agentId,
-		repositoryId: automation.repositoryId,
-		metadata: {
-			source: 'automation_code',
-			automationId: automation.id,
-			mode: 'code',
-		},
-		createdBy: automation.userId,
-	})
-
-	return { mode: 'code', taskId: task.id, conversationId: null }
-}
-
-/**
  * Wave 5 #21 phase 4 — maintenance-mode dispatch.
  *
  * Maintenance ticks are the "scheduled hygiene that doesn't belong in chat history" mode:
@@ -437,7 +381,6 @@ async function runMaintenanceModeAutomation(
 		summary: fullSummary.slice(0, 500),
 		outputTarget: automation.outputTarget,
 		routedTo: route.target,
-		taskId: 'taskId' in route ? route.taskId : null,
 		artifactId: 'artifactId' in route ? route.artifactId : null,
 		reviewItemId: 'reviewItemId' in route ? route.reviewItemId : null,
 	}
@@ -449,7 +392,6 @@ async function runMaintenanceModeAutomation(
  * Each `outputTarget` enum value gets a destination:
  *   - `chat_session` (default): assistant message in the automation's conversation
  *   - `review_inbox`: `automation_summary` review item (deduped per-hour by automation id)
- *   - `task`: new task with the summary as the spec (operator triages it like any other)
  *   - `artifact`: new versioned artifact in the conversation's bound project (skipped + logged
  *     with a clear marker if no project is bound, since artifacts require one)
  *
@@ -464,7 +406,6 @@ async function routeMaintenanceOutput(
 ): Promise<
 	| { target: 'chat_session'; conversationId: string }
 	| { target: 'review_inbox'; reviewItemId: string | null }
-	| { target: 'task'; taskId: string }
 	| { target: 'artifact'; artifactId: string }
 	| { target: 'artifact_skipped'; reason: string }
 	| { target: 'none' }
@@ -488,23 +429,6 @@ async function routeMaintenanceOutput(
 			dedupeKey: `automation_summary:${automation.id}:${now.toISOString().slice(0, 13)}`,
 		})
 		return { target: 'review_inbox', reviewItemId: item?.id ?? null }
-	}
-
-	if (automation.outputTarget === 'task') {
-		const { createTask } = await import('$lib/tasks/tasks.server')
-		const task = await createTask({
-			title: automation.description.slice(0, 200),
-			spec: trimmed.slice(0, 8000),
-			status: 'pending',
-			ownerAgentId: automation.agentId ?? null,
-			metadata: {
-				source: 'automation_maintenance',
-				automationId: automation.id,
-				mode: 'maintenance',
-			},
-			createdBy: automation.userId,
-		})
-		return { target: 'task', taskId: task.id }
 	}
 
 	if (automation.outputTarget === 'artifact') {

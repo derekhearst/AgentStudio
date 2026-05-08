@@ -266,7 +266,7 @@
 	}
 </script>
 
-<div class="space-y-2">
+<div class="console-input-wrap">
 	<input
 		bind:this={fileInputEl}
 		type="file"
@@ -275,6 +275,28 @@
 		accept="image/*,.pdf,.txt,.csv,.json,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 		onchange={handleFilesSelected}
 	/>
+
+	{#if uploadError}
+		<p class="console-input-error">{uploadError}</p>
+	{/if}
+
+	{#if attachments.length > 0}
+		<div class="console-input-attachments">
+			{#each attachments as attachment (attachment.id)}
+				<span class="console-pill" title={attachment.filename}>
+					<span class="truncate" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{attachment.filename}</span>
+					<span class="ar">{formatBytes(attachment.size)}</span>
+					<button
+						type="button"
+						style="background:transparent;border:0;color:inherit;cursor:pointer;padding:0;font-size:13px;line-height:1;"
+						title="Remove file"
+						aria-label="Remove file"
+						onclick={() => removeAttachment(attachment.id)}
+					>×</button>
+				</span>
+			{/each}
+		</div>
+	{/if}
 
 	<ChatComposer
 		bind:value
@@ -296,29 +318,26 @@
 		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}
 	/>
-
-	{#if uploadError}
-		<p class="px-1 text-xs text-error">{uploadError}</p>
-	{/if}
-
-	{#if attachments.length > 0}
-		<div class="flex flex-wrap gap-2 px-1">
-			{#each attachments as attachment (attachment.id)}
-				<div class="badge badge-outline badge-lg gap-2 bg-base-100">
-					<span class="max-w-44 truncate" title={attachment.filename}>{attachment.filename}</span>
-					<span class="text-base-content/60">{formatBytes(attachment.size)}</span>
-					<button
-						type="button"
-						class="btn btn-ghost btn-xs btn-circle"
-						title="Remove file"
-						aria-label="Remove file"
-						onclick={() => removeAttachment(attachment.id)}
-					>
-						×
-					</button>
-				</div>
-			{/each}
-		</div>
-	{/if}
 </div>
+
+<style>
+	.console-input-wrap {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		flex: 0 0 auto;
+	}
+	.console-input-error {
+		padding: 6px 18px;
+		font-size: 11px;
+		color: var(--color-error);
+		font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
+	}
+	.console-input-attachments {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		padding: 6px 18px 0;
+	}
+</style>
 

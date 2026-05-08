@@ -31,7 +31,7 @@ import { users } from '$lib/auth/auth.schema'
  * so re-enqueueing the same logical work returns the existing row instead of creating a
  * duplicate. The application is responsible for choosing keys (e.g. `mine:conv:${id}`).
  *
- * Foreign keys to runs/tasks/sessions/projects are deliberately omitted at the schema level
+ * Foreign keys to runs/sessions/projects are deliberately omitted at the schema level
  * to avoid cycles — these columns are pointers + the application keeps them consistent.
  */
 
@@ -70,7 +70,6 @@ export const jobs = pgTable(
 		// The application keeps these consistent; deletes in those domains don't cascade here
 		// (jobs are kept for forensic visibility even after the source row is GC'd).
 		runId: uuid('run_id'),
-		taskId: uuid('task_id'),
 		sessionId: uuid('session_id'),
 		projectId: uuid('project_id'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
@@ -84,7 +83,6 @@ export const jobs = pgTable(
 		queueIdx: index('jobs_queue_idx').on(t.queue, t.status),
 		typeIdx: index('jobs_type_idx').on(t.type, t.status),
 		runIdx: index('jobs_run_idx').on(t.runId),
-		taskIdx: index('jobs_task_idx').on(t.taskId),
 		userIdx: index('jobs_user_idx').on(t.userId),
 		// Idempotency — `(type, dedupeKey)` is the natural unique key for enqueue dedupe. NULL
 		// dedupeKey is allowed (multiple times) since most ad-hoc jobs don't need it.

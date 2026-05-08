@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
 
@@ -86,36 +86,29 @@
 
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex items-center justify-between gap-3">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Skills</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						{skills.length} {skills.length === 1 ? 'skill' : 'skills'} — Reusable instruction packages. Summaries auto-load; full bodies and resource files load on demand.
-					</p>
-				</div>
-				<button class="btn btn-ghost btn-sm gap-1" onclick={openImportModal} title="Import a SKILL.md package">
-					<svg xmlns="http://www.w3.org/2000/svg" class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
-					Import
-				</button>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Skills" subtitle={`${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`}>
+		{#snippet actions()}
+			<button class="btn btn-ghost btn-xs gap-1" onclick={openImportModal} title="Import a SKILL.md package">
+				<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+				Import
+			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
 
-	<!-- Search -->
-	<div class="flex shrink-0 items-center gap-2">
-		<input
-			class="input input-bordered input-md flex-1"
-			bind:value={search}
-			oninput={handleSearchInput}
-			placeholder="Search skills..."
-		/>
-	</div>
+	<div class="min-h-0 flex-1 flex flex-col overflow-hidden px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 gap-3">
+		<!-- Search -->
+		<div class="flex shrink-0 items-center gap-2">
+			<input
+				class="input input-bordered input-md flex-1"
+				bind:value={search}
+				oninput={handleSearchInput}
+				placeholder="Search skills..."
+			/>
+		</div>
 
-	<!-- Skill list (scrollable) -->
-	<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">
+		<!-- Skill list (scrollable) -->
+		<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">
 	{#if skills.length === 0}
 		<div class="flex flex-col items-center gap-2 py-16 opacity-50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="size-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -155,6 +148,7 @@
 			{/each}
 		</div>
 	{/if}
+		</div>
 	</div>
 </div>
 

@@ -6,6 +6,7 @@
 	import { getAgent, updateAgentCommand } from '$lib/agents'
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
+	import PageHeader from '$lib/ui/PageHeader.svelte'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
 	type StreamEntry = { conversationId: string; agentId: string; delta: string }
@@ -261,6 +262,29 @@
 	}
 </script>
 
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title={data?.agent.name ?? 'Agent'}
+		crumbs={[{ label: 'Agents', href: '/agents' }]}
+		backHref="/agents"
+		subtitle={data ? `${data.agent.role}` : ''}
+		live={!!liveEntry}
+	>
+		{#snippet chips()}
+			{#if data}
+				<span class="console-chip {data.agent.status === 'active' ? 'is-run' : ''}">{data.agent.status}</span>
+				{#if liveEntry}
+					<span class="console-chip is-run">
+						<span class="pulse-dot"></span>
+						live
+					</span>
+				{/if}
+			{/if}
+		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+
 {#if loading}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
@@ -275,8 +299,6 @@
 	{@const live = liveEntry}
 
 	<section class="space-y-5">
-		<!-- ── Back nav ─────────────────────────────────────────────────── -->
-		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/agents">← All agents</a>
 
 		<!-- ── Hero card ────────────────────────────────────────────────── -->
 		<div class="relative overflow-hidden rounded-2xl border border-base-300 bg-base-100">
@@ -638,6 +660,8 @@
 		</ContentPanel>
 	</section>
 {/if}
+	</div>
+</div>
 
 <style>
 	.shimmer-bar {

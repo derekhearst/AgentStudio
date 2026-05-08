@@ -23,7 +23,7 @@ import { users } from '$lib/auth/auth.schema'
  *   operationalMetrics — sampled point-in-time measurements (queue depth, tool latency,
  *                        retry rates) for the dashboard charts.
  *
- * Cross-domain pointers (runId, taskId, jobId, projectId, artifactId) are declared by-name
+ * Cross-domain pointers (runId, jobId, projectId, artifactId) are declared by-name
  * on reviewItems so the inbox can deep-link without circular schema imports. Application
  * logic enforces ownership at the read boundary; deletes in those domains don't cascade
  * here (review items survive their source row's GC for forensic visibility).
@@ -72,7 +72,6 @@ export const runTraces = pgTable(
 		// chat_run id — declared by-name to avoid a circular import with $lib/runs.
 		runId: uuid('run_id').notNull(),
 		sessionId: uuid('session_id'),
-		taskId: uuid('task_id'),
 		jobId: uuid('job_id'),
 		// Normalized step timeline: array of {seq, kind, name, startedAt, durationMs, success?, payload?}.
 		// The trace viewer renders this directly; runtime appends spans during the loop.
@@ -106,7 +105,6 @@ export const reviewItems = pgTable(
 		// has jobId; artifact_conflict has projectId+artifactId; etc.
 		runId: uuid('run_id'),
 		sessionId: uuid('session_id'),
-		taskId: uuid('task_id'),
 		jobId: uuid('job_id'),
 		projectId: uuid('project_id'),
 		artifactId: uuid('artifact_id'),
@@ -130,7 +128,6 @@ export const reviewItems = pgTable(
 		statusSeverityIdx: index('review_items_status_severity_idx').on(t.status, t.severity),
 		assignedIdx: index('review_items_assigned_idx').on(t.assignedTo),
 		runIdx: index('review_items_run_idx').on(t.runId),
-		taskIdx: index('review_items_task_idx').on(t.taskId),
 		jobIdx: index('review_items_job_idx').on(t.jobId),
 		createdIdx: index('review_items_created_idx').on(t.createdAt),
 	}),

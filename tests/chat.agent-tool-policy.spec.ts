@@ -15,9 +15,14 @@ const MOCK_TOOL = (name: string) => ({ type: 'function' as const, function: { na
 
 const READ_ONLY_ALLOW = [
 	'ask_user',
-	'propose_plan',
-	'enable_capability',
+	'search_tools',
 	'web_search',
+	// Plan/todo authoring + handoff tools — the planner needs to write artifacts.
+	'create_artifact',
+	'edit_artifact',
+	'list_artifacts',
+	'present_artifact',
+	'request_plan_approval',
 	'file_read',
 	'list_directory',
 	'search_files',
@@ -36,7 +41,6 @@ const READ_ONLY_ALLOW = [
 	'get_pull_request',
 	'prepare_commit',
 	'list_projects',
-	'list_artifacts',
 	'read_artifact',
 	'list_automations',
 	'recall_memory',
@@ -71,8 +75,6 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 			MOCK_TOOL('push_branch'),
 			MOCK_TOOL('create_pull_request'),
 			MOCK_TOOL('clone_repository'),
-			MOCK_TOOL('create_artifact'),
-			MOCK_TOOL('edit_artifact'),
 			MOCK_TOOL('create_skill'),
 			MOCK_TOOL('update_agent'),
 			MOCK_TOOL('create_automation'),
@@ -80,7 +82,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		expect(filterToolsByAgentPolicy(tools, policy)).toHaveLength(0)
 	})
 
-	test('readOnly keeps allow-listed tools (web_search, file_read, list_my_repos, prepare_commit, propose_plan)', async () => {
+	test('readOnly keeps allow-listed tools (web_search, file_read, present_artifact, request_plan_approval)', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
 		const tools = [
@@ -98,13 +100,18 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 			MOCK_TOOL('read_skill'),
 			MOCK_TOOL('list_artifacts'),
 			MOCK_TOOL('read_artifact'),
+			MOCK_TOOL('create_artifact'),
+			MOCK_TOOL('edit_artifact'),
+			MOCK_TOOL('present_artifact'),
+			MOCK_TOOL('request_plan_approval'),
 			MOCK_TOOL('list_projects'),
-			MOCK_TOOL('propose_plan'),
 			MOCK_TOOL('ask_user'),
 		]
 		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual(
 			[
 				'ask_user',
+				'create_artifact',
+				'edit_artifact',
 				'file_read',
 				'get_pull_request',
 				'git_status',
@@ -115,9 +122,10 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 				'list_pull_requests',
 				'list_skills',
 				'prepare_commit',
-				'propose_plan',
+				'present_artifact',
 				'read_artifact',
 				'read_skill',
+				'request_plan_approval',
 				'search_files',
 				'web_fetch',
 				'web_search',

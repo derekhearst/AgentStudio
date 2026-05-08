@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { listJobsQuery } from '$lib/jobs/jobs.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Result = Awaited<ReturnType<typeof listJobsQuery>>;
 
@@ -57,45 +58,45 @@
 	}
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Job queue</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						Durable background work — automations, evaluations, mining, etc. Admin only.
-					</p>
-				</div>
-				<div class="flex items-center gap-2">
-					<select class="select select-sm select-bordered text-xs" bind:value={statusFilter} onchange={() => void load()}>
-						{#each STATUSES as s (s)}
-							<option value={s}>{s || 'All statuses'}</option>
-						{/each}
-					</select>
-					<input
-						type="text"
-						class="input input-sm input-bordered w-32 text-xs"
-						placeholder="Type filter…"
-						bind:value={typeFilter}
-						onchange={() => void load()}
-					/>
-					<label class="flex cursor-pointer items-center gap-1.5 text-xs">
-						<input
-							type="checkbox"
-							class="toggle toggle-xs toggle-error"
-							bind:checked={failuresOnly}
-							onchange={() => void load()}
-						/>
-						<span>Failed only</span>
-					</label>
-					<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
-						{loading ? 'Loading…' : 'Refresh'}
-					</button>
-				</div>
-			</div>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title="Job queue"
+		crumbs={[{ label: 'Settings', href: '/settings' }]}
+		backHref="/settings"
+		subtitle="Durable background work · admin only"
+	>
+		{#snippet actions()}
+			<button class="btn btn-ghost btn-xs" type="button" onclick={() => void load()} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
-	</ContentPanel>
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
+
+		<div class="flex flex-wrap items-center gap-2">
+			<select class="select select-xs select-bordered text-xs" bind:value={statusFilter} onchange={() => void load()}>
+				{#each STATUSES as s (s)}
+					<option value={s}>{s || 'All statuses'}</option>
+				{/each}
+			</select>
+			<input
+				type="text"
+				class="input input-xs input-bordered w-32 text-xs"
+				placeholder="Type filter…"
+				bind:value={typeFilter}
+				onchange={() => void load()}
+			/>
+			<label class="flex cursor-pointer items-center gap-1.5 text-xs">
+				<input
+					type="checkbox"
+					class="toggle toggle-xs toggle-error"
+					bind:checked={failuresOnly}
+					onchange={() => void load()}
+				/>
+				<span>Failed only</span>
+			</label>
+		</div>
 
 	{#if !result}
 		<div class="flex justify-center py-20">
@@ -175,12 +176,6 @@
 											<a href="/runs/{job.runId}" class="link link-hover ml-1 font-mono">{job.runId}</a>
 										</p>
 									{/if}
-									{#if job.taskId}
-										<p>
-											<span class="font-semibold uppercase tracking-wide opacity-50">Task:</span>
-											<a href="/tasks/{job.taskId}" class="link link-hover ml-1 font-mono">{job.taskId}</a>
-										</p>
-									{/if}
 									{#if job.error}
 										<div>
 											<p class="font-semibold uppercase tracking-wide text-error opacity-80">Error</p>
@@ -195,4 +190,5 @@
 			</ContentPanel>
 		{/if}
 	{/if}
+	</div>
 </div>

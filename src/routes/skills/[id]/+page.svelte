@@ -15,6 +15,7 @@
 		exportSkillCommand
 	} from '$lib/skills';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	const skillId = $derived(page.params.id ?? '');
 
@@ -237,13 +238,35 @@
 	}
 </script>
 
-<div class="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
-	<!-- Back link -->
-	<a href="/skills" class="btn btn-ghost btn-xs gap-1">
-		<svg xmlns="http://www.w3.org/2000/svg" class="size-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
-		All Skills
-	</a>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title={skill?.name ?? 'Skill'}
+		crumbs={[{ label: 'Skills', href: '/skills' }]}
+		backHref="/skills"
+		subtitle={skill?.description}
+	>
+		{#snippet chips()}
+			{#if skill}
+				{#if isSystemSkill}
+					<span class="console-chip">built-in</span>
+				{/if}
+				{#if !skill.enabled}
+					<span class="console-chip">disabled</span>
+				{/if}
+			{/if}
+		{/snippet}
+		{#snippet actions()}
+			{#if skill}
+				<button class="btn btn-ghost btn-xs gap-1" onclick={openExportModal} title="Export as SKILL.md package" disabled={busy}>
+					<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17V3m0 14-4-4m4 4 4-4M5 21h14"/></svg>
+					Export
+				</button>
+			{/if}
+		{/snippet}
+	</PageHeader>
 
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+	<div class="mx-auto max-w-4xl space-y-4">
 	{#if loading}
 		<div class="flex justify-center py-16"><span class="loading loading-spinner loading-lg"></span></div>
 	{:else if error}
@@ -451,6 +474,8 @@
 			{/if}
 		</ContentPanel>
 	{/if}
+	</div>
+	</div>
 </div>
 
 <!-- Add file dialog -->

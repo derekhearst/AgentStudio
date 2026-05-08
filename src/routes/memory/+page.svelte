@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import {
 		listMemoryWingsQuery,
 		listMemoryRoomsQuery,
@@ -103,15 +104,9 @@
 	<title>Memory Palace · AgentStudio</title>
 </svelte:head>
 
-<div class="flex h-full flex-col gap-4 p-4">
-	<header class="flex items-center justify-between">
-		<div>
-			<h1 class="text-xl font-semibold">Memory Palace</h1>
-			<p class="text-xs text-base-content/60">
-				Hierarchical wings · rooms · closets · drawers, mined from your conversations.
-			</p>
-		</div>
-	</header>
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Memory palace" subtitle="Hierarchical wings · rooms · closets · drawers" />
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 flex flex-col gap-4">
 
 	<!-- Semantic search bar -->
 	<div class="card bg-base-200 p-3">
@@ -258,5 +253,6 @@
 				{/each}
 			</ul>
 		</section>
+	</div>
 	</div>
 </div>

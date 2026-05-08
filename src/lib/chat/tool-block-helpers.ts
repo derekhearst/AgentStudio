@@ -20,24 +20,6 @@ export type AskUserQuestion = {
 	allowFreeformInput?: boolean
 }
 
-export type PlanStep = {
-	title: string
-	detail?: string
-	estimatedDurationMin?: number
-	estimatedCostUsd?: number
-	blastRadius?: 'local' | 'shared' | 'production'
-	reversible?: boolean
-}
-
-export type PlanProposal = {
-	summary: string
-	steps: PlanStep[]
-	risks?: string[]
-	rollback?: string
-	totalEstimatedCostUsd?: number
-	totalEstimatedDurationMin?: number
-}
-
 type ToolBlockLike = {
 	arguments: string
 	result?: string | null
@@ -79,81 +61,40 @@ export function getAskUserQuestionsFromTool(block: ToolBlockLike): AskUserQuesti
 		.filter((row) => row.question.trim().length > 0)
 }
 
-export function getPlanProposalFromTool(block: ToolBlockLike): PlanProposal | null {
-	const args = parseJsonFallback(block.arguments)
-	if (!args || typeof args !== 'object') return null
-	if (typeof args.summary !== 'string' || !Array.isArray(args.steps)) return null
-	const steps: PlanStep[] = (args.steps as Array<Record<string, unknown>>)
-		.map((s) => {
-			if (!s || typeof s !== 'object' || typeof s.title !== 'string') return null
-			const step: PlanStep = { title: s.title }
-			if (typeof s.detail === 'string') step.detail = s.detail
-			if (typeof s.estimatedDurationMin === 'number') step.estimatedDurationMin = s.estimatedDurationMin
-			if (typeof s.estimatedCostUsd === 'number') step.estimatedCostUsd = s.estimatedCostUsd
-			if (s.blastRadius === 'local' || s.blastRadius === 'shared' || s.blastRadius === 'production') {
-				step.blastRadius = s.blastRadius
-			}
-			if (typeof s.reversible === 'boolean') step.reversible = s.reversible
-			return step
-		})
-		.filter((s): s is PlanStep => s !== null)
-	if (steps.length === 0) return null
-	const plan: PlanProposal = { summary: args.summary, steps }
-	if (Array.isArray(args.risks)) plan.risks = args.risks.filter((r): r is string => typeof r === 'string')
-	if (typeof args.rollback === 'string') plan.rollback = args.rollback
-	if (typeof args.totalEstimatedCostUsd === 'number') plan.totalEstimatedCostUsd = args.totalEstimatedCostUsd
-	if (typeof args.totalEstimatedDurationMin === 'number')
-		plan.totalEstimatedDurationMin = args.totalEstimatedDurationMin
-	return plan
-}
-
-export type ResearchPlanProposal = {
-	summary: string
-	subQuestions: string[]
-	rationale?: string
-}
-
-export type ResearchPlanResult = {
-	researchId: string
-	jobId?: string
-	subQuestionCount?: number
+export type ArtifactCardData = {
+	artifactId: string
+	name: string
+	contentType: 'markdown' | 'code' | 'json' | 'yaml' | 'plaintext'
+	versionSeq: number
+	content: string
+	focus: 'plan' | 'todo' | 'document' | 'data' | null
+	note: string | null
 }
 
 /**
- * Parse a `propose_research_plan` tool block. The schema validates `summary` + `subQuestions`,
- * with an optional `rationale`. Returns null if the args are malformed (which is recoverable —
- * the chat UI just won't show the sidebar plan card and the user can ask the agent to retry).
+ * Parse the result payload from a completed `present_artifact` tool call. The executor
+ * loads the artifact's current version content and ships it back so the chat UI can render
+ * an inline ArtifactCard without an extra fetch.
  */
-export function getResearchPlanFromTool(block: ToolBlockLike): ResearchPlanProposal | null {
-	const args = parseJsonFallback(block.arguments)
-	if (!args || typeof args !== 'object') return null
-	if (typeof args.summary !== 'string' || !Array.isArray(args.subQuestions)) return null
-	const subQuestions = (args.subQuestions as unknown[])
-		.filter((q): q is string => typeof q === 'string')
-		.map((q) => q.trim())
-		.filter((q) => q.length > 0)
-	if (subQuestions.length < 1) return null
-	const proposal: ResearchPlanProposal = { summary: args.summary, subQuestions }
-	if (typeof args.rationale === 'string' && args.rationale.trim().length > 0) {
-		proposal.rationale = args.rationale.trim()
-	}
-	return proposal
-}
-
-/**
- * Parse the result payload from a completed `propose_research_plan` tool call. The result
- * carries the researchId so the sidebar can switch to the "running" state and start polling.
- */
-export function getResearchPlanResultFromTool(block: ToolBlockLike): ResearchPlanResult | null {
+export function getArtifactCardFromTool(block: ToolBlockLike): ArtifactCardData | null {
 	if (!block.result) return null
 	const result = parseJsonFallback(block.result)
-	if (!result || typeof result !== 'object') return null
-	const researchId = typeof result.researchId === 'string' ? result.researchId : null
-	if (!researchId) return null
-	const out: ResearchPlanResult = { researchId }
-	if (typeof result.jobId === 'string') out.jobId = result.jobId
-	if (typeof result.subQuestionCount === 'number') out.subQuestionCount = result.subQuestionCount
-	return out
+	const artifactId = typeof result.artifactId === 'string' ? result.artifactId : null
+	const name = typeof result.name === 'string' ? result.name : null
+	const content = typeof result.content === 'string' ? result.content : null
+	const versionSeq = typeof result.versionSeq === 'number' ? result.versionSeq : null
+	if (!artifactId || !name || content === null || versionSeq === null) return null
+	const contentTypeRaw = typeof result.contentType === 'string' ? result.contentType : 'markdown'
+	const contentType: ArtifactCardData['contentType'] =
+		contentTypeRaw === 'code' || contentTypeRaw === 'json' || contentTypeRaw === 'yaml' || contentTypeRaw === 'plaintext'
+			? contentTypeRaw
+			: 'markdown'
+	const focus =
+		result.focus === 'plan' || result.focus === 'todo' || result.focus === 'document' || result.focus === 'data'
+			? result.focus
+			: null
+	const note = typeof result.note === 'string' && result.note.trim().length > 0 ? result.note : null
+	return { artifactId, name, contentType, versionSeq, content, focus, note }
 }
 
 export function getAskUserAnswersFromTool(block: ToolBlockLike): Record<string, string> | null {

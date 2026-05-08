@@ -9,6 +9,7 @@
 		softDeleteArtifactCommand,
 	} from '$lib/projects/projects.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getProjectByIdQuery>>>;
 
@@ -90,6 +91,24 @@
 	}
 </script>
 
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader
+		title={detail?.project.name ?? 'Project'}
+		crumbs={[{ label: 'Projects', href: '/projects' }]}
+		backHref="/projects"
+		subtitle={detail ? `/${detail.project.slug} · ${detail.project.kind}` : ''}
+	>
+		{#snippet actions()}
+			{#if detail}
+				<button class="btn btn-xs btn-primary" type="button" onclick={() => (formOpen = !formOpen)}>
+					{formOpen ? 'Cancel' : '+ New artifact'}
+				</button>
+			{/if}
+		{/snippet}
+	</PageHeader>
+
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
+
 {#if loading}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
@@ -99,21 +118,15 @@
 {:else}
 	{@const p = detail.project}
 	<section class="space-y-3 sm:space-y-4">
-		<a class="btn btn-sm btn-ghost -ml-1 w-fit" href="/projects">← All projects</a>
 
 		<ContentPanel>
 			{#snippet header()}
 				<div class="flex flex-1 flex-wrap items-start justify-between gap-2">
 					<div class="min-w-0 flex-1">
-						<h1 class="text-lg font-bold leading-tight sm:text-2xl">{p.name}</h1>
-						<p class="mt-0.5 font-mono text-xs text-base-content/55">/{p.slug} · {p.kind}</p>
 						{#if p.description}
-							<p class="mt-1 text-sm text-base-content/70">{p.description}</p>
+							<p class="text-sm text-base-content/70">{p.description}</p>
 						{/if}
 					</div>
-					<button class="btn btn-sm btn-primary" type="button" onclick={() => (formOpen = !formOpen)}>
-						{formOpen ? 'Cancel' : '+ New artifact'}
-					</button>
 				</div>
 			{/snippet}
 
@@ -199,3 +212,5 @@
 		</ContentPanel>
 	</section>
 {/if}
+	</div>
+</div>

@@ -6,7 +6,7 @@
 		listRecentArtifactsQuery,
 		type ArtifactFeedItem,
 	} from '$lib/artifacts/artifacts-feed.remote';
-	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { artifactDrawer } from '$lib/artifacts/artifact-drawer.svelte';
 
 	type FeedType = 'all' | 'research' | 'image' | 'document';
@@ -87,20 +87,11 @@
 	];
 </script>
 
-<div class="flex h-full min-h-0 flex-col space-y-3 sm:space-y-4">
-	<ContentPanel>
-		{#snippet header()}
-			<div class="flex flex-1 flex-wrap items-center justify-between gap-2">
-				<div>
-					<h1 class="text-xl font-bold sm:text-3xl">Artifacts</h1>
-					<p class="text-xs text-base-content/70 sm:text-sm">
-						Everything the agent has produced for you — research reports, generated images, and project documents.
-					</p>
-				</div>
-			</div>
-		{/snippet}
+<div class="flex h-full min-h-0 flex-col">
+	<PageHeader title="Artifacts" subtitle="Research reports, generated images, and project documents" />
 
-		<div class="mt-3 flex flex-wrap gap-1.5">
+	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
+		<div class="flex flex-wrap gap-1.5">
 			{#each FILTERS as f}
 				<button
 					type="button"
@@ -112,7 +103,6 @@
 				</button>
 			{/each}
 		</div>
-	</ContentPanel>
 
 	{#if loading}
 		<div class="flex justify-center py-20">
@@ -213,5 +203,6 @@
 			{/each}
 		</ul>
 	{/if}
+	</div>
 </div>
 

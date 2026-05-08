@@ -193,7 +193,6 @@ export type RecordPullRequestInput = {
 	headBranch: string
 	baseBranch: string
 	status?: PullRequestStatus
-	taskId?: string | null
 	runId?: string | null
 	createdBy?: string | null
 	providerUrl?: string | null
@@ -216,7 +215,6 @@ export async function recordPullRequest(input: RecordPullRequestInput): Promise<
 			headBranch: input.headBranch,
 			baseBranch: input.baseBranch,
 			status: input.status ?? 'draft',
-			taskId: input.taskId ?? null,
 			runId: input.runId ?? null,
 			createdBy: input.createdBy ?? null,
 			providerUrl: input.providerUrl ?? null,
@@ -300,7 +298,6 @@ export async function listChecksForPullRequest(prId: string) {
 export async function recordBranch(input: {
 	repositoryId: string
 	name: string
-	taskId?: string | null
 	createdByRunId?: string | null
 	headSha?: string | null
 	isDefault?: boolean
@@ -311,7 +308,6 @@ export async function recordBranch(input: {
 		.values({
 			repositoryId: input.repositoryId,
 			name: input.name,
-			taskId: input.taskId ?? null,
 			createdByRunId: input.createdByRunId ?? null,
 			headSha: input.headSha ?? null,
 			isDefault: input.isDefault ?? false,
