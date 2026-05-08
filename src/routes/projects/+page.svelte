@@ -14,6 +14,8 @@
 		listAzureImportCandidatesQuery,
 	} from '$lib/projects/projects.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import ConnectionsPanel from '$lib/projects/components/ConnectionsPanel.svelte';
+	import ProjectGridItem from '$lib/projects/components/ProjectGridItem.svelte';
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number];
 	type Overview = Awaited<ReturnType<typeof getProjectsOverviewQuery>>;
@@ -47,11 +49,10 @@
 	let azureFilter = $state('');
 
 	const errorParam = $derived(page.url.searchParams.get('error'));
+	// Used by the Create modal tabs to gate the GitHub/Azure import UIs. The visual rendering
+	// of connection status itself lives in <ConnectionsPanel>.
 	const githubConnection = $derived(
 		overview?.connections.find((c) => c.provider === 'github' && c.status === 'active') ?? null,
-	);
-	const githubRevoked = $derived(
-		overview?.connections.find((c) => c.provider === 'github' && c.status !== 'active') ?? null,
 	);
 	const azureConnections = $derived(
 		overview?.connections.filter((c) => c.provider === 'azure_devops' && c.status === 'active') ?? [],
@@ -261,25 +262,6 @@
 		}
 	}
 
-	function fmtDate(d: Date | string) {
-		return new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-	}
-
-	function kindTone(kind: string): string {
-		switch (kind) {
-			case 'code': return 'badge-info';
-			case 'research': return 'badge-secondary';
-			case 'documentation': return 'badge-warning';
-			case 'efoil': return 'badge-primary';
-			default: return 'badge-ghost';
-		}
-	}
-
-	function repoBadge(repoKind: string) {
-		if (repoKind === 'local') return { tone: 'badge-ghost', label: 'local' };
-		if (repoKind === 'imported') return { tone: 'badge-success', label: 'imported' };
-		return null;
-	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
@@ -300,80 +282,11 @@
 		{/if}
 
 		<!-- ── Connections ──────────────────────────────────────────────── -->
-		<div class="grid gap-3 sm:grid-cols-2">
-			<div class="rounded-lg border border-base-300 bg-base-100 p-4">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="flex items-center gap-3">
-						<div class="text-2xl">⚡</div>
-						<div>
-							<div class="font-semibold">GitHub</div>
-							{#if githubConnection}
-								<div class="text-sm opacity-70">
-									Connected as <code>{githubConnection.providerAccount}</code>
-									<span class="badge badge-success badge-xs ml-2">active</span>
-								</div>
-							{:else if githubRevoked}
-								<div class="text-sm opacity-70">
-									Previously connected as <code>{githubRevoked.providerAccount}</code>
-									<span class="badge badge-error badge-xs ml-2">{githubRevoked.status}</span>
-								</div>
-							{:else}
-								<div class="text-sm opacity-70">Not connected.</div>
-							{/if}
-						</div>
-					</div>
-					<div class="flex gap-2">
-						{#if !overview?.githubConfigured && !githubConnection}
-							<span class="badge badge-warning badge-sm" title="Set GITHUB_OAUTH_CLIENT_ID + GITHUB_OAUTH_CLIENT_SECRET in env">
-								Not configured
-							</span>
-						{:else if githubConnection}
-							<a class="btn btn-outline btn-xs" href="/source-control/github/connect">Reconnect</a>
-							<button class="btn btn-error btn-outline btn-xs" type="button" onclick={disconnectGithub}>
-								Disconnect
-							</button>
-						{:else}
-							<a class="btn btn-primary btn-xs" href="/source-control/github/connect">Connect</a>
-						{/if}
-					</div>
-				</div>
-			</div>
-
-			<div class="rounded-lg border border-base-300 bg-base-100 p-4">
-				<div class="flex flex-wrap items-center justify-between gap-3">
-					<div class="flex items-center gap-3">
-						<div class="text-2xl">🔷</div>
-						<div>
-							<div class="font-semibold">Azure DevOps</div>
-							{#if azureConnections.length > 0}
-								<div class="text-sm opacity-70">
-									Connected to {azureConnections.length} {azureConnections.length === 1 ? 'org' : 'orgs'}:
-									{#each azureConnections as c, i (c.id)}
-										<code>{c.providerAccount}</code>{i < azureConnections.length - 1 ? ', ' : ''}
-									{/each}
-								</div>
-							{:else}
-								<div class="text-sm opacity-70">Not connected.</div>
-							{/if}
-						</div>
-					</div>
-					<div class="flex gap-2">
-						{#if !overview?.azureConfigured && azureConnections.length === 0}
-							<span class="badge badge-warning badge-sm" title="Set AZURE_DEVOPS_OAUTH_CLIENT_ID + AZURE_DEVOPS_OAUTH_CLIENT_SECRET in env">
-								Not configured
-							</span>
-						{:else if azureConnections.length > 0}
-							<a class="btn btn-outline btn-xs" href="/source-control/azure-devops/connect">Reconnect</a>
-							<button class="btn btn-error btn-outline btn-xs" type="button" onclick={disconnectAzure}>
-								Disconnect
-							</button>
-						{:else}
-							<a class="btn btn-primary btn-xs" href="/source-control/azure-devops/connect">Connect</a>
-						{/if}
-					</div>
-				</div>
-			</div>
-		</div>
+		<ConnectionsPanel
+			{overview}
+			onDisconnectGithub={disconnectGithub}
+			onDisconnectAzure={disconnectAzure}
+		/>
 
 		{#if loading}
 			<div class="flex justify-center py-20">
@@ -388,35 +301,7 @@
 		{:else}
 			<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 				{#each projects as project (project.id)}
-					{@const rb = repoBadge(project.repoKind)}
-					<div class="group flex flex-col gap-2 rounded-xl border border-base-300/60 bg-base-100 p-3 transition-colors hover:bg-base-200/40">
-						<div class="flex items-start justify-between gap-2">
-							<a href="/projects/{project.id}" class="min-w-0 flex-1">
-								<p class="line-clamp-1 font-semibold leading-tight">{project.name}</p>
-								<p class="font-mono text-[10px] text-base-content/50">/{project.slug}</p>
-							</a>
-							<div class="flex flex-col items-end gap-1">
-								<span class="badge badge-xs {kindTone(project.kind)}">{project.kind}</span>
-								{#if rb}
-									<span class="badge badge-xs {rb.tone}">{rb.label}</span>
-								{/if}
-							</div>
-						</div>
-						{#if project.description}
-							<p class="line-clamp-2 text-xs text-base-content/65">{project.description}</p>
-						{/if}
-						<div class="flex items-center justify-between text-xs text-base-content/45">
-							<span>Updated {fmtDate(project.updatedAt)}</span>
-							<button
-								class="btn btn-xs btn-ghost text-error opacity-50 hover:opacity-100"
-								type="button"
-								onclick={() => handleDelete(project)}
-								aria-label="Delete project"
-							>
-								Delete
-							</button>
-						</div>
-					</div>
+					<ProjectGridItem {project} onDelete={handleDelete} />
 				{/each}
 			</div>
 		{/if}
