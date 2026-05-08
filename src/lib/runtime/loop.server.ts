@@ -1,9 +1,4 @@
 import { streamChat } from '$lib/llm/chat.server'
-import { executeTool, toolSchemas, type ToolCallWithContext, type ToolName } from '$lib/tools/tools.server'
-import { trimToolResult } from '$lib/chat/chat'
-import { trimToolResultWithOffload } from '$lib/tools/output-offload.server'
-import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
-import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import { setRunRound } from '$lib/runs/blocks.server'
 import { emitHook } from '$lib/hooks'
 import type {
@@ -12,9 +7,14 @@ import type {
 	RunChatLoopResult,
 	ToolDefinition,
 } from './types'
-import { logger } from '$lib/observability/logger'
 import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
 import { closeRunTrace, markLastToolForCaching, openRunTrace } from './trace-helpers'
+import {
+	checkToolApproval,
+	handleAskUserCall,
+	handleNormalToolCall,
+	handleRunSubagentCall,
+} from './tool-handlers.server'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -225,163 +225,19 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		// Execute each tool call serially.
 		const toolResults: Array<{ call_id: string; name: string; result: string }> = []
 		for (const tc of plannedToolCalls) {
-			const parsedArgs = tc.parsedArgs
-
-			const requiresApproval =
-				input.approvalRequiredTools.has('*') || input.approvalRequiredTools.has(tc.name)
-
-			if (requiresApproval) {
-				const approvalToken = crypto.randomUUID()
-				// Bundle the pendingApprovals enqueue + state transition in a single transaction
-				// (inside enqueuePendingApproval) so a crash between the two never leaves the run
-				// in `running` state with an invisible pending approval, or vice versa.
-				await enqueuePendingApproval(
-					session.runId,
-					{
-						token: approvalToken,
-						toolName: tc.name,
-						args: parsedArgs,
-						requestedAt: new Date().toISOString(),
-					},
-					{
-						state: 'waiting_tool_approval',
-						label: `Waiting for approval: ${tc.name}`,
-					},
-				)
-				await session.emit('tool_pending', {
-					token: approvalToken,
-					id: tc.id,
-					name: tc.name,
-					arguments: tc.arguments,
-				})
-				const approved = await awaitApprovalDecision(session.runId, approvalToken)
-				await session.updateRun({
-					state: 'running',
-					label: approved ? `Executing ${tc.name}` : `Denied ${tc.name}`,
-					heartbeat: true,
-				})
-				if (!approved) {
-					await session.emit('tool_denied', { id: tc.id, name: tc.name })
-					allToolCalls.push({
-						name: tc.name,
-						arguments: parsedArgs,
-						result: { denied: true },
-						executionMs: 0,
-					})
-					toolResults.push({
-						call_id: tc.id,
-						name: tc.name,
-						result: 'Tool execution was denied by user.',
-					})
-					continue
-				}
+			// ── Approval gate (no-op when no approval required).
+			const approval = await checkToolApproval(session, tc, input.approvalRequiredTools)
+			if (approval.kind === 'denied') {
+				toolResults.push(approval.outcome.toolResult)
+				allToolCalls.push(approval.outcome.allToolCallsEntry)
+				continue
 			}
 
-			// ── ask_user (orchestrator-only)
+			// ── ask_user (orchestrator-only). Self-contained: emits + pushes block inside.
 			if (tc.name === 'ask_user') {
-				if (!input.isOrchestrator) {
-					const resultStr = trimToolResult(
-						tc.name,
-						JSON.stringify({
-							error:
-								'Agents cannot ask users directly. Return this question to the orchestrator to gather user input, then resume the agent with those answers.',
-						}),
-					)
-					await session.emit('tool_result', {
-						id: tc.id,
-						name: tc.name,
-						success: false,
-						executionMs: 0,
-						result: resultStr,
-					})
-					toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-					allToolCalls.push({
-						name: tc.name,
-						arguments: parsedArgs,
-						result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-						executionMs: 0,
-					})
-					await session.pushBlock({
-						kind: 'tool',
-						name: tc.name,
-						arguments: parsedArgs,
-						result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-						success: false,
-						executionMs: 0,
-					})
-					continue
-				}
-
-				let askInput: ReturnType<typeof toolSchemas.ask_user.parse>
-				try {
-					askInput = toolSchemas.ask_user.parse(parsedArgs)
-				} catch {
-					const errorMessage = 'ask_user received invalid arguments.'
-					const resultStr = trimToolResult(tc.name, JSON.stringify({ error: errorMessage }))
-					await session.emit('tool_result', {
-						id: tc.id,
-						name: tc.name,
-						success: false,
-						executionMs: 0,
-						result: resultStr,
-					})
-					toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-					allToolCalls.push({
-						name: tc.name,
-						arguments: parsedArgs,
-						result: { error: errorMessage },
-						executionMs: 0,
-					})
-					continue
-				}
-
-				const questionToken = crypto.randomUUID()
-				await enqueuePendingQuestion(
-					session.runId,
-					{
-						token: questionToken,
-						questions: askInput.questions,
-						requestedAt: new Date().toISOString(),
-					},
-					{ state: 'waiting_user_input', label: 'Waiting for user input' },
-				)
-				await session.emit('ask_user', {
-					token: questionToken,
-					id: tc.id,
-					name: tc.name,
-					questions: askInput.questions,
-				})
-				const answers = await awaitQuestionAnswers(session.runId, questionToken)
-				await session.updateRun({ state: 'running', label: 'User input received', heartbeat: true })
-
-				const questionResult = {
-					questions: askInput.questions,
-					answers,
-					timedOut: answers === null,
-				}
-				const resultStr = trimToolResult(tc.name, JSON.stringify(questionResult))
-				await session.emit('tool_result', {
-					id: tc.id,
-					name: tc.name,
-					success: answers !== null,
-					executionMs: 0,
-					result: resultStr,
-				})
-				toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-				allToolCalls.push({
-					name: tc.name,
-					arguments: parsedArgs,
-					result: questionResult,
-					executionMs: 0,
-				})
-				await session.pushBlock({
-					kind: 'tool',
-					name: tc.name,
-					arguments: parsedArgs,
-					result: questionResult,
-					success: answers !== null,
-					executionMs: 0,
-				})
+				const outcome = await handleAskUserCall(session, tc, input.isOrchestrator)
+				toolResults.push(outcome.toolResult)
+				allToolCalls.push(outcome.allToolCallsEntry)
 				continue
 			}
 
@@ -392,182 +248,36 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			})
 			await session.emit('tool_call', { id: tc.id, name: tc.name, arguments: tc.arguments })
 
-			// ── run_subagent (orchestrator-only — delegates via injected callback)
+			// ── run_subagent (orchestrator-only — delegates via injected callback). Returns
+			// null when the args are malformed so the loop falls through to normal dispatch.
 			if (tc.name === 'run_subagent' && input.isOrchestrator && input.spawnSubagent) {
-				const subagentArgs = parsedArgs as { task?: string; context?: string; agentId?: string }
-				if (subagentArgs.agentId && subagentArgs.task) {
-					try {
-						const subResult = await input.spawnSubagent({
-							agentId: subagentArgs.agentId,
-							task: subagentArgs.task,
-							context: subagentArgs.context,
-						})
-						const resultStr = trimToolResult(
-							tc.name,
-							JSON.stringify({
-								success: true,
-								agentConversationId: subResult.conversationId,
-								result: subResult.result.slice(0, 4000),
-							}),
-						)
-						toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-						await session.emit('tool_result', {
-							id: tc.id,
-							name: tc.name,
-							success: true,
-							executionMs: 0,
-							result: resultStr,
-						})
-						allToolCalls.push({
-							name: tc.name,
-							arguments: parsedArgs,
-							result: {
-								agentConversationId: subResult.conversationId,
-								result: subResult.result.slice(0, 4000),
-							},
-							executionMs: 0,
-						})
-						await session.pushBlock({
-							kind: 'tool',
-							name: tc.name,
-							arguments: parsedArgs,
-							result: {
-								agentConversationId: subResult.conversationId,
-								result: subResult.result.slice(0, 4000),
-							},
-							success: true,
-							executionMs: 0,
-						})
-					} catch (error) {
-						const errorStr =
-							error instanceof Error ? error.message : 'Sub-agent execution failed'
-						toolResults.push({ call_id: tc.id, name: tc.name, result: `Error: ${errorStr}` })
-						await session.emit('tool_result', {
-							id: tc.id,
-							name: tc.name,
-							success: false,
-							executionMs: 0,
-							result: errorStr,
-						})
-						allToolCalls.push({
-							name: tc.name,
-							arguments: parsedArgs,
-							result: { error: errorStr },
-							executionMs: 0,
-						})
-						await session.pushBlock({
-							kind: 'tool',
-							name: tc.name,
-							arguments: parsedArgs,
-							result: { error: errorStr },
-							success: false,
-							executionMs: 0,
-						})
-					}
+				const subOutcome = await handleRunSubagentCall(session, tc, input.spawnSubagent)
+				if (subOutcome) {
+					toolResults.push(subOutcome.toolResult)
+					allToolCalls.push(subOutcome.allToolCallsEntry)
 					continue
 				}
 			}
 
 			// ── normal tool dispatch
-			const toolCall: ToolCallWithContext = {
-				name: tc.name as ToolName,
-				arguments: parsedArgs,
-				conversationId: input.conversationId,
-				messageId: null,
-			}
-
-			// Wave 3 #13 phase 1 — `before_tool` hook. Fail-isolated.
-			void emitHook('before_tool', {
-				runId: session.runId,
-				conversationId: input.conversationId,
-				userId: input.userId,
-				agentId: input.agentId ?? null,
-				toolName: tc.name,
-				args: parsedArgs,
-			})
-
-			const toolResult = await executeTool(toolCall, input.userId, session.runId, {
-				persistentKey: input.persistentKey,
-				worktree: input.worktree,
-				projectId: input.projectId,
-				runtime: {
-					approvalRequiredTools: input.approvalRequiredTools,
-					currentToolNames: () => tools.map((t) => t.function.name),
+			const outcome = await handleNormalToolCall(
+				{
 					session,
+					userId: input.userId,
+					conversationId: input.conversationId,
+					agentId: input.agentId ?? null,
+					persistentKey: input.persistentKey,
+					worktree: input.worktree,
+					projectId: input.projectId,
+					approvalRequiredTools: input.approvalRequiredTools,
 					isOrchestrator: input.isOrchestrator,
 					loadSearchableTools: input.loadSearchableTools,
+					currentToolNames: () => tools.map((t) => t.function.name),
 				},
-			})
-
-			// Wave 3 #13 phase 1 — `after_tool` hook. Fail-isolated.
-			void emitHook('after_tool', {
-				runId: session.runId,
-				conversationId: input.conversationId,
-				userId: input.userId,
-				agentId: input.agentId ?? null,
-				toolName: tc.name,
-				args: parsedArgs,
-				result: toolResult.success ? toolResult.result : { error: toolResult.error },
-				success: toolResult.success,
-				durationMs: toolResult.executionMs,
-			})
-
-			// Wave 5 #20 phase 2 — record a tool_call span on the run's trace.
-			void (async () => {
-				try {
-					const { appendTraceSpan } = await import('$lib/observability/traces.server')
-					await appendTraceSpan(session.runId, {
-						kind: 'tool_call',
-						startedAt: new Date(Date.now() - toolResult.executionMs).toISOString(),
-						durationMs: toolResult.executionMs,
-						success: toolResult.success,
-						toolName: tc.name,
-					})
-				} catch (err) {
-					logger.warn('[runtime] appendTraceSpan failed (non-fatal)', { err })
-				}
-			})()
-
-			const rawResultStr = toolResult.success
-				? JSON.stringify(toolResult.result)
-				: `Error: ${toolResult.error}`
-			const trimmed = await trimToolResultWithOffload({
-				toolName: tc.name,
-				content: rawResultStr,
-				callId: tc.id,
-				userId: input.userId,
-				runId: session.runId,
-				persistentKey: input.persistentKey,
-				worktree: input.worktree,
-			})
-			const resultStr = trimmed.visible
-
-			toolResults.push({ call_id: tc.id, name: tc.name, result: resultStr })
-			await session.emit('tool_result', {
-				id: tc.id,
-				name: tc.name,
-				success: toolResult.success,
-				executionMs: toolResult.executionMs,
-				result: resultStr,
-				offloadedHandle: trimmed.handle,
-				fullSize: trimmed.fullSize,
-			})
-
-			allToolCalls.push({
-				name: tc.name,
-				arguments: parsedArgs,
-				result: toolResult.success ? toolResult.result : { error: toolResult.error },
-				success: toolResult.success,
-				executionMs: toolResult.executionMs,
-			})
-			await session.pushBlock({
-				kind: 'tool',
-				name: tc.name,
-				arguments: parsedArgs,
-				result: toolResult.success ? toolResult.result : { error: toolResult.error },
-				success: toolResult.success,
-				executionMs: toolResult.executionMs,
-			})
+				tc,
+			)
+			toolResults.push(outcome.toolResult)
+			allToolCalls.push(outcome.allToolCallsEntry)
 		}
 
 		// Append assistant message + tool results for the next round.
