@@ -29,6 +29,8 @@ import {
 	maybeCompactConversation,
 	maybeGenerateTitle,
 	persistAssistantMessage,
+	resolveModelConfig,
+	resolveParentMessage,
 	resolveSkillTopK,
 	trimToolResultsForRun,
 	type CompactionStats,
@@ -80,42 +82,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
-	const selectedModel = body.model?.trim()
-	const routedModel = selectedModel && selectedModel.length > 0 ? selectedModel : currentSettings.defaultModel
-	const reasoningEffort = body.reasoningEffort ?? 'none'
-	const reasoningConfig =
-		reasoningEffort === 'none' ? undefined : { enabled: true, exclude: false, effort: reasoningEffort }
-	const modelSelection = {
-		source: selectedModel ? ('user' as const) : ('settingsDefault' as const),
-		reason: selectedModel ? 'User-selected model' : 'Default model from settings',
+	const { routedModel, reasoningEffort, reasoningConfig, modelSelection } = resolveModelConfig({
+		body,
+		settings: currentSettings,
+	})
+
+	const parentResult = await resolveParentMessage({
+		conversationId: body.conversationId,
+		body,
+		model: routedModel,
+	})
+	if (!parentResult.ok) {
+		return json({ error: parentResult.error }, { status: 400 })
 	}
-	let parentMessageId: string | null = null
-
-	if (!body.regenerate) {
-		if (!body.content || body.content.trim().length === 0) {
-			return json({ error: 'content is required when regenerate=false' }, { status: 400 })
-		}
-
-		const createdUser = await insertMessageWithSequence({
-			conversationId: body.conversationId,
-			role: 'user',
-			content: body.content.trim(),
-			model: routedModel,
-			metadata: {},
-			toolCalls: [],
-			attachments: body.attachments ?? [],
-		})
-
-		parentMessageId = createdUser.id
-	} else {
-		const [lastUser] = await db
-			.select()
-			.from(messages)
-			.where(and(eq(messages.conversationId, body.conversationId), eq(messages.role, 'user')))
-			.orderBy(desc(messages.sequence))
-			.limit(1)
-		parentMessageId = lastUser?.id ?? null
-	}
+	const parentMessageId = parentResult.parentMessageId
 
 	const historyRows = await db
 		.select({ role: messages.role, content: messages.content, attachments: messages.attachments })

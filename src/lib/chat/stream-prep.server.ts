@@ -16,7 +16,7 @@ import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { compactMessages, generateTitle, shouldCompact } from '$lib/chat/chat.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
-import { and, sql } from 'drizzle-orm'
+import { and, desc, sql } from 'drizzle-orm'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
@@ -243,6 +243,94 @@ export async function maybeCompactConversation(input: {
 			compactionModel: result.compactionModel,
 		},
 	}
+}
+
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+export type ResolvedModelConfig = {
+	routedModel: string
+	reasoningEffort: ReasoningEffort
+	reasoningConfig: { enabled: boolean; exclude: boolean; effort: ReasoningEffort } | undefined
+	modelSelection: {
+		source: 'user' | 'settingsDefault'
+		reason: string
+	}
+}
+
+/**
+ * Resolve the effective model + reasoning config for this run from the request
+ * body and the user's settings. The routed model defaults to the per-user
+ * `defaultModel` when the body omits one. Reasoning effort defaults to 'none',
+ * which short-circuits the reasoning config to undefined so we don't ask
+ * non-reasoning models to spend tokens on it.
+ */
+export function resolveModelConfig(input: {
+	body: { model?: string; reasoningEffort?: ReasoningEffort }
+	settings: AppSettings
+}): ResolvedModelConfig {
+	const selectedModel = input.body.model?.trim()
+	const routedModel =
+		selectedModel && selectedModel.length > 0 ? selectedModel : input.settings.defaultModel
+	const reasoningEffort = input.body.reasoningEffort ?? 'none'
+	const reasoningConfig =
+		reasoningEffort === 'none' ? undefined : { enabled: true, exclude: false, effort: reasoningEffort }
+	return {
+		routedModel,
+		reasoningEffort,
+		reasoningConfig,
+		modelSelection: {
+			source: selectedModel ? 'user' : 'settingsDefault',
+			reason: selectedModel ? 'User-selected model' : 'Default model from settings',
+		},
+	}
+}
+
+/**
+ * Resolve the parent message id for the assistant turn and (when not
+ * regenerating) insert the user's message into the conversation.
+ *
+ * - On a fresh user message: inserts the row and returns its id as parent.
+ * - On regenerate: finds the most recent user message in the conversation and
+ *   uses its id as parent.
+ *
+ * Returns `{ parentMessageId: null, error }` for the early-return case where
+ * the body lacks content for a non-regenerate request.
+ */
+export async function resolveParentMessage(input: {
+	conversationId: string
+	body: {
+		regenerate?: boolean
+		content?: string
+		attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
+	}
+	model: string
+}): Promise<
+	| { ok: true; parentMessageId: string | null }
+	| { ok: false; error: string }
+> {
+	if (!input.body.regenerate) {
+		if (!input.body.content || input.body.content.trim().length === 0) {
+			return { ok: false, error: 'content is required when regenerate=false' }
+		}
+		const createdUser = await insertMessageWithSequence({
+			conversationId: input.conversationId,
+			role: 'user',
+			content: input.body.content.trim(),
+			model: input.model,
+			metadata: {},
+			toolCalls: [],
+			attachments: input.body.attachments ?? [],
+		})
+		return { ok: true, parentMessageId: createdUser.id }
+	}
+
+	const [lastUser] = await db
+		.select()
+		.from(messages)
+		.where(and(eq(messages.conversationId, input.conversationId), eq(messages.role, 'user')))
+		.orderBy(desc(messages.sequence))
+		.limit(1)
+	return { ok: true, parentMessageId: lastUser?.id ?? null }
 }
 
 export type AssistantPersistInput = {
