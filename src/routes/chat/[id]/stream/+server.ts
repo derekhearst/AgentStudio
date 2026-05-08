@@ -16,7 +16,10 @@ import {
 	buildApprovalRequiredSet,
 	buildCacheableSystemPromptBlocks,
 	buildMemoryRecallSlot,
+	buildProjectContextSlot,
 	buildSkillSummariesText,
+	buildToolPolicySlot,
+	extractAgentWorkspaceConfig,
 	resolveSkillTopK,
 } from '$lib/chat/stream-prep.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
@@ -215,27 +218,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
-	// Wave 4 #15 phase 2 — project context slot. When the conversation is bound to a
-	// project (via set_project_context), inject the project's name + slug + description so
-	// the agent has continuous awareness of which project is "in scope" without needing to
-	// call list_projects every turn. Priority 80 (between identity at 100 and skills at 70)
-	// so it's high-signal but not above the agent's own role.
-	if (conversation.projectId) {
-		try {
-			const { getProjectById } = await import('$lib/projects/projects.server')
-			const project = await getProjectById(conversation.projectId)
-			if (project && project.userId === user.id) {
-				const description = project.description ? `\nDescription: ${project.description}` : ''
-				contextSlots.push({
-					name: 'project_context',
-					priority: 80,
-					content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWhen using create_artifact, prefer this project's id unless the user specifies otherwise. Use list_artifacts({projectId: "${project.id}"}) to see existing work in this project, and read_artifact before edit_artifact.`,
-				})
-			}
-		} catch (err) {
-			logger.warn('[chat] project context slot lookup failed', { err })
-		}
-	}
+	// Wave 4 #15 phase 2 — project context slot when the conversation is bound to a project.
+	const projectSlot = await buildProjectContextSlot({
+		projectId: conversation.projectId,
+		userId: user.id,
+	})
+	if (projectSlot) contextSlots.push(projectSlot)
 
 	// --- Context Engineering: Orchestrator / Agent Identity ---
 	if (isOrchestrator) {
@@ -261,80 +249,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			logger.warn('[chat] fragment expansion failed, using raw identity content', { err })
 		}
 		contextSlots.push({ name: 'identity', priority: 100, content: identityContent })
-		const config = agent.config as
-			| {
-					allowedTools?: string[]
-					workspace?: {
-						mode?: string
-						key?: string
-						repoPath?: string
-						baseBranch?: string
-						deleteBranchOnCleanup?: boolean
-					}
-			  }
-			| null
-		if (Array.isArray(config?.allowedTools) && config.allowedTools.length > 0) {
-			scopedAgentTools = config.allowedTools
-		}
-		// Phase 2 of #7: opt-in persistent workspace per agent.
-		if (
-			config?.workspace?.mode === 'persistent' &&
-			typeof config.workspace.key === 'string' &&
-			config.workspace.key.length > 0
-		) {
-			persistentKey = config.workspace.key
-		}
-		// Phase 4 of #7: opt-in git-worktree workspace per agent. The agent config supplies
-		// the source repoPath; the worktree itself is created lazily on first tool use via
-		// ensureWorkspace, off a `run/<runId>` branch from `baseBranch` (default: repo HEAD).
-		if (
-			config?.workspace?.mode === 'worktree' &&
-			typeof config.workspace.repoPath === 'string' &&
-			config.workspace.repoPath.length > 0
-		) {
-			worktreeConfig = {
-				repoPath: config.workspace.repoPath,
-				baseBranch: config.workspace.baseBranch,
-				deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
-			}
-		}
+		const workspace = extractAgentWorkspaceConfig(agent.config)
+		scopedAgentTools = workspace.scopedAgentTools
+		persistentKey = workspace.persistentKey
+		worktreeConfig = workspace.worktreeConfig
 	}
 
 	if (currentSettings.systemPrompt?.trim()) {
 		// Reserved for optional future system prompt handling.
 	}
-	if (isOrchestrator) {
-		contextSlots.push({
-			name: 'tool_policy',
-			priority: 90,
-			content: [
-				'Tool usage policy:',
-				'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
-				"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
-				'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
-				'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
-				'',
-				'Tool surface (deferred loading):',
-				'- A small core (web_search, ask_user, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
-				'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
-				"- Don't search speculatively. Match what the user actually asked for.",
-				'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
-			].join('\n'),
-		})
-	} else {
-		contextSlots.push({
-			name: 'tool_policy',
-			priority: 90,
-			content: [
-				'Tool usage policy:',
-				'- You cannot call ask_user directly in agent conversations.',
-				'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
-				'',
-				'Tool surface (deferred loading):',
-				'- A small core (web_search, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
-			].join('\n'),
-		})
-	}
+	contextSlots.push(buildToolPolicySlot(isOrchestrator))
 	if (skillSummariesText) {
 		contextSlots.push({
 			name: 'skills',

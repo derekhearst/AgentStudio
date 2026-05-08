@@ -131,6 +131,127 @@ export async function buildMemoryRecallSlot(input: {
 }
 
 /**
+ * Resolve the project-context slot for a conversation. When the conversation
+ * is bound to a project (via set_project_context), the agent gets a high-
+ * priority slot describing the project so it doesn't have to re-list projects
+ * each turn. Returns null when there's no project, the project doesn't belong
+ * to the user, or the lookup fails.
+ */
+export async function buildProjectContextSlot(input: {
+	projectId: string | null
+	userId: string
+}): Promise<ContextSlot | null> {
+	if (!input.projectId) return null
+	try {
+		const { getProjectById } = await import('$lib/projects/projects.server')
+		const project = await getProjectById(input.projectId)
+		if (!project || project.userId !== input.userId) return null
+		const description = project.description ? `\nDescription: ${project.description}` : ''
+		return {
+			name: 'project_context',
+			priority: 80,
+			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWhen using create_artifact, prefer this project's id unless the user specifies otherwise. Use list_artifacts({projectId: "${project.id}"}) to see existing work in this project, and read_artifact before edit_artifact.`,
+		}
+	} catch (err) {
+		logger.warn('[chat] project context slot lookup failed', { err })
+		return null
+	}
+}
+
+const ORCHESTRATOR_TOOL_POLICY = [
+	'Tool usage policy:',
+	'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
+	"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
+	'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
+	'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
+	'',
+	'Tool surface (deferred loading):',
+	'- A small core (web_search, ask_user, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
+	'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
+	"- Don't search speculatively. Match what the user actually asked for.",
+	'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
+].join('\n')
+
+const AGENT_TOOL_POLICY = [
+	'Tool usage policy:',
+	'- You cannot call ask_user directly in agent conversations.',
+	'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
+	'',
+	'Tool surface (deferred loading):',
+	'- A small core (web_search, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
+].join('\n')
+
+/**
+ * The tool-usage policy slot. Orchestrator agents get the ask_user-encouraging
+ * variant; sub-agents get the variant that tells them they can't ask the user
+ * directly. Priority 90 — high enough to be near the top, below identity and
+ * project context.
+ */
+export function buildToolPolicySlot(isOrchestrator: boolean): ContextSlot {
+	return {
+		name: 'tool_policy',
+		priority: 90,
+		content: isOrchestrator ? ORCHESTRATOR_TOOL_POLICY : AGENT_TOOL_POLICY,
+	}
+}
+
+export type AgentWorkspaceConfig = {
+	/** When the agent has an `allowedTools` whitelist, the runtime restricts the tool surface. */
+	scopedAgentTools: string[] | null
+	/** Phase 2 of #7: opt-in persistent workspace per agent. */
+	persistentKey: string | null
+	/** Phase 4 of #7: opt-in git-worktree workspace per agent. */
+	worktreeConfig: {
+		repoPath: string
+		baseBranch?: string
+		deleteBranchOnCleanup?: boolean
+	} | null
+}
+
+/**
+ * Read the optional workspace + tool policy fields off `agent.config`. Returns
+ * a tuple of nullable values rather than throwing — most agents have none of
+ * these set and the runtime treats them as "not configured".
+ */
+export function extractAgentWorkspaceConfig(agentConfig: unknown): AgentWorkspaceConfig {
+	const config = agentConfig as
+		| {
+				allowedTools?: string[]
+				workspace?: {
+					mode?: string
+					key?: string
+					repoPath?: string
+					baseBranch?: string
+					deleteBranchOnCleanup?: boolean
+				}
+		  }
+		| null
+
+	const scopedAgentTools =
+		Array.isArray(config?.allowedTools) && config.allowedTools.length > 0 ? config.allowedTools : null
+
+	const persistentKey =
+		config?.workspace?.mode === 'persistent' &&
+		typeof config.workspace.key === 'string' &&
+		config.workspace.key.length > 0
+			? config.workspace.key
+			: null
+
+	const worktreeConfig =
+		config?.workspace?.mode === 'worktree' &&
+		typeof config.workspace.repoPath === 'string' &&
+		config.workspace.repoPath.length > 0
+			? {
+					repoPath: config.workspace.repoPath,
+					baseBranch: config.workspace.baseBranch,
+					deleteBranchOnCleanup: config.workspace.deleteBranchOnCleanup,
+				}
+			: null
+
+	return { scopedAgentTools, persistentKey, worktreeConfig }
+}
+
+/**
  * Split the assembled system-prompt slots into stable + volatile blocks for
  * OpenRouter's `cache_control` marker. The stable block carries the marker so
  * its bytes get cached across turns; the volatile block (memory recall, skill
