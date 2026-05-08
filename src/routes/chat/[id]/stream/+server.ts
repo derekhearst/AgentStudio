@@ -11,8 +11,12 @@ import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { listSkillSummaries, listRelevantSkillSummaries } from '$lib/skills/skills.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
+import {
+	buildApprovalRequiredSet,
+	buildSkillSummariesText,
+	resolveSkillTopK,
+} from '$lib/chat/stream-prep.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
@@ -153,44 +157,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 
 	// --- Context Engineering: Unified System Prompt ---
-	const toolConfig = currentSettings.toolConfig as
-		| {
-				approvalRequiredTools?: string[]
-				approvalMode?: string
-				programmaticToolCallingEnabled?: boolean
-		  }
-		| undefined
-	const approvalRequiredTools = new Set(
-		toolConfig?.approvalRequiredTools ?? (toolConfig?.approvalMode === 'confirm' ? ['*'] : []),
-	)
-	const programmaticToolCallingEnabled = toolConfig?.programmaticToolCallingEnabled === true
-	// Wave 5 #19 phase 3 finish — destructive source-control tools (push_branch /
-	// create_pull_request) ALWAYS require operator approval, regardless of per-user
-	// settings. Refused outright in non-interactive runs at the tool execution layer.
-	const { MANDATORY_APPROVAL_TOOLS } = await import('$lib/tools/tools')
-	for (const toolName of MANDATORY_APPROVAL_TOOLS) approvalRequiredTools.add(toolName)
+	const { approvalRequiredTools, programmaticToolCallingEnabled } =
+		await buildApprovalRequiredSet(currentSettings)
 
 	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
 	// Phase 4 of #4: filter by relevance to the user's query when available, capped to skillTopK
 	// (default 8). Falls back to listing everything when no user content yet (e.g. regenerate
 	// of a system-prompted run) or when embeddings are unavailable.
-	const skillTopK = Math.max(
-		1,
-		((currentSettings.contextConfig as { skillTopK?: number } | null)?.skillTopK ?? 8),
-	)
-	let skillSummariesText: string | undefined
-	const skillSummaries =
-		body.content && body.content.trim().length > 0
-			? await listRelevantSkillSummaries(body.content.trim(), skillTopK)
-			: await listSkillSummaries()
-	if (skillSummaries.length > 0) {
-		skillSummariesText = skillSummaries
-			.map((s) => {
-				const fileNames = s.files.map((f) => f.name).join(', ')
-				return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
-			})
-			.join('\n')
-	}
+	const skillTopK = resolveSkillTopK(currentSettings)
+	const skillSummariesText = await buildSkillSummariesText({
+		userQuery: body.content,
+		skillTopK,
+	})
 
 	const contextSlots: ContextSlot[] = []
 	let scopedAgentTools: string[] | null = null
