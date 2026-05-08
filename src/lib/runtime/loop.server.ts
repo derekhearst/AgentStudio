@@ -14,6 +14,7 @@ import type {
 } from './types'
 import { logger } from '$lib/observability/logger'
 import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
+import { closeRunTrace, openRunTrace } from './trace-helpers'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -47,16 +48,8 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	})
 
 	// Wave 5 #20 phase 2 — open a run_traces row at loop start so spans can append as the
-	// loop progresses. Best-effort + dynamic import to avoid loading observability when the
-	// runtime is exercised in tests that don't need it.
-	void (async () => {
-		try {
-			const { startRunTrace } = await import('$lib/observability/traces.server')
-			await startRunTrace({ runId: session.runId, sessionId: input.conversationId })
-		} catch (err) {
-			logger.warn('[runtime] startRunTrace failed (non-fatal)', { err })
-		}
-	})()
+	// loop progresses.
+	openRunTrace({ runId: session.runId, conversationId: input.conversationId })
 
 	let currentMessages: LoopMessage[] = [...input.initialMessages]
 	const allToolCalls: Array<Record<string, unknown>> = []
@@ -631,14 +624,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	// Wave 5 #20 phase 2 — flip the run_traces row to `completed`. The caller updates cost
 	// after logLlmUsage; we leave costUsd unset here so it's recorded by the caller's own
 	// trace-finish call (or stays at the default 0 when the caller skips it).
-	void (async () => {
-		try {
-			const { finishRunTrace } = await import('$lib/observability/traces.server')
-			await finishRunTrace({ runId: session.runId, status: 'completed' })
-		} catch (err) {
-			logger.warn('[runtime] finishRunTrace failed (non-fatal)', { err })
-		}
-	})()
+	closeRunTrace(session.runId)
 
 	return {
 		finalText: allTextContent || assistantContent,
