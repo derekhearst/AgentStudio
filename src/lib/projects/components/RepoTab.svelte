@@ -8,6 +8,7 @@
 		pushProjectBranchCommand,
 		switchProjectBranchCommand,
 	} from '$lib/projects/projects.remote';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	type RepoDetail = Awaited<ReturnType<typeof getProjectRepoDetailQuery>>;
 	type DiffResult = Awaited<ReturnType<typeof getProjectDiffQuery>>;
@@ -123,19 +124,8 @@
 		}
 	}
 
-	function fmtRelative(d: Date | string | null | undefined): string {
-		if (!d) return '—';
-		const ms = Date.now() - new Date(d).getTime();
-		const sec = Math.round(ms / 1000);
-		if (sec < 60) return `${sec}s ago`;
-		const min = Math.round(sec / 60);
-		if (min < 60) return `${min}m ago`;
-		const hr = Math.round(min / 60);
-		if (hr < 24) return `${hr}h ago`;
-		const day = Math.round(hr / 24);
-		if (day < 30) return `${day}d ago`;
-		return new Date(d).toLocaleDateString();
-	}
+	const fmtRelative = (d: Date | string | null | undefined): string =>
+		relativeTime(d, { weekFallback: true, nullLabel: '—' });
 </script>
 
 {#if repoKind === 'none'}

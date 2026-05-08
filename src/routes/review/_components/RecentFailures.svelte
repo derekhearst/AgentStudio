@@ -1,20 +1,13 @@
 <script lang="ts">
 	import type { listRecentFailuresQuery } from '$lib/observability/review.remote';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof listRecentFailuresQuery>>;
 	type Failure = Extract<Result, { adminOnly: false }>['failures'][number];
 
 	let { failures }: { failures: Failure[] } = $props();
 
-	function fmtAge(d: Date | string) {
-		const now = Date.now();
-		const t = new Date(d).getTime();
-		const ms = Math.max(0, now - t);
-		if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
-		if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
-		if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
-		return `${Math.round(ms / 86_400_000)}d ago`;
-	}
+	const fmtAge = (d: Date | string) => relativeTime(d);
 
 	function kindBadge(kind: 'run_failed' | 'tool_failed'): string {
 		return kind === 'run_failed' ? 'badge-error' : 'badge-warning';

@@ -1,20 +1,14 @@
 <script lang="ts">
 	import Sparkline from '$lib/ui/Sparkline.svelte';
 	import type { getOperationalSnapshotQuery } from '$lib/observability/review.remote';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof getOperationalSnapshotQuery>>;
 	type Entry = Extract<Result, { adminOnly: false }>['entries'][number];
 
 	let { entries }: { entries: Entry[] } = $props();
 
-	function fmtAge(d: Date | string) {
-		const now = Date.now();
-		const t = new Date(d).getTime();
-		const ms = Math.max(0, now - t);
-		if (ms < 60_000) return `${Math.round(ms / 1000)}s ago`;
-		if (ms < 3_600_000) return `${Math.round(ms / 60_000)}m ago`;
-		return `${Math.round(ms / 3_600_000)}h ago`;
-	}
+	const fmtAge = (d: Date | string) => relativeTime(d);
 
 	function dimensionString(dim: Record<string, unknown>): string {
 		const keys = Object.keys(dim);
