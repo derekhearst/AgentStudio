@@ -4,7 +4,7 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { type LlmMessage } from '$lib/llm/chat.server'
-import { generateTitle, estimateMessageTokens } from '$lib/chat/chat.server'
+import { estimateMessageTokens } from '$lib/chat/chat.server'
 import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
 import { logLlmUsage } from '$lib/costs/usage'
@@ -23,8 +23,11 @@ import {
 	createToolComputer,
 	detectPdfPluginConfig,
 	enforceBudgetGuard,
+	enqueueEvaluationJob,
+	enqueueMemoryMineJob,
 	extractAgentWorkspaceConfig,
 	maybeCompactConversation,
+	maybeGenerateTitle,
 	resolveSkillTopK,
 	trimToolResultsForRun,
 	type CompactionStats,
@@ -481,20 +484,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					return written
 				})
 
-				if (isFirstExchange && body.content) {
-					const userContent = body.content.trim()
-					void (async () => {
-						try {
-							const title = await generateTitle([
-								{ role: 'user', content: userContent },
-								{ role: 'assistant', content: allTextContent },
-							])
-							await db.update(conversations).set({ title }).where(eq(conversations.id, body.conversationId))
-						} catch {
-							// Non-critical — title stays as default
-						}
-					})()
-				}
+				maybeGenerateTitle({
+					isFirstExchange,
+					userContent: body.content ?? '',
+					assistantContent: allTextContent,
+					conversationId: body.conversationId,
+				})
 
 				await session.updateRun({
 					state: 'completed',
@@ -504,65 +499,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					finished: true,
 				})
 
-				// --- Memory Palace: enqueue mining as a durable job ---
-				// Wave 4 #17 phase 5: was a fire-and-forget `void mineConversation(...)`. Now
-				// an enqueueJob with dedupeKey `mine:${conversationId}` so concurrent finishes
-				// for the same convo collapse to one job, the work survives a restart, and
-				// failures are visible in /settings/jobs instead of swallowed.
-				const autoMine = (currentSettings.memoryConfig as { autoMine?: boolean } | null)?.autoMine !== false
-				if (autoMine) {
-					void (async () => {
-						try {
-							const { enqueueJob } = await import('$lib/jobs/jobs.server')
-							await enqueueJob({
-								type: 'memory_mine',
-								queue: 'default',
-								priority: 50, // background work — outranked by user-initiated jobs
-								dedupeKey: `mine:${body.conversationId}`,
-								payload: { conversationId: body.conversationId },
-								userId: user.id,
-								runId: run.id,
-								sessionId: body.conversationId,
-							})
-						} catch (err) {
-							logger.warn('[memory] enqueue mine job failed', { err })
-						}
-					})()
-				}
-
-				// Wave 4 #17 phase 5 — was a fire-and-forget `void runEvaluatorPass(...)`. Now an
-				// enqueueJob with dedupeKey `eval:${runId}` so the work survives restart, fails
-				// visibly in /settings/jobs, and dedupes if the trigger somehow fires twice. The
-				// SSE `evaluation` event is dropped from this path — the verdict shows up in the
-				// run viewer's Evaluations panel asynchronously when the worker finishes.
+				// Wave 4 #17 phase 5: durable jobs replace the prior fire-and-forget
+				// mineConversation / runEvaluatorPass calls. Both dedupe so concurrent
+				// finishes collapse to one job and failures are visible in /settings/jobs.
+				enqueueMemoryMineJob({
+					settings: currentSettings,
+					conversationId: body.conversationId,
+					userId: user.id,
+					runId: run.id,
+				})
 				if (run.evalRequired) {
-					void (async () => {
-						try {
-							const { enqueueJob } = await import('$lib/jobs/jobs.server')
-							const toolSummary = allToolCalls.length > 0
-								? allToolCalls.map((c) => (c as { name?: string }).name).filter(Boolean).join(', ')
-								: undefined
-							await enqueueJob({
-								type: 'evaluation_run',
-								queue: 'default',
-								priority: 75, // higher than memory_mine (50), lower than user-initiated (100+)
-								dedupeKey: `eval:${run.id}`,
-								payload: {
-									runId: run.id,
-									userId: user.id,
-									conversationId: body.conversationId,
-									taskDescription: body.content?.trim() ?? '(no user message)',
-									generatorOutput: allTextContent,
-									toolSummary,
-								},
-								userId: user.id,
-								runId: run.id,
-								sessionId: body.conversationId,
-							})
-						} catch (err) {
-							logger.warn('[evaluations] enqueue evaluation_run job failed', { err })
-						}
-					})()
+					enqueueEvaluationJob({
+						runId: run.id,
+						userId: user.id,
+						conversationId: body.conversationId,
+						userContent: body.content,
+						assistantContent: allTextContent,
+						toolCalls: allToolCalls,
+					})
 				}
 
 				await session.emit('metrics', {

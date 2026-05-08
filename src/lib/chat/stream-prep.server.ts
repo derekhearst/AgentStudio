@@ -13,7 +13,8 @@ import type { ContextSlot } from '$lib/context/slots.server'
 import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
-import { compactMessages, shouldCompact } from '$lib/chat/chat.server'
+import { compactMessages, generateTitle, shouldCompact } from '$lib/chat/chat.server'
+import { conversations } from '$lib/sessions/sessions.schema'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
@@ -240,6 +241,108 @@ export async function maybeCompactConversation(input: {
 			compactionModel: result.compactionModel,
 		},
 	}
+}
+
+/**
+ * Fire-and-forget title generation for the first exchange of a conversation.
+ * Sends the user message + assistant response to the title-gen model, then
+ * writes the result back to `conversations.title`. Title-gen failures are
+ * silently swallowed — the conversation keeps its default title and the
+ * normal chat flow is unaffected.
+ */
+export function maybeGenerateTitle(input: {
+	isFirstExchange: boolean
+	userContent: string
+	assistantContent: string
+	conversationId: string
+}): void {
+	if (!input.isFirstExchange || !input.userContent.trim()) return
+	void (async () => {
+		try {
+			const title = await generateTitle([
+				{ role: 'user', content: input.userContent.trim() },
+				{ role: 'assistant', content: input.assistantContent },
+			])
+			await db.update(conversations).set({ title }).where(eq(conversations.id, input.conversationId))
+		} catch {
+			// Non-critical — title stays as default.
+		}
+	})()
+}
+
+/**
+ * Enqueue the memory-mining job for a conversation that just finished, when
+ * the user has auto-mining enabled. DedupeKey collapses concurrent finishes
+ * for the same conversation into one job; failures are visible in
+ * /settings/jobs rather than silently swallowed.
+ */
+export function enqueueMemoryMineJob(input: {
+	settings: AppSettings
+	conversationId: string
+	userId: string
+	runId: string
+}): void {
+	const autoMine = (input.settings.memoryConfig as { autoMine?: boolean } | null)?.autoMine !== false
+	if (!autoMine) return
+	void (async () => {
+		try {
+			const { enqueueJob } = await import('$lib/jobs/jobs.server')
+			await enqueueJob({
+				type: 'memory_mine',
+				queue: 'default',
+				priority: 50, // background work — outranked by user-initiated jobs
+				dedupeKey: `mine:${input.conversationId}`,
+				payload: { conversationId: input.conversationId },
+				userId: input.userId,
+				runId: input.runId,
+				sessionId: input.conversationId,
+			})
+		} catch (err) {
+			logger.warn('[memory] enqueue mine job failed', { err })
+		}
+	})()
+}
+
+/**
+ * Enqueue the evaluator pass for a finished run. Triggered when the run row
+ * had `evalRequired = true`. The verdict shows up in the run viewer's
+ * Evaluations panel asynchronously when the worker finishes (no SSE event).
+ */
+export function enqueueEvaluationJob(input: {
+	runId: string
+	userId: string
+	conversationId: string
+	userContent: string | undefined
+	assistantContent: string
+	toolCalls: Array<Record<string, unknown>>
+}): void {
+	void (async () => {
+		try {
+			const { enqueueJob } = await import('$lib/jobs/jobs.server')
+			const toolSummary = input.toolCalls.length > 0
+				? input.toolCalls.map((c) => (c as { name?: string }).name).filter(Boolean).join(', ')
+				: undefined
+			await enqueueJob({
+				type: 'evaluation_run',
+				queue: 'default',
+				priority: 75, // higher than memory_mine (50), lower than user-initiated (100+)
+				dedupeKey: `eval:${input.runId}`,
+				payload: {
+					runId: input.runId,
+					userId: input.userId,
+					conversationId: input.conversationId,
+					taskDescription: input.userContent?.trim() ?? '(no user message)',
+					generatorOutput: input.assistantContent,
+					toolSummary,
+				},
+				userId: input.userId,
+				runId: input.runId,
+				sessionId: input.conversationId,
+			})
+		} catch (err) {
+			logger.warn('[evaluations] enqueue evaluation_run job failed', { err })
+		}
+	})()
 }
 
 /**
