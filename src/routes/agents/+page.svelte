@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
+	import { formatCost } from '$lib/agents/agent-format'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
@@ -44,12 +45,7 @@
 	}
 
 	// relativeTime defined above using $lib/util/relative-time with capitalized style.
-
-	function formatCost(cost: string | number) {
-		const n = typeof cost === 'string' ? parseFloat(cost) : cost
-		if (n === 0) return '$0.00'
-		return n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`
-	}
+	// formatCost imported from $lib/agents/agent-format
 
 	function modelShortName(model: string) {
 		return model.split('/').pop() ?? model
