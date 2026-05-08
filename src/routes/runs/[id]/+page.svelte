@@ -6,6 +6,7 @@
 	import { getRunDetailQuery } from '$lib/runs/runs.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { formatDateTime as fmtDate } from '$lib/util/relative-time';
 
 	const runId = $derived(page.params.id ?? '');
 
@@ -69,10 +70,7 @@
 		return 'badge-ghost';
 	}
 
-	function fmtDate(iso: Date | string | null | undefined) {
-		if (!iso) return '—';
-		return new Date(iso).toLocaleString();
-	}
+	// fmtDate imported from $lib/util/relative-time as formatDateTime
 
 	function previewPayload(payload: unknown): string {
 		if (payload === null || payload === undefined) return '';
