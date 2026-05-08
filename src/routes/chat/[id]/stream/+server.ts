@@ -16,6 +16,7 @@ import {
 	buildBuiltinAgentPostureSlot,
 	buildCacheableSystemPromptBlocks,
 	buildIdentitySlot,
+	buildLlmMessagesFromHistory,
 	buildMemoryRecallSlot,
 	buildProjectContextSlot,
 	buildSkillSummariesText,
@@ -130,37 +131,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
-	const llmMessages: LlmMessage[] = historyRows
-		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
-		.map((row) => {
-			const attachments = row.attachments ?? []
-			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith('image/'))
-			const pdfAttachments = attachments.filter((a) => a.mimeType === 'application/pdf')
-			const videoAttachments = attachments.filter((a) => a.mimeType.startsWith('video/'))
-			const hasMultimodal =
-				row.role === 'user' && (imageAttachments.length > 0 || pdfAttachments.length > 0 || videoAttachments.length > 0)
-			if (hasMultimodal) {
-				return {
-					role: row.role,
-					content: [
-						{ type: 'text' as const, text: row.content },
-						...imageAttachments.map((a) => ({
-							type: 'image_url' as const,
-							image_url: { url: a.url },
-						})),
-						...pdfAttachments.map((a) => ({
-							type: 'file' as const,
-							file: { filename: a.filename || 'document.pdf', file_data: a.url },
-						})),
-						...videoAttachments.map((a) => ({
-							type: 'video_url' as const,
-							video_url: { url: a.url },
-						})),
-					],
-				}
-			}
-			return { role: row.role, content: row.content }
-		})
+	const llmMessages: LlmMessage[] = buildLlmMessagesFromHistory(historyRows)
 
 	// --- Context Engineering: Unified System Prompt ---
 	const { approvalRequiredTools, programmaticToolCallingEnabled } =

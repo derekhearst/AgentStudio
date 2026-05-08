@@ -239,6 +239,55 @@ export async function maybeCompactConversation(input: {
 	}
 }
 
+type HistoryRow = {
+	role: string
+	content: string
+	attachments: Array<{ mimeType: string; url: string; filename?: string | null }> | null
+}
+
+/**
+ * Convert chat history rows from the DB into the LlmMessage[] shape the
+ * runtime feeds to OpenRouter. Multimodal attachments (images, PDFs, videos)
+ * are unpacked into per-type content blocks; text-only messages stay as a
+ * plain string. Tool/system rows that aren't user/assistant/system are filtered
+ * out — the chat history table can hold tool messages but the LLM input list
+ * doesn't carry them through (they're rebuilt from tool_calls metadata).
+ */
+export function buildLlmMessagesFromHistory(historyRows: HistoryRow[]): LlmMessage[] {
+	return historyRows
+		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
+		.map((row) => {
+			const attachments = row.attachments ?? []
+			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith('image/'))
+			const pdfAttachments = attachments.filter((a) => a.mimeType === 'application/pdf')
+			const videoAttachments = attachments.filter((a) => a.mimeType.startsWith('video/'))
+			const hasMultimodal =
+				row.role === 'user' &&
+				(imageAttachments.length > 0 || pdfAttachments.length > 0 || videoAttachments.length > 0)
+			if (hasMultimodal) {
+				return {
+					role: row.role as 'user',
+					content: [
+						{ type: 'text' as const, text: row.content },
+						...imageAttachments.map((a) => ({
+							type: 'image_url' as const,
+							image_url: { url: a.url },
+						})),
+						...pdfAttachments.map((a) => ({
+							type: 'file' as const,
+							file: { filename: a.filename || 'document.pdf', file_data: a.url },
+						})),
+						...videoAttachments.map((a) => ({
+							type: 'video_url' as const,
+							video_url: { url: a.url },
+						})),
+					],
+				} as LlmMessage
+			}
+			return { role: row.role as 'user' | 'assistant' | 'system', content: row.content }
+		})
+}
+
 export type BudgetEnforcementResult =
 	| { blocked: false }
 	| {
