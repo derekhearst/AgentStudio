@@ -1,0 +1,144 @@
+/**
+ * Streaming-block types + pure inspection helpers used by the chat page.
+ *
+ * The chat stream produces four kinds of incremental blocks: text deltas, tool
+ * calls (with their lifecycle status), reasoning/thinking content, and
+ * sub-agent spans. The page owns the `$state<StreamingBlock[]>` array; these
+ * helpers are pure functions that take the array as input so they can be
+ * unit-tested and reused (e.g. for serializing to message metadata, computing
+ * stats, or building the persistence payload on stop / error).
+ */
+
+import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
+
+export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
+
+export type TextBlock = {
+	kind: 'text'
+	id: string
+	content: string
+}
+
+export type ToolBlock = {
+	kind: 'tool'
+	id: string
+	name: string
+	arguments: string
+	status: ToolStatus
+	result?: string
+	executionMs?: number | null
+	expanded: boolean
+	token?: string | null
+}
+
+export type ThinkingBlock = {
+	kind: 'thinking'
+	id: string
+	content: string
+	reasoningTokens?: number | null
+	expanded: boolean
+}
+
+export type SubagentBlock = {
+	kind: 'subagent'
+	id: string
+	agentId: string
+	agentName: string
+	conversationId: string | null
+	task: string
+	content: string
+	status: 'running' | 'completed' | 'failed'
+	toolCalls: Array<{ name: string; success?: boolean }>
+	expanded: boolean
+}
+
+export type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | SubagentBlock
+
+/** Concatenate all text-block content. Used to surface the full assistant draft. */
+export function getPartialText(blocks: StreamingBlock[]): string {
+	return blocks
+		.filter((b): b is TextBlock => b.kind === 'text')
+		.map((b) => b.content)
+		.join('')
+}
+
+/** Concatenate all thinking-block content with paragraph breaks between turns. */
+export function getThinkingText(blocks: StreamingBlock[]): string {
+	return blocks
+		.filter((b): b is ThinkingBlock => b.kind === 'thinking')
+		.map((b) => b.content)
+		.join('\n\n')
+}
+
+/** Find the most recent thinking block's `reasoningTokens` count, if any. */
+export function getLatestReasoningTokens(blocks: StreamingBlock[]): number | null {
+	for (let i = blocks.length - 1; i >= 0; i--) {
+		const block = blocks[i]
+		if (block.kind === 'thinking' && typeof block.reasoningTokens === 'number') {
+			return block.reasoningTokens
+		}
+	}
+	return null
+}
+
+/**
+ * Build the metadata payload that gets persisted on the assistant message row.
+ * Drops empty text/thinking blocks (they're noise in the persisted history) and
+ * normalizes tool blocks into `{ name, arguments, result, success, executionMs }`.
+ */
+export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Array<Record<string, unknown>> {
+	const out: Array<Record<string, unknown>> = []
+	for (const block of blocks) {
+		if (block.kind === 'text') {
+			if (!block.content.trim()) continue
+			out.push({ kind: 'text', content: block.content })
+		} else if (block.kind === 'thinking') {
+			if (!block.content.trim()) continue
+			out.push({
+				kind: 'thinking',
+				content: block.content,
+				reasoningTokens: block.reasoningTokens ?? null,
+			})
+		} else if (block.kind === 'subagent') {
+			out.push({
+				kind: 'subagent',
+				agentId: block.agentId,
+				agentName: block.agentName,
+				conversationId: block.conversationId,
+				task: block.task,
+				content: block.content,
+				success: block.status === 'completed',
+			})
+		} else {
+			out.push({
+				kind: 'tool',
+				name: block.name,
+				arguments: parseJsonFallback(block.arguments),
+				result: block.result ?? '',
+				success: block.status === 'completed',
+				executionMs: block.executionMs ?? 0,
+			})
+		}
+	}
+	return out
+}
+
+/** Tool blocks whose lifecycle has reached a terminal state, normalized for callers that need a flat list. */
+export function getCompletedToolCalls(blocks: StreamingBlock[]): Array<Record<string, unknown>> {
+	return blocks
+		.filter(
+			(b): b is ToolBlock =>
+				b.kind === 'tool' && (b.status === 'completed' || b.status === 'failed' || b.status === 'denied'),
+		)
+		.map((b) => ({
+			name: b.name,
+			arguments: parseJsonFallback(b.arguments),
+			result: b.result ?? '',
+			status: b.status,
+		}))
+}
+
+/** Cheap token estimate for prompt-budget UI. Mirrors the server fallback (chars / 4). */
+export function estimateTokens(value: string | null | undefined): number {
+	return Math.max(0, Math.ceil((value?.length ?? 0) / 4))
+}

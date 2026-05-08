@@ -36,6 +36,18 @@
 		type AskUserOption,
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
+	import {
+		estimateTokens,
+		getCompletedToolCalls,
+		getLatestReasoningTokens,
+		getPartialText,
+		getSerializableBlocksForMetadata,
+		getThinkingText,
+		type StreamingBlock,
+		type TextBlock,
+		type ThinkingBlock,
+		type ToolStatus,
+	} from '$lib/chat/streaming-blocks';
 
 	type ChatAttachment = {
 		id: string;
@@ -48,49 +60,6 @@
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
 	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-
-	type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied';
-
-	type TextBlock = {
-		kind: 'text';
-		id: string;
-		content: string;
-	};
-
-	type ToolBlock = {
-		kind: 'tool';
-		id: string;
-		name: string;
-		arguments: string;
-		status: ToolStatus;
-		result?: string;
-		executionMs?: number | null;
-		expanded: boolean;
-		token?: string | null;
-	};
-
-	type ThinkingBlock = {
-		kind: 'thinking';
-		id: string;
-		content: string;
-		reasoningTokens?: number | null;
-		expanded: boolean;
-	};
-
-	type SubagentBlock = {
-		kind: 'subagent';
-		id: string;
-		agentId: string;
-		agentName: string;
-		conversationId: string | null;
-		task: string;
-		content: string;
-		status: 'running' | 'completed' | 'failed';
-		toolCalls: Array<{ name: string; success?: boolean }>;
-		expanded: boolean;
-	};
-
-	type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | SubagentBlock;
 
 	const conversationId = $derived(page.params.id ?? '');
 	let model = $state('anthropic/claude-sonnet-4');
@@ -422,83 +391,10 @@
 		currentThinkingTarget = '';
 	}
 
-	function getPartialTextFromBlocks() {
-		return streamingBlocks
-			.filter((b) => b.kind === 'text')
-			.map((b) => (b.kind === 'text' ? b.content : ''))
-			.join('');
-	}
-
-	function getThinkingTextFromBlocks() {
-		return streamingBlocks
-			.filter((b) => b.kind === 'thinking')
-			.map((b) => (b.kind === 'thinking' ? b.content : ''))
-			.join('\n\n');
-	}
-
-	function getLatestReasoningTokensFromBlocks() {
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			const block = streamingBlocks[i];
-			if (block.kind === 'thinking' && typeof block.reasoningTokens === 'number') {
-				return block.reasoningTokens;
-			}
-		}
-		return null;
-	}
-
-	function getSerializableBlocksForMetadata() {
-		return streamingBlocks
-			.map((block) => {
-				if (block.kind === 'text') {
-					if (!block.content.trim()) return null;
-					return { kind: 'text' as const, content: block.content };
-				}
-				if (block.kind === 'thinking') {
-					if (!block.content.trim()) return null;
-					return {
-						kind: 'thinking' as const,
-						content: block.content,
-						reasoningTokens: block.reasoningTokens ?? null,
-					};
-				}
-				if (block.kind === 'subagent') {
-					return {
-						kind: 'subagent' as const,
-						agentId: block.agentId,
-						agentName: block.agentName,
-						conversationId: block.conversationId,
-						task: block.task,
-						content: block.content,
-						success: block.status === 'completed',
-					};
-				}
-				return {
-					kind: 'tool' as const,
-					name: block.name,
-					arguments: parseJsonFallback(block.arguments),
-					result: block.result ?? '',
-					success: block.status === 'completed',
-					executionMs: block.executionMs ?? 0,
-				};
-			})
-			.filter(Boolean);
-	}
-
-	function getCompletedToolCallsFromBlocks() {
-		return streamingBlocks
-			.filter((b) => b.kind === 'tool' && (b.status === 'completed' || b.status === 'failed' || b.status === 'denied'))
-			.map((b) =>
-				b.kind === 'tool'
-					? {
-						name: b.name,
-						arguments: parseJsonFallback(b.arguments),
-						result: b.result ?? '',
-						status: b.status,
-					}
-					: null
-			)
-			.filter(Boolean) as Array<Record<string, unknown>>;
-	}
+	// Block-inspection helpers extracted to $lib/chat/streaming-blocks for unit-testability —
+	// imported as getPartialText / getThinkingText / getLatestReasoningTokens /
+	// getSerializableBlocksForMetadata / getCompletedToolCalls. Each takes streamingBlocks
+	// as an argument instead of closing over it.
 
 	async function persistPartialIfIncomplete() {
 		// Persist any visible partial whenever the stream didn't complete with a `done` event
@@ -508,8 +404,8 @@
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
 
-		const textContent = getPartialTextFromBlocks().trim();
-		const thinkingContent = getThinkingTextFromBlocks().trim();
+		const textContent = getPartialText(streamingBlocks).trim();
+		const thinkingContent = getThinkingText(streamingBlocks).trim();
 		const contentToPersist = textContent || thinkingContent;
 		if (!contentToPersist) return;
 
@@ -517,13 +413,13 @@
 			conversationId,
 			content: contentToPersist,
 			model,
-			toolCalls: getCompletedToolCallsFromBlocks(),
+			toolCalls: getCompletedToolCalls(streamingBlocks),
 			metadata: {
 				partial: true,
 				stoppedByUser,
 				reasoningEffort,
-				reasoningTokens: getLatestReasoningTokensFromBlocks(),
-				blocks: getSerializableBlocksForMetadata(),
+				reasoningTokens: getLatestReasoningTokens(streamingBlocks),
+				blocks: getSerializableBlocksForMetadata(streamingBlocks),
 			},
 		});
 	}
@@ -594,8 +490,7 @@
 		}
 	}
 	const initialPrompt = $derived(page.url.searchParams.get('prompt')?.trim() ?? '');
-	const estimateTokens = (value: string | null | undefined) =>
-		Math.max(0, Math.ceil((value?.length ?? 0) / 4));
+	// estimateTokens is imported from $lib/chat/streaming-blocks (chars / 4 fallback).
 	const displayedMessages = $derived.by(() => {
 		const remoteMessages = messages;
 		const remoteIds = new Set(remoteMessages.map((message) => message.id));
@@ -1445,8 +1340,8 @@
 							finalizeCurrentTextBlock();
 							// Keep content visible until refreshAll() confirms DB message
 							pendingMessageId = payload.messageId;
-							const fullText = getPartialTextFromBlocks();
-							const completedToolCalls = getCompletedToolCallsFromBlocks();
+							const fullText = getPartialText(streamingBlocks);
+							const completedToolCalls = getCompletedToolCalls(streamingBlocks);
 							const hasAskUserTool = completedToolCalls.some(
 								(call) => String(call.name ?? '') === 'ask_user'
 							);
