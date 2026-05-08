@@ -14,6 +14,8 @@ import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import {
 	buildApprovalRequiredSet,
+	buildCacheableSystemPromptBlocks,
+	buildMemoryRecallSlot,
 	buildSkillSummariesText,
 	resolveSkillTopK,
 } from '$lib/chat/stream-prep.server'
@@ -21,7 +23,6 @@ import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
-import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import {
@@ -344,33 +345,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	// --- Context Engineering: Memory Palace Recall ---
-	const memoryConfig = (currentSettings.memoryConfig ?? null) as {
-		enabled?: boolean
-		topK?: number
-		useRerank?: boolean
-		rerankModel?: string
-	} | null
-	const memoryEnabled = memoryConfig?.enabled !== false
-	if (memoryEnabled && body.content && body.content.trim().length > 0) {
-		try {
-			const recalled = await recallForUser(user.id, body.content.trim(), {
-				topK: memoryConfig?.topK ?? 5,
-				useRerank: memoryConfig?.useRerank ?? false,
-				rerankModel: memoryConfig?.rerankModel,
-			})
-			const memoryBlock = renderMemoryContext(recalled)
-			if (memoryBlock) {
-				contextSlots.push({
-					name: 'memory',
-					priority: 60,
-					content: memoryBlock,
-					truncationStrategy: 'truncate-end',
-				})
-			}
-		} catch (err) {
-			logger.warn('[memory] recall failed', { err })
-		}
-	}
+	const memorySlot = await buildMemoryRecallSlot({
+		settings: currentSettings,
+		userId: user.id,
+		userQuery: body.content,
+	})
+	if (memorySlot) contextSlots.push(memorySlot)
 
 	// Phase 8 of #4: per-(user, agent) slot overrides. Lets users disable slots, raise/lower
 	// priority, or set per-slot token caps from /agents/[id]/settings (UI follow-up).
@@ -379,44 +359,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const assembled = assembleSystemPrompt(overriddenSlots)
 	const capabilityPrompt = assembled.systemPrompt
 
-	if (capabilityPrompt) {
-		// Build the system message as content blocks so the cache_control marker can sit AT
-		// the boundary between stable and volatile content. Several slots recompute per query
-		// (skills via top-K relevance, companion_skills via suggested groups, memory via
-		// recall) — keeping them inside the cached prefix would cache-miss every turn.
-		// Strategy: render stable slots as one block with cache_control, append volatile
-		// slots as a second block without one. Result: the cached prefix stays byte-stable
-		// across turns of the same conversation; only the volatile portion churns.
-		const VOLATILE_SLOT_NAMES = new Set(['memory', 'skills', 'companion_skills'])
-		const stableParts: string[] = []
-		const volatileParts: string[] = []
-		for (const { name, content } of assembled.renderedSlots) {
-			if (VOLATILE_SLOT_NAMES.has(name)) volatileParts.push(content)
-			else stableParts.push(content)
-		}
-		// `cacheControl` (camelCase) matches the OpenRouter SDK input shape; the SDK
-		// converts it to `cache_control` on the wire to Anthropic.
-		const blocks: Array<{ type: 'text'; text: string; cacheControl?: { type: 'ephemeral' } }> = []
-		if (stableParts.length > 0) {
-			blocks.push({
-				type: 'text',
-				text: stableParts.join('\n\n'),
-				cacheControl: { type: 'ephemeral' },
-			})
-		}
-		if (volatileParts.length > 0) {
-			blocks.push({ type: 'text', text: volatileParts.join('\n\n') })
-		}
-		// Fallback: if the split produced nothing (e.g. all slots happened to be volatile),
-		// keep the original behavior with cacheControl on the whole prompt.
-		if (blocks.length === 0) {
-			blocks.push({
-				type: 'text',
-				text: capabilityPrompt,
-				cacheControl: { type: 'ephemeral' },
-			})
-		}
-		llmMessages.unshift({ role: 'system', content: blocks })
+	// `cacheControl` (camelCase) matches the OpenRouter SDK input shape; the SDK
+	// converts it to `cache_control` on the wire to Anthropic. Stable slots get the
+	// marker so they cache across turns; volatile ones (memory/skills/companion_skills)
+	// are appended without a marker so per-turn churn doesn't invalidate the prefix.
+	const systemBlocks = buildCacheableSystemPromptBlocks({
+		renderedSlots: assembled.renderedSlots,
+		fallbackText: capabilityPrompt,
+	})
+	if (systemBlocks.length > 0) {
+		llmMessages.unshift({ role: 'system', content: systemBlocks })
 	}
 
 	// --- Context Engineering: Conversation Compaction ---

@@ -8,9 +8,17 @@
  */
 
 import { listRelevantSkillSummaries, listSkillSummaries } from '$lib/skills/skills.server'
+import { recallForUser, renderMemoryContext } from '$lib/memory/memory.server'
+import type { ContextSlot } from '$lib/context/slots.server'
+import { logger } from '$lib/observability/logger'
 import type { getSettings } from '$lib/settings'
 
 type AppSettings = Awaited<ReturnType<typeof getSettings>>
+
+// Slot names whose content recomputes per query (skill top-K relevance, companion-skill
+// groups, memory recall) — they're appended after the cache_control boundary so the
+// stable prefix doesn't cache-miss every turn.
+const VOLATILE_SLOT_NAMES = new Set(['memory', 'skills', 'companion_skills'])
 
 /**
  * Build the set of tool names that require operator approval before execution.
@@ -78,4 +86,95 @@ export async function buildSkillSummariesText(input: {
 export function resolveSkillTopK(settings: AppSettings): number {
 	const raw = (settings.contextConfig as { skillTopK?: number } | null)?.skillTopK ?? 8
 	return Math.max(1, raw)
+}
+
+/**
+ * Run memory-palace recall for the user's query and produce the rendered context
+ * slot if any drawers came back. Swallows recall errors with a warning — recall
+ * is a best-effort enhancement that must never block the chat path.
+ */
+export async function buildMemoryRecallSlot(input: {
+	settings: AppSettings
+	userId: string
+	userQuery: string | undefined
+}): Promise<ContextSlot | null> {
+	const userQuery = input.userQuery?.trim() ?? ''
+	if (userQuery.length === 0) return null
+
+	const memoryConfig = (input.settings.memoryConfig ?? null) as {
+		enabled?: boolean
+		topK?: number
+		useRerank?: boolean
+		rerankModel?: string
+	} | null
+
+	if (memoryConfig?.enabled === false) return null
+
+	try {
+		const recalled = await recallForUser(input.userId, userQuery, {
+			topK: memoryConfig?.topK ?? 5,
+			useRerank: memoryConfig?.useRerank ?? false,
+			rerankModel: memoryConfig?.rerankModel,
+		})
+		const memoryBlock = renderMemoryContext(recalled)
+		if (!memoryBlock) return null
+		return {
+			name: 'memory',
+			priority: 60,
+			content: memoryBlock,
+			truncationStrategy: 'truncate-end',
+		}
+	} catch (err) {
+		logger.warn('[memory] recall failed', { err })
+		return null
+	}
+}
+
+/**
+ * Split the assembled system-prompt slots into stable + volatile blocks for
+ * OpenRouter's `cache_control` marker. The stable block carries the marker so
+ * its bytes get cached across turns; the volatile block (memory recall, skill
+ * summaries, companion-skill groups) is appended without a marker so it can
+ * change every turn without invalidating the prefix.
+ *
+ * Returns an empty array when the assembled prompt is empty — caller should
+ * skip injecting a system message in that case.
+ */
+export function buildCacheableSystemPromptBlocks(input: {
+	renderedSlots: Array<{ name: string; content: string }>
+	fallbackText: string
+}): Array<{ type: 'text'; text: string; cacheControl?: { type: 'ephemeral' } }> {
+	if (!input.fallbackText) return []
+
+	const stableParts: string[] = []
+	const volatileParts: string[] = []
+	for (const { name, content } of input.renderedSlots) {
+		if (VOLATILE_SLOT_NAMES.has(name)) volatileParts.push(content)
+		else stableParts.push(content)
+	}
+
+	const blocks: Array<{ type: 'text'; text: string; cacheControl?: { type: 'ephemeral' } }> = []
+	if (stableParts.length > 0) {
+		blocks.push({
+			type: 'text',
+			text: stableParts.join('\n\n'),
+			cacheControl: { type: 'ephemeral' },
+		})
+	}
+	if (volatileParts.length > 0) {
+		blocks.push({ type: 'text', text: volatileParts.join('\n\n') })
+	}
+
+	// Fallback: if the split produced nothing (e.g. all slots happened to be
+	// volatile), keep the original behavior with cacheControl on the whole
+	// prompt.
+	if (blocks.length === 0) {
+		blocks.push({
+			type: 'text',
+			text: input.fallbackText,
+			cacheControl: { type: 'ephemeral' },
+		})
+	}
+
+	return blocks
 }
