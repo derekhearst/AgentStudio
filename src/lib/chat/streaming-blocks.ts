@@ -251,6 +251,117 @@ export function reconcilePendingDrafts<RemoteMsg extends RemoteUserShape & { id:
 	return { pendingAssistantDrafts, pendingUserMessages }
 }
 
+/**
+ * Mark a tool block as `denied` after the user rejects an approval prompt.
+ * Pure transform — mutates nothing. Returns the same array shape (with one
+ * block updated) when the id matches, else returns the input unchanged.
+ */
+export function applyToolDenied(blocks: StreamingBlock[], toolId: string): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'tool' && b.id === toolId ? { ...b, status: 'denied' as const, expanded: true } : b,
+	)
+}
+
+export type SubagentStartPayload = {
+	agentId: string
+	agentName: string
+	conversationId: string | null
+	task?: string
+}
+
+/**
+ * Append a new subagent block. Collapses any open thinking blocks so the new
+ * subagent span gets visual focus.
+ */
+export function applySubagentStart(
+	blocks: StreamingBlock[],
+	payload: SubagentStartPayload,
+): StreamingBlock[] {
+	return [
+		...blocks.map((b) => (b.kind === 'thinking' ? { ...b, expanded: false } : b)),
+		{
+			kind: 'subagent' as const,
+			id: `subagent-${payload.agentId}-${payload.conversationId}`,
+			agentId: payload.agentId,
+			agentName: payload.agentName,
+			conversationId: payload.conversationId,
+			task: payload.task ?? '',
+			content: '',
+			status: 'running' as const,
+			toolCalls: [],
+			expanded: true,
+		},
+	]
+}
+
+type SubagentTargetMatch = { agentId: string; conversationId: string | null }
+
+/** Append a delta chunk to the currently-running subagent block matching the target. */
+export function applySubagentDelta(
+	blocks: StreamingBlock[],
+	target: SubagentTargetMatch,
+	content: string,
+): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'subagent' &&
+		b.agentId === target.agentId &&
+		b.conversationId === target.conversationId
+			? { ...b, content: b.content + content }
+			: b,
+	)
+}
+
+/** Append a tool call entry to the matching subagent block. */
+export function applySubagentToolCall(
+	blocks: StreamingBlock[],
+	target: SubagentTargetMatch,
+	name: string,
+): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'subagent' &&
+		b.agentId === target.agentId &&
+		b.conversationId === target.conversationId
+			? { ...b, toolCalls: [...b.toolCalls, { name }] }
+			: b,
+	)
+}
+
+/**
+ * Stamp the most-recent matching tool entry on a subagent block with its
+ * success/failure verdict. Server emits `tool_call` followed by `tool_result`,
+ * so the LAST entry with the matching name is the one that just finished.
+ */
+export function applySubagentToolResult(
+	blocks: StreamingBlock[],
+	target: SubagentTargetMatch,
+	name: string,
+	success: boolean,
+): StreamingBlock[] {
+	return blocks.map((b) => {
+		if (b.kind !== 'subagent' || b.agentId !== target.agentId || b.conversationId !== target.conversationId) {
+			return b
+		}
+		const updatedTools = b.toolCalls.map((tc, i) =>
+			i === b.toolCalls.length - 1 && tc.name === name ? { ...tc, success } : tc,
+		)
+		return { ...b, toolCalls: updatedTools }
+	})
+}
+
+/** Mark the matching subagent block completed and collapse it. */
+export function applySubagentDone(
+	blocks: StreamingBlock[],
+	target: SubagentTargetMatch,
+): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'subagent' &&
+		b.agentId === target.agentId &&
+		b.conversationId === target.conversationId
+			? { ...b, status: 'completed' as const, expanded: false }
+			: b,
+	)
+}
+
 function buildOptimisticUser(message: PendingUser, model: string, sequence: number) {
 	return {
 		id: message.id,

@@ -37,6 +37,12 @@
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
 	import {
+		applySubagentDelta,
+		applySubagentDone,
+		applySubagentStart,
+		applySubagentToolCall,
+		applySubagentToolResult,
+		applyToolDenied,
 		buildDisplayedMessages,
 		estimateTokens,
 		getCompletedToolCalls,
@@ -1092,70 +1098,51 @@
 					}
 
 					if (eventName === 'tool_denied') {
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'tool' && b.id === payload.id
-								? { ...b, status: 'denied' as const, expanded: true }
-								: b
-						);
+						streamingBlocks = applyToolDenied(streamingBlocks, payload.id);
 					}
 
 					if (eventName === 'subagent_start') {
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
 						finalizeCurrentTextBlock();
-						streamingBlocks = [
-							...streamingBlocks.map((b) =>
-								b.kind === 'thinking' ? { ...b, expanded: false } : b
-							),
-							{
-								kind: 'subagent' as const,
-								id: `subagent-${payload.agentId}-${payload.conversationId}`,
-								agentId: payload.agentId,
-								agentName: payload.agentName,
-								conversationId: payload.conversationId,
-								task: payload.task ?? '',
-								content: '',
-								status: 'running' as const,
-								toolCalls: [],
-								expanded: true,
-							},
-						];
+						streamingBlocks = applySubagentStart(streamingBlocks, {
+							agentId: payload.agentId,
+							agentName: payload.agentName,
+							conversationId: payload.conversationId,
+							task: payload.task,
+						});
 					}
 
 					if (eventName === 'subagent_delta') {
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
-								? { ...b, content: b.content + (payload.content ?? '') }
-								: b
+						streamingBlocks = applySubagentDelta(
+							streamingBlocks,
+							{ agentId: payload.agentId, conversationId: payload.conversationId },
+							payload.content ?? '',
 						);
 					}
 
 					if (eventName === 'subagent_tool_call') {
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
-								? { ...b, toolCalls: [...b.toolCalls, { name: payload.name }] }
-								: b
+						streamingBlocks = applySubagentToolCall(
+							streamingBlocks,
+							{ agentId: payload.agentId, conversationId: payload.conversationId },
+							payload.name,
 						);
 					}
 
 					if (eventName === 'subagent_tool_result') {
-						streamingBlocks = streamingBlocks.map((b) => {
-							if (b.kind !== 'subagent' || b.agentId !== payload.agentId || b.conversationId !== payload.conversationId) return b;
-							const updatedTools = b.toolCalls.map((tc, i) =>
-								i === b.toolCalls.length - 1 && tc.name === payload.name
-									? { ...tc, success: payload.success }
-									: tc
-							);
-							return { ...b, toolCalls: updatedTools };
-						});
+						streamingBlocks = applySubagentToolResult(
+							streamingBlocks,
+							{ agentId: payload.agentId, conversationId: payload.conversationId },
+							payload.name,
+							payload.success,
+						);
 					}
 
 					if (eventName === 'subagent_done') {
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId
-								? { ...b, status: 'completed' as const, expanded: false }
-								: b
-						);
+						streamingBlocks = applySubagentDone(streamingBlocks, {
+							agentId: payload.agentId,
+							conversationId: payload.conversationId,
+						});
 					}
 
 					if (eventName === 'metrics') {
