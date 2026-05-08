@@ -14,11 +14,16 @@
 	} from '$lib/notifications';
 	import { getSettings, resetAppSettings, updateAppSettings } from '$lib/settings';
 	import { BUILTIN_TOOLS } from '$lib/tools/tools';
-	import ModelSelector from '$lib/llm/ModelSelector.svelte';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
 	import ToolToggleChip from '$lib/settings/ToolToggleChip.svelte';
+	import SettingsModelPanel from '$lib/settings/panels/SettingsModelPanel.svelte';
+	import SettingsContextPanel from '$lib/settings/panels/SettingsContextPanel.svelte';
+	import SettingsMemoryPanel from '$lib/settings/panels/SettingsMemoryPanel.svelte';
+	import SettingsNotificationsPanel from '$lib/settings/panels/SettingsNotificationsPanel.svelte';
+	import SettingsBudgetPanel from '$lib/settings/panels/SettingsBudgetPanel.svelte';
+	import SettingsAppPushPanel from '$lib/settings/panels/SettingsAppPushPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -413,52 +418,16 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('model')}
 						<div id="sec-model" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<h2 class="flex items-center gap-2 text-base font-semibold">
-										<span class="h-1.5 w-1.5 rounded-full bg-primary"></span>
-										Model & AI
-									</h2>
-								{/snippet}
-								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 xl:grid-cols-2 xl:divide-y-0">
-									<!-- Default Model -->
-									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 first:pt-0 xl:py-3.5">
-										<div>
-											<p class="text-sm font-medium">Default Model</p>
-											<p class="mt-0.5 text-xs text-base-content/55">Primary model for new conversations</p>
-										</div>
-										<div class="w-full sm:w-64">
-											<ModelSelector
-												value={settings.defaultModel}
-												showChevron={false}
-												showBrowseBadge={false}
-												onchange={(id: string) => {
-													if (settings) settings.defaultModel = id;
-												}}
-											/>
-										</div>
-									</div>
-
-									<!-- Transcription Model -->
-									<div class="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-3.5 last:pb-0 xl:py-3.5">
-										<div>
-											<p class="text-sm font-medium">Transcription Model</p>
-											<p class="mt-0.5 text-xs text-base-content/55">Model for voice-to-text (must support audio input)</p>
-										</div>
-										<div class="w-full sm:w-64">
-											<ModelSelector
-												value={settings.transcriptionModel}
-												showChevron={false}
-												showBrowseBadge={false}
-												requireInputModality="audio"
-												onchange={(id: string) => {
-													if (settings) settings.transcriptionModel = id;
-												}}
-											/>
-										</div>
-									</div>
-								</div>
-							</ContentPanel>
+							<SettingsModelPanel
+								defaultModel={settings.defaultModel}
+								transcriptionModel={settings.transcriptionModel}
+								onDefaultModelChange={(id) => {
+									if (settings) settings.defaultModel = id;
+								}}
+								onTranscriptionModelChange={(id) => {
+									if (settings) settings.transcriptionModel = id;
+								}}
+							/>
 						</div>
 					{/if}
 
@@ -467,50 +436,7 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('context')}
 						<div id="sec-context" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<h2 class="flex items-center gap-2 text-base font-semibold">
-										<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
-										Context Window
-									</h2>
-								{/snippet}
-								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 xl:grid-cols-2 xl:divide-y-0">
-									<!-- Reserved Response -->
-									<div class="py-3.5 first:pt-0 xl:py-3.5">
-										<div class="flex items-center justify-between">
-											<p class="text-sm font-medium">Reserved Response</p>
-											<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.reservedResponsePct.toFixed(0)}%</span>
-										</div>
-										<input
-											type="range"
-											min="10"
-											max="40"
-											step="1"
-											class="range range-secondary range-xs mt-3"
-											bind:value={settings.contextConfig.reservedResponsePct}
-										/>
-										<p class="mt-1.5 text-xs text-base-content/55">Size of the striped reserved segment in the context bar</p>
-									</div>
-
-									<!-- Auto-Compact Threshold -->
-									<div class="py-3.5 xl:py-3.5">
-										<div class="flex items-center justify-between">
-											<p class="text-sm font-medium">Auto-Compact Threshold</p>
-											<span class="rounded-md bg-secondary/10 px-2 py-0.5 font-mono text-xs text-secondary">{settings.contextConfig.autoCompactThresholdPct.toFixed(0)}%</span>
-										</div>
-										<input
-											type="range"
-											min="40"
-											max="95"
-											step="1"
-											class="range range-secondary range-xs mt-3"
-											bind:value={settings.contextConfig.autoCompactThresholdPct}
-										/>
-										<p class="mt-1.5 text-xs text-base-content/55">Auto-compaction triggers when a model switch would exceed this</p>
-									</div>
-
-								</div>
-							</ContentPanel>
+							<SettingsContextPanel contextConfig={settings.contextConfig} />
 						</div>
 					{/if}
 
@@ -622,64 +548,7 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('memory') && settings?.memoryConfig}
 						<div id="sec-memory" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<h2 class="flex items-center gap-2 text-base font-semibold">
-										<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
-										Memory Palace
-									</h2>
-								{/snippet}
-								<div class="grid gap-2 xl:grid-cols-2">
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-										<span>
-											<span class="block text-sm font-medium">Enable memory recall</span>
-											<span class="block text-xs text-base-content/55">Inject relevant past memories into chat as context.</span>
-										</span>
-										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.enabled} />
-									</label>
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-										<span>
-											<span class="block text-sm font-medium">Auto-mine conversations</span>
-											<span class="block text-xs text-base-content/55">Mine each conversation into the palace after completion.</span>
-										</span>
-										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.autoMine} />
-									</label>
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-										<span>
-											<span class="block text-sm font-medium">Use LLM reranker</span>
-											<span class="block text-xs text-base-content/55">Slower but typically improves retrieval precision.</span>
-										</span>
-										<input type="checkbox" class="checkbox checkbox-sm checkbox-accent" bind:checked={settings.memoryConfig.useRerank} />
-									</label>
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2">
-										<span class="block text-sm font-medium">Top-K results</span>
-										<input
-											type="number"
-											min="1"
-											max="20"
-											class="input input-sm input-bordered w-20"
-											value={settings.memoryConfig.topK}
-											oninput={(e) => {
-												if (!settings) return;
-												const raw = Number((e.currentTarget as HTMLInputElement).value);
-												const topK = Number.isFinite(raw) && raw >= 1 ? Math.min(20, Math.max(1, Math.round(raw))) : 1;
-												settings = { ...settings, memoryConfig: { ...settings.memoryConfig, topK } };
-											}}
-										/>
-									</label>
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2 xl:col-span-2">
-										<span class="block text-sm font-medium">Rerank model</span>
-										<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.rerankModel} />
-									</label>
-									<label class="flex items-center justify-between gap-3 rounded-md bg-base-200/40 px-3 py-2 xl:col-span-2">
-										<span class="block text-sm font-medium">Embedding model</span>
-										<input type="text" class="input input-sm input-bordered w-64 font-mono text-xs" bind:value={settings.memoryConfig.embeddingModel} />
-									</label>
-								</div>
-								<p class="text-xs text-base-content/55 pt-2">
-									Browse and search your palace at <a href="/memory" class="link link-accent">/memory</a>.
-								</p>
-							</ContentPanel>
+							<SettingsMemoryPanel memoryConfig={settings.memoryConfig} />
 						</div>
 					{/if}
 
@@ -688,28 +557,7 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('notifications')}
 						<div id="sec-notifications" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<h2 class="flex items-center gap-2 text-base font-semibold">
-										<span class="h-1.5 w-1.5 rounded-full bg-accent"></span>
-										Notifications
-									</h2>
-								{/snippet}
-								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-3 sm:divide-y-0">
-									<div class="flex items-center justify-between gap-4 py-3 first:pt-0 sm:py-2">
-										<p class="text-sm font-medium">Task completed</p>
-										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.taskCompleted} />
-									</div>
-									<div class="flex items-center justify-between gap-4 py-3 sm:py-2">
-										<p class="text-sm font-medium">Needs input</p>
-										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.needsInput} />
-									</div>
-									<div class="flex items-center justify-between gap-4 py-3 last:pb-0 sm:py-2">
-										<p class="text-sm font-medium">Agent errors</p>
-										<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={settings.notificationPrefs.agentErrors} />
-									</div>
-								</div>
-							</ContentPanel>
+							<SettingsNotificationsPanel notificationPrefs={settings.notificationPrefs} />
 						</div>
 					{/if}
 
@@ -718,61 +566,7 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('budget')}
 						<div id="sec-budget" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<div>
-										<h2 class="flex items-center gap-2 text-base font-semibold">
-											<span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
-											Budget
-										</h2>
-										<p class="mt-0.5 text-xs text-base-content/55">Alerts trigger at 80% and 100%</p>
-									</div>
-								{/snippet}
-								<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-2 sm:divide-y-0">
-									<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0 sm:py-2">
-										<p class="text-sm font-medium">Daily limit</p>
-										<div class="flex items-center gap-1.5">
-											<span class="text-xs text-base-content/50">$</span>
-											<input
-												type="number"
-												class="input input-bordered input-sm w-28 text-right font-mono"
-												min="0"
-												step="0.01"
-												placeholder="No limit"
-												value={settings.budgetConfig?.dailyLimit ?? ''}
-												oninput={(e) => {
-													if (!settings) return;
-													const raw = (e.currentTarget as HTMLInputElement).value.trim();
-													const parsed = raw === '' ? null : Math.max(0, Number(raw));
-													const dailyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
-													settings = { ...settings, budgetConfig: { ...settings.budgetConfig, dailyLimit } };
-												}}
-											/>
-										</div>
-									</div>
-									<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0 sm:py-2">
-										<p class="text-sm font-medium">Monthly limit</p>
-										<div class="flex items-center gap-1.5">
-											<span class="text-xs text-base-content/50">$</span>
-											<input
-												type="number"
-												class="input input-bordered input-sm w-28 text-right font-mono"
-												min="0"
-												step="0.01"
-												placeholder="No limit"
-												value={settings.budgetConfig?.monthlyLimit ?? ''}
-												oninput={(e) => {
-													if (!settings) return;
-													const raw = (e.currentTarget as HTMLInputElement).value.trim();
-													const parsed = raw === '' ? null : Math.max(0, Number(raw));
-													const monthlyLimit = parsed === null || Number.isNaN(parsed) ? null : parsed;
-													settings = { ...settings, budgetConfig: { ...settings.budgetConfig, monthlyLimit } };
-												}}
-											/>
-										</div>
-									</div>
-								</div>
-							</ContentPanel>
+							<SettingsBudgetPanel budgetConfig={settings.budgetConfig} />
 						</div>
 					{/if}
 				{/if}
@@ -782,48 +576,15 @@
 				     ════════════════════════════════════════════════ -->
 				{#if isVisible('app')}
 					<div id="sec-app" data-settings-section class="scroll-mt-4">
-						<ContentPanel>
-							{#snippet header()}
-								<h2 class="flex items-center gap-2 text-base font-semibold">
-									<span class="h-1.5 w-1.5 rounded-full bg-info"></span>
-									App & Push
-								</h2>
-							{/snippet}
-							<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-2 sm:divide-y-0">
-								<!-- Install -->
-								<div class="flex items-center justify-between gap-4 py-3.5 first:pt-0 sm:py-2">
-									<div>
-										<p class="text-sm font-medium">Install App</p>
-										<p class="mt-0.5 text-xs text-base-content/55">Standalone desktop & mobile app</p>
-									</div>
-									<button
-										class="btn btn-primary btn-sm btn-outline"
-										type="button"
-										onclick={promptInstall}
-										disabled={!installAvailable}
-									>
-										{installAvailable ? 'Install' : 'Installed'}
-									</button>
-								</div>
-
-								<!-- Push -->
-								<div class="flex items-center justify-between gap-4 py-3.5 last:pb-0 sm:py-2">
-									<div>
-										<p class="text-sm font-medium">Push Notifications</p>
-										<p class="mt-0.5 text-xs text-base-content/55">
-											{pushEnabled ? 'Enabled' : 'Disabled'} &middot; {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
-										</p>
-									</div>
-									<div class="flex gap-1.5">
-										{#if pushEnabled}
-											<button class="btn btn-ghost btn-sm" type="button" onclick={disablePush} disabled={busy}>Disable</button>
-										{:else}
-											<button class="btn btn-success btn-sm" type="button" onclick={enablePush} disabled={busy}>Enable</button>
-										{/if}
-									</div>
-								</div>
-							</div>
-						</ContentPanel>
+						<SettingsAppPushPanel
+							{installAvailable}
+							{pushEnabled}
+							subscriptionCount={subscriptions.length}
+							{busy}
+							onInstall={promptInstall}
+							onEnablePush={enablePush}
+							onDisablePush={disablePush}
+						/>
 					</div>
 				{/if}
 
