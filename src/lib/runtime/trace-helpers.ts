@@ -33,3 +33,22 @@ export function closeRunTrace(runId: string): void {
 		}
 	})()
 }
+
+/**
+ * Mark the LAST tool in the array with an Anthropic ephemeral cache marker so
+ * the tools prefix gets cached when stable. OpenRouter forwards this to
+ * Anthropic; other providers ignore the field. camelCase `cacheControl`
+ * matches the OpenRouter SDK input shape (it converts to `cache_control` on
+ * the wire). Done every round so progressive-disclosure refreshes still get
+ * the marker.
+ *
+ * Pure transform — does not mutate the input array.
+ */
+export function markLastToolForCaching<T extends { cacheControl?: { type: 'ephemeral' } }>(
+	tools: T[],
+): T[] {
+	if (tools.length === 0) return tools
+	return tools.map((tool, idx) =>
+		idx === tools.length - 1 ? { ...tool, cacheControl: { type: 'ephemeral' as const } } : tool,
+	)
+}

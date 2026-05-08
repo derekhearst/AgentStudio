@@ -14,7 +14,7 @@ import type {
 } from './types'
 import { logger } from '$lib/observability/logger'
 import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
-import { closeRunTrace, openRunTrace } from './trace-helpers'
+import { closeRunTrace, markLastToolForCaching, openRunTrace } from './trace-helpers'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -70,17 +70,7 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		// previous round) takes effect this round. Caller decides whether this is a no-op.
 		tools = await input.computeTools()
 
-		// Mark the last tool with an Anthropic ephemeral cache marker so the tools prefix gets
-		// cached when stable. OpenRouter forwards this to Anthropic; other providers ignore it.
-		// camelCase `cacheControl` matches the OpenRouter SDK input shape (it converts to
-		// `cache_control` on the wire). Done every round so progressive-disclosure refreshes
-		// still get the marker.
-		const toolsForRequest =
-			tools.length > 0
-				? tools.map((tool, idx) =>
-						idx === tools.length - 1 ? { ...tool, cacheControl: { type: 'ephemeral' as const } } : tool,
-					)
-				: tools
+		const toolsForRequest = markLastToolForCaching(tools)
 
 		const streamOptions: Parameters<typeof streamChat>[4] = {}
 		if (input.chatPlugins && input.chatPlugins.length > 0) streamOptions.plugins = input.chatPlugins
