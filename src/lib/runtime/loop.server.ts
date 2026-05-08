@@ -161,36 +161,12 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			}
 
 			if (chunk.usage) {
-				promptTokens += chunk.usage.promptTokens ?? 0
-				completionTokens += chunk.usage.completionTokens ?? 0
-				if ('completionTokensDetails' in chunk.usage) {
-					reasoningTokens =
-						chunk.usage.completionTokensDetails?.reasoningTokens ?? reasoningTokens
-				}
-				// Anthropic prompt-caching stats — exposed by OpenRouter inside
-				// `promptTokensDetails`. Confirmed shape from a live OpenRouter response:
-				//   { cachedTokens: N, cacheWriteTokens: N, audioTokens, videoTokens }
-				// Read snake_case variants too in case the SDK normalizes differently across
-				// versions.
-				const usageRaw = chunk.usage as unknown as {
-					promptTokensDetails?: {
-						cachedTokens?: number
-						cached_tokens?: number
-						cacheWriteTokens?: number
-						cache_write_tokens?: number
-					}
-					prompt_tokens_details?: {
-						cached_tokens?: number
-						cachedTokens?: number
-						cache_write_tokens?: number
-						cacheWriteTokens?: number
-					}
-				}
-				const details = usageRaw.promptTokensDetails ?? usageRaw.prompt_tokens_details ?? {}
-				const writeDelta = details.cacheWriteTokens ?? details.cache_write_tokens ?? 0
-				const readDelta = details.cachedTokens ?? details.cached_tokens ?? 0
-				cacheCreationInputTokens += writeDelta
-				cacheReadInputTokens += readDelta
+				const deltas = parseChunkUsageDeltas(chunk.usage)
+				promptTokens += deltas.promptTokens
+				completionTokens += deltas.completionTokens
+				cacheCreationInputTokens += deltas.cacheCreationInputTokens
+				cacheReadInputTokens += deltas.cacheReadInputTokens
+				if (deltas.reasoningTokens !== null) reasoningTokens = deltas.reasoningTokens
 			}
 
 			await session.updateRun({ state: 'running', heartbeat: true })
@@ -338,5 +314,51 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		cacheReadInputTokens,
 		firstTokenAt: firstTokenAt ? firstTokenAt - startedAt : null,
 		finishedNaturally,
+	}
+}
+
+/**
+ * Pull token usage deltas off a single OpenRouter `chunk.usage` payload. Handles the
+ * Anthropic prompt-cache stats nested inside `promptTokensDetails` (camelCase) or
+ * `prompt_tokens_details` (snake_case) — different SDK versions normalize differently.
+ *
+ * Returns `reasoningTokens: null` when the chunk doesn't report reasoning tokens; the
+ * caller keeps its previous value rather than overwriting it.
+ */
+function parseChunkUsageDeltas(usage: NonNullable<{ promptTokens?: number; completionTokens?: number }>): {
+	promptTokens: number
+	completionTokens: number
+	cacheCreationInputTokens: number
+	cacheReadInputTokens: number
+	reasoningTokens: number | null
+} {
+	const reasoningTokens =
+		'completionTokensDetails' in usage
+			? (usage as { completionTokensDetails?: { reasoningTokens?: number } })
+					.completionTokensDetails?.reasoningTokens ?? null
+			: null
+
+	const usageRaw = usage as unknown as {
+		promptTokensDetails?: {
+			cachedTokens?: number
+			cached_tokens?: number
+			cacheWriteTokens?: number
+			cache_write_tokens?: number
+		}
+		prompt_tokens_details?: {
+			cached_tokens?: number
+			cachedTokens?: number
+			cache_write_tokens?: number
+			cacheWriteTokens?: number
+		}
+	}
+	const details = usageRaw.promptTokensDetails ?? usageRaw.prompt_tokens_details ?? {}
+
+	return {
+		promptTokens: usage.promptTokens ?? 0,
+		completionTokens: usage.completionTokens ?? 0,
+		cacheCreationInputTokens: details.cacheWriteTokens ?? details.cache_write_tokens ?? 0,
+		cacheReadInputTokens: details.cachedTokens ?? details.cached_tokens ?? 0,
+		reasoningTokens: reasoningTokens ?? null,
 	}
 }
