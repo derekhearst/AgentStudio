@@ -48,6 +48,7 @@
 		type ThinkingBlock,
 		type ToolStatus,
 	} from '$lib/chat/streaming-blocks';
+	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
 		id: string;
@@ -566,73 +567,15 @@
 	const reservedResponsePct = $derived(appSettings?.contextConfig?.reservedResponsePct ?? 30);
 	const autoCompactThresholdPct = $derived(appSettings?.contextConfig?.autoCompactThresholdPct ?? 72);
 
-	const contextMetrics = $derived.by(() => {
-		const totalBudget = activeContextLimit;
-
-		const messageTokens = displayedMessages.reduce(
-			(sum, message) => sum + estimateTokens(message.content),
-			0
-		);
-
-		const toolResultTokens = displayedMessages.reduce((sum, message) => {
-			const calls = message.toolCalls ?? [];
-			for (const call of calls) {
-				const resultText =
-					typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {});
-				sum += estimateTokens(resultText);
-			}
-			return sum;
-		}, 0);
-
-		const systemTokens = 900;
-		const toolDefinitionTokens = 900;
-		const otherTokens = 0;
-
-		// Live SSE-supplied tokenizer-accurate count from the stream handler takes precedence
-		// when available (Phase 7 of #4). Falls back to the chars/4-derived estimate above
-		// for the very first prompt before the stream has reported.
-		const live = liveContextStats?.tokenEstimate;
-		const used = Math.min(
-			totalBudget,
-			typeof live === 'number' && live > 0
-				? live
-				: systemTokens + toolDefinitionTokens + messageTokens + toolResultTokens + otherTokens,
-		);
-
-		const toPct = (value: number) =>
-			totalBudget > 0 ? Math.max(0, Number(((value / totalBudget) * 100).toFixed(1))) : 0;
-
-		const modelTokenMap = new Map<string, number>();
-		for (const row of stats) {
-			if (row.role !== 'assistant') continue;
-			const modelLabel = (row.model ?? 'unknown').split('/').at(-1) ?? row.model ?? 'unknown';
-			const modelTokens = row.tokensOut > 0 ? row.tokensOut : estimateTokens(messages.find((m) => m.id === row.id)?.content);
-			modelTokenMap.set(modelLabel, (modelTokenMap.get(modelLabel) ?? 0) + modelTokens);
-		}
-
-		const modelTotal = [...modelTokenMap.values()].reduce((sum, value) => sum + value, 0);
-		const modelPalette = ['var(--color-primary)', 'var(--color-secondary)', 'var(--color-accent)', 'var(--color-info)'];
-		const modelUsage = [...modelTokenMap.entries()]
-			.sort((a, b) => b[1] - a[1])
-			.map(([label, value], idx) => ({
-				label,
-				value: modelTotal > 0 ? Number(((value / modelTotal) * 100).toFixed(1)) : 0,
-				color: modelPalette[idx % modelPalette.length]
-			}));
-
-		return {
-			total: totalBudget,
-			used,
-			breakdown: {
-				system: toPct(systemTokens),
-				tools: toPct(toolDefinitionTokens),
-				messages: toPct(messageTokens),
-				results: toPct(toolResultTokens),
-				other: toPct(otherTokens)
-			},
-			modelUsage
-		};
-	});
+	const contextMetrics = $derived(
+		computeContextMetrics({
+			displayedMessages,
+			stats,
+			messages,
+			totalBudget: activeContextLimit,
+			liveTokenEstimate: liveContextStats?.tokenEstimate ?? null,
+		}),
+	);
 
 	$effect(() => {
 		if (conversationData?.conversation.model) {
