@@ -243,6 +243,24 @@ export async function maybeCompactConversation(input: {
 }
 
 /**
+ * Detect whether the trimmed message list contains a PDF attachment (file
+ * content block) and return the OpenRouter `chatPlugins` config that engages
+ * the file-parser. We default to the `pdf-text` engine — a good middle ground
+ * for text-only PDFs without paying the OCR cost. Returns `undefined` when
+ * no PDFs are present so the caller can omit the plugin field entirely.
+ */
+export function detectPdfPluginConfig(
+	messages: LlmMessage[],
+): Array<{ id: 'file-parser'; pdf: { engine: 'pdf-text' } }> | undefined {
+	const hasPdfAttachment = messages.some(
+		(m) =>
+			Array.isArray(m.content) &&
+			m.content.some((b) => typeof b === 'object' && b !== null && 'type' in b && b.type === 'file'),
+	)
+	return hasPdfAttachment ? [{ id: 'file-parser', pdf: { engine: 'pdf-text' } }] : undefined
+}
+
+/**
  * Wrap `trimHistoricalToolResults` with the per-user `preserveToolResults`
  * config. Tools listed there have their results passed through unmodified;
  * everything else is subject to the default trimming rules. Returns the

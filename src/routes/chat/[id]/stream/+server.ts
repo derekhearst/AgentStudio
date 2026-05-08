@@ -21,6 +21,7 @@ import {
 	buildSkillSummariesText,
 	buildToolPolicySlot,
 	createToolComputer,
+	detectPdfPluginConfig,
 	enforceBudgetGuard,
 	extractAgentWorkspaceConfig,
 	maybeCompactConversation,
@@ -321,16 +322,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 
 				// PDF input — switch on the file-parser plugin so OpenRouter routes the file
-				// content blocks through Mistral OCR (default) or the model's native engine.
-				// `pdf-text` is a good middle ground for text-only PDFs without paying the OCR cost.
-				const hasPdfAttachment = trimmedMessages.some(
-					(m) =>
-						Array.isArray(m.content) &&
-						m.content.some((b) => typeof b === 'object' && b !== null && 'type' in b && b.type === 'file'),
-				)
-				const chatPlugins = hasPdfAttachment
-					? [{ id: 'file-parser' as const, pdf: { engine: 'pdf-text' as const } }]
-					: undefined
+				// content blocks through the configured engine. Returns undefined when no PDFs.
+				const chatPlugins = detectPdfPluginConfig(trimmedMessages)
 
 				const loopResult = await runChatLoop({
 					session,
