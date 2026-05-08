@@ -25,13 +25,11 @@ type ToolBlockLike = {
 	result?: string | null
 }
 
-export function parseJsonFallback(raw: string | undefined | null): Record<string, unknown> {
-	try {
-		return JSON.parse(raw || '{}') as Record<string, unknown>
-	} catch {
-		return {}
-	}
-}
+// Re-export so call sites that already import `parseJsonFallback` keep working;
+// the shared implementation lives in `$lib/util/json` (parseJsonRecord — also
+// guards against non-object JSON values like null or arrays).
+import { parseJsonRecord as parseJsonFallback } from '$lib/util/json'
+export { parseJsonFallback }
 
 export function getAskUserQuestionsFromTool(block: ToolBlockLike): AskUserQuestion[] {
 	const args = parseJsonFallback(block.arguments)

@@ -168,14 +168,9 @@ function extractShortValue(args: unknown, candidates: string[]): string | null {
 	return null
 }
 
-export function parseJsonValue(raw: string): unknown {
-	if (!raw?.trim()) return null
-	try {
-		return JSON.parse(raw)
-	} catch {
-		return null
-	}
-}
+// Re-export so call sites that already import `parseJsonValue` keep working;
+// the shared implementation lives in `$lib/util/json` (tryParseJson).
+export { tryParseJson as parseJsonValue } from '$lib/util/json'
 
 export function getFriendlyToolLabel(name: string, args: unknown, status: ToolCardStatus = 'completed') {
 	const copy = TOOL_COPY[name]
