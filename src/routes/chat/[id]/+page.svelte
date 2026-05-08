@@ -44,6 +44,7 @@
 		getPartialText,
 		getSerializableBlocksForMetadata,
 		getThinkingText,
+		reconcilePendingDrafts,
 		type StreamingBlock,
 		type TextBlock,
 		type ThinkingBlock,
@@ -597,33 +598,13 @@
 	});
 
 	function reconcilePendingWithRemote(remoteMessages: typeof messages) {
-		const now = Date.now();
-		// Drop drafts whose id matches a remote message OR whose remote counterpart matches by
-		// content + recency (covers id rewrites from compaction/branching), AND drop any draft
-		// older than 60 seconds unconditionally to prevent indefinite phantom bubbles when a
-		// stream errored before the `done` event landed.
-		pendingAssistantDrafts = pendingAssistantDrafts.filter((draft) => {
-			if (remoteMessages.some((message) => message.id === draft.id)) return false;
-			const matchesByContent = draft.content.trim().length > 0
-				&& remoteMessages.some(
-					(remote) =>
-						remote.role === 'assistant'
-						&& remote.content === draft.content
-						&& new Date(remote.createdAt).getTime() >= draft.createdAt.getTime() - 15000,
-				);
-			if (matchesByContent) return false;
-			if (now - draft.createdAt.getTime() > 60_000) return false;
-			return true;
+		const reconciled = reconcilePendingDrafts({
+			pendingAssistantDrafts,
+			pendingUserMessages,
+			remoteMessages,
 		});
-		pendingUserMessages = pendingUserMessages.filter(
-			(pending) =>
-				!remoteMessages.some(
-					(remote) =>
-						remote.role === 'user' &&
-						remote.content === pending.content &&
-						new Date(remote.createdAt).getTime() >= pending.createdAt.getTime() - 15000
-				)
-		);
+		pendingAssistantDrafts = reconciled.pendingAssistantDrafts;
+		pendingUserMessages = reconciled.pendingUserMessages;
 	}
 
 	async function loadConversationState() {

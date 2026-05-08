@@ -196,6 +196,61 @@ export function buildDisplayedMessages<R extends RemoteUserShape & MaybeSequence
 	return combined
 }
 
+/**
+ * Drop pending optimistic drafts that have been confirmed by the server, plus
+ * any older-than-60-second leftovers (covers stream-error cases where `done`
+ * never landed).
+ *
+ * Assistant drafts are dropped when:
+ *   - their id matches a remote message (id-rewrite via compaction/branching), OR
+ *   - their content matches a recent (within 15s) remote assistant message, OR
+ *   - they're older than 60 seconds (phantom-bubble guard).
+ *
+ * User drafts are dropped when their content matches a recent remote user
+ * message — the server-assigned id replaces the client-side temp id.
+ *
+ * Pure function — returns the filtered arrays without mutating inputs.
+ */
+export function reconcilePendingDrafts<RemoteMsg extends RemoteUserShape & { id: string }>(input: {
+	pendingAssistantDrafts: PendingAssistant[]
+	pendingUserMessages: PendingUser[]
+	remoteMessages: RemoteMsg[]
+	now?: number
+}): {
+	pendingAssistantDrafts: PendingAssistant[]
+	pendingUserMessages: PendingUser[]
+} {
+	const now = input.now ?? Date.now()
+	const STALE_DRAFT_MS = 60_000
+	const RECENCY_MATCH_MS = 15_000
+
+	const pendingAssistantDrafts = input.pendingAssistantDrafts.filter((draft) => {
+		if (input.remoteMessages.some((message) => message.id === draft.id)) return false
+		const matchesByContent =
+			draft.content.trim().length > 0 &&
+			input.remoteMessages.some(
+				(remote) =>
+					remote.role === 'assistant' &&
+					remote.content === draft.content &&
+					new Date(remote.createdAt).getTime() >= draft.createdAt.getTime() - RECENCY_MATCH_MS,
+			)
+		if (matchesByContent) return false
+		if (now - draft.createdAt.getTime() > STALE_DRAFT_MS) return false
+		return true
+	})
+	const pendingUserMessages = input.pendingUserMessages.filter(
+		(pending) =>
+			!input.remoteMessages.some(
+				(remote) =>
+					remote.role === 'user' &&
+					remote.content === pending.content &&
+					new Date(remote.createdAt).getTime() >= pending.createdAt.getTime() - RECENCY_MATCH_MS,
+			),
+	)
+
+	return { pendingAssistantDrafts, pendingUserMessages }
+}
+
 function buildOptimisticUser(message: PendingUser, model: string, sequence: number) {
 	return {
 		id: message.id,
