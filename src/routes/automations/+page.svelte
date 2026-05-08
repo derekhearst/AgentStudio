@@ -3,47 +3,36 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import {
-		createAutomationCommand,
 		deleteAutomationCommand,
 		listAutomationsQuery,
 		updateAutomationCommand,
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
-
-	type AutomationMode = 'chat_followup' | 'research' | 'maintenance';
-	type AutomationOutputTarget = 'chat_session' | 'artifact' | 'review_inbox';
+	import AutomationCard from '$lib/automations/AutomationCard.svelte';
+	import AutomationCreateForm from '$lib/automations/AutomationCreateForm.svelte';
+	import { isDueSoon, toTime } from '$lib/automations/automation-format';
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
 	type SortMode = 'next_run' | 'updated' | 'status';
 
-	const CRON_PRESETS = [
-		{ label: 'Hourly', expression: '0 * * * *' },
-		{ label: 'Daily 9:00', expression: '0 9 * * *' },
-		{ label: 'Weekdays 9:30', expression: '30 9 * * 1-5' },
-		{ label: 'Every Monday', expression: '0 9 * * 1' },
-		{ label: 'Month start', expression: '0 10 1 * *' },
-	] as const;
-
 	let rows = $state<AutomationRow[]>([]);
 	let agents = $state<AgentChoice[]>([]);
 	let loading = $state(true);
-	let saving = $state(false);
 	let deletingAutomationId = $state<string | null>(null);
 	let togglingAutomationId = $state<string | null>(null);
 	let sortMode = $state<SortMode>('next_run');
 	let formError = $state<string | null>(null);
 	let createMessage = $state<string | null>(null);
-
-	let description = $state('');
-	let cronExpression = $state('0 9 * * *');
-	let prompt = $state('Summarize important updates since the last run and recommend next actions.');
-	let conversationMode = $state<'new_each_run' | 'reuse'>('new_each_run');
-	let mode = $state<AutomationMode>('chat_followup');
-	let outputTarget = $state<AutomationOutputTarget>('chat_session');
-	let enabled = $state(true);
-	let selectedAgentId = $state('orchestrator');
+	let formSeed = $state<{
+		description: string;
+		cronExpression: string;
+		prompt: string;
+		enabled: boolean;
+		conversationMode: 'new_each_run' | 'reuse';
+		selectedAgentId: string;
+	} | null>(null);
 
 	const enabledCount = $derived(rows.filter((row) => row.enabled).length);
 	const dueSoonCount = $derived(rows.filter((row) => isDueSoon(row.nextRunAt)).length);
@@ -90,92 +79,27 @@
 		}
 	}
 
-	function toTime(value: Date | string | null): number {
-		if (!value) return 0;
-		const date = typeof value === 'string' ? new Date(value) : value;
-		const time = date.getTime();
-		return Number.isNaN(time) ? 0 : time;
-	}
-
-	function formatDate(value: Date | string | null): string {
-		if (!value) return 'Unscheduled';
-		const date = typeof value === 'string' ? new Date(value) : value;
-		return date.toLocaleString();
-	}
-
-	function relativeTime(value: Date | string | null): string {
-		if (!value) return 'Never';
-		const date = typeof value === 'string' ? new Date(value) : value;
-		const diffMs = Date.now() - date.getTime();
-		if (Number.isNaN(diffMs)) return 'Unknown';
-		if (Math.abs(diffMs) < 60_000) return 'Just now';
-		const minutes = Math.round(diffMs / 60_000);
-		if (Math.abs(minutes) < 60) return minutes > 0 ? `${minutes}m ago` : `in ${Math.abs(minutes)}m`;
-		const hours = Math.round(minutes / 60);
-		if (Math.abs(hours) < 24) return hours > 0 ? `${hours}h ago` : `in ${Math.abs(hours)}h`;
-		const days = Math.round(hours / 24);
-		return days > 0 ? `${days}d ago` : `in ${Math.abs(days)}d`;
-	}
-
-	function isDueSoon(value: Date | string | null): boolean {
-		if (!value) return false;
-		const ms = toTime(value);
-		if (ms === 0) return false;
-		const diff = ms - Date.now();
-		return diff >= 0 && diff <= 3_600_000;
-	}
-
-	function selectPreset(expression: string) {
-		cronExpression = expression;
-	}
-
-	function fillFromAutomation(automation: AutomationRow) {
-		description = `${automation.description} (copy)`;
-		cronExpression = automation.cronExpression;
-		prompt = automation.prompt;
-		enabled = automation.enabled;
-		conversationMode = automation.conversationMode;
-		selectedAgentId = automation.agentId ?? 'orchestrator';
+	function handleDuplicate(automation: AutomationRow) {
+		formSeed = {
+			description: `${automation.description} (copy)`,
+			cronExpression: automation.cronExpression,
+			prompt: automation.prompt,
+			enabled: automation.enabled,
+			conversationMode: automation.conversationMode,
+			selectedAgentId: automation.agentId ?? 'orchestrator',
+		};
 		createMessage = 'Copied automation settings into the creation studio.';
 	}
 
-	function clearCreateMessage() {
-		createMessage = null;
+	function handleCreated(message: string) {
+		createMessage = message;
+		formSeed = null;
+		void loadPageData();
 	}
 
-	function validateCreateForm(): string | null {
-		if (!description.trim()) return 'Add a short description for this automation.';
-		if (!cronExpression.trim()) return 'Add a cron expression for the schedule.';
-		if (!prompt.trim()) return 'Add instructions for what should happen on each run.';
-		return null;
-	}
-
-	async function createAutomation() {
-		clearCreateMessage();
-		formError = validateCreateForm();
-		if (formError) return;
-
-		saving = true;
-		try {
-			await createAutomationCommand({
-				agentId: selectedAgentId === 'orchestrator' ? null : selectedAgentId,
-				description: description.trim(),
-				cronExpression: cronExpression.trim(),
-				prompt: prompt.trim(),
-				enabled,
-				conversationMode,
-				mode,
-				outputTarget,
-			});
-
-			await loadPageData();
-			description = '';
-			createMessage = 'Automation created successfully.';
-		} catch {
-			formError = 'Failed to create automation. Check values and try again.';
-		} finally {
-			saving = false;
-		}
+	function handleFormError(message: string | null) {
+		formError = message;
+		if (message) createMessage = null;
 	}
 
 	async function toggleAutomation(automation: AutomationRow) {
@@ -245,258 +169,48 @@
 	</PageHeader>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-5">
+		{#if formError}
+			<div class="alert alert-error py-2 text-sm">{formError}</div>
+		{/if}
+		{#if createMessage}
+			<div class="alert alert-success py-2 text-sm">{createMessage}</div>
+		{/if}
 
-	{#if formError}
-		<div class="alert alert-error py-2 text-sm">{formError}</div>
-	{/if}
-	{#if createMessage}
-		<div class="alert alert-success py-2 text-sm">{createMessage}</div>
-	{/if}
-
-	<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
-		<div>
-			{#if loading}
-				<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">
-					<span class="loading loading-spinner loading-lg text-primary"></span>
-				</div>
-			{:else if sortedRows.length === 0}
-				<div class="rounded-2xl border border-dashed border-base-300 bg-base-100/80 py-16 text-center">
-					<p class="text-base font-medium">No automations yet</p>
-					<p class="mt-1 text-sm text-base-content/55">Use the creation studio to build your first recurring workflow.</p>
-				</div>
-			{:else}
-				<div class="space-y-4">
-					{#each sortedRows as automation (automation.id)}
-						{@const rowBusy = togglingAutomationId === automation.id || deletingAutomationId === automation.id}
-						<article
-							class="group relative overflow-hidden rounded-2xl border border-base-300 bg-base-100 transition-all duration-200 hover:border-base-content/20 hover:shadow-xl hover:shadow-base-content/5"
-						>
-							<div class="relative h-0.75 w-full overflow-hidden {automation.enabled ? 'bg-success/30' : 'bg-base-300/60'}">
-								{#if automation.enabled}
-									<div class="shimmer-bar absolute inset-y-0 w-1/2 bg-linear-to-r from-transparent via-success to-transparent"></div>
-								{/if}
-							</div>
-
-							<div class="space-y-3 p-4">
-								<div class="flex flex-wrap items-start justify-between gap-2">
-									<div class="min-w-0 flex-1">
-										<h2 class="truncate font-semibold leading-snug">{automation.description}</h2>
-										<p class="truncate text-xs text-base-content/55">
-											Agent: {automation.agentName ?? 'Orchestrator'}
-											<span class="mx-1">•</span>
-											{automation.conversationMode === 'new_each_run' ? 'New conversation' : 'Reuse conversation'}
-										</p>
-									</div>
-									<span class="badge badge-sm {automation.enabled ? 'badge-success' : 'badge-ghost'}">
-										{automation.enabled ? 'enabled' : 'disabled'}
-									</span>
-								</div>
-
-								<div class="rounded-xl border border-base-300/60 bg-base-200/20 p-3">
-									<p class="text-[10px] font-semibold uppercase tracking-wide text-base-content/35">Prompt</p>
-									<p class="mt-1 line-clamp-3 text-sm text-base-content/70">{automation.prompt}</p>
-								</div>
-
-								<div class="grid gap-2 text-xs text-base-content/60 sm:grid-cols-2">
-									<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
-										<p class="text-[10px] uppercase tracking-wide text-base-content/35">Cron</p>
-										<p class="mt-0.5 font-mono text-[11px]">{automation.cronExpression}</p>
-									</div>
-									<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
-										<p class="text-[10px] uppercase tracking-wide text-base-content/35">Last run</p>
-										<p class="mt-0.5">{relativeTime(automation.lastRunAt)}</p>
-									</div>
-									<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
-										<p class="text-[10px] uppercase tracking-wide text-base-content/35">Next run</p>
-										<p class="mt-0.5">{formatDate(automation.nextRunAt)}</p>
-									</div>
-									<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
-										<p class="text-[10px] uppercase tracking-wide text-base-content/35">Updated</p>
-										<p class="mt-0.5">{relativeTime(automation.updatedAt)}</p>
-									</div>
-								</div>
-
-								<div class="flex flex-wrap items-center gap-2">
-									<button class="btn btn-xs btn-outline" onclick={() => fillFromAutomation(automation)}>Duplicate</button>
-									<button
-										class="btn btn-xs {automation.enabled ? 'btn-warning' : 'btn-success'}"
-										disabled={rowBusy}
-										onclick={() => toggleAutomation(automation)}
-									>
-										{#if togglingAutomationId === automation.id}
-											<span class="loading loading-spinner loading-xs"></span>
-										{:else if automation.enabled}
-											Disable
-										{:else}
-											Enable
-										{/if}
-									</button>
-									<button
-										class="btn btn-xs btn-error btn-outline"
-										disabled={rowBusy}
-										onclick={() => deleteAutomation(automation)}
-									>
-										{deletingAutomationId === automation.id ? 'Deleting...' : 'Delete'}
-									</button>
-									{#if automation.conversationId}
-										<a class="btn btn-xs btn-ghost ml-auto" href="/chat/{automation.conversationId}">Conversation</a>
-									{/if}
-								</div>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<div class="xl:sticky xl:top-3 xl:self-start">
-			<div class="overflow-hidden rounded-2xl border border-base-300 bg-base-100">
-				<div class="bg-linear-to-r from-primary/20 via-accent/10 to-secondary/20 p-4">
-					<p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">Creation studio</p>
-					<h2 class="mt-1 text-lg font-semibold">Create a new automation</h2>
-					<p class="mt-1 text-sm text-base-content/65">
-						Design a recurring workflow with schedule presets, conversation behavior, and a reusable prompt.
-					</p>
-				</div>
-
-				<form
-					class="space-y-4 p-4"
-					onsubmit={(event) => {
-						event.preventDefault();
-						void createAutomation();
-					}}
-				>
-					<fieldset class="fieldset">
-						<legend class="fieldset-legend text-xs">Description</legend>
-						<input
-							class="input input-bordered"
-							placeholder="Daily customer sentiment scan"
-							bind:value={description}
-							oninput={clearCreateMessage}
-						/>
-					</fieldset>
-
-					<fieldset class="fieldset">
-						<legend class="fieldset-legend text-xs">Agent</legend>
-						<select class="select select-bordered" bind:value={selectedAgentId} oninput={clearCreateMessage}>
-							<option value="orchestrator">Orchestrator (default)</option>
-							{#each agents as agent (agent.id)}
-								<option value={agent.id}>{agent.name} ({agent.status})</option>
-							{/each}
-						</select>
-					</fieldset>
-
-					<div class="space-y-2">
-						<div class="flex items-center justify-between">
-							<span class="label-text text-xs">Cron schedule</span>
-							<span class="text-[10px] text-base-content/45">Use presets or custom</span>
-						</div>
-						<div class="flex flex-wrap gap-1.5">
-							{#each CRON_PRESETS as preset (preset.expression)}
-								<button
-									type="button"
-									class="btn btn-xs {cronExpression === preset.expression ? 'btn-primary' : 'btn-ghost'}"
-									onclick={() => selectPreset(preset.expression)}
-								>{preset.label}</button>
-							{/each}
-						</div>
-						<input
-							class="input input-bordered w-full font-mono text-sm"
-							placeholder="0 9 * * *"
-							bind:value={cronExpression}
-							oninput={clearCreateMessage}
-						/>
+		<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+			<div>
+				{#if loading}
+					<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">
+						<span class="loading loading-spinner loading-lg text-primary"></span>
 					</div>
-
-					<div class="space-y-2 rounded-xl border border-base-300/70 bg-base-200/20 p-3">
-						<p class="text-xs font-medium">Conversation mode</p>
-						<div class="join w-full">
-							<button
-								type="button"
-								class="btn join-item btn-sm flex-1 {conversationMode === 'new_each_run' ? 'btn-neutral' : 'btn-ghost'}"
-								onclick={() => (conversationMode = 'new_each_run')}
-							>New each run</button>
-							<button
-								type="button"
-								class="btn join-item btn-sm flex-1 {conversationMode === 'reuse' ? 'btn-neutral' : 'btn-ghost'}"
-								onclick={() => (conversationMode = 'reuse')}
-							>Reuse thread</button>
-						</div>
+				{:else if sortedRows.length === 0}
+					<div class="rounded-2xl border border-dashed border-base-300 bg-base-100/80 py-16 text-center">
+						<p class="text-base font-medium">No automations yet</p>
+						<p class="mt-1 text-sm text-base-content/55">Use the creation studio to build your first recurring workflow.</p>
 					</div>
-
-					<!-- Wave 5 #21 phase 4 — execution mode + per-mode config (repository for code,
-					     output target for maintenance). Mode picks the engine handler at run time. -->
-					<div class="space-y-2 rounded-xl border border-base-300/70 bg-base-200/20 p-3">
-						<p class="text-xs font-medium">Execution mode</p>
-						<select
-							data-testid="automation-mode-select"
-							class="select select-bordered select-sm w-full"
-							bind:value={mode}
-							onchange={clearCreateMessage}
-						>
-							<option value="chat_followup">Chat followup — append prompt to a conversation (default)</option>
-							<option value="research">Research — open a research run with citations</option>
-							<option value="maintenance">Maintenance — run hygiene work, no chat surface</option>
-						</select>
-
-						{#if mode === 'maintenance'}
-							<div class="mt-2 space-y-1">
-								<p class="text-xs text-base-content/70">Output target</p>
-								<select
-									data-testid="automation-output-target-select"
-									class="select select-bordered select-sm w-full"
-									bind:value={outputTarget}
-									onchange={clearCreateMessage}
-								>
-									<option value="chat_session">Chat session — assistant message in the conversation</option>
-									<option value="review_inbox">Review inbox — automation_summary item</option>
-									<option value="artifact">Artifact — write a versioned artifact (project must be bound)</option>
-								</select>
-							</div>
-						{/if}
+				{:else}
+					<div class="space-y-4">
+						{#each sortedRows as automation (automation.id)}
+							<AutomationCard
+								{automation}
+								toggling={togglingAutomationId === automation.id}
+								deleting={deletingAutomationId === automation.id}
+								onDuplicate={handleDuplicate}
+								onToggle={toggleAutomation}
+								onDelete={deleteAutomation}
+							/>
+						{/each}
 					</div>
+				{/if}
+			</div>
 
-					<fieldset class="fieldset">
-						<legend class="fieldset-legend text-xs">Prompt</legend>
-						<textarea
-							class="textarea textarea-bordered min-h-28"
-							placeholder="What should this automation do every run?"
-							bind:value={prompt}
-							oninput={clearCreateMessage}
-						></textarea>
-					</fieldset>
-
-					<label class="label cursor-pointer justify-start gap-2 rounded-lg border border-base-300/70 bg-base-200/20 px-3 py-2">
-						<input class="toggle toggle-success toggle-sm" type="checkbox" bind:checked={enabled} />
-						<span class="label-text text-sm">Enable immediately</span>
-					</label>
-
-					<button class="btn btn-primary w-full" type="submit" disabled={saving}>
-						{#if saving}
-							<span class="loading loading-spinner loading-xs"></span>
-							Creating automation...
-						{:else}
-							Create automation
-						{/if}
-					</button>
-				</form>
+			<div class="xl:sticky xl:top-3 xl:self-start">
+				<AutomationCreateForm
+					{agents}
+					seed={formSeed}
+					onCreated={handleCreated}
+					onError={handleFormError}
+				/>
 			</div>
 		</div>
 	</div>
-	</div>
 </div>
-
-<style>
-	.shimmer-bar {
-		animation: shimmer 1.6s ease-in-out infinite;
-	}
-
-	@keyframes shimmer {
-		0% {
-			transform: translateX(-100%);
-		}
-		100% {
-			transform: translateX(300%);
-		}
-	}
-</style>
