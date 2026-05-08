@@ -1,18 +1,16 @@
 import { json, error } from '@sveltejs/kit'
-import type { RequestHandler } from './$types'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { logger } from '$lib/observability/logger'
+import { getOpenRouterApiKey } from '$lib/server/config'
+import { requireAuth } from '$lib/server/api-route'
 
-export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		throw error(401, 'Unauthorized')
+export const POST = requireAuth(async ({ request, user }) => {
+	const apiKey = getOpenRouterApiKey()
+	if (!apiKey) {
+		throw error(500, 'OPENROUTER_API_KEY is not configured')
 	}
 
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw error(500, 'OPENROUTER_API_KEY is not set')
-	}
-
-	const settings = await getOrCreateSettings(locals.user.id)
+	const settings = await getOrCreateSettings(user.id)
 	const transcriptionModel = settings.transcriptionModel ?? 'google/gemini-2.5-flash'
 
 	const formData = await request.formData()
@@ -33,7 +31,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+			Authorization: `Bearer ${apiKey}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
@@ -70,5 +68,5 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const transcript = result.choices?.[0]?.message?.content?.trim() ?? ''
 
 	return json({ transcript })
-}
+})
 

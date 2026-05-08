@@ -1,8 +1,9 @@
 import { error, type RequestHandler } from '@sveltejs/kit'
 import { readFile, stat } from 'fs/promises'
 import { join } from 'path'
+import { getUploadDir } from '$lib/server/config'
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads'
+const UPLOAD_DIR = getUploadDir()
 
 const MIME_MAP: Record<string, string> = {
 	png: 'image/png',

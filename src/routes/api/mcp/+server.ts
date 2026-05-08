@@ -4,8 +4,9 @@ import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { desc, eq } from 'drizzle-orm'
+import { getMcpApiKey } from '$lib/server/config'
 
-const MCP_API_KEY = process.env.MCP_API_KEY
+const MCP_API_KEY = getMcpApiKey()
 
 function verifyApiKey(request: Request): boolean {
 	if (!MCP_API_KEY) return true // No key configured = open (dev mode)

@@ -2,8 +2,9 @@ import { json, type RequestHandler } from '@sveltejs/kit'
 import { randomUUID } from 'crypto'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
+import { getUploadDir } from '$lib/server/config'
 
-const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads'
+const UPLOAD_DIR = getUploadDir()
 const MAX_FILE_SIZE_DEFAULT = 20 * 1024 * 1024 // 20 MB
 const MAX_FILE_SIZE_VIDEO = 100 * 1024 * 1024 // 100 MB for video
 const ALLOWED_TYPES = new Set([

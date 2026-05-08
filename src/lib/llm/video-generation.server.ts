@@ -10,6 +10,7 @@
  */
 
 import { logger } from '$lib/observability/logger'
+import { requireOpenRouterApiKey } from '$lib/server/config'
 
 const VIDEO_GENERATIONS_URL = 'https://openrouter.ai/api/v1/video/generations'
 
@@ -41,11 +42,8 @@ export type VideoGenJob = {
 }
 
 function authHeaders() {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
 	return {
-		Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+		Authorization: `Bearer ${requireOpenRouterApiKey()}`,
 		'Content-Type': 'application/json',
 	}
 }

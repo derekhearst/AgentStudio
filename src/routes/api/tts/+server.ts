@@ -1,7 +1,8 @@
-import { error, type RequestHandler } from '@sveltejs/kit'
+import { error } from '@sveltejs/kit'
 import { z } from 'zod'
 import { synthesizeSpeech } from '$lib/llm/tts.server'
 import { logger } from '$lib/observability/logger'
+import { requireAuth } from '$lib/server/api-route'
 
 const ttsRequestSchema = z.object({
 	text: z.string().min(1).max(8000),
@@ -11,11 +12,7 @@ const ttsRequestSchema = z.object({
 	speed: z.number().min(0.25).max(4).optional(),
 })
 
-export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		throw error(401, 'Unauthorized')
-	}
-
+export const POST = requireAuth(async ({ request, user }) => {
 	let payload: z.infer<typeof ttsRequestSchema>
 	try {
 		const json = await request.json()
@@ -31,7 +28,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			model: payload.model,
 			format: payload.format,
 			speed: payload.speed,
-			userId: locals.user.id,
+			userId: user.id,
 		})
 		const body = result.audio.buffer.slice(
 			result.audio.byteOffset,
@@ -50,4 +47,4 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		logger.error('[api/tts] synthesis failed', { err })
 		throw error(502, 'TTS failed')
 	}
-}
+})

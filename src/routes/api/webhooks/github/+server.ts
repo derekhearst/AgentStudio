@@ -11,6 +11,7 @@ import {
 import { recordPullRequest, recordPullRequestCheck } from '$lib/source-control/source-control.server'
 import { openReviewItem } from '$lib/observability/review.server'
 import { logger } from '$lib/observability/logger'
+import { getGithubWebhookSecret } from '$lib/server/config'
 
 /**
  * Wave 5 #19 phase 5 — public GitHub webhook receiver.
@@ -31,7 +32,7 @@ import { logger } from '$lib/observability/logger'
  */
 
 export const POST: RequestHandler = async ({ request }) => {
-	const secret = process.env.GITHUB_WEBHOOK_SECRET
+	const secret = getGithubWebhookSecret()
 	if (!secret) {
 		logger.warn('[github-webhook] received delivery but GITHUB_WEBHOOK_SECRET is not configured — rejecting')
 		return json({ error: 'webhook not configured' }, { status: 503 })

@@ -9,6 +9,7 @@
 
 import { logLlmUsage } from '$lib/costs/usage'
 import { logger } from '$lib/observability/logger'
+import { requireOpenRouterApiKey } from '$lib/server/config'
 
 const OPENROUTER_TTS_URL = 'https://openrouter.ai/api/v1/audio/speech'
 
@@ -43,9 +44,7 @@ const MIME_BY_FORMAT: Record<TtsFormat, string> = {
 }
 
 export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<SynthesizeSpeechResult> {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
+	const apiKey = requireOpenRouterApiKey()
 	const model = input.model ?? DEFAULT_TTS_MODEL
 	const format = input.format ?? 'mp3'
 
@@ -60,7 +59,7 @@ export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<Sy
 	const response = await fetch(OPENROUTER_TTS_URL, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+			Authorization: `Bearer ${apiKey}`,
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify(body),

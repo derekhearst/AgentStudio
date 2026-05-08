@@ -7,6 +7,7 @@
  */
 
 import { logger } from '$lib/observability/logger'
+import { getOpenRouterApiKey } from '$lib/server/config'
 
 const OPENROUTER_CREDITS_URL = 'https://openrouter.ai/api/v1/credits'
 const CACHE_TTL_MS = 60_000
@@ -24,7 +25,8 @@ export async function getCreditsBalance(force = false): Promise<CreditsBalance |
 	if (!force && cached && cached.expiresAt > Date.now()) {
 		return cached.balance
 	}
-	if (!process.env.OPENROUTER_API_KEY) {
+	const apiKey = getOpenRouterApiKey()
+	if (!apiKey) {
 		return null
 	}
 
@@ -32,7 +34,7 @@ export async function getCreditsBalance(force = false): Promise<CreditsBalance |
 		const response = await fetch(OPENROUTER_CREDITS_URL, {
 			method: 'GET',
 			headers: {
-				Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+				Authorization: `Bearer ${apiKey}`,
 			},
 		})
 		if (!response.ok) {

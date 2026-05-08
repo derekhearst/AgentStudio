@@ -3,9 +3,10 @@ import { checkAndRunAutomations } from '$lib/automations/engine'
 import { runWorkspaceGc } from '$lib/workspace/gc.server'
 import { backfillSkillEmbeddings } from '$lib/skills/skills.server'
 import { logger } from '$lib/observability/logger'
+import { getCronSecret } from '$lib/server/config'
 
 function hasCronAccess(request: Request) {
-	const expected = process.env.CRON_SECRET?.trim()
+	const expected = getCronSecret()
 	if (!expected) return true
 	const auth = request.headers.get('authorization')
 	if (!auth) return false

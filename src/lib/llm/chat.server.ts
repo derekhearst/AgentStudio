@@ -1,4 +1,5 @@
 import { OpenRouter } from '@openrouter/sdk'
+import { requireOpenRouterApiKey } from '$lib/server/config'
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -118,16 +119,10 @@ export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
 let singleton: OpenRouter | null = null
 
 function getClient() {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
-
+	const apiKey = requireOpenRouterApiKey()
 	if (!singleton) {
-		singleton = new OpenRouter({
-			apiKey: process.env.OPENROUTER_API_KEY,
-		})
+		singleton = new OpenRouter({ apiKey })
 	}
-
 	return singleton
 }
 
@@ -142,11 +137,9 @@ async function chatViaFetch(
 	chatRequest: Record<string, unknown>,
 	cache: NonNullable<ChatOptions['cache']>,
 ): Promise<{ content: string; usage?: { promptTokens?: number; completionTokens?: number } }> {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
+	const apiKey = requireOpenRouterApiKey()
 	const headers: Record<string, string> = {
-		Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+		Authorization: `Bearer ${apiKey}`,
 		'Content-Type': 'application/json',
 	}
 	if (cache.enabled) {

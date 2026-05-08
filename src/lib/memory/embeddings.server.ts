@@ -8,6 +8,7 @@
 
 import { logLlmUsage } from '$lib/costs/usage'
 import { logger } from '$lib/observability/logger'
+import { requireOpenRouterApiKey } from '$lib/server/config'
 
 export const EMBEDDING_DIM = 1536
 export const DEFAULT_EMBEDDING_MODEL = 'openai/text-embedding-3-small'
@@ -30,9 +31,7 @@ type EmbeddingResponse = {
 }
 
 async function callEmbeddings(model: string, input: string[]): Promise<EmbeddingResponse> {
-	if (!process.env.OPENROUTER_API_KEY) {
-		throw new Error('OPENROUTER_API_KEY is not set')
-	}
+	const apiKey = requireOpenRouterApiKey()
 
 	let attempt = 0
 	let lastError: unknown = null
@@ -40,7 +39,7 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 		const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
 			method: 'POST',
 			headers: {
-				authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+				authorization: `Bearer ${apiKey}`,
 				'content-type': 'application/json',
 				// Embeddings are deterministic per-(model,input) — re-embedding identical drawer
 				// content during rebuild/reindex is exactly the cache-hit case OpenRouter optimizes.
