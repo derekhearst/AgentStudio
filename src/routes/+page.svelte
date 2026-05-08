@@ -10,14 +10,12 @@
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { loadReasoningEffort, saveReasoningEffort, type ReasoningEffort } from '$lib/chat/reasoning-effort';
 
 	let busy = $state(false);
 	let prompt = $state('');
 	let model = $state('anthropic/claude-sonnet-4');
 	let agentId = $state<string | null>(null);
-	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
-	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 	let reasoningEffort = $state<ReasoningEffort>('none');
 	let reasoningHydrated = $state(false);
 	let modelInitialized = $state(false);
@@ -51,16 +49,14 @@
 
 	$effect(() => {
 		if (!browser || reasoningHydrated) return;
-		const stored = window.localStorage.getItem(REASONING_STORAGE_KEY);
-		if (stored && VALID_REASONING_EFFORTS.includes(stored as ReasoningEffort)) {
-			reasoningEffort = stored as ReasoningEffort;
-		}
+		const stored = loadReasoningEffort();
+		if (stored) reasoningEffort = stored;
 		reasoningHydrated = true;
 	});
 
 	$effect(() => {
 		if (!browser || !reasoningHydrated) return;
-		window.localStorage.setItem(REASONING_STORAGE_KEY, reasoningEffort);
+		saveReasoningEffort(reasoningEffort);
 	});
 
 	async function loadDefaultModel() {

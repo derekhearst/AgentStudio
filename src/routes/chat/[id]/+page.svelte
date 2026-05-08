@@ -60,9 +60,7 @@
 		url: string;
 	};
 
-	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-	const REASONING_STORAGE_KEY = 'AgentStudio:reasoning-effort';
-	const VALID_REASONING_EFFORTS: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+	import { loadReasoningEffort, saveReasoningEffort, type ReasoningEffort } from '$lib/chat/reasoning-effort';
 
 	const conversationId = $derived(page.params.id ?? '');
 	let model = $state('anthropic/claude-sonnet-4');
@@ -536,29 +534,15 @@
 	$effect(() => {
 		if (!browser) return;
 		if (conversationId === reasoningHydratedFor) return;
-
-		const scopedKey = conversationId ? `${REASONING_STORAGE_KEY}:${conversationId}` : null;
-		const scoped = scopedKey ? window.localStorage.getItem(scopedKey) : null;
-		const global = window.localStorage.getItem(REASONING_STORAGE_KEY);
-		const stored = scoped ?? global;
-
-		if (stored && VALID_REASONING_EFFORTS.includes(stored as ReasoningEffort)) {
-			reasoningEffort = stored as ReasoningEffort;
-		}
-
+		const stored = loadReasoningEffort(conversationId);
+		if (stored) reasoningEffort = stored;
 		reasoningHydratedFor = conversationId;
 	});
-
-
 
 	$effect(() => {
 		if (!browser) return;
 		if (reasoningHydratedFor !== conversationId) return;
-
-		window.localStorage.setItem(REASONING_STORAGE_KEY, reasoningEffort);
-		if (conversationId) {
-			window.localStorage.setItem(`${REASONING_STORAGE_KEY}:${conversationId}`, reasoningEffort);
-		}
+		saveReasoningEffort(reasoningEffort, conversationId);
 	});
 
 	$effect(() => {
