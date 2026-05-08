@@ -4,6 +4,10 @@
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
+
+	const relativeTime = (date: Date | string | null) =>
+		relativeTimeBase(date, { style: 'capitalized' })
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number]
 	type StreamEntry = { conversationId: string; agentId: string; delta: string }
@@ -39,15 +43,7 @@
 			.toUpperCase()
 	}
 
-	function relativeTime(date: Date | string | null) {
-		if (!date) return 'Never'
-		const d = typeof date === 'string' ? new Date(date) : date
-		const diff = Date.now() - d.getTime()
-		if (diff < 60_000) return 'Just now'
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-		return `${Math.floor(diff / 86_400_000)}d ago`
-	}
+	// relativeTime defined above using $lib/util/relative-time with capitalized style.
 
 	function formatCost(cost: string | number) {
 		const n = typeof cost === 'string' ? parseFloat(cost) : cost

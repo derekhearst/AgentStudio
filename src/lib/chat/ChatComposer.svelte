@@ -57,9 +57,29 @@
 	} = $props()
 
 	let reasoningMenuOpen = $state(false)
+	let reasoningRoot: HTMLDivElement | undefined = $state()
 	const selectedReasoningLabel = $derived(
 		REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'off'
 	)
+
+	$effect(() => {
+		if (!reasoningMenuOpen) return
+
+		const handleMousedown = (e: MouseEvent) => {
+			if (reasoningRoot && !reasoningRoot.contains(e.target as Node)) reasoningMenuOpen = false
+		}
+		const handleKeydown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') reasoningMenuOpen = false
+		}
+
+		window.addEventListener('mousedown', handleMousedown)
+		window.addEventListener('keydown', handleKeydown)
+
+		return () => {
+			window.removeEventListener('mousedown', handleMousedown)
+			window.removeEventListener('keydown', handleKeydown)
+		}
+	})
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault()
@@ -114,7 +134,7 @@
 					showChevron={true}
 					onchange={(id: string) => onModelChange?.(id)}
 				/>
-				<div class="dropdown dropdown-top dropdown-end" class:dropdown-open={reasoningMenuOpen}>
+				<div bind:this={reasoningRoot} class="dropdown dropdown-top dropdown-end" class:dropdown-open={reasoningMenuOpen}>
 					<button
 						type="button"
 						class="console-pill"
@@ -128,7 +148,7 @@
 						<span class="ar">▾</span>
 					</button>
 					{#if reasoningMenuOpen}
-						<ul class="menu dropdown-content bg-base-200 border-base-300 rounded-md z-30 mb-2 w-32 border p-1 shadow-xl">
+						<ul class="menu dropdown-content bg-base-100 border-base-300 rounded-box z-30 mb-2 w-32 border p-1 shadow-xl">
 							{#each REASONING_OPTIONS as option (option.value)}
 								<li>
 									<button

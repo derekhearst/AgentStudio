@@ -19,19 +19,9 @@ export function formatDate(value: Date | string | null): string {
 	return date.toLocaleString()
 }
 
-export function relativeTime(value: Date | string | null): string {
-	if (!value) return 'Never'
-	const date = typeof value === 'string' ? new Date(value) : value
-	const diffMs = Date.now() - date.getTime()
-	if (Number.isNaN(diffMs)) return 'Unknown'
-	if (Math.abs(diffMs) < 60_000) return 'Just now'
-	const minutes = Math.round(diffMs / 60_000)
-	if (Math.abs(minutes) < 60) return minutes > 0 ? `${minutes}m ago` : `in ${Math.abs(minutes)}m`
-	const hours = Math.round(minutes / 60)
-	if (Math.abs(hours) < 24) return hours > 0 ? `${hours}h ago` : `in ${Math.abs(hours)}h`
-	const days = Math.round(hours / 24)
-	return days > 0 ? `${days}d ago` : `in ${Math.abs(days)}d`
-}
+// Bidirectional variant ("in Xm" for future runs, "Xm ago" for past) — automations show
+// both lastRunAt and nextRunAt in the same UI strip.
+export { relativeTimeBidirectional as relativeTime } from '$lib/util/relative-time'
 
 /** True when `value` is in the future and within the next hour. */
 export function isDueSoon(value: Date | string | null): boolean {

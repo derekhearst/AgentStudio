@@ -20,6 +20,7 @@
 	} = $props()
 
 	let menuOpen = $state(false)
+	let rootEl: HTMLDivElement | undefined = $state()
 
 	const builtins = $derived(agentChoices.filter((a) => a.builtinKey != null))
 	const custom = $derived(agentChoices.filter((a) => a.builtinKey == null))
@@ -30,16 +31,35 @@
 		if (nextId === agentId) return
 		await onAgentChange?.(nextId)
 	}
+
+	$effect(() => {
+		if (!menuOpen) return
+
+		const handleMousedown = (e: MouseEvent) => {
+			if (rootEl && !rootEl.contains(e.target as Node)) menuOpen = false
+		}
+		const handleKeydown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') menuOpen = false
+		}
+
+		window.addEventListener('mousedown', handleMousedown)
+		window.addEventListener('keydown', handleKeydown)
+
+		return () => {
+			window.removeEventListener('mousedown', handleMousedown)
+			window.removeEventListener('keydown', handleKeydown)
+		}
+	})
 </script>
 
 <!-- On tablet+ we right-anchor to the trigger so the menu doesn't overflow the right edge.
      On mobile the trigger sits in the middle of a narrow composer toolbar and neither edge
      has enough clearance for a 256px menu, so the inner <ul> switches to a fixed bottom
      sheet (see below). -->
-<div class="dropdown dropdown-top tablet:dropdown-end" class:dropdown-open={menuOpen}>
+<div bind:this={rootEl} class="dropdown dropdown-top tablet:dropdown-end" class:dropdown-open={menuOpen}>
 	<button
 		type="button"
-		class="btn btn-ghost btn-xs gap-1"
+		class="console-pill"
 		title={selected ? `Agent: ${selected.name} — ${selected.role}` : 'Select agent'}
 		aria-label="Conversation agent"
 		aria-expanded={menuOpen}
@@ -49,7 +69,7 @@
 		}}
 	>
 		<span class="truncate">{selected?.name ?? 'Agent'}</span>
-		<span class="opacity-70">▾</span>
+		<span class="ar">▾</span>
 	</button>
 	{#if menuOpen}
 		<ul

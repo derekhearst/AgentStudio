@@ -8,6 +8,7 @@
 		type LayoutNode,
 	} from '$lib/memory/memory-map.layout';
 	import type { MemoryWingRow, MemoryWingEdge } from '$lib/memory/memory.remote';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	let {
 		wings,
@@ -105,16 +106,8 @@
 		hoverNode = null;
 	}
 
-	function relativeTime(d: string | Date | null): string {
-		if (!d) return 'never';
-		const date = typeof d === 'string' ? new Date(d) : d;
-		const diff = Date.now() - date.getTime();
-		if (diff < 60_000) return 'just now';
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-		if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-		return date.toISOString().slice(0, 10);
-	}
+	// relativeTime imported from $lib/util/relative-time with weekFallback for older drawers.
+	const tooltipRelativeTime = (d: string | Date | null) => relativeTime(d, { weekFallback: true });
 
 	onMount(() => {
 		if (!containerEl) return;
@@ -254,7 +247,7 @@
 				<span>·</span>
 				<span>{hoverNode.roomCount} room{hoverNode.roomCount === 1 ? '' : 's'}</span>
 				<span>·</span>
-				<span>last {relativeTime(hoverNode.lastTouchedAt)}</span>
+				<span>last {tooltipRelativeTime(hoverNode.lastTouchedAt)}</span>
 			</div>
 			{#if hoverNode.aliases.length}
 				<div class="memory-map__tooltip-aliases">aka {hoverNode.aliases.join(', ')}</div>

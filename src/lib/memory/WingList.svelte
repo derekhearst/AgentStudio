@@ -1,6 +1,11 @@
 <script lang="ts">
 	import type { MemoryWingRow } from '$lib/memory/memory.remote';
 	import { kindColor, wingInitials } from '$lib/memory/memory-map.layout';
+	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time';
+
+	// Compact + week-fallback variant: "1m" / "1h" / "1d" / "2026-05-08" — fits in tight wing rows.
+	const relativeTime = (d: string | Date | null) =>
+		relativeTimeBase(d, { compact: true, weekFallback: true });
 
 	let {
 		wings,
@@ -12,16 +17,7 @@
 		onSelect?: (id: string) => void;
 	} = $props();
 
-	function relativeTime(d: string | Date | null): string {
-		if (!d) return 'never';
-		const date = typeof d === 'string' ? new Date(d) : d;
-		const diff = Date.now() - date.getTime();
-		if (diff < 60_000) return 'just now';
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-		if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d`;
-		return date.toISOString().slice(0, 10);
-	}
+	// relativeTime defined above using $lib/util/relative-time with compact + weekFallback.
 </script>
 
 <div class="wing-list">

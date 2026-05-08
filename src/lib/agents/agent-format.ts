@@ -47,15 +47,11 @@ export function modelShortName(model: string) {
 	return model.split('/').pop() ?? model
 }
 
-export function relativeTime(date: Date | string | null | undefined): string {
-	if (!date) return 'Never'
-	const d = typeof date === 'string' ? new Date(date) : date
-	const diff = Date.now() - d.getTime()
-	if (diff < 60_000) return 'Just now'
-	if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-	if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-	return `${Math.floor(diff / 86_400_000)}d ago`
-}
+import { relativeTime as relativeTimeRaw } from '$lib/util/relative-time'
+
+// Capitalized variant ("Never" / "Just now") used throughout the agents UI.
+export const relativeTime = (date: Date | string | null | undefined): string =>
+	relativeTimeRaw(date, { style: 'capitalized' })
 
 export function formatDate(date: Date | string | null | undefined): string {
 	if (!date) return '—'

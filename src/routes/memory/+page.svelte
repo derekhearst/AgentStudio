@@ -19,6 +19,7 @@
 	import SearchOverlay from '$lib/memory/SearchOverlay.svelte';
 	import WingList from '$lib/memory/WingList.svelte';
 	import ReorganizePanel from '$lib/memory/ReorganizePanel.svelte';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	let wings = $state<MemoryWingRow[]>([]);
 	let edges = $state<MemoryWingEdge[]>([]);
@@ -127,15 +128,7 @@
 		return String(n);
 	}
 
-	function relativeTime(d: string | Date | null): string {
-		if (!d) return 'never';
-		const date = typeof d === 'string' ? new Date(d) : d;
-		const diff = Date.now() - date.getTime();
-		if (diff < 60_000) return 'just now';
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-		return `${Math.floor(diff / 86_400_000)}d ago`;
-	}
+	// relativeTime imported from $lib/util/relative-time
 
 	onMount(() => {
 		void loadAll();

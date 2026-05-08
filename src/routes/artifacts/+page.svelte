@@ -8,6 +8,7 @@
 	} from '$lib/artifacts/artifacts-feed.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { artifactDrawer } from '$lib/artifacts/artifact-drawer.svelte';
+	import { relativeTime } from '$lib/util/relative-time';
 
 	type FeedType = 'all' | 'research' | 'image' | 'document';
 
@@ -38,13 +39,7 @@
 		void load(next);
 	}
 
-	function relativeTime(d: Date | string): string {
-		const diff = Date.now() - new Date(d).getTime();
-		if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-		return `${Math.floor(diff / 86_400_000)}d ago`;
-	}
+	// relativeTime imported from $lib/util/relative-time
 
 	function statusTone(status: string): string {
 		switch (status) {
