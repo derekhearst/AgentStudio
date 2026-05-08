@@ -17,7 +17,7 @@
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
-	import ToolToggleChip from '$lib/settings/ToolToggleChip.svelte';
+	import SettingsToolApprovalPanel from '$lib/settings/panels/SettingsToolApprovalPanel.svelte';
 	import SettingsModelPanel from '$lib/settings/panels/SettingsModelPanel.svelte';
 	import SettingsContextPanel from '$lib/settings/panels/SettingsContextPanel.svelte';
 	import SettingsMemoryPanel from '$lib/settings/panels/SettingsMemoryPanel.svelte';
@@ -64,41 +64,22 @@
 
 	type SectionId = (typeof sections)[number]['id'];
 
-	// Tool tiers come from `toolDisclosure`: 'always' = loaded every request, 'searchable' =
-	// loaded on-demand via `search_tools`. The UI groups tools by tier so operators can bulk-
-	// approve a tier (e.g. require approval for every searchable tool but waive the always set).
-	const TIER_META: Array<{ tierKey: 'always' | 'searchable'; label: string; description: string; alwaysOn: boolean }> = [
-		{ tierKey: 'always', label: 'Always loaded', description: 'Tools shipped in the model surface on every request (web_search, ask_user, run_code, search_tools).', alwaysOn: true },
-		{ tierKey: 'searchable', label: 'Searchable', description: 'The long tail of tools — loaded only after the model invokes `search_tools(query)`.', alwaysOn: false },
-	];
-	const toolsByTier = TIER_META
-		.map(({ tierKey, label, description, alwaysOn }) => ({
-			tierKey,
-			tier: { label, description, alwaysOn },
-			tools: BUILTIN_TOOLS.filter((tool) => tool.tier === tierKey),
-		}))
-		.filter((entry) => entry.tools.length > 0);
-
-	const filteredToolsByTier = $derived.by(() => {
-		if (!searchLower) return toolsByTier;
-		return toolsByTier
-			.map((g) => ({
-				...g,
-				tools: g.tools.filter(
-					(t) =>
-						t.name.toLowerCase().includes(searchLower) ||
-						t.description.toLowerCase().includes(searchLower),
-				),
-			}))
-			.filter((g) => g.tools.length > 0);
+	// Search match for the Tool Approval section: the section is visible if the user's
+	// query matches the section keywords OR any tool name/description.
+	const searchMatchesAnyTool = $derived.by(() => {
+		if (!searchLower) return false;
+		return BUILTIN_TOOLS.some(
+			(t) =>
+				t.name.toLowerCase().includes(searchLower) ||
+				t.description.toLowerCase().includes(searchLower),
+		);
 	});
 
 	function isVisible(id: string) {
 		if (!searchLower) return true;
 		const section = sections.find((s) => s.id === id);
 		const keywordMatch = section ? section.keywords.includes(searchLower) : false;
-		// Tool Approval is also visible when the search matches any tool name/description
-		if (id === 'tools') return keywordMatch || filteredToolsByTier.length > 0;
+		if (id === 'tools') return keywordMatch || searchMatchesAnyTool;
 		return keywordMatch;
 	}
 
@@ -322,58 +303,6 @@
 		await installPromptEvent.userChoice;
 		installPromptEvent = null;
 	}
-
-	function isToolApprovalRequired(toolName: string): boolean {
-		const requiredTools = settings?.toolConfig?.approvalRequiredTools ?? [];
-		return requiredTools.includes('*') || requiredTools.includes(toolName);
-	}
-
-	const isWildcardApproval = $derived(
-		(settings?.toolConfig?.approvalRequiredTools ?? []).includes('*'),
-	);
-
-	function toggleToolApproval(toolName: string, required: boolean) {
-		if (!settings) return;
-		// If the wildcard is currently active, toggling any specific tool would silently
-		// strip the "approve every tool" posture. Refuse — operator must clear the
-		// wildcard explicitly via the master toggle below.
-		if (isWildcardApproval) {
-			statusMessage = 'Per-tool approval is disabled while "Require approval for all tools" is on.';
-			return;
-		}
-		const base = settings.toolConfig?.approvalRequiredTools ?? [];
-		const next = required ? [...new Set([...base, toolName])] : base.filter((name) => name !== toolName);
-		settings = {
-			...settings,
-			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
-		};
-	}
-
-	function setWildcardApproval(value: boolean) {
-		if (!settings) return;
-		const current = settings.toolConfig?.approvalRequiredTools ?? [];
-		const without = current.filter((name) => name !== '*');
-		const next = value ? [...without, '*'] : without;
-		settings = {
-			...settings,
-			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
-		};
-	}
-
-	function setTierApproval(tierKey: 'always' | 'searchable', required: boolean) {
-		if (!settings || isWildcardApproval) return;
-		// `always` tools never have approval pre-set en-masse; the UI hides the bulk-controls
-		// for that tier. Defensive guard for callers passing it anyway.
-		if (tierKey === 'always') return;
-		const tierTools = BUILTIN_TOOLS.filter((t) => t.tier === tierKey).map((t) => t.name);
-		const base = settings.toolConfig?.approvalRequiredTools ?? [];
-		let next = base.filter((n) => !tierTools.includes(n));
-		if (required) next = [...new Set([...next, ...tierTools])];
-		settings = {
-			...settings,
-			toolConfig: { ...settings.toolConfig, approvalRequiredTools: next },
-		};
-	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
@@ -445,101 +374,7 @@
 					     ════════════════════════════════════════════════ -->
 					{#if isVisible('tools')}
 						<div id="sec-tools" data-settings-section class="scroll-mt-4">
-							<ContentPanel>
-								{#snippet header()}
-									<h2 class="flex items-center gap-2 text-base font-semibold">
-										<span class="h-1.5 w-1.5 rounded-full bg-secondary"></span>
-										Tool Approval
-									</h2>
-								{/snippet}
-								<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-info/40 bg-info/5 px-3 py-2.5">
-									<span>
-										<span class="block text-sm font-medium">Programmatic tool calling</span>
-										<span class="block text-xs text-base-content/60">Expose <code>run_code</code> so the agent can write a JavaScript program that calls available tools as <code>await tools.&lt;name&gt;(args)</code>. Approvals and capability filtering still apply inside the script.</span>
-									</span>
-									<input
-										type="checkbox"
-										class="checkbox checkbox-sm checkbox-info mt-0.5"
-										checked={settings?.toolConfig?.programmaticToolCallingEnabled ?? false}
-										onchange={(e) => {
-											if (!settings) return;
-											const enabled = (e.currentTarget as HTMLInputElement).checked;
-											settings = {
-												...settings,
-												toolConfig: { ...settings.toolConfig, programmaticToolCallingEnabled: enabled },
-											};
-										}}
-									/>
-								</label>
-								<label class="mb-3 flex items-start justify-between gap-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
-									<span>
-										<span class="block text-sm font-medium">Require approval for all tools</span>
-										<span class="block text-xs text-base-content/60">When on, every tool call pauses for explicit approval. Per-tool toggles below are ignored while this is on.</span>
-									</span>
-									<input
-										type="checkbox"
-										class="checkbox checkbox-sm checkbox-warning mt-0.5"
-										checked={isWildcardApproval}
-										onchange={(e) => setWildcardApproval((e.currentTarget as HTMLInputElement).checked)}
-									/>
-								</label>
-								<div
-									class="flex flex-col gap-5"
-									class:opacity-60={isWildcardApproval}
-									class:pointer-events-none={isWildcardApproval}
-									aria-disabled={isWildcardApproval}
-								>
-									{#each filteredToolsByTier as tierEntry (tierEntry.tierKey)}
-										{@const alwaysOn = tierEntry.tier.alwaysOn}
-										<div>
-											<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-												<div class="min-w-0">
-													<p class="flex items-center gap-2 text-sm font-medium">
-														{tierEntry.tier.label}
-														{#if alwaysOn}
-															<span class="badge badge-success badge-xs">Always loaded</span>
-														{/if}
-													</p>
-													<p class="mt-0.5 text-xs text-base-content/55">{tierEntry.tier.description}</p>
-												</div>
-												{#if !alwaysOn}
-													<div class="flex shrink-0 items-center gap-1">
-														<button
-															type="button"
-															class="btn btn-ghost btn-xs"
-															onclick={() => setTierApproval(tierEntry.tierKey, true)}
-															disabled={isWildcardApproval}
-														>All</button>
-														<button
-															type="button"
-															class="btn btn-ghost btn-xs"
-															onclick={() => setTierApproval(tierEntry.tierKey, false)}
-															disabled={isWildcardApproval}
-														>None</button>
-													</div>
-												{/if}
-											</div>
-											<div
-												class="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-												class:opacity-60={alwaysOn}
-												class:pointer-events-none={alwaysOn}
-											>
-												{#each tierEntry.tools as tool (tool.name)}
-													<ToolToggleChip
-														name={tool.name}
-														description={tool.description}
-														checked={isToolApprovalRequired(tool.name)}
-														disabled={alwaysOn}
-														onchange={(value) => toggleToolApproval(tool.name, value)}
-													/>
-												{/each}
-											</div>
-										</div>
-									{:else}
-										<p class="text-sm text-base-content/55">No tools match “{searchQuery}”.</p>
-									{/each}
-								</div>
-							</ContentPanel>
+							<SettingsToolApprovalPanel toolConfig={settings.toolConfig} {searchQuery} />
 						</div>
 					{/if}
 
