@@ -14,7 +14,9 @@ import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { compactMessages, generateTitle, shouldCompact } from '$lib/chat/chat.server'
-import { conversations } from '$lib/sessions/sessions.schema'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { and, sql } from 'drizzle-orm'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { getToolDefinitions } from '$lib/tools/tools.server'
 import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
@@ -241,6 +243,107 @@ export async function maybeCompactConversation(input: {
 			compactionModel: result.compactionModel,
 		},
 	}
+}
+
+export type AssistantPersistInput = {
+	conversationId: string
+	parentMessageId: string | null
+	model: string
+	content: string
+	promptTokens: number
+	completionTokens: number
+	ttftMs: number | null
+	totalMs: number
+	tokensPerSec: number | null
+	cost: string
+	metadata: Record<string, unknown>
+	toolCalls: Array<Record<string, unknown>>
+	runId: string
+	conversationTotals: {
+		previousTokens: number
+		previousCost: string
+	}
+}
+
+/**
+ * Persist the final assistant message + bump conversation totals in a single
+ * transaction. Detect-and-merge: if `savePartialAssistant` wrote a partial row
+ * for this run (network-blip recovery path), update it in place instead of
+ * inserting a second assistant row for the same logical turn — matched by
+ * runId in metadata + the `partial` flag.
+ *
+ * Wrapping both the message write and the totals update in one transaction
+ * means a crash between them can't leave the row + totals desynced.
+ */
+export async function persistAssistantMessage(input: AssistantPersistInput) {
+	return db.transaction(async (tx) => {
+		const [existingPartial] = await tx
+			.select({ id: messages.id })
+			.from(messages)
+			.where(
+				and(
+					eq(messages.conversationId, input.conversationId),
+					eq(messages.role, 'assistant'),
+					sql`${messages.metadata}->>'runId' = ${input.runId}`,
+					sql`${messages.metadata}->>'partial' = 'true'`,
+				),
+			)
+			.limit(1)
+
+		const written = existingPartial
+			? (
+					await tx
+						.update(messages)
+						.set({
+							content: input.content,
+							model: input.model,
+							parentMessageId: input.parentMessageId,
+							tokensIn: input.promptTokens,
+							tokensOut: input.completionTokens,
+							ttftMs: input.ttftMs,
+							totalMs: input.totalMs,
+							tokensPerSec: input.tokensPerSec,
+							cost: input.cost,
+							metadata: input.metadata,
+							toolCalls: input.toolCalls,
+						})
+						.where(eq(messages.id, existingPartial.id))
+						.returning()
+				)[0]
+			: await insertMessageWithSequence(
+					{
+						conversationId: input.conversationId,
+						role: 'assistant',
+						content: input.content,
+						model: input.model,
+						parentMessageId: input.parentMessageId,
+						tokensIn: input.promptTokens,
+						tokensOut: input.completionTokens,
+						ttftMs: input.ttftMs,
+						totalMs: input.totalMs,
+						tokensPerSec: input.tokensPerSec,
+						cost: input.cost,
+						metadata: input.metadata,
+						toolCalls: input.toolCalls,
+					},
+					tx,
+				)
+
+		await tx
+			.update(conversations)
+			.set({
+				model: input.model,
+				totalTokens:
+					input.conversationTotals.previousTokens + input.promptTokens + input.completionTokens,
+				totalCost: String(
+					parseFloat(input.conversationTotals.previousCost) + parseFloat(input.cost),
+				),
+				updatedAt: new Date(),
+			})
+			.where(eq(conversations.id, input.conversationId))
+
+		return written
+	})
 }
 
 /**

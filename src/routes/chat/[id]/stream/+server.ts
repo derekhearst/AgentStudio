@@ -28,6 +28,7 @@ import {
 	extractAgentWorkspaceConfig,
 	maybeCompactConversation,
 	maybeGenerateTitle,
+	persistAssistantMessage,
 	resolveSkillTopK,
 	trimToolResultsForRun,
 	type CompactionStats,
@@ -404,84 +405,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// update in a single transaction so a crash between leaves the row + totals
 				// consistent. Title generation stays outside (it's a fire-and-forget side
 				// effect started below).
-				const finalMetadata = {
-					modelSelection,
-					reasoningEffort,
-					reasoningTokens,
-					tokensCacheWrite: cacheCreationInputTokens,
-					tokensCacheRead: cacheReadInputTokens,
+				const assistantMessage = await persistAssistantMessage({
+					conversationId: body.conversationId,
+					parentMessageId,
+					model: routedModel,
+					content: allTextContent || '(no output)',
+					promptTokens,
+					completionTokens,
+					ttftMs,
+					totalMs,
+					tokensPerSec,
+					cost: messageCost,
+					metadata: {
+						modelSelection,
+						reasoningEffort,
+						reasoningTokens,
+						tokensCacheWrite: cacheCreationInputTokens,
+						tokensCacheRead: cacheReadInputTokens,
+						runId: run.id,
+						blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
+					},
+					toolCalls: allToolCalls,
 					runId: run.id,
-					blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
-				}
-
-				const assistantMessage = await db.transaction(async (tx) => {
-					// Detect-and-merge: if `savePartialAssistant` wrote a partial row for this
-					// run (network-blip recovery path), update it in place instead of inserting
-					// a second assistant row for the same logical turn. Match by runId stamped
-					// into metadata + the `partial` flag.
-					const [existingPartial] = await tx
-						.select({ id: messages.id })
-						.from(messages)
-						.where(
-							and(
-								eq(messages.conversationId, body.conversationId),
-								eq(messages.role, 'assistant'),
-								sql`${messages.metadata}->>'runId' = ${run.id}`,
-								sql`${messages.metadata}->>'partial' = 'true'`,
-							),
-						)
-						.limit(1)
-
-					const written = existingPartial
-						? (
-								await tx
-									.update(messages)
-									.set({
-										content: allTextContent || '(no output)',
-										model: routedModel,
-										parentMessageId,
-										tokensIn: promptTokens,
-										tokensOut: completionTokens,
-										ttftMs,
-										totalMs,
-										tokensPerSec,
-										cost: messageCost,
-										metadata: finalMetadata,
-										toolCalls: allToolCalls,
-									})
-									.where(eq(messages.id, existingPartial.id))
-									.returning()
-							)[0]
-						: await insertMessageWithSequence(
-								{
-									conversationId: body.conversationId,
-									role: 'assistant',
-									content: allTextContent || '(no output)',
-									model: routedModel,
-									parentMessageId,
-									tokensIn: promptTokens,
-									tokensOut: completionTokens,
-									ttftMs,
-									totalMs,
-									tokensPerSec,
-									cost: messageCost,
-									metadata: finalMetadata,
-									toolCalls: allToolCalls,
-								},
-								tx,
-							)
-
-					await tx
-						.update(conversations)
-						.set({
-							model: routedModel,
-							totalTokens: conversation.totalTokens + promptTokens + completionTokens,
-							totalCost: String(parseFloat(conversation.totalCost) + parseFloat(messageCost)),
-							updatedAt: new Date(),
-						})
-						.where(eq(conversations.id, body.conversationId))
-
-					return written
+					conversationTotals: {
+						previousTokens: conversation.totalTokens,
+						previousCost: conversation.totalCost,
+					},
 				})
 
 				maybeGenerateTitle({
