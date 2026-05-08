@@ -7,6 +7,15 @@
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
+	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
+	import {
+		agentColor,
+		agentInitials,
+		describeSchedule,
+		modelShortName,
+		relativeTime,
+	} from '$lib/agents/agent-format'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
 	type StreamEntry = { conversationId: string; agentId: string; delta: string }
@@ -15,7 +24,6 @@
 	let data = $state<AgentData | null>(null)
 	let loading = $state(true)
 	let streamingMap = $state(new Map<string, StreamEntry>())
-	let showAllConversations = $state(false)
 	let editingConfig = $state(false)
 	let configSaving = $state(false)
 	let configError = $state<string | null>(null)
@@ -36,81 +44,6 @@
 	let eventSource: EventSource | null = null
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-	// ── Color helpers ──────────────────────────────────────────────────────
-	const COLORS = [
-		{ ring: 'ring-primary/40', bg: 'bg-primary/15', text: 'text-primary', accent: 'border-primary', gradFrom: 'from-primary/20', gradTo: 'to-primary/5' },
-		{ ring: 'ring-secondary/40', bg: 'bg-secondary/15', text: 'text-secondary', accent: 'border-secondary', gradFrom: 'from-secondary/20', gradTo: 'to-secondary/5' },
-		{ ring: 'ring-accent/40', bg: 'bg-accent/15', text: 'text-accent', accent: 'border-accent', gradFrom: 'from-accent/20', gradTo: 'to-accent/5' },
-		{ ring: 'ring-info/40', bg: 'bg-info/15', text: 'text-info', accent: 'border-info', gradFrom: 'from-info/20', gradTo: 'to-info/5' },
-		{ ring: 'ring-success/40', bg: 'bg-success/15', text: 'text-success', accent: 'border-success', gradFrom: 'from-success/20', gradTo: 'to-success/5' },
-		{ ring: 'ring-warning/40', bg: 'bg-warning/15', text: 'text-warning', accent: 'border-warning', gradFrom: 'from-warning/20', gradTo: 'to-warning/5' },
-	]
-
-	// Model colors for session left-border
-	const MODEL_COLORS: Record<string, string> = {
-		claude: 'border-l-purple-500/50',
-		gpt: 'border-l-green-500/50',
-		gemini: 'border-l-blue-500/50',
-		mistral: 'border-l-orange-500/50',
-		llama: 'border-l-pink-500/50',
-	}
-
-	function agentColor(id: string) {
-		return COLORS[id.charCodeAt(0) % COLORS.length]
-	}
-
-	function agentInitials(name: string) {
-		return name
-			.split(/\s+/)
-			.map((w) => w[0] ?? '')
-			.join('')
-			.slice(0, 2)
-			.toUpperCase()
-	}
-
-	function modelColor(model: string | null | undefined) {
-		if (!model) return 'border-l-base-300'
-		const key = Object.keys(MODEL_COLORS).find((k) => model.toLowerCase().includes(k))
-		return key ? MODEL_COLORS[key] : 'border-l-base-300'
-	}
-
-	function modelShortName(model: string) {
-		return model.split('/').pop() ?? model
-	}
-
-	function relativeTime(date: Date | string | null | undefined) {
-		if (!date) return 'Never'
-		const d = typeof date === 'string' ? new Date(date) : date
-		const diff = Date.now() - d.getTime()
-		if (diff < 60_000) return 'Just now'
-		if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-		if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-		return `${Math.floor(diff / 86_400_000)}d ago`
-	}
-
-	function formatDate(date: Date | string | null | undefined) {
-		if (!date) return '—'
-		return new Date(typeof date === 'string' ? date : date).toLocaleDateString(undefined, {
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-		})
-	}
-
-	function formatCost(cost: string | number | null | undefined) {
-		const n = typeof cost === 'string' ? parseFloat(cost) : (cost ?? 0)
-		if (n === 0) return '$0.00'
-		return n >= 0.01 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`
-	}
-
-	function formatTokens(n: number | null | undefined) {
-		if (!n) return '0'
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-		if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-		return String(n)
-	}
-
 	function liveStream(): StreamEntry | undefined {
 		if (!data) return undefined
 		for (const entry of streamingMap.values()) {
@@ -121,26 +54,9 @@
 
 	const liveEntry = $derived(liveStream())
 
-	const visibleConversations = $derived(
-		showAllConversations ? data?.conversations ?? [] : (data?.conversations ?? []).slice(0, 10),
-	)
-
 	const maxToolCount = $derived(
 		data?.toolUsage.length ? Math.max(...data.toolUsage.map((t) => t.count)) : 1,
 	)
-
-	// Cron expression human-readable
-	function describeSchedule(cron: string) {
-		const parts = cron.split(' ')
-		if (parts.length !== 5) return cron
-		const [min, hour] = parts
-		if (min === '0' && hour === '*') return 'Every hour'
-		if (min === '0' && hour === '0') return 'Daily midnight'
-		if (min === '*/30') return 'Every 30 minutes'
-		if (min === '*/15') return 'Every 15 minutes'
-		if (min === '*/5') return 'Every 5 minutes'
-		return cron
-	}
 
 	onMount(() => {
 		void loadData()
@@ -374,75 +290,7 @@
 		{/if}
 
 		<!-- ── Stats grid ────────────────────────────────────────────── -->
-		<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-			<!-- Sessions -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-primary/15 text-primary">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-					</svg>
-				</div>
-				<p class="text-2xl font-bold tabular-nums">{data.stats.sessionCount}</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Sessions</p>
-			</div>
-
-			<!-- Total cost -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-success/15 text-success">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<circle cx="12" cy="12" r="10"/><path d="M12 6v12M9 9h4.5a1.5 1.5 0 0 1 0 3H9m0 3h4.5a1.5 1.5 0 0 1 0 3H9"/>
-					</svg>
-				</div>
-				<p class="text-2xl font-bold tabular-nums">{formatCost(data.stats.totalCost)}</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Total cost</p>
-			</div>
-
-			<!-- Total tokens -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-info/15 text-info">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-					</svg>
-				</div>
-				<p class="text-2xl font-bold tabular-nums">{formatTokens(data.stats.totalTokens)}</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Tokens</p>
-			</div>
-
-			<!-- Avg cost/session -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-warning/15 text-warning">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-					</svg>
-				</div>
-				<p class="text-2xl font-bold tabular-nums">{formatCost(data.stats.avgCostPerSession)}</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Avg/session</p>
-			</div>
-
-			<!-- Avg first token -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-secondary/15 text-secondary">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-					</svg>
-				</div>
-				<p class="text-2xl font-bold tabular-nums">
-					{data.stats.avgTtftMs !== null ? `${data.stats.avgTtftMs}ms` : '—'}
-				</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Avg first token</p>
-			</div>
-
-			<!-- Last active -->
-			<div class="card card-body bg-base-100 border-base-300 rounded-2xl border p-4">
-				<div class="mb-2 flex h-8 w-8 items-center justify-center rounded-xl bg-accent/15 text-accent">
-					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-					</svg>
-				</div>
-				<p class="truncate text-xl font-bold">{relativeTime(data.conversations[0]?.updatedAt)}</p>
-				<p class="mt-0.5 text-xs text-base-content/50">Last active</p>
-			</div>
-		</div>
+		<AgentStatsGrid stats={data.stats} lastActiveAt={data.conversations[0]?.updatedAt ?? null} />
 
 		<!-- ── Two-col: tool usage + automations ────────────────────── -->
 		<div class="grid gap-4 lg:grid-cols-2">
@@ -610,54 +458,7 @@
 		</ContentPanel>
 
 		<!-- ── Session history ───────────────────────────────────────── -->
-		<ContentPanel>
-			{#snippet header()}
-				<div class="flex min-w-0 flex-1 items-center justify-between gap-2">
-					<h2 class="font-semibold">Sessions</h2>
-					<span class="badge badge-sm badge-ghost">{data?.conversations.length ?? 0}</span>
-				</div>
-			{/snippet}
-			{#if data.conversations.length === 0}
-				<p class="py-4 text-center text-sm text-base-content/40">No sessions yet.</p>
-			{:else}
-				<div class="space-y-2">
-					{#each visibleConversations as chat (chat.id)}
-						<a
-							href="/chat/{chat.id}"
-							class="flex items-center gap-3 rounded-xl border border-base-300/60 border-l-4 bg-base-200/20 p-3 transition-colors hover:bg-base-200/50 {modelColor(chat.model)}"
-						>
-							<div class="min-w-0 flex-1">
-								<p class="truncate text-sm font-medium">{chat.title}</p>
-								<div class="mt-0.5 flex items-center gap-2 text-xs text-base-content/50">
-									<span>{formatDate(chat.updatedAt)}</span>
-									{#if chat.messageCount > 0}
-										<span>·</span>
-										<span>{chat.messageCount} msgs</span>
-									{/if}
-								</div>
-							</div>
-							<div class="shrink-0 text-right text-xs text-base-content/50">
-								<p class="tabular-nums">{formatTokens(chat.totalTokens)} tokens</p>
-								<p class="tabular-nums">{formatCost(chat.totalCost)}</p>
-							</div>
-						</a>
-					{/each}
-				</div>
-
-				{#if data.conversations.length > 10}
-					<div class="mt-3 text-center">
-						<button
-							class="btn btn-sm btn-ghost"
-							onclick={() => (showAllConversations = !showAllConversations)}
-						>
-							{showAllConversations
-								? 'Show fewer'
-								: `Show all ${data.conversations.length} sessions`}
-						</button>
-					</div>
-				{/if}
-			{/if}
-		</ContentPanel>
+		<AgentSessionsList conversations={data.conversations} />
 	</section>
 {/if}
 	</div>
