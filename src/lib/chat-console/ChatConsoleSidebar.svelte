@@ -6,6 +6,7 @@
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
 	import { useResizableSize } from './use-resize.svelte';
+	import { dayKey, dayLabel } from '$lib/util/relative-time';
 
 	const THEME_STORAGE_KEY = 'AgentStudio-theme';
 	let isDark = $state(true);
@@ -108,25 +109,7 @@
 		return `${d}d`;
 	}
 
-	function dayKey(date: Date | string) {
-		const d = new Date(date);
-		const y = d.getFullYear();
-		const mo = String(d.getMonth() + 1).padStart(2, '0');
-		const day = String(d.getDate()).padStart(2, '0');
-		return `${y}-${mo}-${day}`;
-	}
-
-	function dayLabel(date: Date | string) {
-		const today = new Date();
-		today.setHours(0, 0, 0, 0);
-		const target = new Date(date);
-		target.setHours(0, 0, 0, 0);
-		const diff = Math.round((today.getTime() - target.getTime()) / 86_400_000);
-		if (diff === 0) return 'Today';
-		if (diff === 1) return 'Yesterday';
-		if (diff < 7) return `${diff}d ago`;
-		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(date));
-	}
+	// dayKey + dayLabel imported from $lib/util/relative-time
 
 	const filtered = $derived.by(() => {
 		const q = chatFilter.trim().toLowerCase();

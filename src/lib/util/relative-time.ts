@@ -54,6 +54,51 @@ export function formatDateTime(value: Date | string | null | undefined): string 
 	return new Date(value).toLocaleString()
 }
 
+/** YYYY-MM-DD bucket key for grouping items by calendar day. */
+export function dayKey(value: Date | string): string {
+	const d = new Date(value)
+	const y = d.getFullYear()
+	const m = String(d.getMonth() + 1).padStart(2, '0')
+	const day = String(d.getDate()).padStart(2, '0')
+	return `${y}-${m}-${day}`
+}
+
+export type DayLabelOptions = {
+	/**
+	 * For dates within the last week (but not today/yesterday):
+	 *   - 'days-ago' (default): "3d ago"
+	 *   - 'date': fall through to the locale month-day format directly
+	 */
+	withinWeek?: 'days-ago' | 'date'
+	/**
+	 * Whether the locale month-day format should include the year. Useful when
+	 * showing a long history list — recent items get "Today", older ones get
+	 * "Mar 14, 2026" instead of an ambiguous "Mar 14".
+	 */
+	includeYear?: boolean
+}
+
+/**
+ * Group-header label for a date bucket: "Today" / "Yesterday" / optional
+ * "Xd ago" intermediate / locale month-day fallback. Used in the chat-list
+ * sidebars for date-grouped conversation lists.
+ */
+export function dayLabel(value: Date | string, options: DayLabelOptions = {}): string {
+	const today = new Date()
+	today.setHours(0, 0, 0, 0)
+	const target = new Date(value)
+	target.setHours(0, 0, 0, 0)
+	const diff = Math.round((today.getTime() - target.getTime()) / 86_400_000)
+	if (diff === 0) return 'Today'
+	if (diff === 1) return 'Yesterday'
+	if ((options.withinWeek ?? 'days-ago') === 'days-ago' && diff > 1 && diff < 7) return `${diff}d ago`
+	return new Intl.DateTimeFormat(undefined, {
+		month: 'short',
+		day: 'numeric',
+		...(options.includeYear ? { year: 'numeric' as const } : {}),
+	}).format(new Date(value))
+}
+
 /**
  * Bidirectional variant: supports future dates with "in Xm" / "in Xh" / "in Xd"
  * formatting. Used by the automations page to show next-run times alongside
