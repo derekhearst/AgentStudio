@@ -14,6 +14,9 @@ import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { compactMessages, shouldCompact } from '$lib/chat/chat.server'
+import { trimHistoricalToolResults } from '$lib/chat/chat'
+import { getToolDefinitions } from '$lib/tools/tools.server'
+import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
 import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { db } from '$lib/db.server'
 import { eq } from 'drizzle-orm'
@@ -237,6 +240,80 @@ export async function maybeCompactConversation(input: {
 			compactionModel: result.compactionModel,
 		},
 	}
+}
+
+/**
+ * Wrap `trimHistoricalToolResults` with the per-user `preserveToolResults`
+ * config. Tools listed there have their results passed through unmodified;
+ * everything else is subject to the default trimming rules. Returns the
+ * trimmed list plus the appliedEdits the SSE handler emits to the client.
+ */
+export function trimToolResultsForRun(input: {
+	messages: LlmMessage[]
+	settings: AppSettings
+}): ReturnType<typeof trimHistoricalToolResults> {
+	const preserveToolResultsRaw = (input.settings.contextConfig as { preserveToolResults?: string[] } | null)
+		?.preserveToolResults
+	const preserveToolNames =
+		Array.isArray(preserveToolResultsRaw) && preserveToolResultsRaw.length > 0
+			? new Set(preserveToolResultsRaw)
+			: undefined
+	return trimHistoricalToolResults(input.messages, { preserveToolNames })
+}
+
+export type ToolComputerConfig = {
+	scopedAgentTools: string[] | null
+	isOrchestrator: boolean
+	programmaticToolCallingEnabled: boolean
+	agentToolPolicy: ReturnType<typeof resolveAgentToolPolicy>
+	dreamingOnlyTools: ReadonlySet<string>
+}
+
+/**
+ * Factory for the per-run `computeTools()` closure. Owns the mutable
+ * `loadedSearchableTools` set so the runtime can extend the loaded surface
+ * via `search_tools(query)` between rounds.
+ *
+ * Resolution order on each compute:
+ *   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface,
+ *      tier filter off.
+ *   2. Default — only `disclosure: 'always'` tools loaded; everything else is
+ *      searchable via search_tools. Once invoked, the runtime adds matched
+ *      names to loadedSearchableTools and the next compute picks them up.
+ *
+ * `ask_user` is stripped for non-orchestrator agents (they return control
+ * instead of asking the user). `run_code` is stripped when programmatic tool
+ * calling is disabled. Built-in Research/Plan agents apply the
+ * agentToolPolicy allow-list so newly-added tools fail closed.
+ */
+export function createToolComputer(config: ToolComputerConfig): {
+	loadedSearchableTools: Set<string>
+	computeTools: () => ReturnType<typeof getToolDefinitions>
+} {
+	const loadedSearchableTools = new Set<string>()
+
+	const computeTools = () => {
+		const all = getToolDefinitions(undefined, {
+			tierFilter: !config.scopedAgentTools,
+			loadedSearchable: loadedSearchableTools,
+		})
+		const askUserFiltered = all.filter(
+			(tool) => (config.isOrchestrator ? true : tool.function.name !== 'ask_user'),
+		)
+		const ptcFiltered = config.programmaticToolCallingEnabled
+			? askUserFiltered
+			: askUserFiltered.filter((tool) => tool.function.name !== 'run_code')
+		let assembled: typeof ptcFiltered
+		if (config.scopedAgentTools) {
+			const allowed = config.scopedAgentTools
+			assembled = ptcFiltered.filter((tool) => allowed.includes(tool.function.name))
+		} else {
+			assembled = ptcFiltered.filter((tool) => !config.dreamingOnlyTools.has(tool.function.name))
+		}
+		return filterToolsByAgentPolicy(assembled, config.agentToolPolicy)
+	}
+
+	return { loadedSearchableTools, computeTools }
 }
 
 type HistoryRow = {

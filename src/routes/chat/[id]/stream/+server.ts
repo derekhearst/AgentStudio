@@ -7,7 +7,6 @@ import { type LlmMessage } from '$lib/llm/chat.server'
 import { generateTitle, estimateMessageTokens } from '$lib/chat/chat.server'
 import { getContextWindowSize } from '$lib/tools/tools'
 import { emitActivity } from '$lib/activity/activity.server'
-import { getToolDefinitions } from '$lib/tools/tools.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
@@ -21,21 +20,19 @@ import {
 	buildProjectContextSlot,
 	buildSkillSummariesText,
 	buildToolPolicySlot,
+	createToolComputer,
 	enforceBudgetGuard,
 	extractAgentWorkspaceConfig,
 	maybeCompactConversation,
 	resolveSkillTopK,
+	trimToolResultsForRun,
 	type CompactionStats,
 } from '$lib/chat/stream-prep.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
-import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
-import {
-	filterToolsByAgentPolicy,
-	resolveAgentToolPolicy,
-} from '$lib/chat/agent-switch.server'
+import { resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
 import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { runChatLoop, createSseSession } from '$lib/runtime'
 import { encodeSseFrame } from '$lib/runtime/sse-codec'
@@ -248,50 +245,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const compactionTokensBefore = compaction.tokensBefore
 
 	// --- Context Engineering: Trim Historical Tool Results ---
-	const preserveToolResultsRaw = (currentSettings.contextConfig as { preserveToolResults?: string[] } | null)?.preserveToolResults
-	const preserveToolNames = Array.isArray(preserveToolResultsRaw) && preserveToolResultsRaw.length > 0
-		? new Set(preserveToolResultsRaw)
-		: undefined
-	const trimResult = trimHistoricalToolResults(llmMessages, { preserveToolNames })
+	const trimResult = trimToolResultsForRun({ messages: llmMessages, settings: currentSettings })
 	const trimmedMessages = trimResult.messages
 	const appliedEdits = trimResult.appliedEdits
 
 	const startedAt = Date.now()
 
 	// --- Context Engineering: Tool Loading (Tool Search Tool — deferred loading) ---
-	// Resolution order:
-	//   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface, tier filter off.
-	//   2. Default — only `disclosure: 'always'` tools loaded; everything else is searchable via
-	//      `search_tools(query)`. Once the model invokes search_tools, the runtime adds the matched
-	//      names to `loadedSearchableTools` and they appear on subsequent rounds.
-	//
-	// `loadedSearchableTools` is a per-run mutable set owned by this closure. The runtime calls
-	// the `loadSearchableTools` callback (see RunChatLoopInput) when search_tools succeeds; the
-	// next `computeTools()` invocation picks the new names up.
-	const loadedSearchableTools = new Set<string>()
-	function computeTools() {
-		const all = getToolDefinitions(undefined, {
-			tierFilter: !scopedAgentTools,
-			loadedSearchable: loadedSearchableTools,
-		})
-		const askUserFiltered = all.filter((tool) => (isOrchestrator ? true : tool.function.name !== 'ask_user'))
-		// Programmatic tool calling is gated behind a global setting (Settings → Tool Approval).
-		// When off, `run_code` is hidden from the model entirely so it cannot be invoked.
-		const ptcFiltered = programmaticToolCallingEnabled
-			? askUserFiltered
-			: askUserFiltered.filter((tool) => tool.function.name !== 'run_code')
-		let assembled: typeof ptcFiltered
-		if (scopedAgentTools) {
-			assembled = ptcFiltered.filter((tool) => scopedAgentTools!.includes(tool.function.name))
-		} else {
-			assembled = ptcFiltered.filter((tool) => !DREAMING_ONLY_TOOLS.has(tool.function.name))
-		}
-		// Built-in Research + Plan agents strip write tools so the model has to surface
-		// findings/proposals instead of silently taking action. Allow-list shape (see
-		// `agent-tool-filter.ts`) so newly added tools fail closed for those agents until
-		// explicitly audited. Chat / Autonomous / custom agents pass through unfiltered.
-		return filterToolsByAgentPolicy(assembled, agentToolPolicy)
-	}
+	const { loadedSearchableTools, computeTools } = createToolComputer({
+		scopedAgentTools,
+		isOrchestrator,
+		programmaticToolCallingEnabled,
+		agentToolPolicy,
+		dreamingOnlyTools: DREAMING_ONLY_TOOLS,
+	})
 	const initialTools = computeTools()
 	// No hard limit — loop exits when the model stops calling tools
 	const MAX_TOOL_ROUNDS = 50
