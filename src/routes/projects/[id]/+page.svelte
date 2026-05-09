@@ -9,6 +9,7 @@
 		softDeleteArtifactCommand,
 	} from '$lib/projects/projects.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
+	import EmptyState from '$lib/ui/EmptyState.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import RepoTab from '$lib/projects/components/RepoTab.svelte';
 
@@ -208,9 +209,10 @@
 					</div>
 				{/snippet}
 				{#if detail.artifacts.length === 0}
-					<p class="py-6 text-center text-sm italic text-base-content/45">
-						No artifacts yet. Create one above to start version-tracking content.
-					</p>
+					<EmptyState
+						title="No artifacts yet"
+						hint="Create one above to start version-tracking content."
+					/>
 				{:else}
 					<ul class="space-y-2">
 						{#each detail.artifacts as a (a.id)}
