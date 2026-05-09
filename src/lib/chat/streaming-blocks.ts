@@ -397,3 +397,254 @@ function buildPendingAssistant(message: PendingAssistant, model: string, sequenc
 		toolCalls: message.toolCalls ?? [],
 	}
 }
+
+// ─────────── Block mutators (pure transforms used by SSE event handling) ───────────
+//
+// These take the current state and return the next state. The chat page binds them
+// against its $state declarations; pulling them out of the page makes the streaming
+// state machine independently inspectable + testable.
+
+function newId(prefix: string): string {
+	return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+/**
+ * Append reasoning content to the last thinking block (or create a new one). Returns
+ * the next blocks array AND the next target string (the page tracks the target
+ * separately so the typewriter interpolator knows where to stop).
+ *
+ * If the last thinking block was collapsed, re-expands it — a fresh stream of
+ * reasoning means the operator should see it again.
+ */
+export function appendThinking(
+	blocks: StreamingBlock[],
+	target: string,
+	content: string,
+): { blocks: StreamingBlock[]; target: string } {
+	if (!content) return { blocks, target }
+	const lastIdx = blocks.length - 1
+	const lastBlock = blocks[lastIdx]
+	if (lastBlock?.kind === 'thinking') {
+		const nextBlocks = lastBlock.expanded
+			? blocks
+			: blocks.map((b, i) =>
+					i === lastIdx && b.kind === 'thinking' ? { ...b, expanded: true } : b,
+				)
+		return { blocks: nextBlocks, target: target + content }
+	}
+	return {
+		blocks: [
+			...blocks,
+			{
+				kind: 'thinking' as const,
+				id: newId('thinking'),
+				content: '',
+				reasoningTokens: null,
+				expanded: true,
+			},
+		],
+		target: content,
+	}
+}
+
+/** Stamp the latest thinking block with its final reasoning-token count. */
+export function setLatestReasoningTokens(
+	blocks: StreamingBlock[],
+	reasoningTokens: number | null | undefined,
+): StreamingBlock[] {
+	if (typeof reasoningTokens !== 'number' || reasoningTokens <= 0) return blocks
+	for (let i = blocks.length - 1; i >= 0; i--) {
+		if (blocks[i].kind !== 'thinking') continue
+		return blocks.map((entry, idx) =>
+			idx === i && entry.kind === 'thinking' ? { ...entry, reasoningTokens } : entry,
+		)
+	}
+	return blocks
+}
+
+/** Commit `target` into the last text block as its final content. */
+export function finalizeText(blocks: StreamingBlock[], target: string): StreamingBlock[] {
+	if (!target) return blocks
+	const lastIdx = blocks.length - 1
+	if (lastIdx < 0 || blocks[lastIdx].kind !== 'text') return blocks
+	return blocks.map((b, i) =>
+		i === lastIdx && b.kind === 'text' ? { ...b, content: target } : b,
+	)
+}
+
+/** Commit `target` into the last thinking block as its final content. */
+export function finalizeThinking(blocks: StreamingBlock[], target: string): StreamingBlock[] {
+	if (!target) return blocks
+	const lastIdx = blocks.length - 1
+	if (lastIdx < 0 || blocks[lastIdx].kind !== 'thinking') return blocks
+	return blocks.map((b, i) =>
+		i === lastIdx && b.kind === 'thinking' ? { ...b, content: target } : b,
+	)
+}
+
+/**
+ * `delta` event — the model started emitting text content. Collapses any expanded
+ * tool blocks so the new text gets visual focus, and appends an empty text block
+ * if the previous block wasn't already text. Returns blocks unchanged when text
+ * was already in flight.
+ */
+export function applyDeltaStart(blocks: StreamingBlock[]): StreamingBlock[] {
+	const lastBlock = blocks.at(-1)
+	if (lastBlock && lastBlock.kind === 'text') return blocks
+	return [
+		...blocks.map((b) => (b.kind === 'tool' ? { ...b, expanded: false } : b)),
+		{ kind: 'text' as const, id: newId('txt'), content: '' },
+	]
+}
+
+/** `tool_pending` event — operator approval required. Appends a pending tool block. */
+export function applyToolPending(
+	blocks: StreamingBlock[],
+	payload: { id: string; name: string; arguments?: string; token?: string },
+): StreamingBlock[] {
+	return [
+		...blocks.map((b) =>
+			b.kind === 'tool' || b.kind === 'thinking' ? { ...b, expanded: false } : b,
+		),
+		{
+			kind: 'tool' as const,
+			id: payload.id,
+			name: payload.name,
+			arguments: payload.arguments ?? '',
+			status: 'pending' as const,
+			expanded: true,
+			token: payload.token,
+		},
+	]
+}
+
+/**
+ * `tool_call` event — execution starting. Two paths:
+ *   1. We already have a pending block for this id (approved → executing): just
+ *      flip status and collapse other tool/thinking blocks.
+ *   2. No pending block (auto-approve mode skips the pending phase): append a
+ *      fresh executing block.
+ */
+export function applyToolCall(
+	blocks: StreamingBlock[],
+	payload: { id: string; name: string; arguments?: string },
+): StreamingBlock[] {
+	const existing = blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
+	if (existing) {
+		return blocks.map((b) =>
+			b.kind === 'tool' && b.id === payload.id
+				? { ...b, status: 'executing' as const, expanded: true }
+				: b.kind === 'tool'
+					? { ...b, expanded: false }
+					: b.kind === 'thinking'
+						? { ...b, expanded: false }
+						: b,
+		)
+	}
+	return [
+		...blocks.map((b) =>
+			b.kind === 'tool' || b.kind === 'thinking' ? { ...b, expanded: false } : b,
+		),
+		{
+			kind: 'tool' as const,
+			id: payload.id,
+			name: payload.name,
+			arguments: payload.arguments ?? '',
+			status: 'executing' as const,
+			expanded: true,
+			token: null,
+		},
+	]
+}
+
+/**
+ * `tool_result` event — execution finished. If we have the matching tool block
+ * we update its status + result + executionMs in-place; otherwise we append a
+ * synthetic completed block (better than dropping the result silently).
+ *
+ * Returns `{ blocks, missing }` so the caller can warn in its log when the
+ * server emitted a result without a matching call (suggests a state-machine bug).
+ */
+export function applyToolResult(
+	blocks: StreamingBlock[],
+	payload: {
+		id: string
+		name?: string
+		success?: boolean
+		executionMs?: number | null
+		result?: string
+	},
+): { blocks: StreamingBlock[]; missing: boolean; unexpectedStatus: ToolStatus | null } {
+	const finalStatus = payload.success ? ('completed' as const) : ('failed' as const)
+	const resultText = payload.result ?? (payload.success ? 'Success' : 'Tool execution failed')
+	const idx = blocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id)
+	if (idx === -1) {
+		return {
+			missing: true,
+			unexpectedStatus: null,
+			blocks: [
+				...blocks.map((b) =>
+					b.kind === 'tool' || b.kind === 'thinking' ? { ...b, expanded: false } : b,
+				),
+				{
+					kind: 'tool' as const,
+					id: payload.id,
+					name: payload.name ?? 'unknown',
+					arguments: '',
+					status: finalStatus,
+					expanded: true,
+					token: null,
+					executionMs: payload.executionMs ?? null,
+					result: resultText,
+				},
+			],
+		}
+	}
+	const existing = blocks[idx]
+	const unexpected =
+		existing.kind === 'tool' &&
+		existing.status !== 'executing' &&
+		existing.status !== 'approved'
+	return {
+		missing: false,
+		unexpectedStatus: unexpected ? (existing as ToolBlock).status : null,
+		blocks: blocks.map((b, i) =>
+			i === idx && b.kind === 'tool'
+				? {
+						...b,
+						status: finalStatus,
+						executionMs: payload.executionMs ?? null,
+						result: resultText,
+					}
+				: b,
+		),
+	}
+}
+
+/**
+ * `ask_user` event — append a synthetic executing tool block carrying the
+ * questions so the AskUserCard can render inline. Skips the append when a tool
+ * block with the same id already exists (idempotent re-emit).
+ */
+export function applyAskUser(
+	blocks: StreamingBlock[],
+	payload: { id: string; name?: string; token?: string | null; questions?: unknown },
+): StreamingBlock[] {
+	const collapsed = blocks.map((b) => (b.kind === 'thinking' ? { ...b, expanded: false } : b))
+	if (!payload.id) return collapsed
+	const existing = collapsed.find((b) => b.kind === 'tool' && b.id === payload.id)
+	if (existing) return collapsed
+	const askUserArgs = JSON.stringify({ questions: payload.questions ?? [] })
+	return [
+		...collapsed.map((b) => (b.kind === 'tool' ? { ...b, expanded: false } : b)),
+		{
+			kind: 'tool' as const,
+			id: payload.id,
+			name: payload.name ?? 'ask_user',
+			arguments: askUserArgs,
+			status: 'executing' as const,
+			expanded: true,
+			token: payload.token ?? null,
+		},
+	]
+}

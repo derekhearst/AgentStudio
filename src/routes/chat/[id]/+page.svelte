@@ -37,25 +37,39 @@
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
 	import {
+		appendThinking,
+		applyAskUser,
+		applyDeltaStart,
 		applySubagentDelta,
 		applySubagentDone,
 		applySubagentStart,
 		applySubagentToolCall,
 		applySubagentToolResult,
+		applyToolCall,
 		applyToolDenied,
+		applyToolPending,
+		applyToolResult,
 		buildDisplayedMessages,
 		estimateTokens,
+		finalizeText,
+		finalizeThinking,
 		getCompletedToolCalls,
 		getLatestReasoningTokens,
 		getPartialText,
 		getSerializableBlocksForMetadata,
 		getThinkingText,
 		reconcilePendingDrafts,
+		setLatestReasoningTokens,
 		type StreamingBlock,
 		type TextBlock,
 		type ThinkingBlock,
 		type ToolStatus,
 	} from '$lib/chat/streaming-blocks';
+	import {
+		hasUnfinishedInterpolation,
+		stepDraftFrame,
+		stepThinkingFrame,
+	} from '$lib/chat/streaming-interpolation';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
@@ -219,182 +233,66 @@
 		thinkingInterpolationLastTs = null;
 	}
 
+	// Typewriter-interpolation rAF loops. The pure stepping logic lives in
+	// `streaming-interpolation.ts`; the page just owns the frame handles and
+	// drives requestAnimationFrame.
 	function interpolateThinking(now: number) {
 		thinkingInterpolationFrame = null;
-		if (thinkingInterpolationLastTs === null) {
-			thinkingInterpolationLastTs = now;
-		}
-
+		if (thinkingInterpolationLastTs === null) thinkingInterpolationLastTs = now;
 		const elapsedMs = now - thinkingInterpolationLastTs;
 		thinkingInterpolationLastTs = now;
-
-		let lastThinkingIdx = -1;
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			if (streamingBlocks[i].kind === 'thinking') {
-				lastThinkingIdx = i;
-				break;
-			}
-		}
-		if (lastThinkingIdx === -1) {
-			stopThinkingInterpolation();
-			return;
-		}
-
-		const block = streamingBlocks[lastThinkingIdx];
-		if (block.kind !== 'thinking') {
-			stopThinkingInterpolation();
-			return;
-		}
-
-		const remaining = currentThinkingTarget.length - block.content.length;
-		if (remaining <= 0) {
-			stopThinkingInterpolation();
-			return;
-		}
-
-		const charsPerSecond = Math.min(220, Math.max(70, remaining * 3));
-		const step = Math.max(1, Math.floor((charsPerSecond * Math.max(16, elapsedMs)) / 1000));
-		const newContent = currentThinkingTarget.slice(0, block.content.length + step);
-
-		streamingBlocks = streamingBlocks.map((b, i) =>
-			i === lastThinkingIdx && b.kind === 'thinking' ? { ...b, content: newContent } : b
-		);
-
-		if (newContent.length < currentThinkingTarget.length) {
-			thinkingInterpolationFrame = requestAnimationFrame(interpolateThinking);
-		} else {
-			stopThinkingInterpolation();
-		}
+		const frame = stepThinkingFrame(streamingBlocks, currentThinkingTarget, elapsedMs);
+		if (frame.blocks) streamingBlocks = frame.blocks;
+		if (frame.done) stopThinkingInterpolation();
+		else thinkingInterpolationFrame = requestAnimationFrame(interpolateThinking);
 	}
 
 	function queueThinkingInterpolation() {
-		let lastThinkingBlock: ThinkingBlock | undefined;
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			const b = streamingBlocks[i];
-			if (b.kind === 'thinking') {
-				lastThinkingBlock = b;
-				break;
-			}
-		}
-		if (!lastThinkingBlock) return;
-		if (lastThinkingBlock.content.length >= currentThinkingTarget.length) return;
 		if (thinkingInterpolationFrame !== null) return;
+		if (!hasUnfinishedInterpolation(streamingBlocks, 'thinking', currentThinkingTarget)) return;
 		thinkingInterpolationFrame = requestAnimationFrame(interpolateThinking);
 	}
 
 	function interpolateDraft(now: number) {
 		draftInterpolationFrame = null;
-		if (draftInterpolationLastTs === null) {
-			draftInterpolationLastTs = now;
-		}
-
+		if (draftInterpolationLastTs === null) draftInterpolationLastTs = now;
 		const elapsedMs = now - draftInterpolationLastTs;
 		draftInterpolationLastTs = now;
-
-		// Find the last text block
-		let lastTextIdx = -1;
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			if (streamingBlocks[i].kind === 'text') { lastTextIdx = i; break; }
-		}
-		if (lastTextIdx === -1) { stopDraftInterpolation(); return; }
-
-		const block = streamingBlocks[lastTextIdx];
-		if (block.kind !== 'text') { stopDraftInterpolation(); return; }
-
-		const remaining = currentTextTarget.length - block.content.length;
-		if (remaining <= 0) { stopDraftInterpolation(); return; }
-
-		const charsPerSecond = Math.min(280, Math.max(80, remaining * 4));
-		const step = Math.max(1, Math.floor((charsPerSecond * Math.max(16, elapsedMs)) / 1000));
-		const newContent = currentTextTarget.slice(0, block.content.length + step);
-
-		streamingBlocks = streamingBlocks.map((b, i) =>
-			i === lastTextIdx && b.kind === 'text' ? { ...b, content: newContent } : b
-		);
-
-		if (newContent.length < currentTextTarget.length) {
-			draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
-		} else {
-			stopDraftInterpolation();
-		}
+		const frame = stepDraftFrame(streamingBlocks, currentTextTarget, elapsedMs);
+		if (frame.blocks) streamingBlocks = frame.blocks;
+		if (frame.done) stopDraftInterpolation();
+		else draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
 	}
 
 	function queueDraftInterpolation() {
-		let lastTextBlock: TextBlock | undefined;
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			const b = streamingBlocks[i];
-			if (b.kind === 'text') { lastTextBlock = b; break; }
-		}
-		if (!lastTextBlock) return;
-		if (lastTextBlock.content.length >= currentTextTarget.length) return;
 		if (draftInterpolationFrame !== null) return;
+		if (!hasUnfinishedInterpolation(streamingBlocks, 'text', currentTextTarget)) return;
 		draftInterpolationFrame = requestAnimationFrame(interpolateDraft);
 	}
 
 	function appendThinkingContent(content: string) {
-		if (!content) return;
-		const lastIdx = streamingBlocks.length - 1;
-		const lastBlock = streamingBlocks[lastIdx];
-		if (lastBlock?.kind === 'thinking') {
-			currentThinkingTarget += content;
-			// Re-expand if user or a prior event collapsed it
-			if (!lastBlock.expanded) {
-				streamingBlocks = streamingBlocks.map((b, i) =>
-					i === lastIdx && b.kind === 'thinking' ? { ...b, expanded: true } : b
-				);
-			}
-			queueThinkingInterpolation();
-			return;
-		}
-
-		streamingBlocks = [
-			...streamingBlocks,
-			{
-				kind: 'thinking' as const,
-				id: `thinking-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-				content: '',
-				reasoningTokens: null,
-				expanded: true,
-			}
-		];
-		currentThinkingTarget = content;
+		const next = appendThinking(streamingBlocks, currentThinkingTarget, content);
+		streamingBlocks = next.blocks;
+		currentThinkingTarget = next.target;
 		queueThinkingInterpolation();
 	}
 
 	function updateLatestReasoningTokens(reasoningTokens: number | null | undefined) {
-		if (typeof reasoningTokens !== 'number' || reasoningTokens <= 0) return;
-		for (let i = streamingBlocks.length - 1; i >= 0; i--) {
-			const block = streamingBlocks[i];
-			if (block.kind !== 'thinking') continue;
-			streamingBlocks = streamingBlocks.map((entry, idx) =>
-				idx === i && entry.kind === 'thinking' ? { ...entry, reasoningTokens } : entry
-			);
-			break;
-		}
+		streamingBlocks = setLatestReasoningTokens(streamingBlocks, reasoningTokens);
 	}
 
 	/** Commit currentTextTarget into the last text block and stop animation. */
 	function finalizeCurrentTextBlock() {
 		stopDraftInterpolation();
 		if (!currentTextTarget) return;
-		const lastIdx = streamingBlocks.length - 1;
-		if (lastIdx >= 0 && streamingBlocks[lastIdx].kind === 'text') {
-			streamingBlocks = streamingBlocks.map((b, i) =>
-				i === lastIdx && b.kind === 'text' ? { ...b, content: currentTextTarget } : b
-			);
-		}
+		streamingBlocks = finalizeText(streamingBlocks, currentTextTarget);
 		currentTextTarget = '';
 	}
 
 	function finalizeCurrentThinkingBlock() {
 		stopThinkingInterpolation();
 		if (!currentThinkingTarget) return;
-		const lastIdx = streamingBlocks.length - 1;
-		if (lastIdx >= 0 && streamingBlocks[lastIdx].kind === 'thinking') {
-			streamingBlocks = streamingBlocks.map((b, i) =>
-				i === lastIdx && b.kind === 'thinking' ? { ...b, content: currentThinkingTarget } : b
-			);
-		}
+		streamingBlocks = finalizeThinking(streamingBlocks, currentThinkingTarget);
 		currentThinkingTarget = '';
 	}
 
@@ -930,14 +828,7 @@
 					if (eventName === 'delta') {
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
-						const lastBlock = streamingBlocks.at(-1);
-						if (!lastBlock || lastBlock.kind !== 'text') {
-							// Collapse any expanded tool blocks when text starts again
-							streamingBlocks = [
-								...streamingBlocks.map((b) => b.kind === 'tool' ? { ...b, expanded: false } : b),
-								{ kind: 'text' as const, id: `txt-${Date.now()}-${Math.random().toString(36).slice(2)}`, content: '' },
-							];
-						}
+						streamingBlocks = applyDeltaStart(streamingBlocks);
 						currentTextTarget += payload.content ?? '';
 						queueDraftInterpolation();
 					}
@@ -951,53 +842,14 @@
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
 						finalizeCurrentTextBlock();
-						streamingBlocks = [
-							...streamingBlocks.map((b) =>
-								b.kind === 'tool' ? { ...b, expanded: false } :
-								b.kind === 'thinking' ? { ...b, expanded: false } : b
-							),
-							{
-								kind: 'tool' as const,
-								id: payload.id,
-								name: payload.name,
-								arguments: payload.arguments ?? '',
-								status: 'pending' as const,
-								expanded: true,
-								token: payload.token,
-							},
-						];
+						streamingBlocks = applyToolPending(streamingBlocks, payload as Parameters<typeof applyToolPending>[1]);
 					}
 
 					if (eventName === 'ask_user') {
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
 						finalizeCurrentTextBlock();
-						// Collapse any open thinking blocks while waiting for user input
-						streamingBlocks = streamingBlocks.map((b) =>
-							b.kind === 'thinking' ? { ...b, expanded: false } : b
-						);
-						// ask_user does not emit tool_pending/tool_call events, so create a
-						// synthetic live tool block now to render the question immediately.
-						const askUserArgs = JSON.stringify({ questions: payload.questions ?? [] });
-						const existingAsk = streamingBlocks.find(
-							(b) => b.kind === 'tool' && b.id === payload.id
-						);
-						if (!existingAsk && payload.id) {
-							streamingBlocks = [
-								...streamingBlocks.map((b) =>
-									b.kind === 'tool' ? { ...b, expanded: false } : b
-								),
-								{
-									kind: 'tool' as const,
-									id: payload.id,
-									name: payload.name ?? 'ask_user',
-									arguments: askUserArgs,
-									status: 'executing' as const,
-									expanded: true,
-									token: payload.token ?? null,
-								},
-							];
-						}
+						streamingBlocks = applyAskUser(streamingBlocks, payload as Parameters<typeof applyAskUser>[1]);
 						pendingAskUser = {
 							token: payload.token,
 							questions: payload.questions ?? []
@@ -1011,35 +863,13 @@
 
 					if (eventName === 'tool_call') {
 						waitingForFirstToken = false;
-						const existing = streamingBlocks.find((b) => b.kind === 'tool' && b.id === payload.id);
-						if (existing) {
-							// Update pending → executing; also collapse any thinking blocks
-							streamingBlocks = streamingBlocks.map((b) =>
-								b.kind === 'tool' && b.id === payload.id
-									? { ...b, status: 'executing' as const, expanded: true }
-									: b.kind === 'tool' ? { ...b, expanded: false }
-									: b.kind === 'thinking' ? { ...b, expanded: false } : b
-							);
-						} else {
-							// Auto-approve mode — tool_call arrives directly
+						const existing = streamingBlocks.some((b) => b.kind === 'tool' && b.id === payload.id);
+						if (!existing) {
+							// Auto-approve mode — tool_call arrives without a prior pending block.
 							finalizeCurrentThinkingBlock();
 							finalizeCurrentTextBlock();
-							streamingBlocks = [
-								...streamingBlocks.map((b) =>
-									b.kind === 'tool' ? { ...b, expanded: false } :
-									b.kind === 'thinking' ? { ...b, expanded: false } : b
-								),
-								{
-									kind: 'tool' as const,
-									id: payload.id,
-									name: payload.name,
-									arguments: payload.arguments ?? '',
-									status: 'executing' as const,
-									expanded: true,
-									token: null,
-								},
-							];
 						}
+						streamingBlocks = applyToolCall(streamingBlocks, payload as Parameters<typeof applyToolCall>[1]);
 					}
 
 					if (eventName === 'tool_result') {
@@ -1047,54 +877,19 @@
 							pendingAskUser = null;
 							askUserModalOpen = false;
 						}
-						const finalStatus = payload.success ? ('completed' as const) : ('failed' as const);
-						const resultText =
-							payload.result ?? (payload.success ? 'Success' : 'Tool execution failed');
-						const idx = streamingBlocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id);
-						if (idx === -1) {
-							// tool_result arrived without a matching tool_call/pending block. Append a
-							// completed block so the result is still visible — better than the silent
-							// drop the previous predicate produced when status didn't match.
+						const outcome = applyToolResult(streamingBlocks, payload as Parameters<typeof applyToolResult>[1]);
+						if (outcome.missing) {
 							logChatUi('warn', 'tool_result without matching tool block', {
 								id: payload.id,
 								name: payload.name,
 							});
-							streamingBlocks = [
-								...streamingBlocks.map((b) =>
-									b.kind === 'tool' ? { ...b, expanded: false } :
-									b.kind === 'thinking' ? { ...b, expanded: false } : b
-								),
-								{
-									kind: 'tool' as const,
-									id: payload.id,
-									name: payload.name ?? 'unknown',
-									arguments: '',
-									status: finalStatus,
-									expanded: true,
-									token: null,
-									executionMs: payload.executionMs ?? null,
-									result: resultText,
-								},
-							];
-						} else {
-							const existing = streamingBlocks[idx];
-							if (existing.kind === 'tool' && existing.status !== 'executing' && existing.status !== 'approved') {
-								logChatUi('warn', 'tool_result for tool block in unexpected status', {
-									id: payload.id,
-									status: existing.status,
-								});
-							}
-							streamingBlocks = streamingBlocks.map((b, i) =>
-								i === idx && b.kind === 'tool'
-									? {
-											...b,
-											status: finalStatus,
-											executionMs: payload.executionMs ?? null,
-											result: resultText,
-										}
-									: b
-							);
+						} else if (outcome.unexpectedStatus) {
+							logChatUi('warn', 'tool_result for tool block in unexpected status', {
+								id: payload.id,
+								status: outcome.unexpectedStatus,
+							});
 						}
+						streamingBlocks = outcome.blocks;
 					}
 
 					if (eventName === 'tool_denied') {
