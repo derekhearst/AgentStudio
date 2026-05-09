@@ -1,18 +1,15 @@
 <script lang="ts">
 	import ToolCallCard from './ToolCallCard.svelte';
-	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
-	import SubagentBlockCard from './SubagentBlockCard.svelte';
 	import ArtifactCard from './ArtifactCard.svelte';
+	import MessageBlocks from './MessageBlocks.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
-		asRecord,
 		asArray,
 		askQuestionAlreadyInMessage,
 		blockHasRenderableOutput,
 		getArtifactCardProps,
 		getAskUserAnswer,
 		getAskUserQuestions,
-		type ArtifactCardProps,
 		type SavedBlock,
 	} from './message-bubble-helpers';
 	import type { ChatMessageMetadata, PersistedToolCall } from './streaming-blocks';
@@ -96,14 +93,11 @@
 	});
 
 	// askQuestionAlreadyInMessage is imported; wrap it so call sites pass (question, blocks)
-	// without re-passing message.content each time.
+	// without re-passing message.content each time. Only the legacy normalizedToolCalls
+	// branch still calls this directly — the savedBlocks path uses MessageBlocks which
+	// has its own wrapper.
 	const askQuestionAlreadyHere = (question: string | undefined, blocks: SavedBlock[] | null) =>
 		askQuestionAlreadyInMessage(question, blocks, message.content);
-	const lastThinkingBlockIndex = $derived(
-		savedBlocks
-			? savedBlocks.reduce((latest, block, index) => (block.kind === 'thinking' ? index : latest), -1)
-			: -1
-	);
 
 	$effect(() => {
 		if (!editing) return;
@@ -237,78 +231,13 @@
 			</div>
 		{/if}
 		{#if savedBlocks}
-		{#each savedBlocks as block, idx (`${message.id}-block-${idx}`)}
-			{#if block.kind === 'tool' && block.name === 'ask_user'}
-				{@const askQuestions = getAskUserQuestions(block.arguments, block.result)}
-				{#if askQuestions.length > 0}
-					{#each askQuestions as q}
-						{#if !askQuestionAlreadyHere(q.question ?? q.header, savedBlocks)}
-							<div class="assistant-message mb-2">
-								<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
-							</div>
-						{/if}
-						{@const answer = getAskUserAnswer(block.result, q.header)}
-						{#if answer}
-							<div class="mb-2 ml-auto w-fit max-w-[85%]">
-								<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
-									<p class="whitespace-pre-wrap">{answer}</p>
-								</div>
-							</div>
-						{/if}
-					{/each}
-				{/if}
-			{:else if block.kind === 'tool' && block.name === 'present_artifact'}
-				{@const card = getArtifactCardProps(block.result)}
-				{#if card}
-					<div class="mb-1.5 w-full">
-						<ArtifactCard {...card} />
-					</div>
-				{:else}
-					<div class="mb-1.5 w-full">
-						<ToolCallCard
-							name={String(block.name)}
-							argumentsText={JSON.stringify(block.arguments ?? {}, null, 2)}
-							result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
-							status={block.success === false ? 'failed' : 'completed'}
-						/>
-					</div>
-				{/if}
-			{:else if block.kind === 'tool' && block.name !== 'ask_user'}
-				<div class="mb-1.5 w-full">
-					<ToolCallCard
-						name={String(block.name)}
-						argumentsText={JSON.stringify(block.arguments ?? {}, null, 2)}
-						result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
-						status={block.success === false ? 'failed' : 'completed'}
-					/>
-				</div>
-			{:else if block.kind === 'thinking' && block.content?.trim()}
-				<div class="mb-1.5 w-full">
-					<ThinkingBlockCard
-						content={block.content}
-						reasoningTokens={idx === lastThinkingBlockIndex ? messageReasoningTokens : block.reasoningTokens ?? null}
-						expanded={true}
-					/>
-				</div>
-			{:else if block.kind === 'subagent' && blockHasRenderableOutput(block)}
-				<div class="mb-1.5 w-full">
-					<SubagentBlockCard
-						agentName={block.agentName}
-						agentId={block.agentId}
-						conversationId={block.conversationId}
-						task={block.task}
-						content={block.content}
-						status={block.success ? 'completed' : 'failed'}
-						expanded={false}
-					/>
-				</div>
-			{:else if block.kind === 'text' && block.content?.trim()}
-				<div class="assistant-message mb-2">
-					<div class="markdown-body">{@html renderMarkdown(block.content)}</div>
-				</div>
-			{/if}
-		{/each}
-	{:else}
+			<MessageBlocks
+				messageId={message.id}
+				messageContent={message.content ?? ''}
+				blocks={savedBlocks}
+				{messageReasoningTokens}
+			/>
+		{:else}
 		{#if normalizedToolCalls.length > 0}
 			<div class="mb-2 w-full space-y-2">
 				{#each normalizedToolCalls as call, idx (`${message.id}-${idx}`)}
