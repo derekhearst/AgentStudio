@@ -57,7 +57,7 @@ export {
 	type MetricSnapshotPoint,
 	type MetricSnapshotEntry,
 } from './metrics.server'
-export { logger, type Logger } from './logger'
+export { logger, registerDbSink, type DbSink, type LogEntry, type Logger } from './logger'
 export {
 	insertAppLogBatch,
 	listAppLogs,

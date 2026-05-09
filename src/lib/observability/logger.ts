@@ -7,9 +7,14 @@
  *     warn/error events from the /observability/logs page (mobile-friendly), even with no
  *     terminal access.
  *
+ * The DB sink is registered at server bootstrap via `registerDbSink()` (see
+ * `logs-handler.server.ts`). This module has zero references — static or dynamic — to
+ * `logs.server.ts`, so it stays browser-safe and the SvelteKit build guard is satisfied
+ * when browser-bound modules import the logger.
+ *
  * The DB sink is best-effort: writes are queued in memory and flushed on a timer. A failed
  * insert falls back to console and never blocks the call site. Browser callers (the logger
- * is cross-environment-safe) skip the DB sink entirely — `app_logs` is server-only.
+ * is cross-environment-safe) skip the DB sink entirely — no sink is ever registered there.
  *
  * Verbosity is controlled by `LOG_LEVEL` (`debug`, `info`, `warn`, `error`); when unset it
  * defaults to `debug` in development and `info` in production.
@@ -75,16 +80,31 @@ function normalizeContext(context?: Record<string, unknown>): Record<string, unk
 
 // ── DB sink: buffered + flushed by timer ─────────────────────────────────────
 
-type BufferedEntry = {
+export type LogEntry = {
 	ts: Date
 	level: LogLevel
 	message: string
 	context: Record<string, unknown> | null
 }
 
+export type DbSink = (batch: LogEntry[]) => Promise<void>
+
+let dbSinkFn: DbSink | null = null
+
+/**
+ * Wire a DB sink. Called once at server bootstrap from `logs-handler.server.ts` after
+ * `ensureDatabaseReady` so `app_logs` exists before the first flush. Browser builds never
+ * call this — keeping the registration on the server side is what lets `logger.ts` stay
+ * free of any reference to `logs.server.ts`.
+ */
+export function registerDbSink(fn: DbSink): void {
+	dbSinkFn = fn
+	if (dbSinkEnabled) scheduleFlush()
+}
+
 const FLUSH_INTERVAL_MS = 2_000
 const FLUSH_MAX_BUFFER = 50
-const buffer: BufferedEntry[] = []
+const buffer: LogEntry[] = []
 let flushTimer: ReturnType<typeof setTimeout> | null = null
 let flushing = false
 
@@ -98,25 +118,17 @@ function scheduleFlush(): void {
 
 async function flushBuffer(): Promise<void> {
 	if (flushing || buffer.length === 0) return
+	if (!dbSinkFn) {
+		// No sink wired (browser build, or server pre-bootstrap). Drop the queue: the
+		// console emit already happened at log time, so the entries aren't lost — just
+		// not persisted. The handler will call registerDbSink() once the DB is ready.
+		buffer.length = 0
+		return
+	}
 	flushing = true
 	const batch = buffer.splice(0, buffer.length)
 	try {
-		// Lazy import keeps the logger module free of a static dep on the DB layer — important
-		// because db.server.ts uses `console.*` for bootstrap diagnostics that run BEFORE the
-		// observability domain is wired up. A static import would create a load-time cycle.
-		const { insertAppLogBatch, extractSource } = await import('./logs.server')
-		await insertAppLogBatch(
-			batch.map((entry) => {
-				const { source } = extractSource(entry.message)
-				return {
-					ts: entry.ts,
-					level: entry.level,
-					message: entry.message,
-					context: entry.context,
-					source,
-				}
-			}),
-		)
+		await dbSinkFn(batch)
 	} catch (err) {
 		// DB write failed — fall back to console so the entries aren't silently dropped.
 		// We DO NOT call emit() here (that would re-buffer). Direct console output only.
@@ -139,7 +151,7 @@ async function flushBuffer(): Promise<void> {
 	}
 }
 
-function bufferEntry(entry: BufferedEntry, immediate: boolean): void {
+function bufferEntry(entry: LogEntry, immediate: boolean): void {
 	if (!dbSinkEnabled) return
 	buffer.push(entry)
 	if (immediate || buffer.length >= FLUSH_MAX_BUFFER) {

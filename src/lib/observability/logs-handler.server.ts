@@ -1,7 +1,7 @@
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
-import { purgeOldLogs } from './logs.server'
-import { logger } from './logger'
+import { extractSource, insertAppLogBatch, purgeOldLogs } from './logs.server'
+import { logger, registerDbSink, type LogEntry } from './logger'
 
 /**
  * Registers the daily `app_logs_purge` job + retention schedule, and turns on the logger's
@@ -53,6 +53,25 @@ export function registerLogsJobHandlers(): void {
 				payload: {},
 			}
 		},
+	})
+
+	// Wire the logger's DB sink. logger.ts has no static or dynamic reference to
+	// logs.server.ts — this is the single point where the two halves are joined, and it
+	// only runs on the server. Browser builds never reach this file (it's *.server.ts), so
+	// the sink stays unregistered there and `flushBuffer` no-ops.
+	registerDbSink(async (batch: LogEntry[]) => {
+		await insertAppLogBatch(
+			batch.map((entry) => {
+				const { source } = extractSource(entry.message)
+				return {
+					ts: entry.ts,
+					level: entry.level,
+					message: entry.message,
+					context: entry.context,
+					source,
+				}
+			}),
+		)
 	})
 
 	// Now that the table exists and the retention job is registered, enable the DB sink so
