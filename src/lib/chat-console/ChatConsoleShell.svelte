@@ -2,6 +2,8 @@
 	import type { Snippet } from 'svelte';
 	import ChatConsoleSidebar from './ChatConsoleSidebar.svelte';
 	import ChatConsoleRail from './ChatConsoleRail.svelte';
+	import MobileLeftDrawer from './MobileLeftDrawer.svelte';
+	import MobileRightDrawer from './MobileRightDrawer.svelte';
 	import { useResizableSize } from './use-resize.svelte';
 
 	let {
@@ -52,3 +54,8 @@
 		{/if}
 	</div>
 </div>
+
+<MobileLeftDrawer {activePath} />
+{#if showRail}
+	<MobileRightDrawer />
+{/if}

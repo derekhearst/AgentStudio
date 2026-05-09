@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
 
 	type Crumb = { label: string; href?: string };
 
@@ -12,6 +13,8 @@
 		chips,
 		actions,
 		mobileActions,
+		showMenuButton = true,
+		showRailButton = false,
 	}: {
 		title: string;
 		crumbs?: Crumb[];
@@ -21,6 +24,8 @@
 		chips?: Snippet;
 		actions?: Snippet;
 		mobileActions?: Snippet;
+		showMenuButton?: boolean;
+		showRailButton?: boolean;
 	} = $props();
 </script>
 
@@ -53,7 +58,20 @@
 <div
 	class="relative z-20 flex shrink-0 items-center gap-2 border-b border-base-300/50 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 desktop:hidden tablet:px-4 tablet:pt-2"
 >
-	{#if backHref}
+	{#if showMenuButton}
+		<button
+			type="button"
+			class="console-iconbtn"
+			aria-label="Open navigation"
+			title="Menu"
+			onclick={openLeft}
+			style="width:32px;height:32px;border:1px solid var(--color-base-300);"
+		>
+			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<path d="M4 6h16M4 12h16M4 18h16" />
+			</svg>
+		</button>
+	{:else if backHref}
 		<a
 			href={backHref}
 			class="console-iconbtn"
@@ -75,6 +93,21 @@
 			</span>
 		{/if}
 	</div>
+	{#if showRailButton}
+		<button
+			type="button"
+			class="console-iconbtn"
+			aria-label="Open chat rail"
+			title="Open rail"
+			onclick={openRight}
+			style="width:32px;height:32px;border:1px solid var(--color-base-300);"
+		>
+			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<rect x="3" y="4" width="18" height="16" rx="2" />
+				<line x1="15" y1="4" x2="15" y2="20" />
+			</svg>
+		</button>
+	{/if}
 	{#if mobileActions}
 		{@render mobileActions()}
 	{/if}

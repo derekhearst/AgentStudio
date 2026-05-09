@@ -1593,3 +1593,111 @@ a.console-crumbs__seg:hover {
 		animation: none;
 	}
 }
+
+/* ── Mobile drawer (left nav, right rail) ───────────────────── */
+.console-drawer-backdrop {
+	position: fixed;
+	inset: 0;
+	background: color-mix(in oklab, black 50%, transparent);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 200ms ease-out;
+	z-index: 35;
+}
+.console-drawer-backdrop.is-open {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.console-drawer {
+	position: fixed;
+	top: 0;
+	bottom: 0;
+	width: min(85vw, 320px);
+	background: var(--color-base-100);
+	z-index: 40;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	padding-top: env(safe-area-inset-top);
+	padding-bottom: env(safe-area-inset-bottom);
+	overscroll-behavior: contain;
+	will-change: transform;
+	transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+	box-shadow: 0 0 24px rgba(0, 0, 0, 0.25);
+}
+.console-drawer.is-left {
+	left: 0;
+	transform: translateX(-100%);
+	border-right: 1px solid var(--color-base-300);
+}
+.console-drawer.is-right {
+	right: 0;
+	transform: translateX(100%);
+	border-left: 1px solid var(--color-base-300);
+	width: min(92vw, 380px);
+}
+.console-drawer.is-open {
+	transform: translateX(0);
+}
+.console-drawer.is-dragging {
+	transition: none;
+}
+
+.console-drawer__body {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.console-drawer__close {
+	position: absolute;
+	top: calc(env(safe-area-inset-top) + 6px);
+	width: 26px;
+	height: 26px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 999px;
+	background: color-mix(in oklab, var(--color-base-200) 80%, transparent);
+	color: var(--color-base-content);
+	border: 1px solid var(--color-base-300);
+	cursor: pointer;
+	z-index: 1;
+	opacity: 0.85;
+	transition: opacity 120ms ease-out, background-color 120ms ease-out;
+}
+.console-drawer__close:hover {
+	opacity: 1;
+	background: var(--color-base-200);
+}
+.console-drawer.is-left .console-drawer__close {
+	right: 8px;
+}
+.console-drawer.is-right .console-drawer__close {
+	left: 8px;
+}
+
+/* Drawer-variant chats panel: no fixed height, no resize handle, scrolls with the drawer */
+.console-sb__chats.is-drawer {
+	height: auto !important;
+	flex: 1 1 auto;
+	min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.console-drawer,
+	.console-drawer-backdrop {
+		transition: none;
+	}
+}
+
+@media (min-width: 48rem) {
+	.console-drawer,
+	.console-drawer-backdrop {
+		display: none !important;
+	}
+}

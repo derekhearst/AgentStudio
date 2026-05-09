@@ -19,6 +19,7 @@
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
 	import { consoleState } from '$lib/chat-console/console-state.svelte';
+	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -1218,11 +1219,11 @@
 
 			<!-- Mobile/tablet header: Console design's am-top (menu | title+sub | actions) -->
 			<div class="relative z-20 flex shrink-0 items-center gap-2 border-b border-base-300/50 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 desktop:hidden tablet:px-4 tablet:pt-2">
-				<a href="/" class="console-iconbtn" aria-label="Back to chats" title="Back to chats" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
-					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+				<button type="button" onclick={openLeft} class="console-iconbtn" aria-label="Open navigation" title="Menu" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M4 6h16M4 12h16M4 18h16" />
 					</svg>
-				</a>
+				</button>
 				<div class="min-w-0 flex-1 text-center">
 					<h1 class="m-0 truncate text-sm font-semibold leading-tight">
 						{conversationData.conversation.title}
@@ -1242,6 +1243,12 @@
 					reservedTargetPct={reservedResponsePct}
 					onCompact={compactContext}
 				/>
+				<button type="button" onclick={openRight} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
+					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<rect x="3" y="4" width="18" height="16" rx="2" />
+						<line x1="15" y1="4" x2="15" y2="20" />
+					</svg>
+				</button>
 			</div>
 
 			<!-- Mobile chips row: running, pending, context, cost -->

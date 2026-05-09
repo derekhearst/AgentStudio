@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { browser, dev } from '$app/environment';
-	import { onNavigate } from '$app/navigation';
+	import { afterNavigate, onNavigate } from '$app/navigation';
 	import './layout.css';
 	import '$lib/chat-console/console.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import ChatConsoleShell from '$lib/chat-console/ChatConsoleShell.svelte';
+	import { closeAll as closeMobileDrawers } from '$lib/chat-console/mobile-drawer-state.svelte';
+
+	afterNavigate(() => closeMobileDrawers());
 
 	let { children } = $props();
 
