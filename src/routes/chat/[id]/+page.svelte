@@ -70,6 +70,7 @@
 		stepDraftFrame,
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
+	import { consumeSseStream } from '$lib/chat/sse-consumer';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
@@ -742,89 +743,31 @@
 
 			streamHandshakeSucceeded = true;
 			logChatUi('info', 'Stream opened', { regenerate });
-			type ChunkReader = ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>>;
-			let reader: ChunkReader = response.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let lastSeenSeq = 0;
 			let doneReceived = false;
-			let resumeAttempts = 0;
-			const MAX_RESUME_ATTEMPTS = 3;
 
-			const tryResume = async (): Promise<ChunkReader | null> => {
-				if (doneReceived || stoppedByUser || resumeAttempts >= MAX_RESUME_ATTEMPTS) return null;
-				resumeAttempts += 1;
-				logChatUi('info', 'Attempting stream resume', { lastSeenSeq, attempt: resumeAttempts });
-				try {
-					const resumeResp = await fetch(
-						`/chat/${conversationId}/stream/resume?since=${lastSeenSeq}`,
-						{ signal: abortController.signal }
-					);
-					if (!resumeResp.ok || !resumeResp.body) {
-						logChatUi('warn', 'Resume rejected', { status: resumeResp.status });
-						return null;
-					}
-					return resumeResp.body.getReader();
-				} catch (err) {
+			for await (const sseEvent of consumeSseStream({
+				initialResponse: response,
+				fetchResume: (since) =>
+					fetch(`/chat/${conversationId}/stream/resume?since=${since}`, {
+						signal: abortController.signal,
+					}),
+				shouldStop: () => doneReceived || stoppedByUser,
+				onResumeAttempt: (info) => logChatUi('info', 'Attempting stream resume', info),
+				onResumeRejected: (info) => logChatUi('warn', 'Resume rejected', info),
+				onResumeError: (err) =>
 					logChatUi('warn', 'Resume request failed', {
 						error: err instanceof Error ? err.message : String(err),
-					});
-					return null;
-				}
-			};
-
-			while (true) {
-				let chunk: ReadableStreamReadResult<Uint8Array<ArrayBuffer>>;
-				try {
-					chunk = await reader.read();
-				} catch (err) {
-					if (err instanceof DOMException && err.name === 'AbortError') throw err;
-					const next = await tryResume();
-					if (!next) throw err;
-					reader = next;
-					buffer = '';
-					continue;
-				}
-				if (chunk.done) {
-					if (doneReceived || stoppedByUser) break;
-					const next = await tryResume();
-					if (!next) break;
-					reader = next;
-					buffer = '';
-					continue;
-				}
-				buffer += decoder.decode(chunk.value, { stream: true });
-				const events = buffer.split('\n\n');
-				buffer = events.pop() ?? '';
-
-				for (const raw of events) {
-					// User clicked Stop — abort() rejects the next read() but events already
-					// buffered will keep flowing through this loop. Don't mutate state any
-					// further; the finally block will tear down cleanly.
-					if (stoppedByUser) break;
-					const lines = raw.split('\n');
-					const idLine = lines.find((line) => line.startsWith('id: '));
-					if (idLine) {
-						const parsed = Number.parseInt(idLine.slice(4).trim(), 10);
-						if (Number.isFinite(parsed) && parsed > lastSeenSeq) lastSeenSeq = parsed;
-					}
-					const eventLine = lines.find((line) => line.startsWith('event: '));
-					const dataLine = lines.find((line) => line.startsWith('data: '));
-					if (!eventLine || !dataLine) continue;
-
-					const eventName = eventLine.slice(7).trim();
-					let payload: Record<string, any>;
-					try {
-						payload = JSON.parse(dataLine.slice(6)) as Record<string, any>;
-					} catch (error) {
-						logChatUi('error', 'Failed to parse SSE payload', {
-							eventName,
-							rawData: dataLine.slice(6, 300),
-							error: error instanceof Error ? error.message : String(error),
-						});
-						continue;
-					}
-
+					}),
+				onParseError: (info) =>
+					logChatUi('error', 'Failed to parse SSE payload', {
+						eventName: info.eventName,
+						rawData: info.rawData,
+						error: info.error instanceof Error ? info.error.message : String(info.error),
+					}),
+			})) {
+				const eventName = sseEvent.event;
+				const payload = sseEvent.payload as Record<string, any>;
+				{
 					if (eventName === 'delta') {
 						waitingForFirstToken = false;
 						finalizeCurrentThinkingBlock();
