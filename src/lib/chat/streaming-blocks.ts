@@ -123,8 +123,25 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 	return out
 }
 
+/**
+ * Persisted shape of a completed tool call — what gets serialized to
+ * `messages.toolCalls` jsonb after a stream finishes. The fields are a subset of
+ * `ToolBlock` (the live shape includes lifecycle state we don't store).
+ *
+ * `arguments` is parsed from the streamed JSON string back into an object so
+ * downstream renderers don't have to re-parse on every render. `result` is kept
+ * as a string because it can be either JSON or a plain message and the renderer
+ * decides per-tool.
+ */
+export type PersistedToolCall = {
+	name: string
+	arguments: Record<string, unknown>
+	result: string
+	status: 'completed' | 'failed' | 'denied'
+}
+
 /** Tool blocks whose lifecycle has reached a terminal state, normalized for callers that need a flat list. */
-export function getCompletedToolCalls(blocks: StreamingBlock[]): Array<Record<string, unknown>> {
+export function getCompletedToolCalls(blocks: StreamingBlock[]): PersistedToolCall[] {
 	return blocks
 		.filter(
 			(b): b is ToolBlock =>
@@ -134,7 +151,7 @@ export function getCompletedToolCalls(blocks: StreamingBlock[]): Array<Record<st
 			name: b.name,
 			arguments: parseJsonFallback(b.arguments),
 			result: b.result ?? '',
-			status: b.status,
+			status: b.status as PersistedToolCall['status'],
 		}))
 }
 
@@ -151,7 +168,36 @@ type PendingAssistant = {
 	id: string
 	content: string
 	createdAt: Date
-	toolCalls?: Array<Record<string, unknown>>
+	toolCalls?: PersistedToolCall[] | Array<Record<string, unknown>>
+}
+
+/**
+ * The fields the chat domain writes into / reads from the `messages.metadata`
+ * jsonb column. The column itself stays opaque at the DB layer — anything the
+ * runtime wants to stash (offload handles, future debug fields) flows through
+ * without a schema change. This type just names the keys our own code
+ * actively touches so callers stop reaching into `Record<string, unknown>`.
+ */
+export type ChatMessageMetadata = {
+	/** Per-block stream snapshot, persisted so reload re-renders the same shape. */
+	blocks?: StreamingBlock[]
+	/** Anthropic / OpenAI reasoning-token count if the run produced reasoning. */
+	reasoningTokens?: number
+	/** True when the assistant message was committed mid-stream (interrupt / error). */
+	partial?: boolean
+	/** Run id that produced this message — used to merge partials into finals. */
+	runId?: string
+	/** Reasoning effort the user picked at send time. */
+	reasoningEffort?: string
+	/** True when the user clicked Stop. */
+	stoppedByUser?: boolean
+	/** Anthropic prompt-cache write/read deltas, when available. */
+	tokensCacheWrite?: number
+	tokensCacheRead?: number
+	/** Routing decision metadata (model selection, cost). */
+	modelSelection?: Record<string, unknown>
+	/** Allow-through for fields we don't model yet. */
+	[key: string]: unknown
 }
 
 /**

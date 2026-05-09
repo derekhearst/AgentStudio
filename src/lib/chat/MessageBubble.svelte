@@ -15,6 +15,7 @@
 		type ArtifactCardProps,
 		type SavedBlock,
 	} from './message-bubble-helpers';
+	import type { ChatMessageMetadata, PersistedToolCall } from './streaming-blocks';
 
 	type MessageRow = {
 		id: string;
@@ -28,8 +29,11 @@
 		totalMs: number | null;
 		tokensPerSec: number | null;
 		createdAt: Date | string;
-		toolCalls?: Array<Record<string, unknown>>;
-		metadata?: Record<string, unknown> | null;
+		// Wire shape from the DB jsonb column. PersistedToolCall names what the chat
+		// domain itself produces; the broader fallback keeps historical rows + external
+		// producers (sub-agents / automations) loading.
+		toolCalls?: PersistedToolCall[] | Array<Record<string, unknown>>;
+		metadata?: ChatMessageMetadata | null;
 	};
 
 
@@ -63,13 +67,12 @@
 	);
 	const formattedCost = $derived(Number.parseFloat(message.cost || '0').toFixed(4));
 	const messageReasoningTokens = $derived.by(() => {
-		const value = (message.metadata as Record<string, unknown> | null | undefined)?.reasoningTokens;
+		const value = message.metadata?.reasoningTokens;
 		return typeof value === 'number' && value > 0 ? value : null;
 	});
 
 	const savedBlocks = $derived.by(() => {
-		const metadata = asRecord(message.metadata) ?? ((message.metadata as Record<string, unknown> | null | undefined) ?? null);
-		const blocks = metadata?.blocks;
+		const blocks = message.metadata?.blocks;
 		return Array.isArray(blocks) ? (blocks as SavedBlock[]) : null;
 	});
 
