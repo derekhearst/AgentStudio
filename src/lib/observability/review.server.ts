@@ -7,6 +7,7 @@ import {
 	type ReviewItemStatus,
 	type ReviewItemType,
 } from './observability.schema'
+import { logger } from './logger'
 
 /**
  * Wave 5 #20 phase 1 — Review Inbox lifecycle helpers.
@@ -77,7 +78,7 @@ export async function openReviewItem(input: OpenReviewItemInput): Promise<Review
 			.returning()
 		return row
 	} catch (err) {
-		console.warn('[review] openReviewItem failed (non-fatal)', err)
+		logger.warn('[review] openReviewItem failed (non-fatal)', { err })
 		return null
 	}
 }

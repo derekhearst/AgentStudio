@@ -1,4 +1,5 @@
 import { allToolNames, toolDescriptions, toolDisclosure } from './tool-schemas'
+import { logger } from '$lib/observability/logger'
 
 type ToolName = string
 
@@ -119,9 +120,7 @@ export function estimateTokensForModel(text: string, model: string): number {
 	if (!enc) {
 		if (!FALLBACK_LOGGED.has(model)) {
 			FALLBACK_LOGGED.add(model)
-			if (typeof console !== 'undefined') {
-				console.warn(`[tokens] no tiktoken encoder for model "${model}"; using chars/4 fallback`)
-			}
+			logger.warn(`[tokens] no tiktoken encoder for model "${model}"; using chars/4 fallback`)
 		}
 		return estimateTokens(text)
 	}

@@ -1,6 +1,7 @@
 import { eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { runTraces, type RunTraceRow, type RunTraceStatus } from './observability.schema'
+import { logger } from './logger'
 
 /**
  * Wave 5 #20 phase 2 — run-trace span recording.
@@ -54,7 +55,7 @@ export async function startRunTrace(input: StartRunTraceInput): Promise<RunTrace
 			.returning()
 		return row
 	} catch (err) {
-		console.warn('[traces] startRunTrace failed (non-fatal)', err)
+		logger.warn('[traces] startRunTrace failed (non-fatal)', { err })
 		return null
 	}
 }
@@ -81,7 +82,7 @@ export async function appendTraceSpan(runId: string, span: Omit<TraceSpan, 'seq'
 			})
 			.where(eq(runTraces.runId, runId))
 	} catch (err) {
-		console.warn('[traces] appendTraceSpan failed (non-fatal)', err)
+		logger.warn('[traces] appendTraceSpan failed (non-fatal)', { err })
 	}
 }
 
@@ -105,7 +106,7 @@ export async function finishRunTrace(input: FinishRunTraceInput): Promise<RunTra
 			.returning()
 		return row ?? null
 	} catch (err) {
-		console.warn('[traces] finishRunTrace failed (non-fatal)', err)
+		logger.warn('[traces] finishRunTrace failed (non-fatal)', { err })
 		return null
 	}
 }

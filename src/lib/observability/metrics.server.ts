@@ -1,6 +1,7 @@
 import { and, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { operationalMetrics, type OperationalMetricRow } from './observability.schema'
+import { logger } from './logger'
 
 /**
  * Wave 5 #20 phase 4 — operational metrics writer + sampler.
@@ -46,7 +47,7 @@ export async function recordMetric(input: RecordMetricInput): Promise<Operationa
 			.returning()
 		return row
 	} catch (err) {
-		console.warn('[metrics] recordMetric failed (non-fatal)', err)
+		logger.warn('[metrics] recordMetric failed (non-fatal)', { err })
 		return null
 	}
 }
@@ -83,7 +84,7 @@ export async function runMetricsSample(): Promise<{ written: number }> {
 			written++
 		}
 	} catch (err) {
-		console.warn('[metrics] queue.depth sample failed', err)
+		logger.warn('[metrics] queue.depth sample failed', { err })
 	}
 
 	// Failed-recent rolling window — jobs that failed in the last hour. Use a fixed window
@@ -106,7 +107,7 @@ export async function runMetricsSample(): Promise<{ written: number }> {
 			written++
 		}
 	} catch (err) {
-		console.warn('[metrics] queue.depth.failed_recent sample failed', err)
+		logger.warn('[metrics] queue.depth.failed_recent sample failed', { err })
 	}
 
 	// Review inbox open count by severity.
@@ -127,7 +128,7 @@ export async function runMetricsSample(): Promise<{ written: number }> {
 			written++
 		}
 	} catch (err) {
-		console.warn('[metrics] review_inbox.open sample failed', err)
+		logger.warn('[metrics] review_inbox.open sample failed', { err })
 	}
 
 	// Runs in the last 24h by terminal state.
@@ -149,7 +150,7 @@ export async function runMetricsSample(): Promise<{ written: number }> {
 			written++
 		}
 	} catch (err) {
-		console.warn('[metrics] runs.terminal_24h sample failed', err)
+		logger.warn('[metrics] runs.terminal_24h sample failed', { err })
 	}
 
 	return { written }
