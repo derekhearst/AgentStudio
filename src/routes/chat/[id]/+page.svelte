@@ -144,6 +144,10 @@
 				kind: 'edit';
 				messageId: string;
 				content: string;
+		  }
+		| {
+				kind: 'regenerate';
+				messageId: string;
 		  };
 
 	let retryIntent = $state<RetryIntent | null>(null);
@@ -200,6 +204,10 @@
 			}
 			if (intent.kind === 'askUser') {
 				await resolveAskUser(intent.answers);
+				return;
+			}
+			if (intent.kind === 'regenerate') {
+				await handleRegenerate();
 				return;
 			}
 			await handleEdit(intent.messageId, intent.content);

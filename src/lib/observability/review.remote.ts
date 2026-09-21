@@ -15,9 +15,10 @@ import { listMetricSnapshotsWithSeries } from './metrics.server'
 /**
  * Wave 5 #20 phase 1 — Review Inbox SvelteKit remote surface.
  *
- * Admin-only access — review items can carry sensitive payloads (tool args, evaluator
- * findings, policy override requests). Non-admins get an empty list + an `adminOnly: true`
- * flag so the UI can render a friendly access-gate.
+ * Authenticated-only access — review items can carry sensitive payloads (tool args,
+ * evaluator findings, policy override requests). Since the app moved to a single-user
+ * model there are no roles left, so the `adminOnly` flag these queries return is always
+ * `false`; it is kept only so the response shape stays stable for existing consumers.
  */
 
 const REVIEW_ITEM_TYPES = [

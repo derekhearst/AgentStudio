@@ -59,12 +59,6 @@
 	let loading = $state(false);
 	let logsLoading = $state(false);
 
-	const adminOnly = $derived(
-		(inbox?.adminOnly === true) ||
-			(snapshot?.adminOnly === true) ||
-			(failures?.adminOnly === true),
-	);
-
 	const warnErrorCount24h = $derived.by(() => {
 		if (!logSources) return 0;
 		// Total of warn+error rows across all sources in last 24h. The countLogsBySourceQuery
@@ -179,13 +173,6 @@
 		<div class="flex justify-center py-20">
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
-	{:else if adminOnly}
-		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
-			<p class="text-sm font-medium">Admin only</p>
-			<p class="mt-1 text-xs opacity-70">
-				The Review dashboard is visible only to users with the <code>admin</code> role.
-			</p>
-		</div>
 	{:else}
 		<!-- KPI strip -->
 		<KpiStrip
@@ -257,7 +244,7 @@
 			{#snippet header()}
 				<div class="flex flex-1 items-center justify-between gap-2">
 					<h2 class="font-semibold">Inbox</h2>
-					<span class="badge badge-sm badge-ghost">{inbox.items.length}</span>
+					<span class="badge badge-sm badge-ghost">{inbox?.items.length ?? 0}</span>
 				</div>
 			{/snippet}
 			<InboxList
