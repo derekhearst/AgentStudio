@@ -93,6 +93,24 @@ Plan mode → propose implementation with success criteria
 Agent mode → execute, minimal interruptions
 ```
 
+### Message attachments
+
+A user can attach files to a chat message from the composer. Each file is uploaded first, stored on the server, and recorded on the message so it survives a reload. When the message is sent, the attachment is delivered to the model in one of three ways, chosen by file type:
+
+| Attachment type                         | How the model receives it                                                                                                    |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| PNG, JPEG, GIF, WebP images             | Sent inline with the message, so the model literally sees the picture                                                          |
+| PDFs                                     | Saved into the agent's sandbox workspace; the message tells the agent the path and the agent reads it with the PDF reader tool |
+| Small text files (txt, csv, json, md)   | Their contents are pasted into the message directly, so no tool call is needed                                                 |
+| Spreadsheets and other files            | Saved into the agent's sandbox workspace and announced by path, so the agent's file tools can open them                        |
+| Video                                    | Saved into the workspace, but the model cannot watch it — the user is warned                                                   |
+
+Rules that keep this honest:
+
+1. A single image is capped at roughly 3.7 MB of original file size. Larger images are refused with a warning asking the user to resize, because sending them would fail at the model boundary.
+2. If a file cannot be delivered — wrong image format, too large, unreadable from storage, no workspace to stage it in, or a missing reader tool — the assistant's reply opens with a short "Attachment warning" block naming the file and the reason. The warning is saved with the message, so it is still there after a reload.
+3. The same rules apply whether the conversation is on a Claude model or a third-party model routed through the gateway. A gateway model that cannot see images will simply not use them; nothing about the delivery path changes.
+
 ### Session list, filtering, and grouping
 
 The left session list is the primary navigation surface for chat history.
@@ -213,6 +231,8 @@ On mobile, the right panel collapses into a bottom sheet or tab drawer. The work
 - Session list agent filters are deterministic: identical filter inputs over unchanged data produce identical session ordering and counts.
 - Project grouping never duplicates a session across groups; each session appears exactly once under its current `projectId` or `No Project`.
 - Run tree nodes are derived from durable `runs` lineage (`id`, `parentRunId`, `sessionId`) and are never inferred from transient UI state.
+- An attachment on a message is either delivered to the model or warned about on that message. There is no path that accepts a file and silently ignores it.
+- A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
 
 ## Roles & Permissions
 

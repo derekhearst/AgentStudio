@@ -66,7 +66,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
 | Code execution | **even** | `run_code` in Bun, sandboxed, and every tool is callable from inside the script — better for fan-out, no chart output | analysis tool / sandboxed Python, renders charts |
-| File attachments | **broken** (#36) | upload, attach, persist, render — and the engine path never passes them to the model | images, PDFs, office docs, with extraction |
+| File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
 | Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |
@@ -103,7 +103,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 **We are not in the game on the ecosystem.** MCP consumption, plugins, connectors, computer use. #17 is the one that matters: it lets other people's work count as ours.
 
-**One thing is outright broken.** Attachments (#36) upload, persist and render, and the engine never passes them to the model.
+**One thing was outright broken.** Attachments (#36) uploaded, persisted and rendered, and the engine never passed them to the model. Fixed: images now ride as content blocks on the Agent SDK prompt, other files are staged into the run workspace, and anything that still cannot be delivered warns on the assistant's reply.
 
 ---
 
