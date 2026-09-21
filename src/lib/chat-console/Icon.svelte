@@ -3,7 +3,7 @@
 		| 'send' | 'arrow' | 'plus' | 'paper' | 'mic' | 'chat' | 'bolt' | 'chip' | 'school'
 		| 'folder' | 'branch' | 'cog' | 'brain' | 'check' | 'x' | 'caret' | 'search' | 'file'
 		| 'edit' | 'copy' | 'refresh' | 'sun' | 'moon' | 'dollar' | 'database' | 'clock'
-		| 'alert' | 'terminal' | 'grid';
+		| 'alert' | 'terminal' | 'grid' | 'globe' | 'external';
 
 	let { name, size = 14 }: { name: IconName; size?: number } = $props();
 </script>
@@ -66,4 +66,8 @@
 	<svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
 {:else if name === 'grid'}
 	<svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+{:else if name === 'globe'}
+	<svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg>
+{:else if name === 'external'}
+	<svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>
 {/if}

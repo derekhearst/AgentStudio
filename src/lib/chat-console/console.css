@@ -935,6 +935,395 @@ body.console-resizing-row * { cursor: row-resize !important; }
 .console-files__btns .ghost:hover { background: var(--color-base-300); color: var(--color-base-content); }
 
 /* Stats footer */
+/* ── Preview pane (#29) ───────────────────────────────────────── */
+.console-rail__body.is-preview {
+	padding: 0;
+	overflow: hidden;
+	display: flex;
+}
+
+.console-prev {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	min-height: 0;
+}
+
+.console-prev__address {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--color-base-300);
+}
+
+.console-prev__address-icon {
+	display: flex;
+	color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+}
+
+.console-prev__address input {
+	flex: 1;
+	min-width: 0;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 4px;
+	padding: 4px 7px;
+	font-family: inherit;
+	font-size: 11.5px;
+	color: var(--color-base-content);
+}
+
+.console-prev__address input:focus {
+	outline: none;
+	border-color: var(--color-primary);
+}
+
+.console-prev__go {
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 4px;
+	color: var(--color-base-content);
+	font-family: inherit;
+	font-size: 10.5px;
+	padding: 4px 8px;
+	cursor: pointer;
+}
+
+.console-prev__go:hover { background: var(--color-base-300); }
+
+.console-prev__err {
+	margin: 0;
+	padding: 5px 12px;
+	font-size: 10.5px;
+	color: var(--color-error);
+}
+
+/* A URL that came out of a tool result: shown, never auto-loaded. */
+.console-prev__propose {
+	margin: 8px 10px;
+	padding: 8px 10px;
+	border: 1px solid color-mix(in oklab, var(--color-warning) 45%, transparent);
+	background: color-mix(in oklab, var(--color-warning) 8%, transparent);
+	border-radius: 5px;
+}
+
+.console-prev__propose-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 10.5px;
+	color: var(--color-warning);
+	margin-bottom: 6px;
+}
+
+.console-prev__propose-url {
+	display: block;
+	font-size: 10.5px;
+	word-break: break-all;
+	color: var(--color-base-content);
+	background: var(--color-base-200);
+	border-radius: 3px;
+	padding: 5px 6px;
+	margin-bottom: 6px;
+}
+
+.console-prev__propose-btns { display: flex; gap: 6px; }
+
+.console-prev__propose-btns button {
+	font-family: inherit;
+	font-size: 10.5px;
+	padding: 3px 8px;
+	border-radius: 4px;
+	cursor: pointer;
+	border: 1px solid var(--color-base-300);
+}
+
+.console-prev__propose-btns .primary {
+	background: var(--color-primary);
+	color: var(--color-primary-content);
+	border-color: var(--color-primary);
+}
+
+.console-prev__propose-btns .ghost {
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+.console-prev__bar {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 10px;
+	border-bottom: 1px solid var(--color-base-300);
+	background: color-mix(in oklab, var(--color-base-content) 3%, transparent);
+	min-width: 0;
+}
+
+.console-prev__bar-icon { display: flex; color: var(--color-primary); }
+.console-prev__bar-icon--url { color: var(--color-info, var(--color-primary)); }
+
+.console-prev__bar-target {
+	flex: 1;
+	min-width: 0;
+	font-size: 10.5px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--color-base-content);
+}
+
+.console-prev__bar-btns { display: flex; gap: 2px; }
+
+.console-prev__bar-btns button,
+.console-prev__bar-btns a {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border: 0;
+	border-radius: 3px;
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	cursor: pointer;
+}
+
+.console-prev__bar-btns button:hover,
+.console-prev__bar-btns a:hover {
+	background: var(--color-base-300);
+	color: var(--color-base-content);
+}
+
+.console-prev__body {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+}
+
+.console-prev__frame {
+	flex: 1;
+	min-height: 320px;
+	width: 100%;
+	border: 0;
+	background: white;
+}
+
+.console-prev__meta {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 10px;
+	font-size: 9.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+}
+
+.console-prev__note {
+	padding: 6px 10px;
+	font-size: 10.5px;
+	font-style: italic;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.console-prev__fail {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin: 10px;
+	padding: 8px 10px;
+	border-radius: 5px;
+	font-size: 11px;
+	color: var(--color-error);
+	background: color-mix(in oklab, var(--color-error) 8%, transparent);
+	border: 1px solid color-mix(in oklab, var(--color-error) 35%, transparent);
+	word-break: break-word;
+}
+
+.console-prev__image {
+	padding: 10px;
+	display: flex;
+	justify-content: center;
+}
+
+.console-prev__image img {
+	max-width: 100%;
+	height: auto;
+	border: 1px solid var(--color-base-300);
+	border-radius: 4px;
+	background: color-mix(in oklab, var(--color-base-content) 4%, transparent);
+}
+
+.console-prev__dir { padding: 4px 4px 10px; }
+
+.console-prev__dir-row {
+	display: grid;
+	grid-template-columns: 14px 1fr auto;
+	align-items: center;
+	gap: 8px;
+	width: calc(100% - 8px);
+	margin: 0 4px;
+	padding: 4px 8px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--color-base-content);
+	font-family: inherit;
+	font-size: 11.5px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.console-prev__dir-row:hover { background: var(--color-base-200); }
+.console-prev__dir-row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.console-prev__dir-row .s {
+	font-size: 9.5px;
+	color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
+}
+
+/* Code view — gutter + highlighted source. */
+.console-prev__code {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	align-items: start;
+	font-size: 11px;
+	line-height: 1.55;
+	padding-bottom: 12px;
+	min-width: 0;
+}
+
+.console-prev__gutter {
+	display: flex;
+	flex-direction: column;
+	padding: 0 8px 0 10px;
+	text-align: right;
+	user-select: none;
+	color: color-mix(in oklab, var(--color-base-content) 28%, transparent);
+	border-right: 1px solid var(--color-base-300);
+	font-variant-numeric: tabular-nums;
+}
+
+.console-prev__code pre {
+	margin: 0;
+	padding: 0 10px;
+	overflow-x: auto;
+	background: transparent;
+	min-width: 0;
+}
+
+.console-prev__code pre code {
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	background: transparent;
+	padding: 0;
+	white-space: pre;
+}
+
+/* Rendered markdown. */
+.console-prev__md {
+	padding: 10px 12px 18px;
+	font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+	font-size: 12.5px;
+	line-height: 1.6;
+	word-break: break-word;
+}
+
+.console-prev__md h1,
+.console-prev__md h2,
+.console-prev__md h3,
+.console-prev__md h4 {
+	font-weight: 650;
+	line-height: 1.3;
+	margin: 1.1em 0 0.45em;
+}
+
+.console-prev__md h1 { font-size: 1.35em; }
+.console-prev__md h2 { font-size: 1.18em; }
+.console-prev__md h3 { font-size: 1.06em; }
+.console-prev__md > :first-child { margin-top: 0; }
+.console-prev__md p, .console-prev__md ul, .console-prev__md ol { margin: 0 0 0.7em; }
+.console-prev__md ul, .console-prev__md ol { padding-left: 1.3em; }
+.console-prev__md li { margin: 0.2em 0; }
+.console-prev__md a { color: var(--color-primary); text-decoration: underline; }
+.console-prev__md img { max-width: 100%; height: auto; border-radius: 4px; }
+.console-prev__md hr { border: 0; border-top: 1px solid var(--color-base-300); margin: 1.1em 0; }
+
+.console-prev__md blockquote {
+	margin: 0 0 0.7em;
+	padding: 2px 0 2px 10px;
+	border-left: 2px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+.console-prev__md code {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 0.92em;
+	background: var(--color-base-200);
+	border-radius: 3px;
+	padding: 1px 4px;
+}
+
+.console-prev__md pre {
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 5px;
+	padding: 8px 10px;
+	overflow-x: auto;
+	margin: 0 0 0.8em;
+}
+
+.console-prev__md pre code { background: transparent; padding: 0; }
+
+.console-prev__md table {
+	border-collapse: collapse;
+	margin: 0 0 0.8em;
+	font-size: 0.95em;
+	display: block;
+	overflow-x: auto;
+}
+
+.console-prev__md th,
+.console-prev__md td {
+	border: 1px solid var(--color-base-300);
+	padding: 4px 8px;
+	text-align: left;
+}
+
+.console-prev__md th { background: var(--color-base-200); font-weight: 600; }
+
+/* Preview chips on a tool call. */
+.console-prev-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	padding: 2px 7px;
+	margin: 0 4px 4px 0;
+	border: 1px solid var(--color-base-300);
+	border-radius: 999px;
+	background: var(--color-base-200);
+	color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10.5px;
+	cursor: pointer;
+}
+
+.console-prev-chip:hover {
+	border-color: var(--color-primary);
+	color: var(--color-base-content);
+}
+
+.console-prev-chip span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .console-stats {
 	border-top: 1px solid var(--color-base-300);
 	background: var(--color-base-100);
