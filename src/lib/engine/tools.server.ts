@@ -1,0 +1,95 @@
+/**
+ * Bridges AgentStudio's existing tool surface onto the Claude Agent SDK.
+ *
+ * Nothing about the tools themselves changes: `toolSchemas` is already a map of
+ * Zod objects and `executeTool` already owns context setup, name normalisation,
+ * error shaping and cost tracking. All this does is re-register them as SDK
+ * tools so the Agent SDK's loop can call them in-process.
+ *
+ * That is the whole point of the migration — the loop becomes Anthropic's, the
+ * tools stay ours.
+ */
+
+import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
+import { toolSchemas, toolDescriptions, allToolNames, type ToolName } from '$lib/tools/tool-schemas'
+import { executeTool, type WorkspaceOptions } from '$lib/tools/tools.server'
+
+/** MCP namespaces tool names as `mcp__<server>__<tool>`. */
+export const ENGINE_MCP_SERVER = 'agentstudio'
+
+export function qualifiedToolName(name: string): string {
+	return `mcp__${ENGINE_MCP_SERVER}__${name}`
+}
+
+/** Strip the MCP namespace so the rest of the app keeps seeing bare tool names. */
+export function bareToolName(qualified: string): string {
+	const prefix = `mcp__${ENGINE_MCP_SERVER}__`
+	return qualified.startsWith(prefix) ? qualified.slice(prefix.length) : qualified
+}
+
+export type ToolExecutionRecord = {
+	name: string
+	success: boolean
+	executionMs: number
+	result?: unknown
+	error?: string
+}
+
+export type ToolServerContext = {
+	userId: string
+	runId: string | null
+	workspace?: WorkspaceOptions
+	/**
+	 * Fired after every tool finishes. The stream layer uses this to emit
+	 * `tool_result` frames without having to re-derive the outcome.
+	 */
+	onExecuted?: (record: ToolExecutionRecord) => void
+}
+
+/**
+ * Build the in-process MCP server exposing every tool in the registry.
+ *
+ * Built per-run rather than at module scope because the handlers close over
+ * `userId` / `runId` / workspace, which differ for every chat run.
+ */
+export function buildToolServer(ctx: ToolServerContext) {
+	const tools = allToolNames.map((name: ToolName) =>
+		tool(
+			name,
+			toolDescriptions[name],
+			// The SDK wants a raw Zod shape, not the ZodObject wrapper.
+			toolSchemas[name].shape,
+			async (args: Record<string, unknown>) => {
+				const outcome = await executeTool({ name, arguments: args }, ctx.userId, ctx.runId, ctx.workspace)
+
+				ctx.onExecuted?.({
+					name,
+					success: outcome.success,
+					executionMs: outcome.executionMs,
+					result: outcome.result,
+					error: outcome.error,
+				})
+
+				// Failures come back as tool output rather than thrown errors so the
+				// model can read them and recover, which is how the old loop behaved.
+				const text = outcome.success
+					? typeof outcome.result === 'string'
+						? outcome.result
+						: JSON.stringify(outcome.result ?? null)
+					: (outcome.error ?? 'Tool failed with no error message')
+
+				return {
+					content: [{ type: 'text' as const, text }],
+					...(outcome.success ? {} : { isError: true as const }),
+				}
+			},
+		),
+	)
+
+	return createSdkMcpServer({
+		name: ENGINE_MCP_SERVER,
+		version: '1.0.0',
+		tools,
+		instructions: "AgentStudio's tool surface.",
+	})
+}
