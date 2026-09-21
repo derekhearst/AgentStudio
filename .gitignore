@@ -49,3 +49,6 @@ vendor/
 data/longmemeval/
 retrieval_logs/
 generation_logs/
+
+# Agent worktrees (git worktrees checked out under the repo; ~700MB, never committed)
+.claude/worktrees/
