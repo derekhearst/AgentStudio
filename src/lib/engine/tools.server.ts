@@ -35,10 +35,22 @@ export type ToolExecutionRecord = {
 	error?: string
 }
 
+export type AskUserQuestion = {
+	header: string
+	question: string
+	options?: Array<{ label: string; description?: string; recommended?: boolean }>
+}
+
 export type ToolServerContext = {
 	userId: string
 	runId: string | null
 	workspace?: WorkspaceOptions
+	/**
+	 * Fulfils `ask_user`. The registry's handler is a deliberate stub — the old
+	 * chat loop special-cased the tool, so without a host implementation the
+	 * model just gets "cannot run directly" back. Resolves once the user answers.
+	 */
+	onAskUser?: (questions: AskUserQuestion[]) => Promise<string>
 	/**
 	 * Fired after every tool finishes. The stream layer uses this to emit
 	 * `tool_result` frames without having to re-derive the outcome.
@@ -60,6 +72,12 @@ export function buildToolServer(ctx: ToolServerContext) {
 			// The SDK wants a raw Zod shape, not the ZodObject wrapper.
 			toolSchemas[name].shape,
 			async (args: Record<string, unknown>) => {
+				if (name === 'ask_user' && ctx.onAskUser) {
+					const questions = (args.questions ?? []) as AskUserQuestion[]
+					const answer = await ctx.onAskUser(questions)
+					return { content: [{ type: 'text' as const, text: answer }] }
+				}
+
 				const outcome = await executeTool({ name, arguments: args }, ctx.userId, ctx.runId, ctx.workspace)
 
 				ctx.onExecuted?.({

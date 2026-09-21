@@ -31,6 +31,7 @@ import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
+import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import {
 	buildApprovalRequiredSet,
 	buildBuiltinAgentPostureSlot,
@@ -189,6 +190,43 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const policyTools = agentToolPolicy.kind === 'readOnly' ? Array.from(agentToolPolicy.allow) : undefined
 	const scopedTools = workspaceConfig?.scopedAgentTools ?? policyTools
 
+	// The tool server is constructed before the stream opens, but ask_user needs to
+	// push a frame. Capture the engine's emitter when the run starts so both share
+	// one sequence counter.
+	let emitFrame: ((event: string, payload: unknown) => void) | null = null
+	let askUserSeq = 0
+
+	async function fulfilAskUser(questions: unknown[]): Promise<string> {
+		askUserSeq += 1
+		const token = `${run.id}:q${askUserSeq}`
+		const normalized = (questions as Array<Record<string, unknown>>).map((q) => ({
+			header: String(q.header ?? ''),
+			question: String(q.question ?? ''),
+			options: (q.options ?? []) as Array<{ label: string; description?: string; recommended?: boolean }>,
+			allowFreeformInput: true,
+		}))
+
+		await enqueuePendingQuestion(
+			run.id,
+			{ token, questions: normalized, requestedAt: new Date().toISOString() },
+			{ state: 'waiting_user_input', label: 'Waiting for your answer' },
+		)
+
+		emitFrame?.('ask_user', { id: token, name: 'ask_user', token, questions: normalized })
+
+		const answers = await awaitQuestionAnswers(run.id, token)
+
+		await db
+			.update(chatRuns)
+			.set({ state: 'running', label: 'Generating response' })
+			.where(eq(chatRuns.id, run.id))
+
+		if (!answers) return 'The user did not answer in time.'
+		return Object.entries(answers)
+			.map(([header, answer]) => `${header}: ${answer}`)
+			.join('\n')
+	}
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
@@ -200,6 +238,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			tools: {
 				userId: user.id,
 				runId: run.id,
+				onAskUser: (questions) => fulfilAskUser(questions),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,
@@ -239,6 +278,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					{
 						prompt: body.content ?? '',
 						options: engineOptions,
+						onEmitterReady: (emit) => {
+							emitFrame = emit
+						},
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
 							// next turn to resume rather than silently start a new session.

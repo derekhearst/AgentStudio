@@ -36,6 +36,14 @@ export type EngineRunInput = {
 	requestApproval?: (call: { id: string; name: string; input: Record<string, unknown> }) => Promise<ApprovalDecision>
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
+	/**
+	 * Hands the frame emitter to the caller before the run starts.
+	 *
+	 * Host-side tool callbacks (ask_user) need to push frames too, and they must
+	 * share this counter — two counters means duplicate `id:` values, which the
+	 * resume protocol silently mishandles.
+	 */
+	onEmitterReady?: (emit: (event: string, payload: unknown) => void) => void
 }
 
 export type EngineUsage = {
@@ -116,6 +124,8 @@ export async function runEngineStream(
 		return queue && queue.length > 0 ? (queue.shift() ?? null) : null
 	}
 
+	input.onEmitterReady?.(emit)
+
 	const approvalsEnabled = Boolean(input.requestApproval)
 
 	const options: Options = {
@@ -182,6 +192,14 @@ export async function runEngineStream(
 				const name = bareToolName(String(block.name))
 				const id = String(block.id)
 				toolNames.set(id, name)
+
+				if (name === 'ask_user') {
+					// The host's onAskUser owns this one: it mints the answer token,
+					// emits the `ask_user` frame and blocks until the user replies.
+					// Emitting a tool_call here would render it as an ordinary
+					// collapsed tool block alongside the card.
+					continue
+				}
 
 				if (approvalsEnabled) {
 					// Park the id for canUseTool and show the block as awaiting approval.
