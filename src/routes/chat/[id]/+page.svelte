@@ -1400,13 +1400,25 @@
 
 		<div class="chat-composer-transition w-full">
 
-			<AskUserModal
-				open={askUserModalOpen && !!pendingAskUser}
-				questions={pendingAskUser?.questions ?? []}
-				onSubmit={resolveAskUser}
-				onClose={closeAskUserModal}
-				onSkipToChat={skipAskUserToChat}
-			/>
+			<!--
+				Only mount the modal when a question is actually pending.
+
+				Mounting it unconditionally froze the page on every send: it was fed
+				`pendingAskUser?.questions ?? []`, a freshly allocated array on each
+				update, which kept its derived chain re-running and blew the effect
+				update depth (`effect_update_depth_exceeded`). Svelte then tore down
+				reactivity for the subtree, so the stream spinner never resolved and
+				navigation stopped working — with no pending question in sight.
+			-->
+			{#if pendingAskUser}
+				<AskUserModal
+					open={askUserModalOpen}
+					questions={pendingAskUser.questions}
+					onSubmit={resolveAskUser}
+					onClose={closeAskUserModal}
+					onSkipToChat={skipAskUserToChat}
+				/>
+			{/if}
 
 			<ChatInput
 				busy={streaming && !pendingAskUser}
