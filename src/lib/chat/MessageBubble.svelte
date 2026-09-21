@@ -39,11 +39,19 @@
 		onEdit,
 		onRegenerate,
 		canRegenerate = false,
+		modelChanged = true,
 	} = $props<{
 		message: MessageRow;
 		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
 		canRegenerate?: boolean;
+		/**
+		 * Whether this message's model differs from the previous assistant message's.
+		 * The tag is noise when it repeats down a whole conversation; it earns its place
+		 * only where a switch actually happened. Token and cost figures stay available on
+		 * the message's meta row either way.
+		 */
+		modelChanged?: boolean;
 	}>();
 
 	let editing = $state(false);
@@ -53,6 +61,7 @@
 	let draft = $state('');
 	let editorRoot = $state<HTMLDivElement | null>(null);
 
+	const showModelTag = $derived(Boolean(message.model) && modelChanged);
 	const isUser = $derived(message.role === 'user');
 	const isAssistant = $derived(message.role === 'assistant');
 	const renderedAssistantMarkdown = $derived(isAssistant ? renderMarkdown(message.content ?? '') : '');
@@ -227,10 +236,10 @@
 			</div>
 		{/if}
 	{:else}
-		{#if ts || message.model}
+		{#if ts || showModelTag}
 			<div class="console-msg__head">
 				{#if ts}<span class="console-msg__time">{ts}</span>{/if}
-				{#if message.model}<span class="console-msg__model">{message.model}{message.tokensOut ? ` · ${message.tokensOut} tok` : ''}{Number.parseFloat(message.cost || '0') > 0 ? ` · $${formattedCost}` : ''}</span>{/if}
+				{#if showModelTag}<span class="console-msg__model">{message.model}{message.tokensOut ? ` · ${message.tokensOut} tok` : ''}{Number.parseFloat(message.cost || '0') > 0 ? ` · $${formattedCost}` : ''}</span>{/if}
 			</div>
 		{/if}
 		{#if savedBlocks}

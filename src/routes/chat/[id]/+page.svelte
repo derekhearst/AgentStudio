@@ -22,6 +22,8 @@
 	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
+	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
+	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
@@ -1311,12 +1313,13 @@
 					</div>
 				{/if}
 
-				{#each displayedMessages as message (message.id)}
+				{#each displayedMessages as message, i (message.id)}
 					<MessageBubble
 						{message}
 						onEdit={handleEdit}
 						onRegenerate={handleRegenerate}
 						canRegenerate={!streaming && message.id === lastUserMessageId}
+						modelChanged={shouldShowModelTag(displayedMessages, i)}
 					/>
 				{/each}
 
@@ -1392,29 +1395,14 @@
 			</div>
 
 			{#if streamError}
-				<div class="alert alert-error py-2 text-sm">
-					<span>{streamError}</span>
-					<div class="ml-auto flex items-center gap-2">
-						{#if retryIntent}
-							<button
-								type="button"
-								class="btn btn-xs btn-outline"
-								onclick={retryLastAction}
-								disabled={retryBusy || streaming}
-							>
-								{retryBusy ? 'Retrying...' : 'Retry'}
-							</button>
-						{/if}
-						<button
-							type="button"
-							class="btn btn-xs btn-ghost"
-							onclick={clearRecoverableError}
-							disabled={retryBusy}
-						>
-							Dismiss
-						</button>
-					</div>
-				</div>
+				<ChatErrorNotice
+					message={streamError}
+					canRetry={Boolean(retryIntent)}
+					retrying={retryBusy}
+					busy={retryBusy || streaming}
+					onRetry={retryLastAction}
+					onDismiss={clearRecoverableError}
+				/>
 			{/if}
 		{/if}
 

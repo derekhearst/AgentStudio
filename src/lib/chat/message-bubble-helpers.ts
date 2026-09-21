@@ -128,3 +128,25 @@ export function askQuestionAlreadyInMessage(
 	const messageText = normalizeText(messageContent ?? '')
 	return messageText.includes(q)
 }
+
+/**
+ * Whether the message at `index` should show its model tag.
+ *
+ * Only when its model differs from the nearest earlier assistant message that carried one.
+ * Stamping the same model above every reply is noise in a conversation that never switches;
+ * the tag earns its space exactly where a switch happened, which is also the only place it
+ * answers a question the reader is asking. The first model-bearing message states it once.
+ */
+export function shouldShowModelTag(
+	messages: ReadonlyArray<{ role: string; model?: string | null }>,
+	index: number,
+): boolean {
+	const current = messages[index]
+	if (!current || current.role !== 'assistant' || !current.model) return false
+	for (let i = index - 1; i >= 0; i -= 1) {
+		const previous = messages[i]
+		if (previous.role !== 'assistant' || !previous.model) continue
+		return previous.model !== current.model
+	}
+	return true
+}
