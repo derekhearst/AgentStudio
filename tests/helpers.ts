@@ -418,8 +418,8 @@ export async function seedGithubConnection(
 	const account = overrides?.providerAccount ?? `${prefix.toLowerCase().replace(/[^a-z0-9_-]+/g, '_')}_user`
 	// Use the same encryption helpers the runtime uses so the column round-trips.
 	const { deriveKeyFromSecret, encryptWithKey } = await import('../src/lib/source-control/encryption')
-	const secret = readEnvVar('APP_ENCRYPTION_KEY') ?? readEnvVar('CLAIM_KEY')
-	if (!secret) throw new Error('seedGithubConnection requires APP_ENCRYPTION_KEY or CLAIM_KEY in .env')
+	const secret = readEnvVar('APP_ENCRYPTION_KEY')
+	if (!secret) throw new Error('seedGithubConnection requires APP_ENCRYPTION_KEY in .env')
 	const encrypted = encryptWithKey(deriveKeyFromSecret(secret), overrides?.accessToken ?? 'gho_E2E_FAKE_TOKEN_DO_NOT_USE')
 	const [row] = await sql<{ id: string; provider_account: string }[]>`
 		insert into repository_connections (user_id, provider, provider_account, encrypted_token, scopes, status)

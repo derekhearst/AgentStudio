@@ -34,16 +34,13 @@ services:
       - ORIGIN=${ORIGIN}
       - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID}
       - GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET}
-      # Legacy name for APP_ENCRYPTION_KEY, which is what `encryption.server.ts`
-      # actually prefers. The live app sets CLAIM_KEY only, so the stored GitHub
-      # token is encrypted under this value — switching to APP_ENCRYPTION_KEY with a
-      # different secret makes that token undecryptable and the connection has to be
-      # re-authorized.
-      - CLAIM_KEY=${CLAIM_KEY}
+      # Derives the AES key for stored OAuth tokens. This was CLAIM_KEY until
+      # 2026-09-21; the live app was moved to APP_ENCRYPTION_KEY carrying the same
+      # value, so the existing GitHub token still decrypts. Change the value and it
+      # will not — the connection then has to be re-authorized.
+      - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY}
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-      # The live app also sets USER_NAME=CaptainDerek. Nothing in the codebase reads
-      # it; left out here rather than carried forward.
     security_opt:
       - seccomp:unconfined
     shm_size: 1gb

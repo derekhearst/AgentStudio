@@ -3,7 +3,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 /**
  * Wave 5 #19 phase 2 — AES-256-GCM helpers, environment-free.
  *
- * The server-side wrapper module supplies the key (read from APP_ENCRYPTION_KEY / CLAIM_KEY).
+ * The server-side wrapper module supplies the key (read from APP_ENCRYPTION_KEY).
  * Tests use the pure functions directly with a known key so they don't depend on $env.
  *
  * Format on disk: `v1:<base64iv>:<base64ciphertext>:<base64authtag>` — version prefix lets
