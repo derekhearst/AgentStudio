@@ -68,6 +68,46 @@ Automations support:
 - Event triggers from first-party systems
 - Webhook triggers for external systems
 
+### Cron schedules and time zones
+
+A cron schedule is a wall-clock instruction, so every automation carries the zone it should
+be read in. The `automations.timezone` column holds an IANA zone name (for example
+`America/Boise`, the default) and the create form pre-selects the browser's own zone. The
+automations list shows the zone beneath the expression, so "9am" is never ambiguous. Before
+this existed, the server read every schedule against the container's clock, which is UTC —
+a 9am automation actually ran at 3am Mountain.
+
+The expression itself is a standard five-field crontab line:
+`minute hour day-of-month month day-of-week`.
+
+| Form                            | Example     | Means                                        |
+| ------------------------------- | ----------- | -------------------------------------------- |
+| Any value                       | `*`         | Every minute / hour / day                    |
+| A literal                       | `9`         | Exactly 9                                    |
+| A range                         | `1-5`       | Monday through Friday                        |
+| A list                          | `1,3,5`     | Monday, Wednesday, Friday                    |
+| A step                          | `*/15`      | Every 15 minutes                             |
+| A step on a range               | `9-17/4`    | 9, 13 and 17                                 |
+| A name                          | `MON`, `JAN`| Three-letter day and month names             |
+| A wildcard synonym              | `?`         | Same as `*`, day fields only                 |
+| An alias                        | `@daily`    | Also `@hourly`, `@weekly`, `@monthly`, `@yearly` |
+
+When both the day-of-month and day-of-week fields are restricted, the automation runs when
+**either** matches — the long-standing crontab convention. When one of them is `*`, both must
+match. That is what makes `0 9 * * 1-5` mean "weekdays at 9" rather than "never".
+
+`@reboot` is rejected: automations have no boot event to hang a schedule on. Anything the
+parser cannot read is rejected with a message naming the field and the reason, for example
+`Invalid cron day-of-week field "FUNDAY": unrecognized value "FUNDAY"`.
+
+**Daylight saving.** Schedules keep their wall-clock time across a transition, so a 9am
+automation is 9am in both winter and summer. In the two edge hours:
+
+- **Spring forward** — a schedule that lands in the hour that never happens (2am to 3am in
+  Mountain time) runs once, at the moment the clock jumps, rather than being skipped for the day.
+- **Fall back** — a schedule inside the hour that happens twice runs once, on the first pass,
+  rather than firing twice.
+
 ### Output routing
 
 An automation can route its output to:

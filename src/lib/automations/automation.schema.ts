@@ -32,6 +32,10 @@ export const automations = pgTable(
 		agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 		description: text('description').notNull(),
 		cronExpression: text('cron_expression').notNull(),
+		// #30 — a cron expression is a wall-clock schedule and means nothing without a zone.
+		// The container sets no TZ, so before this column "9am" was resolved as UTC (3am in
+		// Boise). IANA zone name; the default matches where the box and its operator live.
+		timezone: text('timezone').notNull().default('America/Boise'),
 		prompt: text('prompt').notNull(),
 		enabled: boolean('enabled').notNull().default(true),
 		conversationMode: automationConversationModeEnum('conversation_mode').notNull().default('new_each_run'),

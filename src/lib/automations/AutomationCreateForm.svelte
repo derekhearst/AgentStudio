@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createAutomationCommand } from '$lib/automations'
+	import { COMMON_TIME_ZONES, DEFAULT_TIMEZONE, isValidTimeZone } from '$lib/automations/cron'
 	import { getAgentChoices } from '$lib/agents'
 
 	type AutomationMode = 'chat_followup' | 'research' | 'maintenance'
@@ -13,6 +14,15 @@
 		{ label: 'Every Monday', expression: '0 9 * * 1' },
 		{ label: 'Month start', expression: '0 10 1 * *' },
 	] as const
+
+	function detectTimeZone(): string {
+		try {
+			const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone
+			return resolved && isValidTimeZone(resolved) ? resolved : DEFAULT_TIMEZONE
+		} catch {
+			return DEFAULT_TIMEZONE
+		}
+	}
 
 	let {
 		agents,
@@ -28,6 +38,7 @@
 		seed?: {
 			description: string
 			cronExpression: string
+			timezone?: string
 			prompt: string
 			enabled: boolean
 			conversationMode: 'new_each_run' | 'reuse'
@@ -39,6 +50,9 @@
 
 	let description = $state('')
 	let cronExpression = $state('0 9 * * *')
+	// #30 — the cron expression is a wall-clock schedule, so it needs a zone to mean anything.
+	// Seed from the browser's own zone when we recognise it, else the app default.
+	let timezone = $state(detectTimeZone())
 	let prompt = $state('Summarize important updates since the last run and recommend next actions.')
 	let conversationMode = $state<'new_each_run' | 'reuse'>('new_each_run')
 	let mode = $state<AutomationMode>('chat_followup')
@@ -47,10 +61,15 @@
 	let selectedAgentId = $state('orchestrator')
 	let saving = $state(false)
 
+	// The picker offers the common zones plus whatever the browser reports, so a detected or
+	// duplicated zone is always selectable even when it isn't on the short list.
+	const timeZoneOptions = $derived(Array.from(new Set<string>([...COMMON_TIME_ZONES, timezone])).sort())
+
 	$effect(() => {
 		if (!seed) return
 		description = seed.description
 		cronExpression = seed.cronExpression
+		if (seed.timezone) timezone = seed.timezone
 		prompt = seed.prompt
 		enabled = seed.enabled
 		conversationMode = seed.conversationMode
@@ -68,6 +87,8 @@
 	function validate(): string | null {
 		if (!description.trim()) return 'Add a short description for this automation.'
 		if (!cronExpression.trim()) return 'Add a cron expression for the schedule.'
+		if (!timezone.trim() || !isValidTimeZone(timezone.trim()))
+			return 'Pick a valid IANA time zone for the schedule.'
 		if (!prompt.trim()) return 'Add instructions for what should happen on each run.'
 		return null
 	}
@@ -86,6 +107,7 @@
 				agentId: selectedAgentId === 'orchestrator' ? null : selectedAgentId,
 				description: description.trim(),
 				cronExpression: cronExpression.trim(),
+				timezone: timezone.trim(),
 				prompt: prompt.trim(),
 				enabled,
 				conversationMode,
@@ -158,6 +180,25 @@
 				bind:value={cronExpression}
 				oninput={clearMessage}
 			/>
+			<p class="text-[10px] text-base-content/45">
+				Ranges (<code>1-5</code>), lists (<code>1,3,5</code>), steps (<code>*/15</code>), names
+				(<code>MON</code>) and <code>@daily</code>-style aliases are all accepted.
+			</p>
+
+			<div class="flex items-center justify-between pt-1">
+				<span class="label-text text-xs">Time zone</span>
+				<span class="text-[10px] text-base-content/45">The expression is read in this zone</span>
+			</div>
+			<select
+				data-testid="automation-timezone-select"
+				class="select select-bordered w-full text-sm"
+				bind:value={timezone}
+				onchange={clearMessage}
+			>
+				{#each timeZoneOptions as zone (zone)}
+					<option value={zone}>{zone}</option>
+				{/each}
+			</select>
 		</div>
 
 		<div class="space-y-2 rounded-xl border border-base-300/70 bg-base-200/20 p-3">

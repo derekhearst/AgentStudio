@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { automations } from '$lib/automations/automation.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { computeNextRunAt } from '$lib/automations/engine'
+import { DEFAULT_TIMEZONE } from '$lib/automations/cron'
 
 export async function listAutomationsForUser(userId: string) {
 	return db
@@ -10,6 +11,7 @@ export async function listAutomationsForUser(userId: string) {
 			id: automations.id,
 			description: automations.description,
 			cronExpression: automations.cronExpression,
+			timezone: automations.timezone,
 			prompt: automations.prompt,
 			enabled: automations.enabled,
 			conversationMode: automations.conversationMode,
@@ -32,6 +34,8 @@ export async function createAutomationRecord(input: {
 	agentId?: string | null
 	description: string
 	cronExpression: string
+	/** IANA zone the cron expression is read in. Defaults to `DEFAULT_TIMEZONE`. */
+	timezone?: string
 	prompt: string
 	enabled?: boolean
 	conversationMode?: 'new_each_run' | 'reuse'
@@ -42,7 +46,8 @@ export async function createAutomationRecord(input: {
 	repositoryId?: string | null
 }) {
 	const now = new Date()
-	const nextRunAt = computeNextRunAt(input.cronExpression, now)
+	const timezone = input.timezone ?? DEFAULT_TIMEZONE
+	const nextRunAt = computeNextRunAt(input.cronExpression, now, timezone)
 	const [created] = await db
 		.insert(automations)
 		.values({
@@ -50,6 +55,7 @@ export async function createAutomationRecord(input: {
 			agentId: input.agentId ?? null,
 			description: input.description,
 			cronExpression: input.cronExpression,
+			timezone,
 			prompt: input.prompt,
 			enabled: input.enabled ?? true,
 			conversationMode: input.conversationMode ?? 'new_each_run',
@@ -71,6 +77,7 @@ export async function updateAutomationRecord(
 		agentId?: string | null
 		description?: string
 		cronExpression?: string
+		timezone?: string
 		prompt?: string
 		enabled?: boolean
 		conversationMode?: 'new_each_run' | 'reuse'
@@ -98,9 +105,16 @@ export async function updateAutomationRecord(
 	if (patch.mode !== undefined) updates.mode = patch.mode
 	if (patch.outputTarget !== undefined) updates.outputTarget = patch.outputTarget
 	if (patch.repositoryId !== undefined) updates.repositoryId = patch.repositoryId
-	if (patch.cronExpression !== undefined) {
-		updates.cronExpression = patch.cronExpression
-		updates.nextRunAt = computeNextRunAt(patch.cronExpression)
+	// The schedule is (expression, zone) — changing either one has to re-derive nextRunAt,
+	// and each recompute needs the other half as it will be after this patch lands.
+	if (patch.timezone !== undefined) updates.timezone = patch.timezone
+	if (patch.cronExpression !== undefined) updates.cronExpression = patch.cronExpression
+	if (patch.cronExpression !== undefined || patch.timezone !== undefined) {
+		updates.nextRunAt = computeNextRunAt(
+			patch.cronExpression ?? existing.cronExpression,
+			new Date(),
+			patch.timezone ?? existing.timezone ?? DEFAULT_TIMEZONE,
+		)
 	}
 
 	const [updated] = await db

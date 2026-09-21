@@ -7,14 +7,26 @@ import {
 	listAutomationsForUser,
 	updateAutomationRecord,
 } from '$lib/automations/automation.server'
+import { isValidTimeZone } from '$lib/automations/cron'
 
 const automationModeSchema = z.enum(['chat_followup', 'research', 'maintenance'])
 const automationOutputTargetSchema = z.enum(['chat_session', 'review_inbox'])
+
+// #30 — the cron expression is wall-clock, so the zone is part of the schedule. Validated
+// against the runtime's own tz database so a typo fails at the form instead of silently
+// scheduling in the wrong hemisphere.
+const timezoneSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(64)
+	.refine(isValidTimeZone, { message: 'Must be an IANA time zone name, e.g. America/Boise' })
 
 const createAutomationSchema = z.object({
 	agentId: z.string().uuid().nullable().optional(),
 	description: z.string().trim().min(1).max(200),
 	cronExpression: z.string().trim().min(1).max(120),
+	timezone: timezoneSchema.optional(),
 	prompt: z.string().trim().min(1),
 	enabled: z.boolean().optional(),
 	conversationMode: z.enum(['new_each_run', 'reuse']).optional(),
@@ -28,6 +40,7 @@ const updateAutomationSchema = z.object({
 	agentId: z.string().uuid().nullable().optional(),
 	description: z.string().trim().min(1).max(200).optional(),
 	cronExpression: z.string().trim().min(1).max(120).optional(),
+	timezone: timezoneSchema.optional(),
 	prompt: z.string().trim().min(1).optional(),
 	enabled: z.boolean().optional(),
 	conversationMode: z.enum(['new_each_run', 'reuse']).optional(),
@@ -52,6 +65,7 @@ export const createAutomationCommand = command(createAutomationSchema, async (in
 		agentId: input.agentId ?? null,
 		description: input.description,
 		cronExpression: input.cronExpression,
+		timezone: input.timezone,
 		prompt: input.prompt,
 		enabled: input.enabled,
 		conversationMode: input.conversationMode,
