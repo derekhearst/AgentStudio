@@ -10,12 +10,28 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import {
 	memoryClosets,
 	memoryDrawers,
+	memoryExclusionRules,
 	memoryKgEntities,
 	memoryKgRelations,
 	memoryRooms,
 	memoryWings,
 } from '$lib/memory/memory.schema'
 import { recallForUser } from '$lib/memory/memory.server'
+import {
+	editDrawerContent,
+	forgetConversationMemories,
+	listMinedConversations,
+	setDrawerFlags,
+	MAX_DRAWER_CONTENT_CHARS,
+} from '$lib/memory/curation.server'
+import {
+	compileExclusionRules,
+	ensureBuiltinExclusionRules,
+	findExclusionMatch,
+	MAX_PATTERN_LENGTH,
+	validateExclusionPattern,
+} from '$lib/memory/exclusions.server'
+import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { jobs } from '$lib/jobs/jobs.schema'
 import { enqueueJob } from '$lib/jobs/jobs.server'
@@ -138,6 +154,9 @@ export const listMemoryDrawersQuery = query(closetIdSchema, async ({ closetId })
 			tokenCount: memoryDrawers.tokenCount,
 			occurredAt: memoryDrawers.occurredAt,
 			sourceMessageId: memoryDrawers.sourceMessageId,
+			pinned: memoryDrawers.pinned,
+			neverRecall: memoryDrawers.neverRecall,
+			editedAt: memoryDrawers.editedAt,
 			sourceExcerpt: sql<string | null>`(
 				select substring(messages.content from 1 for 120) from messages
 				where messages.id = memory_drawers.source_message_id
@@ -151,7 +170,11 @@ export const listMemoryDrawersQuery = query(closetIdSchema, async ({ closetId })
 
 export const searchMemoryQuery = query(searchSchema, async ({ query: q, topK, useRerank }) => {
 	const user = requireAuthenticatedRequestUser()
-	return recallForUser(user.id, q, { topK: topK ?? 5, useRerank: useRerank ?? false })
+	return recallForUser(user.id, q, {
+		topK: topK ?? 5,
+		useRerank: useRerank ?? false,
+		recallSource: 'search',
+	})
 })
 
 export const deleteMemoryDrawerCommand = command(drawerIdSchema, async ({ id }) => {
@@ -159,6 +182,191 @@ export const deleteMemoryDrawerCommand = command(drawerIdSchema, async ({ id }) 
 	await db.delete(memoryDrawers).where(and(eq(memoryDrawers.id, id), eq(memoryDrawers.userId, user.id)))
 	return { ok: true }
 })
+
+const editDrawerSchema = z.object({
+	id: z.string().uuid(),
+	content: z.string().trim().min(1).max(MAX_DRAWER_CONTENT_CHARS),
+})
+
+/**
+ * Rewrite a mined paraphrase. Re-embeds in the same call; if embedding is unavailable the
+ * vector is cleared rather than left pointing at the old wording, and the response says so
+ * (`reEmbedded: false`) so the UI can warn that the drawer is out of semantic recall until
+ * the next Reorganize backfill.
+ */
+export const editMemoryDrawerCommand = command(editDrawerSchema, async ({ id, content }) => {
+	const user = requireAuthenticatedRequestUser()
+	const result = await editDrawerContent({ userId: user.id, drawerId: id, content })
+	if (!result.ok) {
+		return { ok: false as const, reason: result.reason }
+	}
+	return {
+		ok: true as const,
+		reEmbedded: result.reEmbedded,
+		embeddingError: 'embeddingError' in result ? result.embeddingError : undefined,
+		tokenCount: result.tokenCount,
+	}
+})
+
+const drawerFlagsSchema = z.object({
+	id: z.string().uuid(),
+	pinned: z.boolean().optional(),
+	neverRecall: z.boolean().optional(),
+})
+
+/** Pin (always consider in recall) / never-recall (browsable, never injected) per drawer. */
+export const setMemoryDrawerFlagsCommand = command(drawerFlagsSchema, async ({ id, pinned, neverRecall }) => {
+	const user = requireAuthenticatedRequestUser()
+	const result = await setDrawerFlags({ userId: user.id, drawerId: id, pinned, neverRecall })
+	if (!result) return { ok: false as const }
+	return { ok: true as const, pinned: result.pinned, neverRecall: result.neverRecall }
+})
+
+const conversationIdSchema = z.object({ conversationId: z.string().uuid() })
+
+/** Delete everything mined from one conversation — rooms, closets, drawers, empty wings. */
+export const forgetConversationMemoriesCommand = command(conversationIdSchema, async ({ conversationId }) => {
+	const user = requireAuthenticatedRequestUser()
+	return forgetConversationMemories({ userId: user.id, conversationId })
+})
+
+/** Conversations that currently have memories, for the "forget a conversation" list. */
+export const listMinedConversationsQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return listMinedConversations(user.id)
+})
+
+export const listDrawerRecallEventsQuery = query(drawerIdSchema, async ({ id }) => {
+	const user = requireAuthenticatedRequestUser()
+	return listDrawerRecallEvents(user.id, id)
+})
+
+/* ------------------------------------------------------------------ exclusion rules */
+
+export const listMemoryExclusionRulesQuery = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	await ensureBuiltinExclusionRules(user.id)
+	return db
+		.select({
+			id: memoryExclusionRules.id,
+			name: memoryExclusionRules.name,
+			description: memoryExclusionRules.description,
+			kind: memoryExclusionRules.kind,
+			pattern: memoryExclusionRules.pattern,
+			enabled: memoryExclusionRules.enabled,
+			builtin: memoryExclusionRules.builtin,
+			hitCount: memoryExclusionRules.hitCount,
+			lastHitAt: memoryExclusionRules.lastHitAt,
+		})
+		.from(memoryExclusionRules)
+		.where(eq(memoryExclusionRules.userId, user.id))
+		.orderBy(desc(memoryExclusionRules.builtin), memoryExclusionRules.name)
+})
+
+const saveExclusionRuleSchema = z.object({
+	id: z.string().uuid().optional(),
+	name: z.string().trim().min(1).max(80),
+	description: z.string().trim().max(240).optional(),
+	kind: z.enum(['regex', 'substring']),
+	pattern: z.string().trim().min(1).max(MAX_PATTERN_LENGTH),
+	enabled: z.boolean().default(true),
+})
+
+export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const invalid = validateExclusionPattern(input.kind, input.pattern)
+	if (invalid) return { ok: false as const, error: invalid }
+
+	if (input.id) {
+		const [updated] = await db
+			.update(memoryExclusionRules)
+			.set({
+				name: input.name,
+				description: input.description ?? null,
+				kind: input.kind,
+				pattern: input.pattern,
+				enabled: input.enabled,
+				updatedAt: new Date(),
+			})
+			.where(and(eq(memoryExclusionRules.id, input.id), eq(memoryExclusionRules.userId, user.id)))
+			.returning({ id: memoryExclusionRules.id })
+		if (!updated) return { ok: false as const, error: 'Rule not found.' }
+		return { ok: true as const, id: updated.id }
+	}
+
+	try {
+		const [created] = await db
+			.insert(memoryExclusionRules)
+			.values({
+				userId: user.id,
+				name: input.name,
+				description: input.description ?? null,
+				kind: input.kind,
+				pattern: input.pattern,
+				enabled: input.enabled,
+				builtin: false,
+			})
+			.returning({ id: memoryExclusionRules.id })
+		return { ok: true as const, id: created.id }
+	} catch {
+		return { ok: false as const, error: 'A rule with that name already exists.' }
+	}
+})
+
+const exclusionRuleIdSchema = z.object({ id: z.string().uuid() })
+
+/** Built-in credential rules can be disabled but never deleted. */
+export const deleteMemoryExclusionRuleCommand = command(exclusionRuleIdSchema, async ({ id }) => {
+	const user = requireAuthenticatedRequestUser()
+	const [row] = await db
+		.select({ builtin: memoryExclusionRules.builtin })
+		.from(memoryExclusionRules)
+		.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+		.limit(1)
+	if (!row) return { ok: false as const, error: 'Rule not found.' }
+	if (row.builtin) return { ok: false as const, error: 'Built-in rules can be disabled but not deleted.' }
+	await db
+		.delete(memoryExclusionRules)
+		.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+	return { ok: true as const }
+})
+
+export const toggleMemoryExclusionRuleCommand = command(
+	z.object({ id: z.string().uuid(), enabled: z.boolean() }),
+	async ({ id, enabled }) => {
+		const user = requireAuthenticatedRequestUser()
+		await db
+			.update(memoryExclusionRules)
+			.set({ enabled, updatedAt: new Date() })
+			.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+		return { ok: true as const }
+	},
+)
+
+/**
+ * Dry-run the live rule set against sample text. Lets a user check a new pattern before
+ * trusting it with their secrets — and check that an existing rule catches what they think.
+ */
+export const testMemoryExclusionRulesQuery = query(
+	z.object({ sample: z.string().max(4000) }),
+	async ({ sample }) => {
+		const user = requireAuthenticatedRequestUser()
+		if (sample.trim().length === 0) return { matched: false as const }
+		const rows = await db
+			.select({
+				id: memoryExclusionRules.id,
+				name: memoryExclusionRules.name,
+				kind: memoryExclusionRules.kind,
+				pattern: memoryExclusionRules.pattern,
+				enabled: memoryExclusionRules.enabled,
+			})
+			.from(memoryExclusionRules)
+			.where(and(eq(memoryExclusionRules.userId, user.id), eq(memoryExclusionRules.enabled, true)))
+		const match = findExclusionMatch(sample, compileExclusionRules(rows))
+		if (!match) return { matched: false as const }
+		return { matched: true as const, ruleName: match.ruleName, sample: match.sample }
+	},
+)
 
 /**
  * Manual reorganize trigger — finds every conversation owned by the caller that has at
@@ -306,6 +514,10 @@ export const getMemoryDrawerQuery = query(drawerIdSchema, async ({ id }) => {
 			occurredAt: memoryDrawers.occurredAt,
 			createdAt: memoryDrawers.createdAt,
 			sourceMessageId: memoryDrawers.sourceMessageId,
+			pinned: memoryDrawers.pinned,
+			neverRecall: memoryDrawers.neverRecall,
+			editedAt: memoryDrawers.editedAt,
+			hasEmbedding: sql<boolean>`${memoryDrawers.embedding} is not null`,
 			closetTopic: memoryClosets.topic,
 			roomId: memoryRooms.id,
 			roomLabel: memoryRooms.label,
@@ -346,10 +558,15 @@ export const getMemoryDrawerQuery = query(drawerIdSchema, async ({ id }) => {
 		.innerJoin(sql`${memoryKgEntities} as to_e`, sql`to_e.id = ${memoryKgRelations.toEntityId}`)
 		.where(and(eq(memoryKgRelations.userId, user.id), eq(memoryKgRelations.sourceDrawerId, id)))
 
+	// Why was this recalled? — the component scores recall already computed, kept per event.
+	const recall = await listDrawerRecallEvents(user.id, id)
+
 	return {
 		...row,
 		sourceMessage,
 		kgRelations: kgRows,
+		recallEvents: recall.events,
+		recallCount: recall.total,
 	}
 })
 
@@ -421,3 +638,6 @@ export type MemoryDrawerRow = Awaited<ReturnType<typeof listMemoryDrawersQuery>>
 export type MemoryDrawerDetail = NonNullable<Awaited<ReturnType<typeof getMemoryDrawerQuery>>>
 export type MemoryStats = Awaited<ReturnType<typeof getMemoryStatsQuery>>
 export type MemoryWingEdge = Awaited<ReturnType<typeof listMemoryWingEdgesQuery>>[number]
+export type MemoryExclusionRuleRow = Awaited<ReturnType<typeof listMemoryExclusionRulesQuery>>[number]
+export type MemoryMinedConversationRow = Awaited<ReturnType<typeof listMinedConversationsQuery>>[number]
+export type MemoryRecallEventRow = MemoryDrawerDetail['recallEvents'][number]

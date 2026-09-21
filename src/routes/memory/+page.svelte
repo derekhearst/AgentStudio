@@ -19,6 +19,7 @@
 	import SearchOverlay from '$lib/memory/SearchOverlay.svelte';
 	import WingList from '$lib/memory/WingList.svelte';
 	import ReorganizePanel from '$lib/memory/ReorganizePanel.svelte';
+	import MemoryControlPanel from '$lib/memory/MemoryControlPanel.svelte';
 	import { relativeTime } from '$lib/util/relative-time';
 
 	let wings = $state<MemoryWingRow[]>([]);
@@ -34,6 +35,7 @@
 	let mineResult = $state<{ conversationsScanned: number; enqueued: number } | null>(null);
 	let showHowItWorks = $state(false);
 	let showReorganize = $state(false);
+	let showManage = $state(false);
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const selectedWing = $derived(wings.find((w) => w.id === selectedWingId) ?? null);
@@ -90,6 +92,21 @@
 		await deleteMemoryDrawerCommand({ id });
 		closeDrawerDetail();
 		// Refresh counts.
+		await loadAll({ force: true });
+	}
+
+	/** Re-read the open drawer after an edit or flag change, then refresh palace counts. */
+	async function refreshDrawerDetail() {
+		if (selectedDrawerId) {
+			await getMemoryDrawerQuery({ id: selectedDrawerId }).refresh();
+			drawerDetail = (await getMemoryDrawerQuery({ id: selectedDrawerId })) as MemoryDrawerDetail | null;
+		}
+		await loadAll({ force: true });
+	}
+
+	/** A conversation was forgotten — whatever was selected may no longer exist. */
+	async function afterManageChange() {
+		closeWing();
 		await loadAll({ force: true });
 	}
 
@@ -180,6 +197,13 @@
 			</button>
 			<button
 				class="btn btn-xs"
+				onclick={() => (showManage = true)}
+				title="Exclusion rules the miner obeys, and per-conversation forget"
+			>
+				Manage
+			</button>
+			<button
+				class="btn btn-xs"
 				onclick={() => (showReorganize = true)}
 				title="Preview wing merges, closet consolidations, and embedding backfills before applying"
 			>
@@ -235,6 +259,10 @@
 					<span class="memory-explain__step">4 · Reorganize</span>
 					<span>The palace doesn't reorganize on its own. <strong>Reorganize</strong> previews rule-based merges (similar wings, near-duplicate closets) plus an embedding backfill before applying. <strong>Mine pending</strong> sweeps any conversation whose new messages aren't yet memorized.</span>
 				</li>
+				<li>
+					<span class="memory-explain__step">5 · Control</span>
+					<span><strong>Manage</strong> holds the exclusion rules the miner checks <em>before</em> it embeds anything (credential patterns are built in) plus a per-conversation forget. Open any drawer to rewrite it — which re-embeds it — pin it, mark it never-recall, or see the scores that caused it to be recalled.</span>
+				</li>
 			</ol>
 			{#if mineResult}
 				<div class="memory-explain__result">
@@ -250,6 +278,8 @@
 	<SearchOverlay onSelectHit={handleSearchHit} />
 
 	<ReorganizePanel bind:open={showReorganize} onApplied={() => void loadAll({ force: true })} />
+
+	<MemoryControlPanel bind:open={showManage} onChanged={() => void afterManageChange()} />
 
 	<div class="memory-page__body" class:has-panel={!!selectedWing}>
 		<div class="memory-page__main">
@@ -281,6 +311,7 @@
 						drawer={drawerDetail}
 						onBack={closeDrawerDetail}
 						onDelete={removeDrawer}
+						onChanged={() => void refreshDrawerDetail()}
 					/>
 				{:else}
 					<WingDetailPanel

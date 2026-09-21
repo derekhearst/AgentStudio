@@ -23,6 +23,24 @@ Memories are stored in a four-level tree:
 
 The hierarchy is pre-built so the model isn't reasoning over a flat blob of past chats — it gets pre-grouped, time-stamped slices that are easy to filter.
 
+A drawer also carries the flags a user sets on it:
+
+| Field | Meaning |
+| --- | --- |
+| `pinned` | Always considered during recall, with a small score boost. |
+| `neverRecall` | Browsable in the palace, excluded from every recall. |
+| `editedAt` | Set when a human rewrote the mined text; blank means "as mined". |
+| `sourceMessageId` | The chat message this drawer came from, so every memory links back to its origin. |
+
+### Control records
+
+Two supporting records exist purely so a user can manage what was remembered:
+
+| Entity | What it is |
+| --- | --- |
+| **Exclusion rule** | A named pattern the miner checks before storing anything. Credential rules ship built in; users add their own. Tracks how many turns it has blocked and when it last fired. |
+| **Recall event** | One row per drawer per recall, holding the query, the source (chat / agent / search / bench), the rank, and the semantic / keyword / temporal / pinned components of its score. Retained 30 days; deleted with its drawer. |
+
 ### AAAK index
 
 Each drawer carries an "AAAK pointer" — a compressed reference like `§ W-042/R-11/D-007` plus a few semantic tags (`@p` for people, `@l` for locations, `@e` for events, `@i` for items, `@t` for time). The pointer lets the model cite a memory by ID instead of regurgitating it, which keeps the assistant's responses tight and traceable.
@@ -39,6 +57,9 @@ Drawers carry a 1536-dimension embedding (OpenAI `text-embedding-3-small`). When
 2. **Keyword boost** — Postgres full-text search over drawer content + AAAK tags.
 3. **Temporal proximity** — recent drawers ranked higher than old ones for time-sensitive queries.
 4. **Preference patterns** — recurring user choices boost relevance for matching topics.
+5. **Pin boost** — drawers the user pinned are added to the candidate pool regardless of distance and get a small additive bonus.
+
+Drawers flagged **never recall** are removed from the candidate pool before any of this runs. Every drawer that survives carries its component scores back to the caller, which is what the palace uses to answer "why was this recalled?".
 
 The top results get formatted into a `<memory_context>…</memory_context>` block prepended to the system prompt.
 
@@ -66,6 +87,63 @@ When `useRerank` is enabled in settings, the top 20 candidates are sent to a che
 ### Manual palace browsing (`/memory`)
 
 The Memory page shows the palace tree (wings → rooms → closets → drawers), a search box that runs the same retrieval pipeline against arbitrary queries, an AAAK preview for each drawer, and a delete control for surgical pruning.
+
+### Managing what was remembered
+
+Browsing the palace is not the same as controlling it, and control is what makes a memory system trustworthy. The Memory page has a **Manage** dialog plus per-drawer controls that let a user undo or pre-empt anything the miner did.
+
+#### Editing a drawer
+
+Mining paraphrases, and a wrong paraphrase that gets recalled forever is worse than no memory at all. Open any drawer and choose **Edit** to rewrite it.
+
+When the text changes, the system re-embeds the drawer in the same step so the vector and the text always agree. If the embedding service is unavailable, the system **clears** the vector rather than leaving the old one in place — a drawer with no vector drops out of semantic search (so it can never be matched on wording it no longer contains) and is picked back up automatically by the next **Reorganize** embedding backfill. The panel says so when this happens, and the drawer's metadata shows whether an embedding is present.
+
+An edited drawer is stamped with an "edited" marker in the palace so a reader can tell a human correction from a mined paraphrase.
+
+#### Pin and never-recall
+
+Every drawer carries two independent flags:
+
+| Flag | Meaning |
+| --- | --- |
+| **Pinned** | "Always consider this." The drawer is added to the recall candidate pool even when it falls outside the nearest-neighbour cut, and gets a small additive score boost (default `0.15`). |
+| **Never recall** | "Remember that you know this, but never use it." The drawer stays visible and editable in the palace, but is excluded from every recall before scoring begins, so it can never reach a prompt. |
+
+Never-recall is the softer alternative to deletion: the user keeps the record and the audit trail without the drawer influencing future answers.
+
+#### Why was this recalled?
+
+Every recall — from chat, from an agent, or from the palace search box — records the component scores it computed for each drawer it returned: semantic similarity, keyword rank, temporal proximity, any pinned boost, the final score, the rank, the query text, and the recall weights in force at the time.
+
+Open a drawer and the **Why was this recalled?** section replays the most recent of those, so a bad recall can be diagnosed ("it won on keyword, not meaning") instead of guessed at. The log keeps 30 days and is pruned opportunistically; deleting a drawer deletes its provenance with it.
+
+#### Forgetting a whole conversation
+
+The **Manage → Mined conversations** tab lists every conversation that currently has memories, with its drawer and room counts. **Forget** deletes that conversation's rooms, which cascades through its closets to its drawers, and removes any wing left empty as a result.
+
+The chat transcript itself is untouched, so a later **Mine pending** sweep would memorize it again — add an exclusion rule first if the point was to keep that content out permanently.
+
+#### Exclusion rules
+
+Exclusion rules are a deny list the miner checks **before** it calls the embedding provider and before it writes anything. A turn that matches an enabled rule is dropped entirely: it never leaves the process and never becomes a drawer. Ordering matters here — filtering after insert would mean the secret had already been embedded and stored.
+
+Each rule has a name, a match kind (`regex` or `substring`), a pattern, an on/off switch, and a running count of how many turns it has blocked.
+
+A set of credential rules is built in and enabled for every user:
+
+| Rule | Catches |
+| --- | --- |
+| Secret assignment | `password = …`, `API_KEY: …`, "my api key is …" |
+| AWS access key id | `AKIA…` / `ASIA…` identifiers |
+| Provider API key | `sk-` / `pk-` / `rk-` style keys (OpenAI, OpenRouter, Anthropic, Stripe) |
+| GitHub token | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` tokens |
+| Private key block | PEM-armoured private keys |
+| JSON web token | three base64url segments in JWT shape |
+| Connection string credentials | `scheme://user:password@host` URLs |
+
+Built-in rules can be disabled or reworded but not deleted. Users can add their own for anything else they would rather not have remembered — a home address, a client name, a medical detail.
+
+The Manage dialog includes a **tester**: paste something you would not want remembered and it reports which rule would block it (showing only a redacted fragment of the match, never the whole value). Nothing typed into the tester is stored.
 
 ### Settings
 
@@ -95,7 +173,10 @@ Per-agent override: `agents.config.memory` lets you disable recall for specific 
 
 ## Business rules
 
-- **Verbatim-only drawers** — drawer content is never paraphrased. AAAK + embeddings are the index; the source text stays exact for auditability.
+- **Verbatim-only drawers** — mining never paraphrases; AAAK + embeddings are the index and the source text stays exact for auditability. The one exception is a deliberate human edit, which is stamped with an `editedAt` timestamp so the change is visible.
+- **Text and vector must agree** — a drawer's embedding is derived from its content. Any write that changes content either writes a fresh embedding or writes none at all. A stale vector is never left behind, because it would make the drawer match wording it no longer contains while the UI showed something else.
+- **Exclusion runs before embedding** — the deny list is evaluated on the raw turn before the extraction call and before the embedding call, so excluded content never leaves the process.
+- **Never-recall is enforced in the query, not the ranking** — excluded drawers are filtered out of the candidate pool by the database predicate rather than scored to the bottom, so no scoring change can accidentally surface them.
 - **Per-user isolation** — every drawer/wing/entity is FK'd to a `userId` with cascade-on-delete. There's no shared memory pool.
 - **Soft staleness on relations** — overwriting a relation creates a new row and bumps `validTo` on the old one rather than mutating it; the timeline is preserved.
 - **Embedding-dimension lock** — the pgvector column is `vector(1536)`. Switching embedding models that change dimension requires a migration + reindex; the settings UI restricts choices to compatible models.
@@ -124,3 +205,7 @@ The benchmark uses an isolated test schema scoped per-run so it never pollutes t
 - **Embedding API failure** — drawer is still written but with a null embedding; a backfill job (future work, queued onto the `#17` jobs system) re-embeds nullable rows.
 - **Massive conversations (>50 turns)** — mining batches the entity-extraction call across windows of 8-10 turns to keep the LLM input bounded.
 - **Duplicate detection** — wings/rooms/closets dedupe by slug + alias matching; mining the same conversation twice is idempotent.
+- **Every turn in a conversation is excluded** — mining reports the exclusion count and the rules that fired (visible on the job in `/settings/jobs`), so "nothing was mined" is distinguishable from "a rule blocked it".
+- **A broken exclusion pattern** — a rule whose regex no longer compiles is logged and treated as never matching, rather than throwing and wedging the mining job. The rule editor validates patterns on save, so this only happens to rules written before a validation change.
+- **Editing a drawer while the embedding provider is down** — the text is saved and the vector is cleared. The drawer keeps working in keyword search and stays browsable; **Reorganize** re-embeds it later.
+- **Forgetting a conversation that spans several wings** — each wing that has rooms from that conversation loses those rooms; wings left with nothing are deleted, wings with other rooms survive.

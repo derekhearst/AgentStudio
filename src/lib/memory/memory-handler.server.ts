@@ -40,6 +40,10 @@ export function registerMemoryJobHandlers(): void {
 			wingCount: result.wingIds.length,
 			roomCount: result.roomIds.length,
 			closetCount: result.closetIds.length,
+			// Turns the exclusion deny list dropped before embedding — visible in
+			// /settings/jobs so a user can tell "nothing was mined" from "a rule fired".
+			excludedTurns: result.excludedTurns,
+			excludedByRule: result.excludedByRule,
 		}
 	})
 	registered = true

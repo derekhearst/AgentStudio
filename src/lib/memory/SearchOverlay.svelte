@@ -13,6 +13,9 @@
 		finalScore: number;
 		semanticScore: number;
 		keywordScore: number;
+		temporalScore: number;
+		pinnedBoost: number;
+		pinned: boolean;
 	};
 
 	let {
@@ -114,7 +117,12 @@
 						<div class="search-overlay__hit-foot">
 							<span class="search-overlay__hit-role role-{hit.role}">{hit.role}</span>
 							<span class="search-overlay__hit-time">{formatTime(hit.occurredAt)}</span>
-							<span class="search-overlay__hit-sub">sem {hit.semanticScore.toFixed(2)} · kw {hit.keywordScore.toFixed(2)}</span>
+							<span class="search-overlay__hit-sub" title="Why this matched: semantic / keyword / temporal components">
+								sem {hit.semanticScore.toFixed(2)} · kw {hit.keywordScore.toFixed(2)} · tmp {hit.temporalScore.toFixed(2)}
+							</span>
+							{#if hit.pinned}
+								<span class="search-overlay__hit-pin" title="Pinned — boosted by +{hit.pinnedBoost.toFixed(2)}">pinned</span>
+							{/if}
 						</div>
 					</button>
 				</li>
@@ -334,6 +342,13 @@
 		margin-left: auto;
 		color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
 		font-variant-numeric: tabular-nums;
+	}
+
+	.search-overlay__hit-pin {
+		padding: 0 5px;
+		border-radius: 3px;
+		border: 1px solid color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300));
+		color: var(--color-primary);
 	}
 
 	.op-50 { opacity: 0.5; padding: 0 4px; }

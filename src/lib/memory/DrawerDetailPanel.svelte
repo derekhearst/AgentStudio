@@ -1,19 +1,123 @@
 <script lang="ts">
-	import type { MemoryDrawerDetail, MemoryDrawerAaak } from '$lib/memory/memory.remote';
+	import {
+		editMemoryDrawerCommand,
+		setMemoryDrawerFlagsCommand,
+		type MemoryDrawerDetail,
+		type MemoryDrawerAaak,
+	} from '$lib/memory/memory.remote';
 
 	let {
 		drawer,
 		onBack,
 		onCopy,
 		onDelete,
+		onChanged,
 	}: {
 		drawer: MemoryDrawerDetail;
 		onBack?: () => void;
 		onCopy?: (content: string) => void;
 		onDelete?: (id: string) => void;
+		/** Called after an edit or flag change lands, so the parent can refresh counts. */
+		onChanged?: () => void;
 	} = $props();
 
 	const aaak = $derived(drawer.aaak as MemoryDrawerAaak | null);
+
+	// --- edit state -------------------------------------------------------------
+	let editing = $state(false);
+	let draft = $state('');
+	let saving = $state(false);
+	let saveError = $state<string | null>(null);
+	let embedWarning = $state<string | null>(null);
+
+	// --- flag state (optimistic, reconciled from the command response) ----------
+	let pinned = $state(false);
+	let neverRecall = $state(false);
+	let flagBusy = $state(false);
+
+	$effect(() => {
+		// Reset local state whenever a different drawer is shown.
+		const id = drawer.id;
+		void id;
+		editing = false;
+		saveError = null;
+		embedWarning = null;
+		pinned = drawer.pinned;
+		neverRecall = drawer.neverRecall;
+	});
+
+	function startEdit() {
+		draft = drawer.content;
+		saveError = null;
+		editing = true;
+	}
+
+	function cancelEdit() {
+		editing = false;
+		draft = '';
+		saveError = null;
+	}
+
+	async function saveEdit() {
+		if (saving) return;
+		const next = draft.trim();
+		if (next.length === 0) {
+			saveError = 'Content cannot be empty. Delete the drawer instead.';
+			return;
+		}
+		if (next === drawer.content) {
+			editing = false;
+			return;
+		}
+		saving = true;
+		saveError = null;
+		embedWarning = null;
+		try {
+			const result = await editMemoryDrawerCommand({ id: drawer.id, content: next });
+			if (!result.ok) {
+				saveError =
+					result.reason === 'too_long'
+						? 'That is too long for one drawer.'
+						: result.reason === 'empty'
+							? 'Content cannot be empty.'
+							: 'Drawer not found.';
+				return;
+			}
+			if (!result.reEmbedded) {
+				embedWarning =
+					'Saved, but re-embedding failed, so the vector was cleared rather than left stale. This drawer is out of semantic recall until the next Reorganize backfill.';
+			}
+			editing = false;
+			onChanged?.();
+		} catch (err) {
+			saveError = err instanceof Error ? err.message : 'Save failed.';
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function toggleFlag(flag: 'pinned' | 'neverRecall') {
+		if (flagBusy) return;
+		flagBusy = true;
+		const next = flag === 'pinned' ? !pinned : !neverRecall;
+		try {
+			const result = await setMemoryDrawerFlagsCommand({
+				id: drawer.id,
+				...(flag === 'pinned' ? { pinned: next } : { neverRecall: next }),
+			});
+			if (result.ok) {
+				pinned = result.pinned;
+				neverRecall = result.neverRecall;
+				onChanged?.();
+			}
+		} finally {
+			flagBusy = false;
+		}
+	}
+
+	function scorePct(value: number): number {
+		return Math.max(0, Math.min(100, Math.round(value * 100)));
+	}
 
 	const tagGroups = $derived.by(() => {
 		const tags = aaak?.tags ?? {};
@@ -65,17 +169,128 @@
 			<div class="drawer-detail__sec-head">
 				<span class="drawer-detail__sec-label">Content</span>
 				<div class="drawer-detail__sec-actions">
-					<button class="console-pill" onclick={copyContent}>
-						{copied ? 'Copied!' : 'Copy'}
-					</button>
-					{#if onDelete}
-						<button class="console-pill drawer-detail__delete" onclick={() => onDelete?.(drawer.id)}>
-							Delete
+					{#if editing}
+						<button class="console-pill" onclick={saveEdit} disabled={saving}>
+							{saving ? 'Saving…' : 'Save'}
 						</button>
+						<button class="console-pill" onclick={cancelEdit} disabled={saving}>Cancel</button>
+					{:else}
+						<button class="console-pill" onclick={startEdit} title="Rewrite this memory and re-embed it">
+							Edit
+						</button>
+						<button class="console-pill" onclick={copyContent}>
+							{copied ? 'Copied!' : 'Copy'}
+						</button>
+						{#if onDelete}
+							<button class="console-pill drawer-detail__delete" onclick={() => onDelete?.(drawer.id)}>
+								Delete
+							</button>
+						{/if}
 					{/if}
 				</div>
 			</div>
-			<pre class="drawer-detail__content">{drawer.content}</pre>
+
+			{#if editing}
+				<textarea
+					class="drawer-detail__editor"
+					bind:value={draft}
+					rows="10"
+					disabled={saving}
+					aria-label="Drawer content"
+				></textarea>
+				<p class="drawer-detail__hint">
+					Saving re-embeds this drawer so the vector matches the new wording. If embedding is unavailable the
+					vector is cleared instead of left stale.
+				</p>
+			{:else}
+				<pre class="drawer-detail__content">{drawer.content}</pre>
+			{/if}
+
+			{#if saveError}
+				<p class="drawer-detail__error">{saveError}</p>
+			{/if}
+			{#if embedWarning}
+				<p class="drawer-detail__warn">{embedWarning}</p>
+			{/if}
+		</section>
+
+		<section class="drawer-detail__section">
+			<div class="drawer-detail__sec-head">
+				<span class="drawer-detail__sec-label">Recall control</span>
+			</div>
+			<div class="drawer-detail__flags">
+				<button
+					class="drawer-detail__flag"
+					class:is-on={pinned}
+					disabled={flagBusy}
+					onclick={() => toggleFlag('pinned')}
+					title="Pinned drawers are always considered during recall and get a score boost"
+				>
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><path d="M12 17v5M5 9l7-7 7 7-2 2v4l2 3H3l2-3v-4z"/></svg>
+					{pinned ? 'Pinned' : 'Pin'}
+				</button>
+				<button
+					class="drawer-detail__flag is-danger"
+					class:is-on={neverRecall}
+					disabled={flagBusy}
+					onclick={() => toggleFlag('neverRecall')}
+					title="Never-recall drawers stay browsable here but are excluded from every recall"
+				>
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-3 w-3"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
+					{neverRecall ? 'Never recalled' : 'Never recall'}
+				</button>
+			</div>
+			{#if neverRecall}
+				<p class="drawer-detail__hint">Excluded from recall. It stays in the palace so you can review or delete it.</p>
+			{/if}
+		</section>
+
+		<section class="drawer-detail__section">
+			<div class="drawer-detail__sec-head">
+				<span class="drawer-detail__sec-label">Why was this recalled?</span>
+				<span class="drawer-detail__sec-note">{drawer.recallCount} recall{drawer.recallCount === 1 ? '' : 's'}</span>
+			</div>
+			{#if drawer.recallEvents.length === 0}
+				<p class="drawer-detail__hint">
+					This drawer hasn't been recalled yet. Once it appears in a memory context block or a palace search, the
+					semantic / keyword / temporal scores that put it there show up here.
+				</p>
+			{:else}
+				<ul class="drawer-detail__recalls">
+					{#each drawer.recallEvents as event (event.id)}
+						<li class="drawer-detail__recall">
+							<div class="drawer-detail__recall-head">
+								<span class="drawer-detail__recall-source src-{event.source}">{event.source}</span>
+								<span class="drawer-detail__recall-query" title={event.query}>“{event.query}”</span>
+								<span class="drawer-detail__recall-rank">#{event.rank}</span>
+							</div>
+							<div class="drawer-detail__recall-bars">
+								{#each [{ label: 'sem', value: event.semanticScore, cls: 'is-sem' }, { label: 'kw', value: event.keywordScore, cls: 'is-kw' }, { label: 'tmp', value: event.temporalScore, cls: 'is-tmp' }] as part (part.label)}
+									<div class="drawer-detail__bar-row">
+										<span class="drawer-detail__bar-label">{part.label}</span>
+										<span class="drawer-detail__bar-track">
+											<span class="drawer-detail__bar-fill {part.cls}" style:width="{scorePct(part.value)}%"></span>
+										</span>
+										<span class="drawer-detail__bar-value">{part.value.toFixed(3)}</span>
+									</div>
+								{/each}
+							</div>
+							<div class="drawer-detail__recall-foot">
+								<span>final {event.finalScore.toFixed(3)}</span>
+								{#if event.pinnedBoost > 0}
+									<span class="drawer-detail__recall-pin">+{event.pinnedBoost.toFixed(2)} pinned</span>
+								{/if}
+								{#if event.weights}
+									<span class="op-50">
+										weights {event.weights.semantic}/{event.weights.keyword}/{event.weights.temporal}
+									</span>
+								{/if}
+								<span class="drawer-detail__recall-time">{formatFull(event.createdAt)}</span>
+							</div>
+						</li>
+					{/each}
+				</ul>
+			{/if}
 		</section>
 
 		<section class="drawer-detail__section">
@@ -86,6 +301,13 @@
 				<dt>Tokens</dt><dd>{drawer.tokenCount}</dd>
 				<dt>Occurred</dt><dd>{formatFull(drawer.occurredAt)}</dd>
 				<dt>Created</dt><dd>{formatFull(drawer.createdAt)}</dd>
+				{#if drawer.editedAt}
+					<dt>Edited</dt><dd>{formatFull(drawer.editedAt)}</dd>
+				{/if}
+				<dt>Embedding</dt>
+				<dd class:is-warn={!drawer.hasEmbedding}>
+					{drawer.hasEmbedding ? 'present' : 'missing — not in semantic recall'}
+				</dd>
 				{#if drawer.conversationTitle}
 					<dt>Conversation</dt>
 					<dd>
@@ -252,6 +474,208 @@
 		word-break: break-word;
 		max-height: 360px;
 		overflow-y: auto;
+	}
+
+	.drawer-detail__sec-note {
+		font-size: 10px;
+		color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+	}
+
+	.drawer-detail__editor {
+		width: 100%;
+		padding: 10px 12px;
+		background: var(--color-base-200);
+		border: 1px solid color-mix(in oklab, var(--color-primary) 40%, var(--color-base-300));
+		border-radius: 6px;
+		font-family: Consolas, 'Cascadia Code', monospace;
+		font-size: 12px;
+		line-height: 1.55;
+		color: var(--color-base-content);
+		resize: vertical;
+		min-height: 120px;
+	}
+
+	.drawer-detail__hint {
+		margin: 0;
+		font-size: 10.5px;
+		line-height: 1.45;
+		color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	}
+
+	.drawer-detail__error {
+		margin: 0;
+		font-size: 11px;
+		color: var(--color-error);
+	}
+
+	.drawer-detail__warn {
+		margin: 0;
+		font-size: 11px;
+		line-height: 1.45;
+		color: var(--color-warning);
+	}
+
+	.drawer-detail__flags {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+
+	.drawer-detail__flag {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 3px 9px;
+		border-radius: 999px;
+		border: 1px solid var(--color-base-300);
+		background: var(--color-base-100);
+		font-family: inherit;
+		font-size: 11px;
+		color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+		cursor: pointer;
+	}
+
+	.drawer-detail__flag:hover:not(:disabled) {
+		border-color: color-mix(in oklab, var(--color-primary) 40%, var(--color-base-300));
+	}
+
+	.drawer-detail__flag:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.drawer-detail__flag.is-on {
+		border-color: var(--color-primary);
+		background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+		color: var(--color-primary);
+	}
+
+	.drawer-detail__flag.is-danger.is-on {
+		border-color: var(--color-error);
+		background: color-mix(in oklab, var(--color-error) 14%, transparent);
+		color: var(--color-error);
+	}
+
+	.drawer-detail__recalls {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.drawer-detail__recall {
+		padding: 8px 10px;
+		border: 1px solid var(--color-base-300);
+		border-radius: 6px;
+		background: color-mix(in oklab, var(--color-base-content) 2%, var(--color-base-100));
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.drawer-detail__recall-head {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
+
+	.drawer-detail__recall-source {
+		flex: 0 0 auto;
+		font-size: 9px;
+		text-transform: uppercase;
+		letter-spacing: 0.1em;
+		font-weight: 700;
+		padding: 1px 5px;
+		border-radius: 3px;
+		background: var(--color-base-200);
+		color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+	}
+
+	.drawer-detail__recall-source.src-chat { color: var(--color-primary); }
+	.drawer-detail__recall-source.src-search { color: var(--color-info); }
+	.drawer-detail__recall-source.src-agent { color: var(--color-secondary); }
+
+	.drawer-detail__recall-query {
+		flex: 1;
+		min-width: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		font-size: 11px;
+		color: var(--color-base-content);
+	}
+
+	.drawer-detail__recall-rank {
+		flex: 0 0 auto;
+		font-size: 10px;
+		color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+	}
+
+	.drawer-detail__recall-bars {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.drawer-detail__bar-row {
+		display: grid;
+		grid-template-columns: 26px 1fr 44px;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.drawer-detail__bar-label {
+		font-size: 9.5px;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+	}
+
+	.drawer-detail__bar-track {
+		display: block;
+		height: 5px;
+		border-radius: 999px;
+		background: var(--color-base-200);
+		overflow: hidden;
+	}
+
+	.drawer-detail__bar-fill {
+		display: block;
+		height: 100%;
+		border-radius: 999px;
+	}
+
+	.drawer-detail__bar-fill.is-sem { background: var(--color-primary); }
+	.drawer-detail__bar-fill.is-kw { background: var(--color-secondary); }
+	.drawer-detail__bar-fill.is-tmp { background: var(--color-accent); }
+
+	.drawer-detail__bar-value {
+		font-size: 10px;
+		text-align: right;
+		color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+	}
+
+	.drawer-detail__recall-foot {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		font-size: 10px;
+		color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	}
+
+	.drawer-detail__recall-pin {
+		color: var(--color-primary);
+	}
+
+	.drawer-detail__recall-time {
+		margin-left: auto;
+	}
+
+	.drawer-detail__meta dd.is-warn {
+		color: var(--color-warning);
 	}
 
 	.drawer-detail__meta {

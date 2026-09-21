@@ -28,7 +28,7 @@ import {
 	memoryRooms,
 	memoryWings,
 } from '$lib/memory/memory.schema'
-import { embed, toPgVector } from '$lib/memory/embeddings.server'
+import { embed } from '$lib/memory/embeddings.server'
 import { logger } from '$lib/observability/logger'
 
 export type WingMergeProposal = {
@@ -369,7 +369,9 @@ async function applyEmbeddingBackfill(userId: string): Promise<{ filled: number;
 			if (!vec) continue
 			await db
 				.update(memoryDrawers)
-				.set({ embedding: toPgVector(vec) as unknown as number[] })
+				// Drizzle's `vector` column serializes a plain number[]; a pre-formatted
+				// pgvector string gets double-encoded and Postgres rejects the UPDATE.
+				.set({ embedding: vec })
 				.where(and(eq(memoryDrawers.id, drawers[i].id), eq(memoryDrawers.userId, userId)))
 		}
 		return { filled: drawers.length, failures }
