@@ -26,6 +26,7 @@ import * as hooksSchema from '$lib/hooks/hooks.schema'
 import * as evaluationsSchema from '$lib/evaluations/evaluations.schema'
 import * as projectsSchema from '$lib/projects/projects.schema'
 import * as jobsSchema from '$lib/jobs/jobs.schema'
+import * as monitorsSchema from '$lib/monitors/monitors.schema'
 import * as researchSchema from '$lib/research/research.schema'
 import * as imagesSchema from '$lib/images/images.schema'
 import * as observabilitySchema from '$lib/observability/observability.schema'
@@ -50,6 +51,7 @@ export const schema = {
 	...evaluationsSchema,
 	...projectsSchema,
 	...jobsSchema,
+	...monitorsSchema,
 	...researchSchema,
 	...imagesSchema,
 	...observabilitySchema,

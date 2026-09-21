@@ -53,6 +53,10 @@ export const reviewItemTypeEnum = pgEnum('review_item_type', [
 	// summary to the review inbox via `outputTarget = review_inbox`. Payload carries the
 	// automation id, mode, and a truncated summary.
 	'automation_summary',
+	// #33 — a long-horizon monitor's condition changed and it fired, or the monitor retired
+	// (expired / exhausted / failed) without ever firing. Payload carries the monitor id,
+	// what it was watching, and the observation that ended it.
+	'monitor_fired',
 ])
 
 export const reviewItemStatusEnum = pgEnum('review_item_status', [

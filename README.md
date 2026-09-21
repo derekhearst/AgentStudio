@@ -183,5 +183,6 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/cost` Cost dashboard
 - `/agents` Agent management
 - `/automations` Scheduled automation workflows
+- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/spec.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration

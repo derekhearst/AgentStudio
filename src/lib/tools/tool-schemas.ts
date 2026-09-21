@@ -1,4 +1,16 @@
 import { z } from 'zod'
+// Relative rather than `$lib/...` on purpose: this module is imported directly by specs
+// running in the plain Playwright/Node loader, where the SvelteKit alias is not guaranteed
+// to resolve. `monitors/condition` is dependency-light (zod only) for the same reason.
+import {
+	monitorActionConfigSchema,
+	monitorActionSchema,
+	monitorConditionSchema,
+	MONITOR_HARD_MAX_CHECKS,
+	MONITOR_MAX_DEADLINE_DAYS,
+	MONITOR_MAX_INTERVAL_SECONDS,
+	MONITOR_MIN_INTERVAL_SECONDS,
+} from '../monitors/condition'
 
 /**
  * Declarative tool surface — Zod input schemas + human-readable descriptions for every
@@ -173,6 +185,34 @@ export const toolSchemas = {
 	delete_automation: z.object({
 		automationId: z.string().uuid(),
 	}),
+	// #33 — long-horizon monitors. An automation runs on a clock; a monitor watches for a
+	// condition and acts when it changes. Every one of them expires.
+	create_monitor: z.object({
+		name: z.string().trim().min(1).max(200),
+		condition: monitorConditionSchema,
+		action: monitorActionSchema,
+		actionConfig: monitorActionConfigSchema.optional(),
+		intervalSeconds: z
+			.number()
+			.int()
+			.min(MONITOR_MIN_INTERVAL_SECONDS)
+			.max(MONITOR_MAX_INTERVAL_SECONDS)
+			.optional(),
+		deadlineDays: z.number().min(0.01).max(MONITOR_MAX_DEADLINE_DAYS).optional(),
+		maxChecks: z.number().int().min(1).max(MONITOR_HARD_MAX_CHECKS).optional(),
+		oneShot: z.boolean().optional(),
+	}),
+	list_monitors: z.object({
+		openOnly: z.boolean().optional(),
+	}),
+	cancel_monitor: z.object({
+		monitorId: z.string().uuid(),
+	}),
+	extend_monitor: z.object({
+		monitorId: z.string().uuid(),
+		additionalDays: z.number().min(0).max(MONITOR_MAX_DEADLINE_DAYS).optional(),
+		additionalChecks: z.number().int().min(0).max(MONITOR_HARD_MAX_CHECKS).optional(),
+	}),
 	ask_user: z.object({
 		questions: z
 			.array(
@@ -300,6 +340,13 @@ export const toolDescriptions: Record<ToolName, string> = {
 	list_automations: 'List automations for the current user.',
 	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',
 	delete_automation: 'Delete an automation by id.',
+	create_monitor:
+		'Watch for something to happen and act when it does — the "wake me when X changes" counterpart to create_automation\'s "run this every N". Two condition kinds. `{kind:"tool_result", tool, args, extract, compare}` runs a read-only tool on each check and compares the result: compare="changed" fires when the value differs from the last observation (the FIRST check only records a baseline, it never fires), and equals/contains/matches/not_empty test the value directly. Use `extract` (a dotted path like "text" or "0.status") to narrow the result — comparing a whole web_fetch result is useless because it carries a timestamp that changes every check. `{kind:"model_question", question, context}` fetches context with read-only tools and asks a cheap model a yes/no question about it; use it only when no deterministic comparison will do, because it costs tokens on every check and is subject to the budget gate. Observable tools are read-only: web_fetch, web_search, search_files, file_read, file_info, list_directory, git_status, git_log, git_diff, list_pull_requests, get_pull_request, list_projects. `action` is what happens on the firing edge: start_conversation (needs actionConfig.prompt — opens a conversation seeded with that prompt plus what was observed and runs the agent), review_item, push, or run_automation (needs actionConfig.automationId). Firing is debounced to one action per false→true transition, and `oneShot` (default true) retires the monitor after the first. EVERY monitor expires: `deadlineDays` is capped at 30 and defaults to the cap, `maxChecks` caps total spend (default 200), and whichever runs out first ends it. Say what you created and when it will expire.',
+	list_monitors:
+		'List the current user\'s monitors with what each one is watching, its status (active/paused/fired/expired/exhausted/failed/canceled), the last observed value, when it was last checked and when it next will be, how much of its check budget is spent, and its deadline. Pass openOnly=true for just the active and paused ones. Read-only.',
+	cancel_monitor: 'Cancel a monitor by id. Terminal — it stops being checked immediately and cannot be resumed; create a new one instead.',
+	extend_monitor:
+		'Push a monitor\'s deadline out and/or top up its check budget. Extension is deliberately explicit — monitors expire on purpose. `additionalDays` is measured from NOW and re-capped at 30 days, so repeated extensions cannot compound into an immortal monitor; `additionalChecks` is added to the existing budget and re-capped. A monitor that expired or exhausted its budget becomes active again if the extension leaves it with both time and budget. A canceled monitor cannot be extended.',
 	ask_user:
 		'Ask the user one or more focused clarifying questions with prefilled answer options. Each question should have ~3 prefilled options — prefer splitting a broad inquiry into multiple focused questions rather than providing many options in a single question. Use when you need explicit user input before proceeding.',
 	list_skills:
@@ -364,6 +411,36 @@ export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
   tools.web_search({ query: 'ivfflat performance' }),
 ])
 return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.title } }`,
+		},
+	],
+	create_monitor: [
+		// Deterministic path — narrow `extract` so the comparison is on the thing that matters.
+		{
+			name: 'Release notes page changes',
+			condition: {
+				kind: 'tool_result',
+				tool: 'web_fetch',
+				args: { url: 'https://example.com/releases' },
+				extract: 'text',
+				compare: 'changed',
+			},
+			action: 'push',
+			intervalSeconds: 3600,
+			deadlineDays: 14,
+		},
+		// Fuzzy path — a yes/no question over fetched context, billed on every check.
+		{
+			name: 'PR 412 checks go green',
+			condition: {
+				kind: 'model_question',
+				question: 'Have all CI checks on pull request 412 finished successfully?',
+				context: [{ tool: 'list_pull_requests', args: { owner: 'acme', repo: 'widgets' } }],
+			},
+			action: 'start_conversation',
+			actionConfig: { prompt: 'CI is green on PR 412. Review the diff and summarize what changed.' },
+			intervalSeconds: 600,
+			deadlineDays: 3,
+			maxChecks: 100,
 		},
 	],
 	request_plan_approval: [

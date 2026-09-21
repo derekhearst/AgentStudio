@@ -69,6 +69,12 @@
 				</a>
 			</li>
 			<li>
+				<a href="/monitors" class:menu-active={isActive('/monitors')} onclick={onNavigate}>
+					<i class="mdi mdi-radar text-base shrink-0 opacity-60"></i>
+					Monitors
+				</a>
+			</li>
+			<li>
 				<a href="/projects" class:menu-active={isActive('/projects')} onclick={onNavigate}>
 					<i class="mdi mdi-folder-outline text-base shrink-0 opacity-60"></i>
 					Projects

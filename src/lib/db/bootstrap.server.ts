@@ -249,6 +249,13 @@ async function registerJobHandlers(): Promise<void> {
 	}
 
 	try {
+		const { registerMonitorJobHandlers } = await import('$lib/monitors/monitors-handler.server')
+		registerMonitorJobHandlers()
+	} catch (err) {
+		console.warn('[db] Monitor handler registration failed (non-fatal):', err)
+	}
+
+	try {
 		const { registerMetricsJobHandlers } = await import(
 			'$lib/observability/metrics-handler.server'
 		)
