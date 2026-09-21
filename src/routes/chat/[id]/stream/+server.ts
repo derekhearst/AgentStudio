@@ -24,6 +24,8 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { emitActivity } from '$lib/activity/activity.server'
 import { logLlmUsage } from '$lib/costs/usage'
+import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { appendRunEvent } from '$lib/runs/events.server'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { getContextWindowSize } from '$lib/tools/tools'
 import { encodeSseFrame } from '$lib/runtime/sse-codec'
@@ -191,9 +193,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const scopedTools = workspaceConfig?.scopedAgentTools ?? policyTools
 
 	// The tool server is constructed before the stream opens, but ask_user needs to
-	// push a frame. Capture the engine's emitter when the run starts so both share
-	// one sequence counter.
-	let emitFrame: ((event: string, payload: unknown) => void) | null = null
+	// push a frame, so the emitter is assigned once the stream starts.
+	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
 	let askUserSeq = 0
 
 	async function fulfilAskUser(questions: unknown[]): Promise<string> {
@@ -212,7 +213,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			{ state: 'waiting_user_input', label: 'Waiting for your answer' },
 		)
 
-		emitFrame?.('ask_user', { id: token, name: 'ask_user', token, questions: normalized })
+		await emitFrame?.('ask_user', { id: token, name: 'ask_user', token, questions: normalized })
 
 		const answers = await awaitQuestionAnswers(run.id, token)
 
@@ -254,14 +255,39 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
-			let seq = 0
-			const emit = (event: string, payload: unknown) => {
-				seq += 1
+			/*
+			 * Sequence ids come from `chat_runs.nextEventSeq` via appendRunEvent —
+			 * the same counter `stream/resume` replays against. `delta` and
+			 * `reasoning` are far too frequent to persist and are deliberately sent
+			 * with no `id:` at all, which the SSE consumer already handles, so they
+			 * never move the resume cursor.
+			 */
+			const NON_PERSISTED = new Set(['delta', 'reasoning'])
+
+			const emit = async (event: string, payload: unknown) => {
+				if (NON_PERSISTED.has(event)) {
+					controller.enqueue(encodeSseFrame(event, payload))
+					return
+				}
+				let seq: number | undefined
+				try {
+					seq = await appendRunEvent(run.id, event, payload)
+				} catch (error) {
+					// A failed event write must not kill the stream; the frame still
+					// reaches a connected client, it just won't be replayable.
+					logger.warn('[chat/stream] failed to persist run event', {
+						runId: run.id,
+						event,
+						error: error instanceof Error ? error.message : String(error),
+					})
+				}
 				controller.enqueue(encodeSseFrame(event, payload, seq))
 			}
 
+			emitFrame = emit
+
 			try {
-				emit('context_stats', {
+				await emit('context_stats', {
 					runId: run.id,
 					tokenEstimate: assembled.estimatedTokens,
 					contextWindow: getContextWindowSize(routedModel),
@@ -274,13 +300,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				})
 
 				const summary = await runEngineStream(
-					controller,
 					{
 						prompt: body.content ?? '',
 						options: engineOptions,
-						onEmitterReady: (emit) => {
-							emitFrame = emit
-						},
+						emit,
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
 							// next turn to resume rather than silently start a new session.
@@ -312,12 +335,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
-					},
-					seq,
-				)
+				})
 
-				// Continue from where the engine stopped; reusing ids breaks stream resume.
-				seq = summary.lastSeq
+				await persistRunBlocks(run.id, summary.blocks)
 
 				const totalMs = Date.now() - startedAt
 				const claudeRun = isClaudeModel(routedModel)
@@ -362,6 +382,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
 						numTurns: summary.numTurns,
+						blocks: summary.blocks.length > 0 ? summary.blocks : undefined,
 					},
 					toolCalls: [],
 					runId: run.id,
@@ -407,7 +428,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					})
 				}
 
-				emit('metrics', {
+				await emit('metrics', {
 					model: routedModel,
 					tokensIn: summary.usage.inputTokens,
 					tokensOut: summary.usage.outputTokens,
@@ -421,7 +442,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					modelSelection,
 					subscription: claudeRun,
 				})
-				emit('done', { messageId: assistantMessage.id, ...(summary.error ? { error: summary.error } : {}) })
+				await emit('done', { messageId: assistantMessage.id, ...(summary.error ? { error: summary.error } : {}) })
 				controller.close()
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
@@ -430,7 +451,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.update(chatRuns)
 					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
 					.where(eq(chatRuns.id, run.id))
-				emit('done', { error: errorMessage })
+				await emit('done', { error: errorMessage })
 				controller.close()
 			}
 		},

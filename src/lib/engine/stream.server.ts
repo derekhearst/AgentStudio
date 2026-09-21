@@ -17,8 +17,8 @@
  */
 
 import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { encodeSseFrame } from '$lib/runtime/sse-codec'
 import { bareToolName } from './tools.server'
+import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
 export type ApprovalDecision = { allow: true } | { allow: false; reason: string }
@@ -37,13 +37,12 @@ export type EngineRunInput = {
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
 	/**
-	 * Hands the frame emitter to the caller before the run starts.
-	 *
-	 * Host-side tool callbacks (ask_user) need to push frames too, and they must
-	 * share this counter — two counters means duplicate `id:` values, which the
-	 * resume protocol silently mishandles.
+	 * Writes one frame. Owned by the caller because sequence ids come from
+	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
+	 * endpoint replays against — and `delta`/`reasoning` are deliberately not
+	 * persisted, so they carry no id at all.
 	 */
-	onEmitterReady?: (emit: (event: string, payload: unknown) => void) => void
+	emit: (event: string, payload: unknown) => Promise<void>
 }
 
 export type EngineUsage = {
@@ -69,6 +68,12 @@ export type EngineRunSummary = {
 	durationMs: number
 	numTurns: number
 	error: string | null
+	/**
+	 * The run's content as ordered blocks, for `chat_runs.streamBlocks` and the
+	 * assistant message metadata. Assembled here because this is the only place
+	 * that sees text, thinking and tool activity interleaved in order.
+	 */
+	blocks: StreamBlock[]
 	/** Time to first token, straight from the SDK result. */
 	ttftMs: number | null
 	/**
@@ -76,39 +81,36 @@ export type EngineRunSummary = {
 	 * frames. The SDK calls these estimates, so treat them as such.
 	 */
 	reasoningTokens: number
-	/**
-	 * Sequence id of the last frame emitted here. The caller MUST continue its own
-	 * numbering from this — the resume endpoint replays "events with id strictly
-	 * greater than `since`", so a reused id silently drops or double-replays a frame.
-	 */
-	lastSeq: number
 }
 
-type Emit = (event: string, payload: unknown) => void
-
 /**
- * Drive one run and push SSE frames into `controller`.
+ * Drive one run, emitting frames through the caller's `emit`.
  *
  * Does NOT emit `done` — the caller owns that, because the client expects
  * `done` to carry the persisted `messageId`, which only exists after the
  * summary returned here has been written to the database.
  */
-export async function runEngineStream(
-	controller: ReadableStreamDefaultController<Uint8Array>,
-	input: EngineRunInput,
-	startSeq = 0,
-): Promise<EngineRunSummary> {
-	let seq = startSeq
-	const emit: Emit = (event, payload) => {
-		seq += 1
-		controller.enqueue(encodeSseFrame(event, payload, seq))
-	}
+export async function runEngineStream(input: EngineRunInput): Promise<EngineRunSummary> {
+	const emit = input.emit
 
 	let sessionId: string | null = null
 	let finalText = ''
 	let reasoningTokens = 0
+
+	/*
+	 * Blocks are accumulated alongside the frames. Consecutive deltas of the same
+	 * kind coalesce into one block so the persisted shape matches what the UI
+	 * assembles client-side rather than one block per token.
+	 */
+	const blocks: StreamBlock[] = []
+	const appendContent = (kind: 'text' | 'thinking', content: string) => {
+		const last = blocks[blocks.length - 1]
+		if (last && last.kind === kind) last.content += content
+		else blocks.push(kind === 'text' ? { kind, content } : { kind, content })
+	}
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
+	const toolInputs = new Map<string, unknown>()
 
 	/*
 	 * canUseTool is called with (name, input) but NOT the tool_use id, while the
@@ -124,8 +126,6 @@ export async function runEngineStream(
 		return queue && queue.length > 0 ? (queue.shift() ?? null) : null
 	}
 
-	input.onEmitterReady?.(emit)
-
 	const approvalsEnabled = Boolean(input.requestApproval)
 
 	const options: Options = {
@@ -134,7 +134,7 @@ export async function runEngineStream(
 			? {
 					canUseTool: async (toolName, toolInput, { signal }): Promise<PermissionResult> => {
 						const name = bareToolName(toolName)
-						const id = takeToolUseId(name, toolInput) ?? `pending-${name}-${seq}`
+						const id = takeToolUseId(name, toolInput) ?? `pending-${name}-${Date.now()}`
 
 						const decision = await Promise.race([
 							input.requestApproval!({ id, name, input: toolInput }),
@@ -146,11 +146,11 @@ export async function runEngineStream(
 						])
 
 						if (!decision.allow) {
-							emit('tool_denied', { id })
+							await emit('tool_denied', { id })
 							return { behavior: 'deny', message: decision.reason }
 						}
 						// Moves the UI's pending block to "executing" using the same id.
-						emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+						await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
 						return { behavior: 'allow' }
 					},
 				}
@@ -177,10 +177,12 @@ export async function runEngineStream(
 				const delta = ev.delta as Record<string, any>
 				if (delta?.type === 'text_delta' && delta.text) {
 					finalText += delta.text
-					emit('delta', { content: delta.text })
+					appendContent('text', delta.text)
+					await emit('delta', { content: delta.text })
 				}
 				if (delta?.type === 'thinking_delta' && delta.thinking) {
-					emit('reasoning', { content: delta.thinking })
+					appendContent('thinking', delta.thinking)
+					await emit('reasoning', { content: delta.thinking })
 				}
 			}
 			continue
@@ -192,6 +194,7 @@ export async function runEngineStream(
 				const name = bareToolName(String(block.name))
 				const id = String(block.id)
 				toolNames.set(id, name)
+				toolInputs.set(id, block.input ?? null)
 
 				if (name === 'ask_user') {
 					// The host's onAskUser owns this one: it mints the answer token,
@@ -206,9 +209,9 @@ export async function runEngineStream(
 					// The tool_call frame is emitted from canUseTool once approved.
 					const key = callKey(name, block.input)
 					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
-					emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
 				} else {
-					emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
 				}
 			}
 			continue
@@ -224,9 +227,18 @@ export async function runEngineStream(
 					: typeof raw === 'string'
 						? raw
 						: JSON.stringify(raw ?? null)
-				emit('tool_result', {
+				const toolName = toolNames.get(id) ?? 'unknown'
+				blocks.push({
+					kind: 'tool',
+					name: toolName,
+					arguments: toolInputs.get(id) ?? null,
+					result: text,
+					success: block.is_error !== true,
+					executionMs: 0,
+				})
+				await emit('tool_result', {
 					id,
-					name: toolNames.get(id) ?? 'unknown',
+					name: toolName,
 					success: block.is_error !== true,
 					executionMs: null,
 					result: text,
@@ -237,6 +249,13 @@ export async function runEngineStream(
 
 		if (msg.type === 'result') {
 			const u = (msg.usage ?? {}) as Record<string, number>
+			for (let i = blocks.length - 1; i >= 0; i--) {
+				const b = blocks[i]
+				if (b.kind === 'thinking') {
+					b.reasoningTokens = reasoningTokens
+					break
+				}
+			}
 			return {
 				text: finalText,
 				sessionId,
@@ -250,9 +269,9 @@ export async function runEngineStream(
 				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
 				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
 				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+				blocks,
 				ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
 				reasoningTokens,
-				lastSeq: seq,
 			}
 		}
 	}
@@ -266,8 +285,8 @@ export async function runEngineStream(
 		durationMs: 0,
 		numTurns: 0,
 		error: null,
+		blocks,
 		ttftMs: null,
 		reasoningTokens,
-		lastSeq: seq,
 	}
 }
