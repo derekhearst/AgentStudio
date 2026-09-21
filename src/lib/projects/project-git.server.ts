@@ -13,7 +13,7 @@ import {
 } from '$lib/source-control/git-local.server'
 import { pushBranchToGithub, type PushBranchResult } from '$lib/source-control/git-push.server'
 import { getProjectPath, fetchProjectRemote } from './project-fs.server'
-import { getActiveAzureConnection, getActiveGithubConnection } from '$lib/source-control/source-control.server'
+import { getActiveGithubConnection } from '$lib/source-control/source-control.server'
 
 /**
  * Project-aware wrappers around the existing git primitives. The agent + UI layer should
@@ -165,15 +165,6 @@ export async function pullProject(
 		if (!conn) throw new Error('GitHub connection unavailable. Reconnect at /projects.')
 		token = conn.accessToken
 		credentialUsername = 'x-access-token'
-	} else if (repository.provider === 'azure_devops') {
-		const azure = (repository.metadata as { azure?: { org?: string } }).azure
-		if (azure?.org) {
-			const conn = await getActiveAzureConnection(userId, azure.org)
-			if (conn) {
-				token = conn.accessToken
-				credentialUsername = 'oauth2'
-			}
-		}
 	}
 
 	await fetchProjectRemote({
@@ -191,9 +182,8 @@ export async function pullProject(
 }
 
 /**
- * Push a branch to the project's remote. Currently only GitHub is wired up (mirrors
- * existing source-control push behavior). Azure DevOps + generic URLs throw with a
- * clear message.
+ * Push a branch to the project's remote. Only GitHub is wired up (mirrors existing
+ * source-control push behavior); generic URLs throw with a clear message.
  */
 export async function pushProjectBranch(
 	userId: string,

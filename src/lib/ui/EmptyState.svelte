@@ -9,7 +9,7 @@
 	 * Replaces the recurring inline pattern across the codebase:
 	 *
 	 *   <p class="py-6 text-center text-sm italic text-base-content/45">
-	 *       No artifacts yet. Create one above to start version-tracking content.
+	 *       Nothing here yet. Create one above to get started.
 	 *   </p>
 	 *
 	 * Density default ('default') matches the most common chat / list footer; pass

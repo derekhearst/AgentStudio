@@ -31,7 +31,6 @@ export type OpenReviewItemInput = {
 	sessionId?: string | null
 	jobId?: string | null
 	projectId?: string | null
-	artifactId?: string | null
 	assignedTo?: string | null
 	// When set, the call is idempotent: looks for an open row matching the same `type` +
 	// dedupeKey and returns it instead of creating a duplicate. Use for sources that fire
@@ -72,7 +71,6 @@ export async function openReviewItem(input: OpenReviewItemInput): Promise<Review
 				sessionId: input.sessionId ?? null,
 				jobId: input.jobId ?? null,
 				projectId: input.projectId ?? null,
-				artifactId: input.artifactId ?? null,
 				assignedTo: input.assignedTo ?? null,
 			})
 			.returning()

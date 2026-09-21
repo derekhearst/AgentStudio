@@ -44,13 +44,10 @@ export {
 export {
 	getSourceControlOverviewQuery,
 	disconnectGithubCommand,
-	disconnectAzureCommand,
 	importRepositoryCommand,
 	pullRepositoryCommand,
 	detachRepositoryCommand,
 	getRepositoryDetailQuery,
 	listGithubImportCandidatesQuery,
-	listAzureImportCandidatesQuery,
 } from './source-control.remote'
 export { isGithubOAuthConfigured } from './github-oauth.server'
-export { isAzureDevOpsOAuthConfigured } from './azure-devops-oauth.server'

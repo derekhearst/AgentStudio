@@ -15,7 +15,7 @@
 	 *   <ConfirmDialog
 	 *       open={showDelete}
 	 *       title="Delete project?"
-	 *       message="All artifacts and versions will be lost."
+	 *       message="This cannot be undone."
 	 *       confirmLabel="Delete"
 	 *       variant="danger"
 	 *       onConfirm={async () => { await runDelete(); showDelete = false }}

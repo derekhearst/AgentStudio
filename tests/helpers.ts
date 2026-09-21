@@ -624,13 +624,7 @@ export async function cleanupExtendedPrefix(prefix: string): Promise<void> {
 		await sql`delete from tasks where title like ${`${prefix}%`} or spec like ${`${prefix}%`}`
 	}
 
-	// Projects + artifacts + versions
-	if (await tableExists('artifact_versions')) {
-		await sql`delete from artifact_versions where artifact_id in (select id from artifacts where name like ${`${prefix}%`})`
-	}
-	if (await tableExists('artifacts')) {
-		await sql`delete from artifacts where name like ${`${prefix}%`}`
-	}
+	// Projects
 	if (await tableExists('projects')) {
 		await sql`delete from projects where name like ${`${prefix}%`}`
 	}

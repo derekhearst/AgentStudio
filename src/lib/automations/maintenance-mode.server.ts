@@ -54,7 +54,6 @@ export async function runMaintenanceModeAutomation(
 		summary: fullSummary.slice(0, 500),
 		outputTarget: automation.outputTarget,
 		routedTo: route.target,
-		artifactId: 'artifactId' in route ? route.artifactId : null,
 		reviewItemId: 'reviewItemId' in route ? route.reviewItemId : null,
 	}
 }
@@ -65,8 +64,6 @@ export async function runMaintenanceModeAutomation(
  * Each `outputTarget` enum value gets a destination:
  *   - `chat_session` (default): assistant message in the automation's conversation
  *   - `review_inbox`: `automation_summary` review item (deduped per-hour by automation id)
- *   - `artifact`: new versioned artifact in the conversation's bound project (skipped + logged
- *     with a clear marker if no project is bound, since artifacts require one)
  *
  * Best-effort: failures are caught at the caller so a routing hiccup never invalidates the
  * already-completed maintenance work.
@@ -79,8 +76,6 @@ async function routeMaintenanceOutput(
 ): Promise<
 	| { target: 'chat_session'; conversationId: string }
 	| { target: 'review_inbox'; reviewItemId: string | null }
-	| { target: 'artifact'; artifactId: string }
-	| { target: 'artifact_skipped'; reason: string }
 	| { target: 'none' }
 > {
 	const trimmed = summary.length > 0 ? summary : '(no output)'
@@ -104,29 +99,6 @@ async function routeMaintenanceOutput(
 		return { target: 'review_inbox', reviewItemId: item?.id ?? null }
 	}
 
-	if (automation.outputTarget === 'artifact') {
-		const conversation = await getOrCreateAutomationConversation(automation)
-		if (!conversation.projectId) {
-			logger.info(
-				'[automations] outputTarget=artifact but conversation has no project bound; skipping',
-				{
-					automationId: automation.id,
-					conversationId: conversation.id,
-				},
-			)
-			return { target: 'artifact_skipped', reason: 'no project bound to automation conversation' }
-		}
-		const { createArtifact } = await import('$lib/projects/projects.server')
-		const artifact = await createArtifact({
-			projectId: conversation.projectId,
-			name: `${automation.description.slice(0, 80)} (${now.toISOString().slice(0, 10)})`,
-			contentType: 'markdown',
-			content: trimmed,
-			changeNote: `Maintenance run at ${now.toISOString()}`,
-			editedBy: automation.userId,
-		})
-		return { target: 'artifact', artifactId: artifact.id }
-	}
 
 	// chat_session (default) — append the summary into the automation's conversation as
 	// an assistant message. Differs from chat_followup mode because we don't insert the

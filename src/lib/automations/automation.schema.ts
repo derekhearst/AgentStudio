@@ -19,7 +19,6 @@ export const automationModeEnum = pgEnum('automation_mode', ['chat_followup', 'r
  */
 export const automationOutputTargetEnum = pgEnum('automation_output_target', [
 	'chat_session',
-	'artifact',
 	'review_inbox',
 ])
 

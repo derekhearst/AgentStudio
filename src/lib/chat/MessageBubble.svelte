@@ -1,13 +1,11 @@
 <script lang="ts">
 	import ToolCallCard from './ToolCallCard.svelte';
-	import ArtifactCard from './ArtifactCard.svelte';
 	import MessageBlocks from './MessageBlocks.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		asArray,
 		askQuestionAlreadyInMessage,
 		blockHasRenderableOutput,
-		getArtifactCardProps,
 		getAskUserAnswer,
 		getAskUserQuestions,
 		type SavedBlock,
@@ -266,17 +264,6 @@
 								</div>
 							{/if}
 						{/each}
-					{/if}
-				{:else if call.name === 'present_artifact'}
-					{@const card = getArtifactCardProps(call.result)}
-					{#if card}
-						<ArtifactCard {...card} />
-					{:else}
-						<ToolCallCard
-							name="present_artifact"
-							argumentsText={JSON.stringify(call.arguments ?? {}, null, 2)}
-							result={typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {}, null, 2)}
-						/>
 					{/if}
 				{:else}
 					<ToolCallCard

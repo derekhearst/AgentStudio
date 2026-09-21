@@ -76,8 +76,6 @@ cp .env.example .env
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
-- `AZURE_DEVOPS_OAUTH_CLIENT_ID`, `AZURE_DEVOPS_OAUTH_CLIENT_SECRET` (only needed if connecting Azure DevOps at `/source-control`)
-- `AZURE_DEVOPS_OAUTH_CALLBACK_URL` (optional override; only set when running behind a reverse proxy where `ORIGIN` does not match the externally-reachable callback URL)
 
 Database note:
 
@@ -145,7 +143,7 @@ Notes:
 
 ## Projects
 
-Projects are durable containers for the work users produce with their agents — named artifacts with append-only version history. Each edit creates a new immutable version, rollback is non-destructive (creates a new version with the older content). Browse at `/projects`. Agents can read/create/edit artifacts via the `projects` capability group when a project-related query auto-suggests it. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
+Projects are durable containers for the work users produce with their agents. Most projects have a real working directory on disk — either a fresh `git init` or a clone imported from GitHub — and the agent writes files there, with git as the version history. Browse at `/projects`; a conversation can be bound to a project with `set_project_context` so the agent knows where to work. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
 
 ## Memory Palace
 

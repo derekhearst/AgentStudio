@@ -3,7 +3,7 @@
 	import { getAgentChoices } from '$lib/agents'
 
 	type AutomationMode = 'chat_followup' | 'research' | 'maintenance'
-	type AutomationOutputTarget = 'chat_session' | 'artifact' | 'review_inbox'
+	type AutomationOutputTarget = 'chat_session' | 'review_inbox'
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number]
 
 	const CRON_PRESETS = [
@@ -200,7 +200,6 @@
 					>
 						<option value="chat_session">Chat session — assistant message in the conversation</option>
 						<option value="review_inbox">Review inbox — automation_summary item</option>
-						<option value="artifact">Artifact — write a versioned artifact (project must be bound)</option>
 					</select>
 				</div>
 			{/if}

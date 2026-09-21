@@ -27,7 +27,6 @@ const REVIEW_ITEM_TYPES = [
 	'job_failure',
 	'job_stuck',
 	'hook_failure',
-	'artifact_conflict',
 	'memory_conflict',
 	'policy_override_request',
 	'pull_request_ready',

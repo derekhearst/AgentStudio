@@ -2,25 +2,33 @@
 
 ## Overview
 
-Projects are durable containers for the work the user produces with their agents. Each project holds named **artifacts** — documents, code files, specs, plans, anything the user wants to keep — and every edit creates a new version, so nothing is ever overwritten or lost. Think of it as an organizing layer on top of conversation transcripts: chats are about figuring things out, projects are about retaining what got figured out.
+Projects are durable containers for the work a user produces with their agents. A project is a name, a kind, and — for most projects — a real working directory on disk that the agent reads from and writes to. Think of it as an organizing layer on top of conversation transcripts: chats are about figuring things out, projects are where the resulting files live.
 
-Projects are user-scoped (each user sees only their own), can be browsed and edited from the `/projects` page, and can be manipulated by agents via a small set of tools (`list_projects`, `read_artifact`, `create_artifact`, `edit_artifact`, etc.) when an agent's `projects` capability group is enabled.
+Projects are user-scoped (each user sees only their own), are browsed from the `/projects` page, and can be created or listed by agents via `list_projects` / `create_project`. A conversation can be *bound* to a project with `set_project_context`, which puts the project into the agent's system prompt so it knows where to work by default.
+
+> **Historical note.** Projects used to also own **artifacts** — named documents stored as database rows with append-only version history, edited through a dedicated UI and five agent tools. That layer was removed: the agent writes real files into the project's working directory, and git is the version history. Nothing reads the old `artifacts` / `artifact_versions` tables any more and migration `0063_drop_artifacts.sql` drops them.
 
 ## Key concepts
 
-### The hierarchy
+| Concept    | What it represents                                                       | Example                                        |
+| ---------- | ------------------------------------------------------------------------ | ---------------------------------------------- |
+| Project    | A container — a bucket for related work, usually with a repo on disk      | "Efoil rebuild", "Tax research", "Blog drafts" |
+| Repo kind  | Whether the project has a filesystem footprint and where it came from     | `none`, `local`, `imported`                    |
+| Repository | Sidecar row for an imported project: provider, owner, name, clone URL     | `github / derekhearst / AgentStudio`           |
 
-| Level             | What it represents                                                  | Example                                              |
-| ----------------- | ------------------------------------------------------------------- | ---------------------------------------------------- |
-| Project           | A container — a bucket for related work                              | "Efoil rebuild", "Tax research", "Blog drafts"       |
-| Artifact          | A named document inside the project                                  | "Hydrofoil assembly guide", "Q3 expenses analysis"   |
-| Version           | An immutable snapshot of an artifact at a moment in time             | v1, v2, v3 — each one an append-only edit            |
+### Repo kinds
 
-The `current_version_id` pointer on each artifact tracks which version is "live". Older versions are preserved forever; rollback creates a NEW version with the old content rather than reverting in place, so the timeline reads like an audit log.
+Every project carries a `repo_kind`:
+
+- **none** — database row only, no directory on disk. Useful as a label/grouping; the agent has nowhere project-specific to write.
+- **local** — `git init`'d at the project's sandbox path (`<SANDBOX_WORKSPACE>/<userId>/projects/<projectId>`) with a README and an initial commit. No remote.
+- **imported** — cloned from a remote (GitHub or any plain clone URL) into the same sandbox path, paired with a `repositories` sidecar row remembering where it came from.
+
+Filesystem work happens *after* the database insert commits. If the `git init` or clone fails, the project row is deleted again and the directory cleaned up — a failed import leaves nothing behind.
 
 ### Project kinds
 
-Projects are tagged with a kind for filtering and conventions:
+Projects are tagged with a kind for filtering and convention:
 
 - **efoil** — hardware tinkering / project notes
 - **research** — investigation, source-gathering, analysis
@@ -28,79 +36,66 @@ Projects are tagged with a kind for filtering and conventions:
 - **documentation** — user-facing docs, README content
 - **other** — anything else
 
-Kinds don't change behavior — they just make the project list easier to scan and let future automations target by kind.
-
-### Content types
-
-Each artifact carries a `content_type` so the UI knows how to render it:
-
-- **markdown** (default) — most documents, with rich text formatting
-- **code** — code snippets in any language, monospace render
-- **json** / **yaml** — structured config or data
-- **plaintext** — anything else
+Kinds don't change behavior; they make the project list easier to scan and let future automations target by kind.
 
 ### Slugs
 
-Project and artifact names are auto-converted to URL-safe slugs (lowercase, dashes, no special chars). Slugs are scoped:
-
-- Project slug is unique per user (so two users can both have a `notes` project)
-- Artifact slug is unique within its project (so two projects can both have a `readme` artifact)
-
-Collisions append `-2`, `-3` etc. so renaming never breaks an existing URL.
+Project names are auto-converted to URL-safe slugs (lowercase, dashes, no special characters). A slug is unique per user, so two users can both have a `notes` project. Collisions append `-2`, `-3` and so on. Once created, a project's slug doesn't change even if the name does, so links stay valid.
 
 ## User flows
 
-### Create and edit through the UI
+### Create a project
 
-1. Open `/projects`. Click **+ New project**, give it a name and kind.
-2. Open the project. Click **+ New artifact**, give it a name + content type + initial content. The first version (v1) is saved.
-3. Open the artifact. The current version is shown with the version history sidebar on the right.
-4. Click **Edit**, type your changes, optionally add a change note, click **Save as v2**. The previous content stays preserved.
-5. To revert: click any older version in the sidebar, then **Rollback to vN**. A new version is created with the older content; the in-between versions stay in the history.
-6. To soft-delete: click **Soft delete** on an artifact. It disappears from the active list but the data + history are preserved (admin can flip `is_active` back true to recover).
+1. Open `/projects` and click **+ New project**.
+2. Give it a name and a kind, then pick how it should exist on disk:
+   - no repo (database row only),
+   - a new local repo, or
+   - an import from the connected GitHub account or a clone URL.
+3. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
 
-### Edit through an agent
+### Work in a project
 
-When an agent has the `projects` capability group enabled, it can use these tools as part of any conversation:
+1. Open the project. The detail page shows the repo view: branch, status, and the file tree for projects that have one. Projects with `repo_kind = none` show an empty state instead.
+2. In chat, bind the conversation to the project (or let the agent call `set_project_context`). From then on the agent's system prompt names the project, and it writes files into that working directory rather than anywhere else.
+3. History and diffs come from git — `git_status`, `git_log`, `git_diff`, `prepare_commit`, and, with explicit operator approval, `push_branch` and `create_pull_request`.
 
-- `list_projects` — browse the user's existing projects to find context
-- `create_project` — start a new project
-- `list_artifacts(projectId)` — see what's in a project
-- `read_artifact(artifactId)` — load an artifact's current content (use this BEFORE editing)
-- `create_artifact(projectId, name, content)` — create a new artifact
-- `edit_artifact(artifactId, content, changeNote)` — append a new version
+### Delete a project
 
-Auto-suggest classifier surfaces the `projects` group when the user message mentions things like "project", "artifact", "document", "spec", "rfc", "draft" — so the agent gets the tools loaded automatically without having to call `enable_capability` first.
-
-Each version edited by an agent is tagged with the originating chat run (`source_run_id`) so the audit chain points back to the conversation that produced the change.
+Delete from the `/projects` list. Deleting removes the database row, and for `local` / `imported` projects the sandbox directory with it. There is no soft delete for projects.
 
 ## Roles & permissions
 
-- **All authenticated users**: see + manage their own projects; nothing is shared cross-user.
-- **Agents**: read/write only projects belonging to the conversation's owning user. Cross-user reads are explicitly rejected by the tool executor.
-- **Admins**: same as users for their own projects; no special cross-user access (projects are private by design).
+- **All authenticated users** — see and manage their own projects; nothing is shared cross-user.
+- **Agents** — read and write only projects belonging to the conversation's owning user. Cross-user access is rejected at the tool boundary.
+- **Admins** — same as users for their own projects; no special cross-user access, because projects are private by design.
+
+## Agent tools
+
+- `list_projects` — browse the user's projects to find context.
+- `create_project` — start a new project (slug auto-generated and deduped per user).
+- `set_project_context` — bind or unbind the current conversation's project.
+- `clone_repository` — ad-hoc clone of a connected repo outside any project (legacy layout; prefer importing a project).
+
+Everything else the agent does inside a project goes through the ordinary filesystem, search and git tools.
 
 ## Integrations
 
-- **Chat domain** — agents get the project tools automatically when the `projects` capability group is enabled or auto-suggested.
-- **Cost domain** — agent edits track `source_run_id` so the audit chain shows which run produced the version. Future work could surface cumulative cost-per-artifact in the UI.
-- **Memory domain** — Phase 3 (still pending) will add `memoryDrawers.linkedArtifactId` so artifact references can be recalled in future conversations alongside the regular memory recall.
-- **Sessions domain** — Phase 2 finish (still pending) will add `sessions.projectId` + a `set_project_context` tool so a conversation can be "bound" to a project for sticky context.
+- **Chat domain** — the bound project is injected as a system-prompt context slot, so the agent has continuous awareness of which project is in scope.
+- **Source control domain** — imported projects own a `repositories` sidecar row; pull requests opened by the agent are recorded against it and surface in `/review`.
+- **Cost domain** — tool usage inside a run is attributed to that run, so project work rolls up alongside chat token cost.
 
 ## Business rules
 
-- **Append-only versioning** — `editArtifact` always creates a new version row with `seq = max+1` in a single transaction. The `current_version_id` pointer updates atomically. Old versions are never modified or deleted.
-- **Rollback as forward-edit** — restoring v3 to a previous v1's content creates a NEW v4 with v1's content. The timeline preserves the full edit history including the rollback decision.
 - **Per-user isolation** — every project carries a `user_id` FK with cascade-on-user-delete. Agents enforce ownership at the tool boundary; the database enforces it via the FK.
-- **Soft delete only at the artifact level** — artifacts have an `is_active` boolean. Projects don't soft-delete (cascade-on-project-delete is real and removes everything). The list view filters `is_active=false` by default; pass `includeInactive` to see them.
-- **Slug stability** — once an artifact is created, its slug doesn't change even if the name does. URLs stay valid forever.
+- **Filesystem after commit** — repo creation never happens inside the database transaction. A failure compensates by deleting the row and the directory.
+- **Imports need a source** — `repoMode: 'imported'` without a `source` is rejected outright rather than leaving a half-made project.
+- **Slug stability** — a project's slug is fixed at creation.
 
 ## Edge cases
 
-- **Empty content** — artifacts can have empty content (`""`) on v1 and any subsequent version. The UI renders an empty pre block; the API doesn't reject it.
-- **Massive content** — there's no hard cap on `content` size (Postgres `text` column). The UI is reasonable up to a few hundred KB; beyond that the rendering will lag.
-- **Concurrent edits** — `editArtifact` reads `max(seq)` then inserts `seq+1` in a transaction, so two concurrent edits get different seq numbers (no collision). The "current pointer" race is benign because both updates write a real version row — the pointer just points at whichever finished last.
-- **Cascade chains** — deleting a user cascades through projects → artifacts → versions, removing everything. Deleting a project cascades through artifacts → versions. Deleting an individual version is not supported (would break the seq monotonicity contract).
+- **Legacy `none` projects** — projects created before repos existed have no directory. They still list and bind fine; the agent simply has no project-local place to write.
+- **Clone timeouts** — a large import can take tens of seconds. The row is inserted first and rolled back on failure, so a timeout shows as "project disappeared" rather than a half-cloned directory.
+- **Deleting a user** — cascades through their projects. Sandbox directories are removed by the project delete path, not by the database.
 
 ## Data model summary
 
@@ -108,23 +103,11 @@ Each version edited by an agent is tagged with the originating chat run (`source
 projects (
   id, name, slug, description, kind,
   user_id (FK → users CASCADE),
+  repo_kind ('none' | 'local' | 'imported'),
+  repo_local_path, default_branch,
+  last_pulled_at, last_imported_at,
   created_at, updated_at
-)
-
-artifacts (
-  id, project_id (FK → projects CASCADE),
-  name, slug, content_type,
-  current_version_id (denormalized pointer, nullable),
-  is_active,
-  created_at, updated_at
-)
-
-artifact_versions (
-  id, artifact_id (FK → artifacts CASCADE),
-  seq (unique per artifact, monotonic),
-  content, change_note,
-  edited_by (FK → users SET NULL),
-  source_run_id (declared by-name, no FK to avoid cycle),
-  cost_usd, created_at
 )
 ```
+
+Imported projects additionally have a row in `repositories` (source-control domain) carrying provider, owner, name and clone URL.

@@ -1,12 +1,7 @@
 import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import {
-	artifactVersions,
-	artifacts,
 	projects,
-	type ArtifactContentType,
-	type ArtifactRow,
-	type ArtifactVersionRow,
 	type ProjectKind,
 	type ProjectRow,
 	type RepoKind,
@@ -15,15 +10,14 @@ import { repositories, type RepositoryRow } from '$lib/source-control/source-con
 import { logger } from '$lib/observability/logger'
 import { cloneIntoProject, deleteProjectFs, initLocalProjectRepo } from './project-fs.server'
 import { credentialUsernameForProvider, parseCloneUrl } from '$lib/source-control/parse-clone-url'
-import { getActiveAzureConnection, getActiveGithubConnection } from '$lib/source-control/source-control.server'
+import { getActiveGithubConnection } from '$lib/source-control/source-control.server'
 
 /**
- * Wave 4 #15 phase 1 — projects + artifacts + version helpers.
+ * Wave 4 #15 phase 1 — project helpers.
  *
  * All operations are user-scoped — listProjects/createProject etc. take a `userId` and the
  * remote layer enforces it. Slug generation is automatic + collision-resilient (appends `-2`,
- * `-3` etc. on conflict). Artifact versions are append-only — even rollback creates a NEW
- * version row that copies the target seq's content forward.
+ * `-3` etc. on conflict).
  */
 
 // ─────────── Slug helpers ───────────
@@ -45,20 +39,12 @@ async function uniqueProjectSlug(userId: string | null, baseSlug: string): Promi
 	throw new Error(`unable to find a unique slug for "${baseSlug}" after 1000 attempts`)
 }
 
-// Artifact CRUD lives in $lib/projects/artifacts.server — re-exported below for back-compat.
 
 // ─────────── Project CRUD ───────────
 
 export type GithubSource = { type: 'github'; owner: string; repo: string; cloneUrl: string }
-export type AzureSource = {
-	type: 'azure'
-	org: string
-	project: string
-	repo: string
-	cloneUrl: string
-}
 export type UrlSource = { type: 'url'; cloneUrl: string }
-export type ImportSource = GithubSource | AzureSource | UrlSource
+export type ImportSource = GithubSource | UrlSource
 
 export type CreateProjectInput = {
 	userId: string
@@ -158,7 +144,7 @@ async function importIntoProject(
 	source: ImportSource,
 ): Promise<CreateProjectResult> {
 	// Resolve provider, identity, and credentials from the discriminated source union.
-	let provider: 'github' | 'azure_devops' | 'local'
+	let provider: 'github' | 'local'
 	let owner: string
 	let name: string
 	let cloneUrl: string
@@ -178,24 +164,10 @@ async function importIntoProject(
 		token = conn.accessToken
 		credentialUsername = 'x-access-token'
 		providerMetadata = { htmlUrl: `https://github.com/${owner}/${name}` }
-	} else if (source.type === 'azure') {
-		provider = 'azure_devops'
-		owner = source.org
-		name = source.repo
-		cloneUrl = source.cloneUrl
-		const conn = await getActiveAzureConnection(userId, source.org)
-		if (conn) {
-			token = conn.accessToken
-			credentialUsername = 'oauth2'
-		}
-		providerMetadata = {
-			htmlUrl: cloneUrl,
-			azure: { org: source.org, project: source.project, repo: source.repo },
-		}
 	} else {
 		// URL paste — defer to the parser to figure out what it is.
 		const parsed = parseCloneUrl(source.cloneUrl)
-		provider = parsed.provider === 'github' ? 'github' : parsed.provider === 'azure_devops' ? 'azure_devops' : 'local'
+		provider = parsed.provider === 'github' ? 'github' : 'local'
 		cloneUrl = parsed.cloneUrl
 		credentialUsername = credentialUsernameForProvider(provider)
 		if (parsed.provider === 'github') {
@@ -207,18 +179,6 @@ async function importIntoProject(
 				credentialUsername = 'x-access-token'
 			}
 			providerMetadata = { htmlUrl: parsed.htmlUrl }
-		} else if (parsed.provider === 'azure_devops') {
-			owner = parsed.org
-			name = parsed.repo
-			const conn = await getActiveAzureConnection(userId, parsed.org)
-			if (conn) {
-				token = conn.accessToken
-				credentialUsername = 'oauth2'
-			}
-			providerMetadata = {
-				htmlUrl: parsed.htmlUrl,
-				azure: { org: parsed.org, project: parsed.project, repo: parsed.repo },
-			}
 		} else {
 			owner = parsed.owner
 			name = parsed.name
@@ -304,7 +264,6 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 	const [row] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
 	if (!row) return { deleted: false }
 
-	// Cascade trims artifacts + versions automatically via FK.
 	// `repositories` has its FK to `projects` declared by-name (not enforced) — clear the
 	// sidecar row explicitly so PRs/branches/checks cascade off it.
 	await db.delete(repositories).where(eq(repositories.projectId, projectId))
@@ -318,22 +277,3 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 
 	return { deleted: result.length > 0 }
 }
-
-// ─────────── Artifact CRUD + versions ───────────
-
-// Artifact CRUD lives in $lib/projects/artifacts.server. Re-exported here so existing imports
-// from $lib/projects/projects.server keep working without code-level migration.
-export {
-	createArtifact,
-	editArtifact,
-	getArtifactById,
-	getVersion,
-	getVersionHistory,
-	listArtifactsForConversation,
-	listArtifactsForProject,
-	rollbackArtifact,
-	softDeleteArtifact,
-	type ArtifactWithCurrent,
-	type CreateArtifactInput,
-	type EditArtifactInput,
-} from './artifacts.server'

@@ -16,7 +16,7 @@ type ToolName = string
 export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
 	'push_branch',
 	'create_pull_request',
-	// Plan-approval handoff: the planner asks the user to confirm the plan artifact and switch
+	// Plan-approval handoff: the planner asks the user to confirm the plan file and switch
 	// the conversation's bound agent to the implementer. Always requires explicit approval —
 	// in detached/automation runs the tool fails closed.
 	'request_plan_approval',

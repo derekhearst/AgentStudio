@@ -133,15 +133,6 @@
 			</section>
 		{/if}
 
-		{#if drawer.linkedArtifact}
-			<section class="drawer-detail__section">
-				<div class="drawer-detail__sec-head">
-					<span class="drawer-detail__sec-label">Linked artifact</span>
-				</div>
-				<div class="drawer-detail__artifact">{drawer.linkedArtifact.name}</div>
-			</section>
-		{/if}
-
 		{#if drawer.kgRelations.length > 0}
 			<section class="drawer-detail__section">
 				<div class="drawer-detail__sec-head">
@@ -349,13 +340,6 @@
 		font-size: 11.5px;
 		line-height: 1.5;
 		white-space: pre-wrap;
-	}
-
-	.drawer-detail__artifact {
-		padding: 6px 10px;
-		background: var(--color-base-200);
-		border: 1px solid var(--color-base-300);
-		border-radius: 6px;
 	}
 
 	.drawer-detail__kg {

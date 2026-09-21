@@ -442,6 +442,13 @@
       "when": 1779300000000,
       "tag": "0062_modernize_model_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1779400000000,
+      "tag": "0063_drop_artifacts",
+      "breakpoints": true
     }
   ]
 }

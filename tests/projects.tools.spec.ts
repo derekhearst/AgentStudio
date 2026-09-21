@@ -2,11 +2,10 @@ import { expect, test } from '@playwright/test'
 import { getSql, uniquePrefix } from './helpers'
 
 /**
- * Wave 4 #15 phase 2 — Projects + Artifacts agent tools storage contract.
+ * Wave 4 #15 phase 2 — Projects agent tools storage contract.
  *
- * The 6 new tools (list_projects, create_project, list_artifacts, read_artifact,
- * create_artifact, edit_artifact) all delegate to the existing project server functions.
- * Their schemas are exercised by the Zod parser in tools.server.ts; this spec pins the
+ * `list_projects` and `create_project` delegate to the project server functions. Their
+ * schemas are exercised by the Zod parser in tools.server.ts; this spec pins the
  * underlying storage round-trips so the agent calls land in the durable shape the UI reads.
  *
  * Live LLM-driven tool execution is exercised whenever an agent with the `projects`
@@ -55,80 +54,6 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 		}
 	})
 
-	test('create_artifact tool path: artifact + v1 in single transaction with currentVersionId pointer', async () => {
-		const prefix = uniquePrefix('artifact-tool-create')
-		const userId = await getActiveUserId()
-		const sql = getSql()
-		try {
-			const [project] = await sql<{ id: string }[]>`
-				insert into projects (user_id, name, slug) values (${userId}, ${`${prefix} p`}, ${`${prefix}-p`})
-				returning id
-			`
-			// Tool calls projectsModule.createArtifact which is a single transaction.
-			// Simulate the resulting durable state.
-			const [artifact] = await sql<{ id: string }[]>`
-				insert into artifacts (project_id, name, slug, content_type)
-				values (${project.id}, 'agent-doc', ${`${prefix}-doc`}, 'markdown'::artifact_content_type)
-				returning id
-			`
-			const [version] = await sql<{ id: string; seq: number }[]>`
-				insert into artifact_versions (artifact_id, seq, content, edited_by)
-				values (${artifact.id}, 1, 'agent-generated initial content', ${userId})
-				returning id, seq
-			`
-			await sql`update artifacts set current_version_id = ${version.id} where id = ${artifact.id}`
-
-			const [check] = await sql<{ current_version_id: string | null; seq: number }[]>`
-				select a.current_version_id, v.seq
-				from artifacts a
-				join artifact_versions v on v.id = a.current_version_id
-				where a.id = ${artifact.id}
-			`
-			expect(check.current_version_id).toBe(version.id)
-			expect(check.seq).toBe(1)
-		} finally {
-			await cleanupProjectsToolsPrefix(prefix)
-		}
-	})
-
-	test('edit_artifact tool path: append-only v(N+1) with edited_by + source_run_id linkage', async () => {
-		const prefix = uniquePrefix('artifact-tool-edit')
-		const userId = await getActiveUserId()
-		const sql = getSql()
-		try {
-			const [project] = await sql<{ id: string }[]>`
-				insert into projects (user_id, name, slug) values (${userId}, ${`${prefix} p`}, ${`${prefix}-p`})
-				returning id
-			`
-			const [artifact] = await sql<{ id: string }[]>`
-				insert into artifacts (project_id, name, slug) values (${project.id}, 'doc', ${`${prefix}-doc`})
-				returning id
-			`
-			await sql`
-				insert into artifact_versions (artifact_id, seq, content, edited_by)
-				values (${artifact.id}, 1, 'v1 content', ${userId})
-			`
-			// Tool calls editArtifact which inserts v2 + updates currentVersionId atomically.
-			const [v2] = await sql<{ id: string; seq: number; edited_by: string | null }[]>`
-				insert into artifact_versions (artifact_id, seq, content, change_note, edited_by)
-				values (${artifact.id}, 2, 'v2 content with revisions', 'Agent revised based on user feedback', ${userId})
-				returning id, seq, edited_by
-			`
-			await sql`update artifacts set current_version_id = ${v2.id}, updated_at = now() where id = ${artifact.id}`
-
-			expect(v2.seq).toBe(2)
-			expect(v2.edited_by).toBe(userId)
-
-			// History preserved — both versions still exist.
-			const [{ count }] = await sql<{ count: number }[]>`
-				select count(*)::int as count from artifact_versions where artifact_id = ${artifact.id}
-			`
-			expect(count).toBe(2)
-		} finally {
-			await cleanupProjectsToolsPrefix(prefix)
-		}
-	})
-
 	test('per-user isolation: tools cannot read another user\'s projects', async () => {
 		const prefix = uniquePrefix('project-isolation')
 		const userId = await getActiveUserId()
@@ -161,17 +86,10 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 })
 
 test.describe('projects/tools — registry presence', () => {
-	test('all six project tools are registered in the schema registry', async () => {
+	test('both project tools are registered in the schema registry', async () => {
 		try {
 			const { allToolNames, toolDisclosure } = await import('../src/lib/tools/tool-schemas')
-			for (const name of [
-				'list_projects',
-				'create_project',
-				'list_artifacts',
-				'read_artifact',
-				'create_artifact',
-				'edit_artifact',
-			]) {
+			for (const name of ['list_projects', 'create_project']) {
 				expect(allToolNames).toContain(name)
 				// Project tools live in the searchable tier (Tool Search Tool deferred loading).
 				expect(toolDisclosure[name as keyof typeof toolDisclosure]).toBe('searchable')

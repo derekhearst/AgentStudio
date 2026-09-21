@@ -36,7 +36,9 @@ export const sourceControlProviderEnum = pgEnum('source_control_provider', [
 	'gitlab',
 	'bitbucket',
 	'gitea',
-	'azure_devops',
+	// NOTE: the PG enum still carries the retired 'azure_devops' value. Dropping an enum
+	// value means recreating the type and rewriting every dependent column; nothing writes
+	// one now that the Azure DevOps integration is gone.
 	'local',
 ])
 

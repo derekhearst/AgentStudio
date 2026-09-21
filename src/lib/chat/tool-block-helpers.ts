@@ -59,42 +59,6 @@ export function getAskUserQuestionsFromTool(block: ToolBlockLike): AskUserQuesti
 		.filter((row) => row.question.trim().length > 0)
 }
 
-export type ArtifactCardData = {
-	artifactId: string
-	name: string
-	contentType: 'markdown' | 'code' | 'json' | 'yaml' | 'plaintext'
-	versionSeq: number
-	content: string
-	focus: 'plan' | 'todo' | 'document' | 'data' | null
-	note: string | null
-}
-
-/**
- * Parse the result payload from a completed `present_artifact` tool call. The executor
- * loads the artifact's current version content and ships it back so the chat UI can render
- * an inline ArtifactCard without an extra fetch.
- */
-export function getArtifactCardFromTool(block: ToolBlockLike): ArtifactCardData | null {
-	if (!block.result) return null
-	const result = parseJsonFallback(block.result)
-	const artifactId = typeof result.artifactId === 'string' ? result.artifactId : null
-	const name = typeof result.name === 'string' ? result.name : null
-	const content = typeof result.content === 'string' ? result.content : null
-	const versionSeq = typeof result.versionSeq === 'number' ? result.versionSeq : null
-	if (!artifactId || !name || content === null || versionSeq === null) return null
-	const contentTypeRaw = typeof result.contentType === 'string' ? result.contentType : 'markdown'
-	const contentType: ArtifactCardData['contentType'] =
-		contentTypeRaw === 'code' || contentTypeRaw === 'json' || contentTypeRaw === 'yaml' || contentTypeRaw === 'plaintext'
-			? contentTypeRaw
-			: 'markdown'
-	const focus =
-		result.focus === 'plan' || result.focus === 'todo' || result.focus === 'document' || result.focus === 'data'
-			? result.focus
-			: null
-	const note = typeof result.note === 'string' && result.note.trim().length > 0 ? result.note : null
-	return { artifactId, name, contentType, versionSeq, content, focus, note }
-}
-
 export function getAskUserAnswersFromTool(block: ToolBlockLike): Record<string, string> | null {
 	if (!block.result) return null
 	const result = parseJsonFallback(block.result)

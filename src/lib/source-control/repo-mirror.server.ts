@@ -38,10 +38,10 @@ export type MaterializeMirrorInput = {
 	 * here lets the caller log "(default branch: main)" without an extra round-trip. */
 	defaultBranch?: string
 	/** Override the GitHub-only URL build. When set, used verbatim as the remote URL.
-	 * Required for non-GitHub providers (Azure DevOps, generic clones). */
+	 * Required for non-GitHub providers (generic clones). */
 	cloneUrl?: string
 	/** Credential helper username. Defaults to `x-access-token` (GitHub OAuth). Use
-	 * `oauth2` for Azure DevOps OAuth, empty string for public/anonymous clones. */
+	 * an empty string for public/anonymous clones. */
 	credentialUsername?: string
 }
 

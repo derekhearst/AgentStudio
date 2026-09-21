@@ -170,7 +170,7 @@ export async function buildProjectContextSlot(input: {
 		return {
 			name: 'project_context',
 			priority: 80,
-			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWhen using create_artifact, prefer this project's id unless the user specifies otherwise. Use list_artifacts({projectId: "${project.id}"}) to see existing work in this project, and read_artifact before edit_artifact.`,
+			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.`,
 		}
 	} catch (err) {
 		logger.warn('[chat] project context slot lookup failed', { err })

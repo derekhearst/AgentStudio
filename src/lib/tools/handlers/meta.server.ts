@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { searchToolsRegistry, toolSchemas } from '../tool-schemas'
 import { toolUserContext } from '../sandbox.server'
-import { resolveConversationFromRunId } from '../artifact-scope.server'
+import { resolveConversationFromRunId } from '../run-scope.server'
 import { logger } from '$lib/observability/logger'
 import type { ToolHandler } from '../handler-types'
 
@@ -85,13 +85,19 @@ export const metaHandlers: Record<string, ToolHandler> = {
 			}
 		}
 
-		const projectsModule = await import('$lib/projects/projects.server')
-		const artifact = await projectsModule.getArtifactById(input.artifactId)
-		if (!artifact) {
+		// The plan is a file in the workspace. Reading it here both validates the
+		// path and fails closed before the agent
+		// handoff if the planner referenced a file it never wrote. Path traversal is
+		// the sandbox's problem — fileRead resolves inside the workspace root.
+		let planContent: string
+		try {
+			const { fileRead } = await import('$lib/tools/sandbox-fs.server')
+			planContent = await fileRead(input.path)
+		} catch (err) {
 			return {
 				success: false,
 				tool: call.name,
-				error: `Artifact ${input.artifactId} not found`,
+				error: `Could not read plan file "${input.path}": ${err instanceof Error ? err.message : String(err)}`,
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -102,14 +108,6 @@ export const metaHandlers: Record<string, ToolHandler> = {
 				success: false,
 				tool: call.name,
 				error: 'Unable to resolve the conversation for this run.',
-				executionMs: Date.now() - startedAt,
-			}
-		}
-		if (artifact.conversationId && artifact.conversationId !== conversationId) {
-			return {
-				success: false,
-				tool: call.name,
-				error: 'Artifact does not belong to this conversation.',
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -133,7 +131,7 @@ export const metaHandlers: Record<string, ToolHandler> = {
 			const { setConversationAgent } = await import('$lib/chat/agent-switch.server')
 			const result = await setConversationAgent(conversationId, input.implementerAgentId, {
 				userId: ctx.userId,
-				approvedArtifactId: input.artifactId,
+				approvedPlanPath: input.path,
 			})
 			return {
 				success: true,
@@ -143,7 +141,7 @@ export const metaHandlers: Record<string, ToolHandler> = {
 					approved: true,
 					switchedToAgentId: result.agentId,
 					previousAgentId: result.previousAgentId,
-					artifactId: input.artifactId,
+					planPath: input.path,
 					implementerName: implementer.name,
 				},
 				executionMs: Date.now() - startedAt,

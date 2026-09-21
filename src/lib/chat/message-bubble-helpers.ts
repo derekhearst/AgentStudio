@@ -2,8 +2,8 @@
  * Pure helpers for the MessageBubble component.
  *
  * Decode JSONB-or-string blobs from the messages table, gate empty saved
- * blocks out of the render, extract ask_user / artifact metadata for inline
- * cards, and normalize text for the dedupe check that suppresses the model's
+ * blocks out of the render, extract ask_user metadata for inline cards, and
+ * normalize text for the dedupe check that suppresses the model's
  * inline question when the same prompt is already in an ask_user card.
  *
  * Pure functions only — every helper takes the data it needs as arguments
@@ -30,16 +30,6 @@ export type SavedBlock =
 			content: string
 			success: boolean
 	  }
-
-export type ArtifactCardProps = {
-	artifactId: string
-	name: string
-	contentType: 'markdown' | 'code' | 'json' | 'yaml' | 'plaintext'
-	versionSeq: number
-	content: string
-	focus: 'plan' | 'todo' | 'document' | 'data' | null
-	note: string | null
-}
 
 /** Coerce a JSONB column value (object, JSON string, or raw) into a record. */
 export function asRecord(value: unknown): Record<string, unknown> | null {
@@ -106,33 +96,6 @@ export function getAskUserAnswer(resultValue: unknown, header: string): string |
 	if (typeof value !== 'string') return null
 	const trimmed = value.trim()
 	return trimmed.length > 0 ? trimmed : null
-}
-
-/**
- * Extract the props for the inline ArtifactCard from a `present_artifact` /
- * `create_artifact` tool result. Returns null when the result blob is missing
- * required fields — the bubble falls back to the generic tool-result card in
- * that case.
- */
-export function getArtifactCardProps(resultValue: unknown): ArtifactCardProps | null {
-	const result = asRecord(resultValue)
-	if (!result) return null
-	const artifactId = typeof result.artifactId === 'string' ? result.artifactId : null
-	const name = typeof result.name === 'string' ? result.name : null
-	const content = typeof result.content === 'string' ? result.content : null
-	const versionSeq = typeof result.versionSeq === 'number' ? result.versionSeq : null
-	if (!artifactId || !name || content === null || versionSeq === null) return null
-	const contentType = (typeof result.contentType === 'string' ? result.contentType : 'markdown') as
-		ArtifactCardProps['contentType']
-	const focus =
-		result.focus === 'plan' ||
-		result.focus === 'todo' ||
-		result.focus === 'document' ||
-		result.focus === 'data'
-			? result.focus
-			: null
-	const note = typeof result.note === 'string' && result.note.trim() ? result.note : null
-	return { artifactId, name, contentType, versionSeq, content, focus, note }
 }
 
 /** Lowercase + collapse whitespace for the dedupe-text comparison. */

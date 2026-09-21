@@ -2,8 +2,8 @@ import { expect, test } from '@playwright/test'
 import { authenticateContext, getSql, uniquePrefix } from './helpers'
 
 /**
- * Deep Research is triggered by the Research agent drafting a plan as a markdown artifact
- * (create_artifact + present_artifact + request_plan_approval), not via a separate composer
+ * Deep Research is triggered by the Research agent writing a plan to a markdown file
+ * (file_write + request_plan_approval), not via a separate composer
  * button. These tests assert:
  *
  *   - The home page composer does NOT surface a "Start Deep Research" button.
@@ -23,7 +23,7 @@ test.describe('research/composer — agent-driven trigger', () => {
 		await authenticateContext(page.context())
 		await page.goto('/')
 		// Negative assertion — the magnifying-glass button was removed; research now flows
-		// through the Research agent's plan-artifact + request_plan_approval handoff. The
+		// through the Research agent's plan-file + request_plan_approval handoff. The
 		// AgentSelector drop-down is the way users opt into the research workflow.
 		const researchBtn = page.getByRole('button', { name: /Start Deep Research/i })
 		await expect(researchBtn).toHaveCount(0)
@@ -47,7 +47,7 @@ test.describe('research/composer — agent-driven trigger', () => {
 
 	test('research row schema accepts a pre-seeded plan (post-handoff runner path)', async () => {
 		// After a request_plan_approval handoff the runner agent can create a research row
-		// with `plan` already populated from the approved plan artifact's sub-questions, so the
+		// with `plan` already populated from the approved plan file's sub-questions, so the
 		// orchestrator skips its Phase-1 planner LLM call. This asserts the schema accepts that
 		// shape so a regression in the column types or jsonb default gets caught immediately.
 		const prefix = uniquePrefix('agent-driven-shape')

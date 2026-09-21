@@ -1,11 +1,10 @@
 /**
- * Slug generation for projects and artifacts.
+ * Slug generation for projects.
  *
  * Pure module: `slugify` produces a URL-safe lowercase slug capped at 64 chars,
- * with empty/whitespace input falling back to `'untitled'`. Project- and
- * artifact-scoped uniqueness checks (the per-row collision-resilient
- * `-2` / `-3` suffixing) live in their respective server modules — they need
- * DB access to read the existing taken set.
+ * with empty/whitespace input falling back to `'untitled'`. The per-row
+ * collision-resilient `-2` / `-3` suffixing lives in the projects server module
+ * — it needs DB access to read the existing taken set.
  */
 
 const SLUG_SAFE_CHARS = /[^a-z0-9-]/g

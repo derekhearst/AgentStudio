@@ -304,7 +304,7 @@
 			{:else if repoKind === 'imported'}
 				<div class="rounded-xl border border-base-300/60 bg-base-200/30 p-3 text-xs opacity-70">
 					Push is only wired up for GitHub-backed projects right now.
-					Azure / generic remotes can be pushed via the agent's git tools.
+					Generic remotes can be pushed via the agent's git tools.
 				</div>
 			{/if}
 		</div>

@@ -56,51 +56,18 @@ export const toolSchemas = {
 		source: z.string().min(1).max(2048),
 		maxChars: z.number().int().min(1000).max(200_000).default(100_000).optional(),
 	}),
-	// Wave 4 #15 phase 2 — Projects + Artifacts agent tools.
+	// Wave 4 #15 phase 2 — Projects agent tools.
 	list_projects: z.object({}),
 	create_project: z.object({
 		name: z.string().trim().min(1).max(120),
 		kind: z.enum(['efoil', 'research', 'code', 'documentation', 'other']).optional(),
 		description: z.string().trim().max(1000).optional(),
 	}),
-	list_artifacts: z.object({
-		// Provide projectId for project-scoped artifacts, conversationId for in-chat artifacts,
-		// or omit both to list artifacts in the current conversation.
-		projectId: z.string().uuid().optional(),
-		conversationId: z.string().uuid().optional(),
-		includeInactive: z.boolean().default(false).optional(),
-	}),
-	read_artifact: z.object({
-		artifactId: z.string().uuid(),
-	}),
-	create_artifact: z.object({
-		// Either projectId, conversationId, or neither (defaults to the current chat).
-		projectId: z.string().uuid().optional(),
-		conversationId: z.string().uuid().optional(),
-		name: z.string().trim().min(1).max(160),
-		content: z.string(),
-		contentType: z.enum(['markdown', 'code', 'json', 'yaml', 'plaintext']).optional(),
-		changeNote: z.string().trim().max(500).optional(),
-	}),
-	edit_artifact: z.object({
-		artifactId: z.string().uuid(),
-		content: z.string(),
-		changeNote: z.string().trim().max(500).optional(),
-	}),
-	// Generic in-chat artifact presenter — loads an artifact's current (or pinned) version and
-	// returns the full content so the chat UI can render an ArtifactCard inline. The `focus`
-	// hint adjusts the badge colour/label (Plan / Todo / Document / Data).
-	present_artifact: z.object({
-		artifactId: z.string().uuid(),
-		versionSeq: z.number().int().positive().optional(),
-		focus: z.enum(['plan', 'todo', 'document', 'data']).optional(),
-		note: z.string().max(500).optional(),
-	}),
-	// Mandatory-approval handoff: the planner asks the user to approve the plan artifact and
+	// Mandatory-approval handoff: the planner asks the user to approve a plan file and
 	// switch the conversation to the implementer agent. On approve, the conversation's bound
 	// agent flips so the next round runs as the implementer.
 	request_plan_approval: z.object({
-		artifactId: z.string().uuid(),
+		path: z.string().trim().min(1),
 		implementerAgentId: z.string().uuid(),
 		rationale: z.string().trim().max(1000).optional(),
 	}),
@@ -310,8 +277,8 @@ export const toolDescriptions: Record<ToolName, string> = {
 	browser_screenshot: 'Take a screenshot of a web page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
 	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
-	list_projects: 'List the user\'s projects (durable containers for artifacts with append-only version history). Returns id, name, slug, kind, description for each project.',
-	create_project: 'Create a new project to group related artifacts. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
+	list_projects: 'List the user\'s projects (durable work surfaces, each with its own sandbox working directory). Returns id, name, slug, kind, description for each project.',
+	create_project: 'Create a new project to group related work. Slug auto-generated from name + deduped per-user. Kinds: efoil/research/code/documentation/other.',
 	list_my_repos: 'List source-control repositories the user has imported (downloaded) into AgentStudio. Optional `search` substring on owner/name. Returns id, owner, name, defaultBranch, htmlUrl, private. New imports are managed at /projects (each imported project has a sidecar repository row); only imported (locally cloned) repos are visible here. Prefer `list_projects` for the canonical list of work surfaces.',
 	sync_my_repos: 'Sync the user\'s GitHub repos into AgentStudio (idempotent). Requires the user to have connected GitHub at /projects (Connections panel). Returns {total, inserted, updated, skipped} or an errorMessage when the connection is missing/expired. Prefer the picker on /projects for human-driven imports.',
 	prepare_commit: 'Inspect a working tree (defaults to the workspace root; supply a relative `path` to inspect a subdirectory) and produce a structured commit draft. Returns {branch, upstream, ahead, behind, dirty, diff: {filesChanged, insertions, deletions, files}, suggestedSubject, files}. Read-only — no commit/push happens. Use as the first step before requesting human approval to push or open a PR. The path must be a git repository (has a .git entry); otherwise the call fails with a clear error.',
@@ -320,10 +287,6 @@ export const toolDescriptions: Record<ToolName, string> = {
 	list_pull_requests: 'List pull requests recorded for a repository (the user must have synced the repo via sync_my_repos first). Returns up to `limit` rows (default 50) ordered by most recently updated, each with {id, providerPrNumber, title, status, headBranch, baseBranch, providerUrl, runId, taskId, createdBy, createdAt, updatedAt}. Read-only. Returns an empty list when the repo has no recorded PRs yet.',
 	get_pull_request: 'Fetch a single pull request by its AgentStudio id (the `recordedId` returned by create_pull_request, or any id from list_pull_requests). Returns the full row including title, body, status, head/base branches, providerUrl, runId, taskId, metadata. Read-only. Returns null when the id is unknown.',
 	clone_repository: 'Materialize a local clone of a connected GitHub repo under the per-user sandbox (`${SANDBOX_WORKSPACE}/<userId>/repos/<owner>/<repo>`, legacy layout). Idempotent — if the path already has a clone, runs `git fetch --prune` instead of re-cloning. Authenticated via the user\'s stored OAuth token (private repos work without the agent ever seeing the token). Returns {path, fresh, branch}. Prefer creating an imported project at /projects: that flow clones into the project\'s sandbox path and gives you the full repo controls UI; this tool is kept for ad-hoc one-shot clones outside any project.',
-	list_artifacts: 'List artifacts. Pass projectId for project-scoped artifacts, conversationId for in-chat artifacts, or omit both to list artifacts in the current conversation. Returns id, name, slug, contentType, isActive (active by default; pass includeInactive to see soft-deleted).',
-	read_artifact: 'Read an artifact\'s current version content. Returns name, contentType, version seq, content, and the artifact\'s scope (project or conversation). Use to load an artifact before editing or implementing against it.',
-	create_artifact: 'Create a new artifact (saves the initial content as v1). Pass projectId for a project-scoped artifact, conversationId for a chat-scoped artifact, or omit both to scope to the current conversation. Slug auto-generated from name. Use this to write a plan/todo/document the agent (or a downstream agent) can re-read.',
-	edit_artifact: 'Append a new version to an existing artifact (append-only, preserves the full history). Optional changeNote describes what changed in this version. Use read_artifact first to see the current content.',
 	set_project_context: 'Bind a project to the current conversation so subsequent agent edits know which project to target by default. Pass projectId=null (or omit) to unbind. The bound project shows up in the conversation\'s system-prompt context slot so the agent has continuous awareness of which project is "in scope".',
 	run_subagent:
 		'Run a subagent to handle a task. Optionally specify agentId to delegate to a specific agent. Without agentId, uses a general-purpose stateless subagent.',
@@ -358,10 +321,8 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Show recent commits with subject, author, and date (read-only). Optional `paths` filter scopes the log to specific files. Only available in worktree mode.',
 	git_diff:
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
-	present_artifact:
-		'Surface an artifact in the chat as a focused inline card. Pass the artifactId from create_artifact (or list_artifacts). Optional `focus` is a hint for the renderer (\'plan\' badge, \'todo\' badge, \'document\', \'data\'); `note` is a one-liner shown above the card; `versionSeq` pins to a specific version (defaults to current). Use this after writing a plan/todo via create_artifact so the user can see and reference it.',
 	request_plan_approval:
-		'Ask the user to approve a plan artifact and hand off the conversation to an implementer agent. Mandatory approval — the user must approve in the inline card before this tool runs. On approve: the conversation\'s bound agent flips to `implementerAgentId` and the next round runs under that agent (which can read the artifact via read_artifact). On deny: the planner stays bound. Pass the plan artifactId, the implementer agent id (use list_agents to find one), and an optional rationale for picking that implementer.',
+		'Ask the user to approve a plan file and hand the conversation to an implementer agent. Write the plan into the workspace first (file_write, e.g. PLAN.md), then pass its path. Mandatory approval: the user must approve in the inline card before this runs. On approve the bound agent flips to implementerAgentId and the next round runs under that agent, which can read the file with file_read. On deny the planner stays bound. Use list_agents to find an implementer.',
 	search_tools:
 		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
 	run_code:
@@ -405,21 +366,9 @@ export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
 return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.title } }`,
 		},
 	],
-	create_artifact: [
-		{
-			name: 'Plan: drop session cookies',
-			content:
-				'# Plan\n\n1. Audit cookie reads/writes across the codebase\n2. Add a token-rotation endpoint\n3. Migrate clients to Authorization header\n4. Remove cookie-write paths and run integration tests',
-			contentType: 'markdown',
-			changeNote: 'Initial plan',
-		},
-	],
-	present_artifact: [
-		{ artifactId: '00000000-0000-0000-0000-000000000000', focus: 'plan', note: 'Plan ready for review.' },
-	],
 	request_plan_approval: [
 		{
-			artifactId: '00000000-0000-0000-0000-000000000000',
+			path: 'plan.md',
 			implementerAgentId: '00000000-0000-0000-0000-000000000000',
 			rationale: 'Hand off to the coding agent to implement the approved plan.',
 		},

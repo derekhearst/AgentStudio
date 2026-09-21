@@ -8,7 +8,6 @@
 		deleteProjectCommand,
 		getProjectsOverviewQuery,
 		disconnectGithubCommand,
-		disconnectAzureCommand,
 	} from '$lib/projects/projects.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import ConnectionsPanel from '$lib/projects/components/ConnectionsPanel.svelte';
@@ -17,7 +16,7 @@
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number];
 	type Overview = Awaited<ReturnType<typeof getProjectsOverviewQuery>>;
-	type RepoMode = 'none' | 'local' | 'github' | 'azure' | 'url';
+	type RepoMode = 'none' | 'local' | 'github' | 'url';
 
 	let projects = $state<ProjectRow[]>([]);
 	let overview = $state<Overview | null>(null);
@@ -30,9 +29,6 @@
 	const errorParam = $derived(page.url.searchParams.get('error'));
 	const githubAvailable = $derived(
 		overview?.connections.some((c) => c.provider === 'github' && c.status === 'active') ?? false,
-	);
-	const azureAvailable = $derived(
-		overview?.connections.some((c) => c.provider === 'azure_devops' && c.status === 'active') ?? false,
 	);
 
 	onMount(() => void load());
@@ -65,7 +61,7 @@
 
 	async function handleDelete(project: ProjectRow) {
 		const fsNote = project.repoKind !== 'none' ? ' Filesystem and git repo will also be removed.' : '';
-		if (!confirm(`Delete "${project.name}"?${fsNote} All artifacts and versions will be lost.`)) return;
+		if (!confirm(`Delete "${project.name}"?${fsNote} This cannot be undone.`)) return;
 		try {
 			await deleteProjectCommand(project.id);
 			await load();
@@ -78,16 +74,6 @@
 		if (!confirm('Disconnect GitHub? Your stored token will be revoked. Imported projects keep their local clone.')) return;
 		try {
 			await disconnectGithubCommand();
-			await load();
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Disconnect failed';
-		}
-	}
-
-	async function disconnectAzure() {
-		if (!confirm('Disconnect all Azure DevOps connections? Imported projects keep their local clone.')) return;
-		try {
-			await disconnectAzureCommand();
 			await load();
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Disconnect failed';
@@ -116,7 +102,6 @@
 		<ConnectionsPanel
 			{overview}
 			onDisconnectGithub={disconnectGithub}
-			onDisconnectAzure={disconnectAzure}
 		/>
 
 		{#if loading}
@@ -143,7 +128,6 @@
 	open={modalOpen}
 	initialTab={modalInitialTab}
 	{githubAvailable}
-	{azureAvailable}
 	onCreated={handleProjectCreated}
 	onClose={closeModal}
 />

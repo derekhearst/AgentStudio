@@ -7,10 +7,10 @@ import { images, type ImageRow } from './images.schema'
  *
  * `recordGeneratedImage` is called from the `image_generate` tool handler right
  * after a successful provider response so the resulting image becomes a durable
- * audit row visible in the /artifacts feed. Failures are swallowed by the
+ * audit row visible in the /research feed. Failures are swallowed by the
  * caller (image generation must succeed even if the audit insert fails).
  *
- * `listImagesForUser` powers the /artifacts feed.
+ * `listImagesForUser` powers the /research feed.
  */
 
 export type RecordGeneratedImageInput = {

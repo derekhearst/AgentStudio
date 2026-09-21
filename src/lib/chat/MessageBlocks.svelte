@@ -1,13 +1,11 @@
 <script lang="ts">
 	import { renderMarkdown } from '$lib/chat/chat';
-	import ArtifactCard from './ArtifactCard.svelte';
 	import SubagentBlockCard from './SubagentBlockCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
 	import {
 		askQuestionAlreadyInMessage,
 		blockHasRenderableOutput,
-		getArtifactCardProps,
 		getAskUserAnswer,
 		getAskUserQuestions,
 		type SavedBlock,
@@ -19,12 +17,11 @@
 	 * `MessageBubble.svelte` so the bubble can be a thin layout shell.
 	 *
 	 * Block-kind dispatch:
-	 *   - tool/ask_user        → inline question + (if available) the answer bubble
-	 *   - tool/present_artifact → ArtifactCard, or ToolCallCard fallback if no card data
-	 *   - tool (other)          → ToolCallCard
-	 *   - thinking              → ThinkingBlockCard
-	 *   - subagent              → SubagentBlockCard
-	 *   - text                  → rendered markdown
+	 *   - tool/ask_user → inline question + (if available) the answer bubble
+	 *   - tool (other)  → ToolCallCard
+	 *   - thinking      → ThinkingBlockCard
+	 *   - subagent      → SubagentBlockCard
+	 *   - text          → rendered markdown
 	 *
 	 * `messageId` is used to compose stable per-block keys; `messageContent` is
 	 * the raw assistant text (used to suppress redundant ask_user prompts that
@@ -73,22 +70,6 @@
 					</div>
 				{/if}
 			{/each}
-		{/if}
-	{:else if block.kind === 'tool' && block.name === 'present_artifact'}
-		{@const card = getArtifactCardProps(block.result)}
-		{#if card}
-			<div class="mb-1.5 w-full">
-				<ArtifactCard {...card} />
-			</div>
-		{:else}
-			<div class="mb-1.5 w-full">
-				<ToolCallCard
-					name={String(block.name)}
-					argumentsText={JSON.stringify(block.arguments ?? {}, null, 2)}
-					result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
-					status={block.success === false ? 'failed' : 'completed'}
-				/>
-			</div>
 		{/if}
 	{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 		<div class="mb-1.5 w-full">
