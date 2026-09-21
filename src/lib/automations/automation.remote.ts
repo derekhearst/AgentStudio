@@ -5,8 +5,10 @@ import {
 	createAutomationRecord,
 	deleteAutomationRecord,
 	listAutomationsForUser,
+	runAutomationNow,
 	updateAutomationRecord,
 } from '$lib/automations/automation.server'
+import { listAutomationRunsForUser } from '$lib/automations/automation-runs.server'
 import { isValidTimeZone } from '$lib/automations/cron'
 
 const automationModeSchema = z.enum(['chat_followup', 'research', 'maintenance'])
@@ -84,4 +86,27 @@ export const updateAutomationCommand = command(updateAutomationSchema, async (in
 export const deleteAutomationCommand = command(automationIdSchema, async ({ id }) => {
 	const user = requireAuthenticatedRequestUser()
 	return deleteAutomationRecord(user.id, id)
+})
+
+/**
+ * #31 — "Run now". Queues a manual execution of an automation the caller owns. Returns the
+ * queued job id; the run itself lands in the run history a moment later. Does not move
+ * `next_run_at`, and works on a disabled automation so a fix can be verified.
+ */
+export const runAutomationNowCommand = command(automationIdSchema, async ({ id }) => {
+	const user = requireAuthenticatedRequestUser()
+	const queued = await runAutomationNow(user.id, id)
+	if (!queued) throw new Error('Automation not found')
+	return queued
+})
+
+const automationRunsSchema = z.object({
+	automationId: z.string().uuid(),
+	limit: z.number().int().min(1).max(100).optional(),
+})
+
+/** #31 — run history for one automation, newest first. */
+export const listAutomationRunsQuery = query(automationRunsSchema, async ({ automationId, limit }) => {
+	const user = requireAuthenticatedRequestUser()
+	return listAutomationRunsForUser(user.id, { automationId, limit })
 })

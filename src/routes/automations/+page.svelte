@@ -5,6 +5,7 @@
 	import {
 		deleteAutomationCommand,
 		listAutomationsQuery,
+		runAutomationNowCommand,
 		updateAutomationCommand,
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
@@ -22,6 +23,7 @@
 	let loading = $state(true);
 	let deletingAutomationId = $state<string | null>(null);
 	let togglingAutomationId = $state<string | null>(null);
+	let runningAutomationId = $state<string | null>(null);
 	let sortMode = $state<SortMode>('next_run');
 	let formError = $state<string | null>(null);
 	let createMessage = $state<string | null>(null);
@@ -37,6 +39,12 @@
 
 	const enabledCount = $derived(rows.filter((row) => row.enabled).length);
 	const dueSoonCount = $derived(rows.filter((row) => isDueSoon(row.nextRunAt)).length);
+	// #31 — an automation the system switched off is the single most important thing on
+	// this page, so it gets a counter in the header rather than hiding in a card.
+	const autoDisabledCount = $derived(
+		rows.filter((row) => !row.enabled && row.disabledReason === 'consecutive_failures').length,
+	);
+	const failingCount = $derived(rows.filter((row) => row.lastRunStatus === 'failed').length);
 
 	const sortedRows = $derived.by(() => {
 		const list = [...rows];
@@ -118,6 +126,25 @@
 		}
 	}
 
+	// #31 — "Run now" queues a manual execution; the worker picks it up within a poll
+	// interval, so we reload shortly after to pull in the resulting run row.
+	async function runAutomationNow(automation: AutomationRow) {
+		runningAutomationId = automation.id;
+		formError = null;
+		createMessage = null;
+		try {
+			await runAutomationNowCommand({ id: automation.id });
+			createMessage = `Queued a run of "${automation.description}". The schedule is unchanged — open History on the card to watch it land.`;
+			setTimeout(() => {
+				void loadPageData();
+			}, 3000);
+		} catch {
+			formError = 'Unable to queue this automation right now.';
+		} finally {
+			runningAutomationId = null;
+		}
+	}
+
 	async function deleteAutomation(automation: AutomationRow) {
 		const confirmed = window.confirm(`Delete automation "${automation.description}"?`);
 		if (!confirmed) return;
@@ -150,6 +177,12 @@
 					<span class="pulse-dot"></span>
 					{dueSoonCount} due soon
 				</span>
+			{/if}
+			{#if failingCount > 0}
+				<span class="console-chip is-warn">{failingCount} failing</span>
+			{/if}
+			{#if autoDisabledCount > 0}
+				<span class="console-chip is-warn">{autoDisabledCount} auto-disabled</span>
 			{/if}
 		{/snippet}
 		{#snippet actions()}
@@ -196,9 +229,11 @@
 								{automation}
 								toggling={togglingAutomationId === automation.id}
 								deleting={deletingAutomationId === automation.id}
+								running={runningAutomationId === automation.id}
 								onDuplicate={handleDuplicate}
 								onToggle={toggleAutomation}
 								onDelete={deleteAutomation}
+								onRunNow={runAutomationNow}
 							/>
 						{/each}
 					</div>
