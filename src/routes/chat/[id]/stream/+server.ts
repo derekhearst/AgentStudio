@@ -54,6 +54,7 @@ import {
 } from '$lib/chat/stream-prep.server'
 import { buildEngineOptions, GatewayNotConfiguredError, isClaudeModel } from '$lib/engine/options.server'
 import { runEngineStream } from '$lib/engine/stream.server'
+import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { logger } from '$lib/observability/logger'
 
 type StreamPayload = {
@@ -228,6 +229,33 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			.join('\n')
 	}
 
+	/*
+	 * Full agent dispatch. runInlineSubagent builds a forwarded session that
+	 * persists to the sub-agent's own run_events and pushes translated
+	 * `subagent_*` frames into this controller WITHOUT a seq, so they never
+	 * disturb the parent's resume cursor.
+	 */
+	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+
+	async function fulfilSubagent(req: { task: string; context?: string; agentId?: string }): Promise<string> {
+		if (!req.agentId) return 'run_subagent requires an agentId.'
+		if (!streamController) return 'Subagent dispatch is unavailable outside an active stream.'
+		const task = req.context ? `${req.context}\n\n${req.task}` : req.task
+		try {
+			const outcome = await runInlineSubagent(
+				{ agentId: req.agentId, agentName: req.agentId.slice(0, 8), task },
+				user.id,
+				body.conversationId,
+				streamController,
+			)
+			return outcome.result
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			logger.warn('[chat/stream] subagent failed', { runId: run.id, error: message })
+			return `Subagent failed: ${message}`
+		}
+	}
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
@@ -240,6 +268,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				userId: user.id,
 				runId: run.id,
 				onAskUser: (questions) => fulfilAskUser(questions),
+				onRunSubagent: (req) => fulfilSubagent(req),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,
@@ -285,6 +314,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 
 			emitFrame = emit
+			streamController = controller
 
 			try {
 				await emit('context_stats', {
@@ -315,6 +345,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
 						},
+						requiresApproval: (name) => approvalRequiredTools.has(name),
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {

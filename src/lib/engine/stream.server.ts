@@ -34,6 +34,12 @@ export type EngineRunInput = {
 	 * Omit to auto-approve everything (the old "auto-approve mode").
 	 */
 	requestApproval?: (call: { id: string; name: string; input: Record<string, unknown> }) => Promise<ApprovalDecision>
+	/**
+	 * Whether a tool needs human approval. Only these get a `tool_pending` block:
+	 * the SDK does not call `canUseTool` for tools it can run outright, so
+	 * showing everything as pending leaves blocks that never resolve.
+	 */
+	requiresApproval?: (toolName: string) => boolean
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
 	/**
@@ -127,6 +133,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	}
 
 	const approvalsEnabled = Boolean(input.requestApproval)
+	const needsApproval = (name: string) => approvalsEnabled && (input.requiresApproval?.(name) ?? true)
+	// Tools whose `tool_call` frame has already gone out, so the approval path
+	// doesn't emit a second one.
+	const callEmitted = new Set<string>()
 
 	const options: Options = {
 		...input.options,
@@ -150,7 +160,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							return { behavior: 'deny', message: decision.reason }
 						}
 						// Moves the UI's pending block to "executing" using the same id.
-						await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+						if (!callEmitted.has(id)) {
+							callEmitted.add(id)
+							await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+						}
 						return { behavior: 'allow' }
 					},
 				}
@@ -204,13 +217,14 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					continue
 				}
 
-				if (approvalsEnabled) {
+				if (needsApproval(name)) {
 					// Park the id for canUseTool and show the block as awaiting approval.
 					// The tool_call frame is emitted from canUseTool once approved.
 					const key = callKey(name, block.input)
 					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
 					await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
 				} else {
+					callEmitted.add(id)
 					await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
 				}
 			}

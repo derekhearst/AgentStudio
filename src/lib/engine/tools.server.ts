@@ -52,6 +52,12 @@ export type ToolServerContext = {
 	 */
 	onAskUser?: (questions: AskUserQuestion[]) => Promise<string>
 	/**
+	 * Full agent dispatch for `run_subagent`. The registry handler is only a
+	 * stateless one-shot fallback; the old chat loop special-cased this tool to
+	 * spawn a real agent whose events forward into the parent stream.
+	 */
+	onRunSubagent?: (req: { task: string; context?: string; agentId?: string }) => Promise<string>
+	/**
 	 * Fired after every tool finishes. The stream layer uses this to emit
 	 * `tool_result` frames without having to re-derive the outcome.
 	 */
@@ -72,6 +78,12 @@ export function buildToolServer(ctx: ToolServerContext) {
 			// The SDK wants a raw Zod shape, not the ZodObject wrapper.
 			toolSchemas[name].shape,
 			async (args: Record<string, unknown>) => {
+				if (name === 'run_subagent' && ctx.onRunSubagent) {
+					const req = args as { task: string; context?: string; agentId?: string }
+					const result = await ctx.onRunSubagent(req)
+					return { content: [{ type: 'text' as const, text: result }] }
+				}
+
 				if (name === 'ask_user' && ctx.onAskUser) {
 					const questions = (args.questions ?? []) as AskUserQuestion[]
 					const answer = await ctx.onAskUser(questions)
