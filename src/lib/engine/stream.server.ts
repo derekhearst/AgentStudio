@@ -34,22 +34,50 @@ export type EngineRunInput = {
 	 * Omit to auto-approve everything (the old "auto-approve mode").
 	 */
 	requestApproval?: (call: { id: string; name: string; input: Record<string, unknown> }) => Promise<ApprovalDecision>
-	/** Called once the SDK reports its session id, so the run row can store it for resume. */
+	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
-	/** Called with the final assistant text so the caller can persist the message. */
-	onComplete?: (summary: { text: string; sessionId: string | null }) => void
+}
+
+export type EngineUsage = {
+	inputTokens: number
+	outputTokens: number
+	cacheCreationTokens: number
+	cacheReadTokens: number
+	/**
+	 * The SDK's own cost estimate. Zero (or meaningless) for subscription runs,
+	 * which is why Claude runs are accounted in tokens rather than dollars.
+	 *
+	 * Caveat: on a resumed session the SDK reports this cumulatively across the
+	 * whole transcript, so it is only safe to treat as a per-turn figure for
+	 * gateway runs, where we start fresh sessions.
+	 */
+	costUsd: number
+}
+
+export type EngineRunSummary = {
+	text: string
+	sessionId: string | null
+	usage: EngineUsage
+	durationMs: number
+	numTurns: number
+	error: string | null
 }
 
 type Emit = (event: string, payload: unknown) => void
 
 /**
  * Drive one run and push SSE frames into `controller`.
+ *
+ * Does NOT emit `done` — the caller owns that, because the client expects
+ * `done` to carry the persisted `messageId`, which only exists after the
+ * summary returned here has been written to the database.
  */
 export async function runEngineStream(
 	controller: ReadableStreamDefaultController<Uint8Array>,
 	input: EngineRunInput,
-): Promise<void> {
-	let seq = 0
+	startSeq = 0,
+): Promise<EngineRunSummary> {
+	let seq = startSeq
 	const emit: Emit = (event, payload) => {
 		seq += 1
 		controller.enqueue(encodeSseFrame(event, payload, seq))
@@ -171,16 +199,32 @@ export async function runEngineStream(
 		}
 
 		if (msg.type === 'result') {
-			// `result` is the SDK's end-of-run marker; anything it reports as an
-			// error should surface rather than looking like a clean finish.
-			if (msg.is_error) {
-				emit('done', { error: String(msg.result ?? 'Run failed'), sessionId })
-				input.onComplete?.({ text: finalText, sessionId })
-				return
+			const u = (msg.usage ?? {}) as Record<string, number>
+			return {
+				text: finalText,
+				sessionId,
+				usage: {
+					inputTokens: u.input_tokens ?? 0,
+					outputTokens: u.output_tokens ?? 0,
+					cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+					cacheReadTokens: u.cache_read_input_tokens ?? 0,
+					costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
+				},
+				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
+				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
+				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
 			}
 		}
 	}
 
-	emit('done', { sessionId })
-	input.onComplete?.({ text: finalText, sessionId })
+	// The iterator ended without a `result` message — treat as a completed run
+	// with no usage rather than inventing numbers.
+	return {
+		text: finalText,
+		sessionId,
+		usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+		durationMs: 0,
+		numTurns: 0,
+		error: null,
+	}
 }

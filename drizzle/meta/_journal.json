@@ -428,6 +428,13 @@
       "when": 1779100000000,
       "tag": "0060_projects_repo_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1779200000000,
+      "tag": "0061_chat_sdk_session",
+      "breakpoints": true
     }
   ]
 }

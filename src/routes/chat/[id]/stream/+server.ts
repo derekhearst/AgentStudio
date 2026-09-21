@@ -1,51 +1,57 @@
+/**
+ * Chat streaming endpoint, rebuilt on the Claude Agent SDK.
+ *
+ * What changed from the hand-written loop:
+ *   - The agent loop, tool dispatch, tool disclosure, compaction and
+ *     tool-result trimming are the SDK's now. All of that code is gone.
+ *   - Conversation state lives in the SDK session (`conversations.sdkSessionId`),
+ *     so a turn sends only the new user message and resumes. We no longer rebuild
+ *     the whole history from `messages` on every request.
+ *   - Claude runs go through the Claude Code CLI login (subscription, no
+ *     per-token cost); everything else goes through an Anthropic-compatible
+ *     gateway. `buildEngineOptions` picks per run.
+ *
+ * What deliberately did NOT change: the SSE wire contract, so the chat page and
+ * `sse-consumer` are untouched. Persistence, budgets, titles and the follow-up
+ * jobs are all still ours.
+ */
+
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { and, asc, desc, eq, gt, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
-import { type LlmMessage } from '$lib/llm/chat.server'
-import { estimateMessageTokens } from '$lib/chat/chat.server'
-import { getContextWindowSize } from '$lib/tools/tools'
+import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { emitActivity } from '$lib/activity/activity.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
-import { persistRunBlocks } from '$lib/runs/blocks.server'
+import { getContextWindowSize } from '$lib/tools/tools'
+import { encodeSseFrame } from '$lib/runtime/sse-codec'
+import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
+import { loadSlotOverrides } from '$lib/context/overrides.server'
+import { resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
+import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import {
 	buildApprovalRequiredSet,
 	buildBuiltinAgentPostureSlot,
-	buildCacheableSystemPromptBlocks,
 	buildIdentitySlot,
-	buildLlmMessagesFromHistory,
 	buildMemoryRecallSlot,
 	buildProjectContextSlot,
 	buildSkillSummariesText,
 	buildToolPolicySlot,
-	createToolComputer,
-	detectPdfPluginConfig,
 	enforceBudgetGuard,
 	enqueueEvaluationJob,
 	enqueueMemoryMineJob,
 	extractAgentWorkspaceConfig,
-	maybeCompactConversation,
 	maybeGenerateTitle,
 	persistAssistantMessage,
 	resolveModelConfig,
 	resolveParentMessage,
 	resolveSkillTopK,
-	trimToolResultsForRun,
-	type CompactionStats,
 } from '$lib/chat/stream-prep.server'
-import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
-import { runInlineSubagent } from '$lib/agents/inline-subagent'
-import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
-import { loadSlotOverrides } from '$lib/context/overrides.server'
-import { resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
-import { agents as agentsTable } from '$lib/agents/agents.schema'
-import { runChatLoop, createSseSession } from '$lib/runtime'
-import { encodeSseFrame } from '$lib/runtime/sse-codec'
+import { buildEngineOptions, GatewayNotConfiguredError, isClaudeModel } from '$lib/engine/options.server'
+import { runEngineStream } from '$lib/engine/stream.server'
 import { logger } from '$lib/observability/logger'
-
-const DREAMING_ONLY_TOOLS = new Set<string>()
 
 type StreamPayload = {
 	conversationId: string
@@ -56,20 +62,12 @@ type StreamPayload = {
 	attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
 }
 
-type ChatRunState = (typeof chatRuns.$inferInsert)['state']
-
-const sse = encodeSseFrame
-
 export const POST: RequestHandler = async ({ request, locals }) => {
-	if (!locals.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 })
-	}
+	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 })
 	const user = locals.user
 
 	const body = (await request.json()) as StreamPayload
-	if (!body.conversationId) {
-		return json({ error: 'conversationId is required' }, { status: 400 })
-	}
+	if (!body.conversationId) return json({ error: 'conversationId is required' }, { status: 400 })
 
 	const [conversation] = await db
 		.select()
@@ -77,12 +75,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		.where(and(eq(conversations.id, body.conversationId), eq(conversations.userId, user.id)))
 		.limit(1)
 
-	if (!conversation) {
-		return json({ error: 'Conversation not found' }, { status: 404 })
-	}
+	if (!conversation) return json({ error: 'Conversation not found' }, { status: 404 })
 
 	const currentSettings = await getOrCreateSettings(user.id)
-	const { routedModel, reasoningEffort, reasoningConfig, modelSelection } = resolveModelConfig({
+	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
 		body,
 		settings: currentSettings,
 	})
@@ -92,20 +88,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		body,
 		model: routedModel,
 	})
-	if (!parentResult.ok) {
-		return json({ error: parentResult.error }, { status: 400 })
-	}
+	if (!parentResult.ok) return json({ error: parentResult.error }, { status: 400 })
 	const parentMessageId = parentResult.parentMessageId
 
-	const historyRows = await db
-		.select({ role: messages.role, content: messages.content, attachments: messages.attachments })
-		.from(messages)
-		.where(eq(messages.conversationId, body.conversationId))
-		.orderBy(asc(messages.sequence))
-
-	// First exchange = only the message we just inserted exists (historyRows has exactly 1 row)
-	const isFirstExchange = historyRows.length === 1 && !body.regenerate
-
+	// A conversation with no SDK session yet is on its first exchange as far as the
+	// engine is concerned, which is also when the title gets generated.
+	const isFirstExchange = !conversation.sdkSessionId && !body.regenerate
 	if (isFirstExchange) {
 		void emitActivity('chat_started', `Chat started: ${conversation.title}`, {
 			entityId: body.conversationId,
@@ -113,32 +101,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
-	const llmMessages: LlmMessage[] = buildLlmMessagesFromHistory(historyRows)
-
-	// --- Context Engineering: Unified System Prompt ---
-	const { approvalRequiredTools, programmaticToolCallingEnabled } =
-		await buildApprovalRequiredSet(currentSettings)
-
-	// Build skill summaries so the model can lazily load details with read_skill/read_skill_file.
-	// Phase 4 of #4: filter by relevance to the user's query when available, capped to skillTopK
-	// (default 8). Falls back to listing everything when no user content yet (e.g. regenerate
-	// of a system-prompted run) or when embeddings are unavailable.
-	const skillTopK = resolveSkillTopK(currentSettings)
-	const skillSummariesText = await buildSkillSummariesText({
-		userQuery: body.content,
-		skillTopK,
-	})
-
-	const contextSlots: ContextSlot[] = []
-	let scopedAgentTools: string[] | null = null
-	let persistentKey: string | null = null
-	let worktreeConfig: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null = null
-
-	// Resolve the bound agent — conversations are always logically bound to one (the modes
-	// concept folded into agents) but the column is nullable at the DB layer for back-compat
-	// with raw test fixtures. Fall back to the built-in Chat agent when null. Built-in agents
-	// (chat / research / plan / autonomous) carry a `builtinKey` and drive the orchestrator
-	// path; custom agents drive the per-agent path.
+	// ── Agent resolution ───────────────────────────────────────────────────────
 	let resolvedAgentId = conversation.agentId
 	if (!resolvedAgentId) {
 		const { getBuiltinAgentId } = await import('$lib/agents/builtin-agents.server')
@@ -147,42 +110,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			return json({ error: 'No default agent configured. Re-run database bootstrap.' }, { status: 500 })
 		}
 	}
-	const [agent] = await db
-		.select()
-		.from(agentsTable)
-		.where(eq(agentsTable.id, resolvedAgentId))
-		.limit(1)
-	if (!agent) {
-		return json({ error: 'Conversation agent not found' }, { status: 500 })
-	}
+	const [agent] = await db.select().from(agentsTable).where(eq(agentsTable.id, resolvedAgentId)).limit(1)
+	if (!agent) return json({ error: 'Conversation agent not found' }, { status: 500 })
+
 	const agentToolPolicy = resolveAgentToolPolicy(agent.config as Parameters<typeof resolveAgentToolPolicy>[0])
-
 	const isOrchestrator = agent.builtinKey != null
+	const workspaceConfig = isOrchestrator ? null : extractAgentWorkspaceConfig(agent.config)
 
-	// --- Context Engineering: Built-in Agent Posture ---
+	// ── Context slots → one system prompt ──────────────────────────────────────
+	// The slot system stays: it's how identity, posture, project context and memory
+	// recall get composed. Only the delivery changed — the SDK takes a string, so
+	// there are no per-block cache markers to manage any more.
+	const contextSlots: ContextSlot[] = []
 	const postureSlot = await buildBuiltinAgentPostureSlot(agent)
 	if (postureSlot) contextSlots.push(postureSlot)
 
-	// Wave 4 #15 phase 2 — project context slot when the conversation is bound to a project.
 	const projectSlot = await buildProjectContextSlot({
 		projectId: conversation.projectId,
 		userId: user.id,
 	})
 	if (projectSlot) contextSlots.push(projectSlot)
 
-	// --- Context Engineering: Orchestrator / Agent Identity ---
 	contextSlots.push(await buildIdentitySlot(agent))
-	if (!isOrchestrator) {
-		const workspace = extractAgentWorkspaceConfig(agent.config)
-		scopedAgentTools = workspace.scopedAgentTools
-		persistentKey = workspace.persistentKey
-		worktreeConfig = workspace.worktreeConfig
-	}
-
-	if (currentSettings.systemPrompt?.trim()) {
-		// Reserved for optional future system prompt handling.
-	}
 	contextSlots.push(buildToolPolicySlot(isOrchestrator))
+
+	const skillSummariesText = await buildSkillSummariesText({
+		userQuery: body.content,
+		skillTopK: resolveSkillTopK(currentSettings),
+	})
 	if (skillSummariesText) {
 		contextSlots.push({
 			name: 'skills',
@@ -192,7 +147,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
-	// --- Context Engineering: Memory Palace Recall ---
 	const memorySlot = await buildMemoryRecallSlot({
 		settings: currentSettings,
 		userId: user.id,
@@ -200,64 +154,19 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	})
 	if (memorySlot) contextSlots.push(memorySlot)
 
-	// Phase 8 of #4: per-(user, agent) slot overrides. Lets users disable slots, raise/lower
-	// priority, or set per-slot token caps from /agents/[id]/settings (UI follow-up).
 	const slotOverrides = await loadSlotOverrides(user.id, conversation.agentId)
-	const overriddenSlots = applySlotOverrides(contextSlots, slotOverrides)
-	const assembled = assembleSystemPrompt(overriddenSlots)
-	const capabilityPrompt = assembled.systemPrompt
+	const assembled = assembleSystemPrompt(applySlotOverrides(contextSlots, slotOverrides))
 
-	// `cacheControl` (camelCase) matches the OpenRouter SDK input shape; the SDK
-	// converts it to `cache_control` on the wire to Anthropic. Stable slots get the
-	// marker so they cache across turns; volatile ones (memory/skills/companion_skills)
-	// are appended without a marker so per-turn churn doesn't invalidate the prefix.
-	const systemBlocks = buildCacheableSystemPromptBlocks({
-		renderedSlots: assembled.renderedSlots,
-		fallbackText: capabilityPrompt,
-	})
-	if (systemBlocks.length > 0) {
-		llmMessages.unshift({ role: 'system', content: systemBlocks })
-	}
+	// ── Approval policy ────────────────────────────────────────────────────────
+	const { approvalRequiredTools } = await buildApprovalRequiredSet(currentSettings)
 
-	// --- Context Engineering: Conversation Compaction ---
-	const compaction = await maybeCompactConversation({
-		llmMessages,
-		model: routedModel,
-		userId: user.id,
-	})
-	const didCompact = compaction.didCompact
-	const compactionStats: CompactionStats | null = compaction.stats
-	const compactionTokensBefore = compaction.tokensBefore
-
-	// --- Context Engineering: Trim Historical Tool Results ---
-	const trimResult = trimToolResultsForRun({ messages: llmMessages, settings: currentSettings })
-	const trimmedMessages = trimResult.messages
-	const appliedEdits = trimResult.appliedEdits
-
-	const startedAt = Date.now()
-
-	// --- Context Engineering: Tool Loading (Tool Search Tool — deferred loading) ---
-	const { loadedSearchableTools, computeTools } = createToolComputer({
-		scopedAgentTools,
-		isOrchestrator,
-		programmaticToolCallingEnabled,
-		agentToolPolicy,
-		dreamingOnlyTools: DREAMING_ONLY_TOOLS,
-	})
-	const initialTools = computeTools()
-	// No hard limit — loop exits when the model stops calling tools
-	const MAX_TOOL_ROUNDS = 50
-
-	// Phase 3 of #5: budget enforcement BEFORE creating the run row, so a `block` cap
-	// short-circuits without leaving an orphan run.
+	// ── Budget guard, before the run row so a block leaves no orphan ───────────
 	const budgetGuard = await enforceBudgetGuard({
 		userId: user.id,
 		agentId: conversation.agentId,
 		conversationId: body.conversationId,
 	})
-	if (budgetGuard.blocked) {
-		return json(budgetGuard.payload, { status: 402 })
-	}
+	if (budgetGuard.blocked) return json(budgetGuard.payload, { status: 402 })
 
 	const [run] = await db
 		.insert(chatRuns)
@@ -273,139 +182,140 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 		.returning({ id: chatRuns.id, evalRequired: chatRuns.evalRequired })
 
+	const startedAt = Date.now()
+	// An agent can narrow the tool surface two ways: an explicit scoped list on a
+	// custom agent, or a readOnly policy. Unrestricted means "hand the model
+	// everything", which the SDK expresses as omitting allowedTools entirely.
+	const policyTools = agentToolPolicy.kind === 'readOnly' ? Array.from(agentToolPolicy.allow) : undefined
+	const scopedTools = workspaceConfig?.scopedAgentTools ?? policyTools
+
+	let engineOptions
+	try {
+		engineOptions = buildEngineOptions({
+			model: routedModel,
+			systemPrompt: assembled.systemPrompt,
+			allowedTools: scopedTools,
+			resumeSessionId: conversation.sdkSessionId ?? undefined,
+			tools: {
+				userId: user.id,
+				runId: run.id,
+				workspace: {
+					persistentKey: workspaceConfig?.persistentKey ?? null,
+					worktree: workspaceConfig?.worktreeConfig ?? null,
+					projectId: conversation.projectId ?? null,
+				},
+			},
+		})
+	} catch (error) {
+		const message = error instanceof GatewayNotConfiguredError ? error.message : 'Failed to configure model'
+		await db.update(chatRuns).set({ state: 'failed', label: 'Failed', error: message }).where(eq(chatRuns.id, run.id))
+		return json({ error: message }, { status: 400 })
+	}
+
 	const readable = new ReadableStream<Uint8Array>({
 		async start(controller) {
-			// Wave 2 #10 phase 1 — runtime extraction. The session wraps the controller +
-			// run_events + chat_runs writes; the loop is now in $lib/runtime/loop.server.ts.
-			const session = createSseSession({ runId: run.id, controller })
+			let seq = 0
+			const emit = (event: string, payload: unknown) => {
+				seq += 1
+				controller.enqueue(encodeSseFrame(event, payload, seq))
+			}
 
 			try {
-				// Notify client if compaction occurred. Include the full stats so the dev panel
-				// can render before/after counts and the model used (Feature #6 telemetry).
-				if (didCompact && compactionStats) {
-					await session.emit('compaction', {
-						tokensBefore: compactionTokensBefore,
-						...compactionStats,
-					})
-				}
-
-				// Phase 7 of #4: emit a context_stats snapshot so the chat workbench can show
-				// the real prompt-assembly footprint (tokenizer-accurate) rather than estimating
-				// client-side. Sent once at the top of the stream; cheap to compute.
-				await session.emit('context_stats', {
+				emit('context_stats', {
 					runId: run.id,
-					tokenEstimate: estimateMessageTokens(trimmedMessages, routedModel),
+					tokenEstimate: assembled.estimatedTokens,
 					contextWindow: getContextWindowSize(routedModel),
-					didCompact,
+					didCompact: false, // the SDK compacts internally; see compact boundary messages
 					includedSlots: assembled.includedSlots,
 					droppedSlots: assembled.droppedSlots,
 					truncatedSlots: assembled.truncatedSlots,
 					systemPromptTokens: assembled.estimatedTokens,
-					// Feature #5: applied_edits-style telemetry — what got trimmed before this turn
-					appliedEdits,
+					appliedEdits: [],
 				})
 
-				// PDF input — switch on the file-parser plugin so OpenRouter routes the file
-				// content blocks through the configured engine. Returns undefined when no PDFs.
-				const chatPlugins = detectPdfPluginConfig(trimmedMessages)
-
-				const loopResult = await runChatLoop({
-					session,
-					userId: user.id,
-					conversationId: body.conversationId,
-					model: routedModel,
-					initialMessages: trimmedMessages,
-					initialTools,
-					reasoningConfig,
-					chatPlugins,
-					maxRounds: MAX_TOOL_ROUNDS,
-					approvalRequiredTools,
-					isOrchestrator,
-					agentId: conversation.agentId ?? null,
-					persistentKey,
-					worktree: worktreeConfig,
-					projectId: conversation.projectId ?? null,
-					computeTools: async () => computeTools(),
-					loadSearchableTools: (toolNames) => {
-						for (const name of toolNames) loadedSearchableTools.add(name)
+				const summary = await runEngineStream(
+					controller,
+					{
+						prompt: body.content ?? '',
+						options: engineOptions,
+						onSessionId: (sessionId) => {
+							// Persist immediately: if the run dies mid-turn we still want the
+							// next turn to resume rather than silently start a new session.
+							void db
+								.update(conversations)
+								.set({ sdkSessionId: sessionId, updatedAt: new Date() })
+								.where(eq(conversations.id, body.conversationId))
+								.catch((error) =>
+									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
+								)
+						},
+						requestApproval:
+							approvalRequiredTools.size > 0
+								? async ({ id, name, input }) => {
+										if (!approvalRequiredTools.has(name)) return { allow: true }
+										const token = `${run.id}:${id}`
+										await enqueuePendingApproval(
+											run.id,
+											{ token, toolName: name, args: input, requestedAt: new Date().toISOString() },
+											{ state: 'waiting_tool_approval', label: `Awaiting approval: ${name}` },
+										)
+										const approved = await awaitApprovalDecision(run.id, token)
+										if (approved) {
+											await db
+												.update(chatRuns)
+												.set({ state: 'running', label: 'Generating response' })
+												.where(eq(chatRuns.id, run.id))
+										}
+										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
+									}
+								: undefined,
 					},
-					spawnSubagent: async (req) => {
-						const fullTask = req.context ? `${req.context}\n\n${req.task}` : req.task
-						const result = await runInlineSubagent(
-							{ agentId: req.agentId, agentName: req.agentId.slice(0, 8), task: fullTask },
-							user.id,
-							body.conversationId,
-							session.safeController,
-						)
-						return { conversationId: result.conversationId, result: result.result }
-					},
-				})
+					seq,
+				)
 
-				const {
-					promptTokens,
-					completionTokens,
-					reasoningTokens,
-					cacheCreationInputTokens,
-					cacheReadInputTokens,
-					finalText: allTextContent,
-					toolCalls: allToolCalls,
-					streamBlocks,
-				} = loopResult
-				const firstTokenAt = loopResult.firstTokenAt
+				// runEngineStream emitted its own frames after `seq`; keep numbering monotonic.
+				seq += 1
 
 				const totalMs = Date.now() - startedAt
-				const ttftMs = firstTokenAt
-				const tokensPerSec = totalMs > 0 ? Math.round((completionTokens / (totalMs / 1000)) * 100) / 100 : null
-				// Backfill the most recent thinking block with its final reasoning-token count.
-				// The loop only learns the count from the LAST chunk; updating the block in-place
-				// keeps the persisted metadata accurate after the message is saved.
-				for (let i = streamBlocks.length - 1; i >= 0; i--) {
-					const block = streamBlocks[i]
-					if (block.kind === 'thinking') {
-						block.reasoningTokens = reasoningTokens
-						break
-					}
-				}
-				await persistRunBlocks(run.id, streamBlocks)
+				const claudeRun = isClaudeModel(routedModel)
 
+				// Subscription runs have no per-token price, so record tokens and force the
+				// dollar figure to zero rather than inventing one from list pricing.
 				const messageCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
-					tokensIn: promptTokens,
-					tokensOut: completionTokens,
-					tokensCacheWrite: cacheCreationInputTokens,
-					tokensCacheRead: cacheReadInputTokens,
+					tokensIn: summary.usage.inputTokens,
+					tokensOut: summary.usage.outputTokens,
+					tokensCacheWrite: summary.usage.cacheCreationTokens,
+					tokensCacheRead: summary.usage.cacheReadTokens,
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					metadata: { conversationId: body.conversationId },
+					costOverride: claudeRun ? 0 : summary.usage.costUsd,
+					metadata: { conversationId: body.conversationId, subscription: claudeRun },
 				})
 
-				// Wrap the assistant insert (or partial-merge) and the conversation totals
-				// update in a single transaction so a crash between leaves the row + totals
-				// consistent. Title generation stays outside (it's a fire-and-forget side
-				// effect started below).
 				const assistantMessage = await persistAssistantMessage({
 					conversationId: body.conversationId,
 					parentMessageId,
 					model: routedModel,
-					content: allTextContent || '(no output)',
-					promptTokens,
-					completionTokens,
-					ttftMs,
+					content: summary.text || '(no output)',
+					promptTokens: summary.usage.inputTokens,
+					completionTokens: summary.usage.outputTokens,
+					ttftMs: null,
 					totalMs,
-					tokensPerSec,
+					tokensPerSec: null,
 					cost: messageCost,
 					metadata: {
 						modelSelection,
 						reasoningEffort,
-						reasoningTokens,
-						tokensCacheWrite: cacheCreationInputTokens,
-						tokensCacheRead: cacheReadInputTokens,
+						tokensCacheWrite: summary.usage.cacheCreationTokens,
+						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
-						blocks: streamBlocks.length > 0 ? streamBlocks : undefined,
+						sdkSessionId: summary.sessionId,
+						numTurns: summary.numTurns,
 					},
-					toolCalls: allToolCalls,
+					toolCalls: [],
 					runId: run.id,
 					conversationTotals: {
 						previousTokens: conversation.totalTokens,
@@ -416,21 +326,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				maybeGenerateTitle({
 					isFirstExchange,
 					userContent: body.content ?? '',
-					assistantContent: allTextContent,
+					assistantContent: summary.text,
 					conversationId: body.conversationId,
 				})
 
-				await session.updateRun({
-					state: 'completed',
-					label: 'Completed',
-					lastDelta: allTextContent.slice(-500),
-					heartbeat: true,
-					finished: true,
-				})
+				await db
+					.update(chatRuns)
+					.set({
+						state: summary.error ? 'failed' : 'completed',
+						label: summary.error ? 'Failed' : 'Completed',
+						error: summary.error,
+						lastDelta: summary.text.slice(-500),
+						lastHeartbeatAt: new Date(),
+						finishedAt: new Date(),
+					})
+					.where(eq(chatRuns.id, run.id))
 
-				// Wave 4 #17 phase 5: durable jobs replace the prior fire-and-forget
-				// mineConversation / runEvaluatorPass calls. Both dedupe so concurrent
-				// finishes collapse to one job and failures are visible in /settings/jobs.
 				enqueueMemoryMineJob({
 					settings: currentSettings,
 					conversationId: body.conversationId,
@@ -443,42 +354,36 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						userId: user.id,
 						conversationId: body.conversationId,
 						userContent: body.content,
-						assistantContent: allTextContent,
-						toolCalls: allToolCalls,
+						assistantContent: summary.text,
+						toolCalls: [],
 					})
 				}
 
-				await session.emit('metrics', {
+				emit('metrics', {
 					model: routedModel,
-					tokensIn: promptTokens,
-					tokensOut: completionTokens,
-					tokensCacheWrite: cacheCreationInputTokens,
-					tokensCacheRead: cacheReadInputTokens,
-					reasoningTokens,
-					ttftMs,
+					tokensIn: summary.usage.inputTokens,
+					tokensOut: summary.usage.outputTokens,
+					tokensCacheWrite: summary.usage.cacheCreationTokens,
+					tokensCacheRead: summary.usage.cacheReadTokens,
+					reasoningTokens: 0,
+					ttftMs: null,
 					totalMs,
-					tokensPerSec,
+					tokensPerSec: null,
 					cost: parseFloat(messageCost),
 					modelSelection,
+					subscription: claudeRun,
 				})
-				await session.emit('done', { messageId: assistantMessage.id })
-				if (session.isClientConnected()) {
-					controller.close()
-				}
+				emit('done', { messageId: assistantMessage.id, ...(summary.error ? { error: summary.error } : {}) })
+				controller.close()
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
-				await session.updateRun({
-					state: 'failed',
-					label: 'Failed',
-					error: errorMessage,
-					finished: true,
-				})
-				await session.emit('done', {
-					error: errorMessage,
-				})
-				if (session.isClientConnected()) {
-					controller.close()
-				}
+				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
+				await db
+					.update(chatRuns)
+					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
+					.where(eq(chatRuns.id, run.id))
+				emit('done', { error: errorMessage })
+				controller.close()
 			}
 		},
 	})

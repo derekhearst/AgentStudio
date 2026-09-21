@@ -22,6 +22,11 @@ export const conversations = pgTable('conversations', {
 	projectId: uuid('project_id'),
 	totalTokens: integer('total_tokens').notNull().default(0),
 	totalCost: numeric('total_cost', { precision: 18, scale: 12 }).notNull().default('0'),
+	// Claude Agent SDK session id. The SDK owns turn-to-turn conversation state, so
+	// subsequent turns `resume` this instead of us rebuilding the message history
+	// on every request. Null until the first run completes, and for conversations
+	// that predate the engine migration — those start a fresh SDK session.
+	sdkSessionId: text('sdk_session_id'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
