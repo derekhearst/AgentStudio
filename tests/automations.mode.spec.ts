@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #21 phase 3 — automation_mode + automation_output_target enums.
@@ -13,15 +13,6 @@ import { getSql, uniquePrefix } from './helpers'
  *   - the metric shape emitted by engine.ts (automations.duration_ms + automations.lifecycle.*)
  *     carries the right dimensions
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 test.describe('automations/mode — schema invariants', () => {
 	test('mode defaults to chat_followup + outputTarget defaults to chat_session for back-compat', async () => {

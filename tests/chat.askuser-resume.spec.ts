@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Cold-load resume of a paused ask_user. Closes the gap where a hard refresh during an
@@ -15,17 +15,6 @@ import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } fro
  *   5. Click an option → option highlights + Submit becomes enabled
  *   6. Click Submit → POST /chat/[id]/ask-user fires + chat_runs.pending_questions records the answer
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function seedPausedAskUser(prefix: string) {
 	const sql = getSql()

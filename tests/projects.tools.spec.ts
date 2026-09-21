@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #15 phase 2 — Projects agent tools storage contract.
@@ -12,17 +12,6 @@ import { getSql, uniquePrefix } from './helpers'
  * capability group calls one of these tools — the worker then writes through to the
  * projects schema this spec verifies.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupProjectsToolsPrefix(prefix: string) {
 	const sql = getSql()
@@ -61,8 +50,8 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 		try {
 			// Create a fake "other user" + their project.
 			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username, role, is_active)
-				values ('Other User', ${`other-${prefix}`}, 'user', true)
+				insert into users (name, username)
+				values ('Other User', ${`other-${prefix}`})
 				returning id
 			`
 			const [otherProject] = await sql<{ id: string }[]>`

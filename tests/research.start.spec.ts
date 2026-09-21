@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #18 phase 3 — startResearchCommand row-shape contract.
@@ -10,17 +10,6 @@ import { getSql, uniquePrefix } from './helpers'
  * once a real research run completes (the in-process worker started in db.server.ts will
  * pick up enqueued jobs).
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupResearchPrefix(prefix: string) {
 	const sql = getSql()

@@ -97,7 +97,7 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(byKey.research?.toolPolicy?.kind).toBe('readOnly')
 		expect(byKey.plan?.toolPolicy?.kind).toBe('readOnly')
 		// Read-only agents must keep the plan authoring + handoff tools (the whole point)
-		// and the read tools. `file_write` is their one write tool: the plan is a file.
+		// and the read tools. `Write` is their one write tool: the plan is a file.
 		expect(byKey.research?.toolPolicy?.allow).toContain('Write')
 		expect(byKey.research?.toolPolicy?.allow).toContain('request_plan_approval')
 		expect(byKey.research?.toolPolicy?.allow).toContain('web_search')

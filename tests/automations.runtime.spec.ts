@@ -1,19 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type BrowserContext } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 const BASE_URL = 'http://127.0.0.1:4173'
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function triggerCron(context: BrowserContext) {
 	const cookies = await context.cookies(BASE_URL)

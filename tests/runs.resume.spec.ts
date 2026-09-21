@@ -7,10 +7,7 @@ async function seedRunWithEvents(
 ) {
 	const sql = getSql()
 	const [user] = await sql<{ id: string }[]>`
-		select id from users
-		where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
+		select id from users order by created_at asc limit 1
 	`
 	if (!user) throw new Error('No active user found')
 
@@ -126,7 +123,7 @@ test.describe('runs/resume — replay events from terminated run', () => {
 		await authenticateContext(context)
 
 		const sql = getSql()
-		const [user] = await sql<{ id: string }[]>`select id from users where is_active = true limit 1`
+		const [user] = await sql<{ id: string }[]>`select id from users order by created_at asc limit 1`
 		const [conversation] = await sql<{ id: string }[]>`
 			insert into conversations (title, user_id, model, total_tokens, total_cost)
 			values (${`${prefix} Conversation`}, ${user.id}, ${'anthropic/claude-sonnet-4'}, 0, '0')

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #17 phase 5 — evaluation_run job migration contract.
@@ -13,17 +13,6 @@ import { getSql, uniquePrefix } from './helpers'
  * Live evaluator-pass execution is exercised by the existing evaluation tests + chat-stream
  * live tests (which now go through the enqueue → worker → runEvaluatorPass path).
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupEvalPrefix(prefix: string) {
 	const sql = getSql()

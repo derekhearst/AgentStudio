@@ -119,8 +119,8 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		try {
 			// Seed a second user and assign the run to them.
 			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username, role, is_active)
-				values (${`${prefix} other`}, ${otherUsername}, 'user', true)
+				insert into users (name, username)
+				values (${`${prefix} other`}, ${otherUsername})
 				returning id
 			`
 			const conversationId = await seedConversation(prefix, otherUser.id)

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 3 #14 phase 1+2 — evaluation framework schema invariants.
@@ -10,17 +10,6 @@ import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
  * columns. Phase 3+ live integration (spawning evaluator runs) is exercised once the
  * orchestration lands — for now the recordEvaluation helper is what writes to this table.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function setupRun(prefix: string, userId: string, opts: { evalRequired?: boolean } = {}) {
 	const sql = getSql()

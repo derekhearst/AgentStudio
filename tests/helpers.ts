@@ -655,3 +655,25 @@ export async function cleanupExtendedPrefix(prefix: string): Promise<void> {
 	// Then run the legacy cleanup for the older domains (agents/conversations/messages/etc).
 	await cleanupPrefixedRecords(prefix)
 }
+
+/**
+ * The instance's user.
+ *
+ * Every spec used to carry its own copy of this, all of them filtering on
+ * `is_active`/`deleted_at` and ordering by `role = 'admin'` — columns migration 0050
+ * dropped when the app became single-user. That broke 52 spec files at once, and because
+ * nothing in CI runs the suite it stayed broken silently.
+ *
+ * One copy now, and it asks the only question a single-user instance can answer: which
+ * user is there.
+ */
+export async function getActiveUserId(): Promise<string> {
+	const sql = getSql()
+	const [user] = await sql<{ id: string }[]>`select id from users order by created_at asc limit 1`
+	if (!user) {
+		throw new Error(
+			'No user found. The instance is not provisioned — run the setup flow, or seed one the way global-setup does.',
+		)
+	}
+	return user.id
+}

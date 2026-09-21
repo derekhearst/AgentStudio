@@ -3,6 +3,7 @@ import {
 	authenticateContext,
 	cleanupPrefixedRecords,
 	expectRealAssistantReply,
+	getActiveUserId,
 	getSql,
 	uniquePrefix,
 } from './helpers'
@@ -20,17 +21,6 @@ import {
  * Slow (60-120s per test) — they ride on the model's actual output. Skip with a soft
  * skip when env vars are missing, but the global setup already enforces them.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function seedConversation(prefix: string, userId: string, mode: 'chat' | 'research' = 'chat') {
 	const sql = getSql()

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * `/source-control` admin page — full operator flow exercised through the UI.
@@ -10,17 +10,6 @@ import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } fro
  *   2. Viewing the synced repo list when repos exist (sortable table, status badges)
  *   3. The page renders without console errors and reflects the current connection state
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function clearReposForUser(userId: string, prefix: string) {
 	const sql = getSql()

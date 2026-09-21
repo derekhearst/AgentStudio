@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #19 phase 2 finish — `tasks.repository_id` is declared by-name (no FK), so
@@ -11,17 +11,6 @@ import { getSql, uniquePrefix } from './helpers'
  * Also pins the `pull_requests` cascade behavior (DOES delete on repo delete — those
  * rows have a real FK so they're transient by definition).
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 test.describe('source-control/cascade — task survives repo delete', () => {
 	test('deleting a repository leaves task rows intact with a stale repository_id', async () => {

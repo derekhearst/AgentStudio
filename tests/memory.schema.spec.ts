@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #16 — memory schema invariants for the palace hierarchy + KG.
@@ -15,17 +15,6 @@ import { getSql, uniquePrefix } from './helpers'
  *   - relation valid_from/valid_to nullability (open-ended relations supported)
  *   - cascade-on-source-drawer-delete trims relations that cite it (SET NULL preserves the relation)
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupMemoryPrefix(prefix: string) {
 	const sql = getSql()

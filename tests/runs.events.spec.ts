@@ -13,10 +13,7 @@ type EventRow = {
 async function seedRun(prefix: string) {
 	const sql = getSql()
 	const [user] = await sql<{ id: string }[]>`
-		select id from users
-		where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
+		select id from users order by created_at asc limit 1
 	`
 	if (!user) throw new Error('No active user found for seeding')
 

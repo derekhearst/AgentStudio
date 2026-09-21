@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { stat, readFile, rm } from 'node:fs/promises'
 import { expect, test, type BrowserContext } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const STREAM_TIMEOUT_MS = 90_000
@@ -9,17 +9,6 @@ const STREAM_TIMEOUT_MS = 90_000
 async function buildCookieHeader(context: BrowserContext) {
 	const cookies = await context.cookies(BASE_URL)
 	return cookies.map((c) => `${c.name}=${c.value}`).join('; ')
-}
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
 }
 
 async function setApprovalRequiredTools(userId: string, tools: string[]) {
@@ -53,7 +42,7 @@ async function exists(path: string): Promise<boolean> {
 test.describe('workspace/live — per-run sandbox isolation through chat stream', () => {
 	test.describe.configure({ mode: 'serial' })
 
-	test('a file_write tool call lands in <sandbox>/<userId>/runs/<runId>/, not the legacy user dir', async ({
+	test('a Write tool call lands in <sandbox>/<userId>/runs/<runId>/, not the legacy user dir', async ({
 		context,
 	}) => {
 		test.setTimeout(STREAM_TIMEOUT_MS * 2)
@@ -82,7 +71,7 @@ test.describe('workspace/live — per-run sandbox isolation through chat stream'
 				headers: { 'Content-Type': 'application/json', Cookie: cookie },
 				body: JSON.stringify({
 					conversationId: conv.id,
-					content: `Use the file_write tool exactly once to write a file. path: "${fileName}", content: "${fileContent}". Do not produce any other tool calls or text first.`,
+					content: `Use the Write tool exactly once to write a file. file_path: "${fileName}", content: "${fileContent}". Do not produce any other tool calls or text first.`,
 					regenerate: false,
 				}),
 				signal: abort.signal,

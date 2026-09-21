@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #19 phase 3 + 4 — `list_pull_requests` / `get_pull_request` wiring + the
@@ -12,17 +12,6 @@ import { getSql, uniquePrefix } from './helpers'
  *   - DedupeKey shape `pull_request:<owner>/<repo>:<num>` is what the create-PR handoff uses,
  *     so a single PR never multiplies inbox rows even if the agent retries.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 test.describe('source-control — registered tool surface', () => {
 	test('source-control read + write tools are all registered', async () => {
@@ -126,8 +115,8 @@ test.describe('list_pull_requests / get_pull_request — visibility scoping', ()
 			const otherUserId = '00000000-0000-4000-8000-000000aaaaaa'
 			// Make sure the synthetic user actually exists so the FK doesn't reject.
 			await sql`
-				insert into users (id, name, username, role, is_active)
-				values (${otherUserId}, 'Test User', ${`${prefix}-user`}, 'user', true)
+				insert into users (id, name, username)
+				values (${otherUserId}, 'Test User', ${`${prefix}-user`})
 				on conflict (id) do nothing
 			`
 			const [repo] = await sql<{ id: string }[]>`

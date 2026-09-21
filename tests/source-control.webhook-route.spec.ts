@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { getSql, readEnvVar, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, readEnvVar, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #19 phase 5 — HTTP-level integration tests for `/api/webhooks/github`.
@@ -22,17 +22,6 @@ const BASE_URL = 'http://127.0.0.1:4173'
 
 function sign(rawBody: string, secret: string): string {
 	return 'sha256=' + createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
-}
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
 }
 
 async function clearPrefix(prefix: string) {
