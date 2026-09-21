@@ -314,12 +314,12 @@ body.console-resizing-row * { cursor: row-resize !important; }
 
 /* Sidebar Chats section — pinned bottom, scrollable, vertically resizable */
 .console-sb__chats {
-	margin-top: auto;
+	margin-top: 0;
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
-	flex: 0 0 auto;
-	height: var(--c-chats-h, 240px);
+	/* Chats are the point of the sidebar: take every pixel the nav doesn't need. */
+	flex: 1 1 auto;
 	border-top: 1px solid var(--color-base-300);
 	padding-top: 10px;
 	gap: 6px;
@@ -1339,11 +1339,11 @@ a.console-crumbs__seg:hover {
 	border: 0;
 	background: var(--color-base-200);
 	border-radius: 0;
-	padding: 14px 18px 12px;
+	padding: 8px 14px 8px;
 	display: flex;
 	flex-direction: column;
-	flex: 1 1 auto;
-	min-height: 168px;
+	flex: 0 0 auto;
+	min-height: 0;
 	transition: background 120ms;
 }
 
@@ -1359,12 +1359,15 @@ a.console-crumbs__seg:hover {
 	resize: none;
 	font: inherit;
 	outline: none;
-	padding: 4px 4px 0;
-	line-height: 1.55;
+	padding: 2px 4px;
+	line-height: 1.5;
 	font-size: 13.5px;
 	font-family: Consolas, 'Cascadia Code', monospace;
-	flex: 1 1 auto;
-	min-height: 110px;
+	flex: 0 0 auto;
+	/* One row by default; ChatComposer grows this to fit, capped here. */
+	min-height: 22px;
+	max-height: 168px;
+	overflow-y: auto;
 }
 
 .console-composer__ta::placeholder { color: color-mix(in oklab, var(--color-base-content) 30%, transparent); }
@@ -1373,7 +1376,7 @@ a.console-crumbs__seg:hover {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 4px 2px 0;
+	padding: 2px 2px 0;
 	gap: 6px;
 }
 
@@ -1700,4 +1703,72 @@ a.console-crumbs__seg:hover {
 	.console-drawer-backdrop {
 		display: none !important;
 	}
+}
+
+
+/* ── Sidebar: chat-first hierarchy ─────────────────────────────────────────
+   New chat sits at the top, chats take the middle, and configuration is
+   folded into a footer disclosure instead of six permanent rows. */
+
+.console-sb__newbtn {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 7px 10px;
+	border-radius: 8px;
+	border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
+	background: color-mix(in oklab, var(--color-primary) 10%, transparent);
+	color: var(--color-base-content);
+	font-size: 13px;
+	font-weight: 500;
+	text-decoration: none;
+	transition: background 120ms, border-color 120ms;
+}
+
+.console-sb__newbtn:hover {
+	background: color-mix(in oklab, var(--color-primary) 18%, transparent);
+	border-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+}
+
+.console-sb__foot {
+	margin-top: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-top: 8px;
+	border-top: 1px solid var(--color-base-300);
+	flex: 0 0 auto;
+}
+
+.console-sb__more {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 10px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+	font-size: 12.5px;
+	cursor: pointer;
+	transition: background 120ms, color 120ms;
+}
+
+.console-sb__more:hover {
+	background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+	color: var(--color-base-content);
+}
+
+.console-sb__more .car {
+	margin-left: auto;
+	font-size: 10px;
+	opacity: 0.7;
+}
+
+.console-sb__moreitems {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	padding-bottom: 4px;
 }
