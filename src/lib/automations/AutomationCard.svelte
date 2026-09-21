@@ -56,6 +56,10 @@
 			<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
 				<p class="text-[10px] uppercase tracking-wide text-base-content/35">Cron</p>
 				<p class="mt-0.5 font-mono text-[11px]">{automation.cronExpression}</p>
+				<!-- #30 — the expression is wall-clock, so the zone is half the schedule. -->
+				<p class="mt-0.5 truncate text-[10px] text-base-content/45" title="Schedule time zone">
+					{automation.timezone ?? 'America/Boise'}
+				</p>
 			</div>
 			<div class="rounded-lg border border-base-300/60 bg-base-200/20 px-3 py-2">
 				<p class="text-[10px] uppercase tracking-wide text-base-content/35">Last run</p>

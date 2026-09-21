@@ -449,6 +449,13 @@
       "when": 1779400000000,
       "tag": "0063_drop_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1779500000000,
+      "tag": "0064_automation_timezone",
+      "breakpoints": true
     }
   ]
 }

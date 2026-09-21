@@ -52,7 +52,7 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 		} else {
 			result = await runChatFollowupAutomation(automation, now)
 		}
-		const nextRunAt = computeNextRunAt(automation.cronExpression, now)
+		const nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
 		await db
 			.update(automations)
 			.set({ lastRunAt: now, nextRunAt, updatedAt: now })
@@ -138,7 +138,7 @@ async function handleAutomationBudgetBlocked(
 
 	let nextRunAt: Date | null = null
 	try {
-		nextRunAt = computeNextRunAt(automation.cronExpression, now)
+		nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
 	} catch {
 		// Bad cron expression — leave nextRunAt unchanged so the dispatcher won't keep
 		// re-evaluating; the same condition would re-trigger immediately otherwise.

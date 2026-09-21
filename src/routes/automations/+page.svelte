@@ -28,6 +28,7 @@
 	let formSeed = $state<{
 		description: string;
 		cronExpression: string;
+		timezone: string;
 		prompt: string;
 		enabled: boolean;
 		conversationMode: 'new_each_run' | 'reuse';
@@ -83,6 +84,7 @@
 		formSeed = {
 			description: `${automation.description} (copy)`,
 			cronExpression: automation.cronExpression,
+			timezone: automation.timezone,
 			prompt: automation.prompt,
 			enabled: automation.enabled,
 			conversationMode: automation.conversationMode,
