@@ -274,7 +274,7 @@
 			{#if modalTab === 'none'}
 				<form onsubmit={submitEmpty}>
 					<p class="mb-3 text-xs opacity-65">
-						Creates a project with no filesystem footprint. Add artifacts manually; no git repo on disk.
+						Creates a project with no filesystem footprint and no git repo on disk.
 					</p>
 					<div class="flex justify-end gap-2">
 						<button type="button" class="btn btn-ghost btn-sm" onclick={onClose} disabled={creating}>Cancel</button>

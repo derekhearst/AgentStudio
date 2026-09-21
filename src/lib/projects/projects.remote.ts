@@ -10,17 +10,9 @@ import { listPullRequestsForRepository } from '$lib/source-control/source-contro
 import {
 	createProject,
 	deleteProject,
-	editArtifact,
-	getArtifactById,
 	getProjectById,
-	getVersion,
-	getVersionHistory,
-	listArtifactsForProject,
 	listProjects,
-	rollbackArtifact,
-	softDeleteArtifact,
 	updateProject,
-	createArtifact,
 } from './projects.server'
 import {
 	commitProject,
@@ -45,7 +37,7 @@ import {
 } from './connections.server'
 
 /**
- * Projects + Artifacts SvelteKit remote surface, expanded with repo controls.
+ * Projects SvelteKit remote surface, expanded with repo controls.
  *
  * The /projects pages call into this module for everything: the connection cards, the
  * 4-mode creation flow (none/local/github/azure/url), and all repo-level git operations
@@ -64,23 +56,6 @@ async function ensureProjectOwned(projectId: string, userId: string) {
 	return project
 }
 
-async function ensureArtifactOwned(artifactId: string, userId: string) {
-	const artifact = await getArtifactById(artifactId)
-	if (!artifact) throw new Error(`Artifact ${artifactId} not found`)
-	if (artifact.projectId) {
-		await ensureProjectOwned(artifact.projectId, userId)
-	} else if (artifact.conversationId) {
-		const [conv] = await db
-			.select({ userId: conversations.userId })
-			.from(conversations)
-			.where(eq(conversations.id, artifact.conversationId))
-			.limit(1)
-		if (!conv || conv.userId !== userId) throw new Error('Not authorized')
-	} else {
-		throw new Error(`Artifact ${artifactId} has no scope`)
-	}
-	return artifact
-}
 
 // ─────────── Project queries + commands ───────────
 
@@ -92,8 +67,7 @@ export const listProjectsQuery = query(async () => {
 export const getProjectByIdQuery = query(z.string().uuid(), async (projectId) => {
 	const user = requireAuthenticatedRequestUser()
 	const project = await ensureProjectOwned(projectId, user.id)
-	const projectArtifacts = await listArtifactsForProject(project.id)
-	return { project, artifacts: projectArtifacts }
+	return { project }
 })
 
 const githubSourceSchema = z.object({
@@ -179,84 +153,6 @@ export const deleteProjectCommand = command(z.string().uuid(), async (projectId)
 	const user = requireAuthenticatedRequestUser()
 	await ensureProjectOwned(projectId, user.id)
 	return deleteProject(projectId)
-})
-
-// ─────────── Artifact queries + commands ───────────
-
-export const getArtifactQuery = query(z.string().uuid(), async (artifactId) => {
-	const user = requireAuthenticatedRequestUser()
-	const artifact = await ensureArtifactOwned(artifactId, user.id)
-	const versions = await getVersionHistory(artifactId)
-	return { artifact, versions }
-})
-
-export const getVersionQuery = query(z.string().uuid(), async (versionId) => {
-	const user = requireAuthenticatedRequestUser()
-	const version = await getVersion(versionId)
-	if (!version) return null
-	await ensureArtifactOwned(version.artifactId, user.id)
-	return version
-})
-
-const createArtifactSchema = z.object({
-	projectId: z.string().uuid(),
-	name: z.string().trim().min(1).max(160),
-	content: z.string(),
-	contentType: z.enum(CONTENT_TYPE_VALUES).optional(),
-	changeNote: z.string().trim().max(500).optional(),
-})
-
-export const createArtifactCommand = command(createArtifactSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	await ensureProjectOwned(input.projectId, user.id)
-	return createArtifact({
-		projectId: input.projectId,
-		name: input.name,
-		content: input.content,
-		contentType: input.contentType,
-		changeNote: input.changeNote,
-		editedBy: user.id,
-	})
-})
-
-const editArtifactSchema = z.object({
-	artifactId: z.string().uuid(),
-	content: z.string(),
-	changeNote: z.string().trim().max(500).optional(),
-})
-
-export const editArtifactCommand = command(editArtifactSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	await ensureArtifactOwned(input.artifactId, user.id)
-	return editArtifact({
-		artifactId: input.artifactId,
-		content: input.content,
-		changeNote: input.changeNote,
-		editedBy: user.id,
-	})
-})
-
-const rollbackArtifactSchema = z.object({
-	artifactId: z.string().uuid(),
-	toSeq: z.number().int().min(1),
-	changeNote: z.string().trim().max(500).optional(),
-})
-
-export const rollbackArtifactCommand = command(rollbackArtifactSchema, async (input) => {
-	const user = requireAuthenticatedRequestUser()
-	await ensureArtifactOwned(input.artifactId, user.id)
-	return rollbackArtifact({
-		artifactId: input.artifactId,
-		toSeq: input.toSeq,
-		editedBy: user.id,
-		changeNote: input.changeNote,
-	})
-})
-
-export const softDeleteArtifactCommand = command(z.string().uuid(), async (artifactId) => {
-	const user = requireAuthenticatedRequestUser()
-	await ensureArtifactOwned(artifactId, user.id)
-	return softDeleteArtifact(artifactId)
 })
 
 // ─────────── Connections (was /source-control) ───────────

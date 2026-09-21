@@ -31,7 +31,7 @@ import { getContextWindowSize } from '$lib/tools/tools'
 import { encodeSseFrame } from '$lib/runtime/sse-codec'
 import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib/context/slots.server'
 import { loadSlotOverrides } from '$lib/context/overrides.server'
-import { resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
+import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import {

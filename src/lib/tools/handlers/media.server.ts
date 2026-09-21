@@ -4,13 +4,13 @@
  *
  * Both handlers route the cost ledger entry through `logToolUsage` so the per-tool
  * spend rolls up alongside chat token costs. `image_generate` also persists the
- * generated image to the /artifacts feed; the persist is best-effort and never
+ * generated image to the /research feed; the persist is best-effort and never
  * blocks the agent's report-back.
  */
 
 import { toolSchemas } from '../tool-schemas'
 import { generateImage } from '../image-gen.server'
-import { resolveConversationFromRunId } from '../artifact-scope.server'
+import { resolveConversationFromRunId } from '../run-scope.server'
 import { logger } from '$lib/observability/logger'
 import type { ToolHandler } from '../handler-types'
 
@@ -71,7 +71,7 @@ export const mediaHandlers: Record<string, ToolHandler> = {
 	image_generate: async (call, { userId, runId, startedAt }) => {
 		const input = toolSchemas.image_generate.parse(call.arguments)
 		const result = await generateImage(input.prompt, input.model, input.size)
-		// Record the generated image so it appears in the /artifacts feed.
+		// Record the generated image so it appears in the /research feed.
 		// Best-effort: failures here must NOT bubble up — the image was generated
 		// successfully and the model needs to see the URL even if our audit insert
 		// fails (DB hiccup, transient issue, …).

@@ -16,9 +16,9 @@ export const conversations = pgTable('conversations', {
 	agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
 	model: text('model').notNull().default('claude-sonnet-5'),
 	// Wave 4 #15 phase 2 — bind a conversation to a project so subsequent agent edits know
-	// where to put new artifacts. Declared by-name (no enforced FK) to avoid a circular import
+	// where to write new files. Declared by-name (no enforced FK) to avoid a circular import
 	// with $lib/projects. SET NULL semantics enforced via application logic when a project
-	// is deleted (cascade hits artifacts; the conversation back-reference becomes a tombstone).
+	// is deleted (the conversation back-reference becomes a tombstone).
 	projectId: uuid('project_id'),
 	totalTokens: integer('total_tokens').notNull().default(0),
 	totalCost: numeric('total_cost', { precision: 18, scale: 12 }).notNull().default('0'),

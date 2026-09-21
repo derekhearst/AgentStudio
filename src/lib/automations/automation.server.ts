@@ -37,7 +37,7 @@ export async function createAutomationRecord(input: {
 	conversationMode?: 'new_each_run' | 'reuse'
 	// Wave 5 #21 phase 4 — execution mode + output routing.
 	mode?: 'chat_followup' | 'research' | 'maintenance'
-	outputTarget?: 'chat_session' | 'artifact' | 'review_inbox'
+	outputTarget?: 'chat_session' | 'review_inbox'
 	// Wave 5 #21 phase 4 finish — code-mode target repository.
 	repositoryId?: string | null
 }) {
@@ -75,7 +75,7 @@ export async function updateAutomationRecord(
 		enabled?: boolean
 		conversationMode?: 'new_each_run' | 'reuse'
 		mode?: 'chat_followup' | 'research' | 'maintenance'
-		outputTarget?: 'chat_session' | 'artifact' | 'review_inbox'
+		outputTarget?: 'chat_session' | 'review_inbox'
 		repositoryId?: string | null
 	},
 ) {

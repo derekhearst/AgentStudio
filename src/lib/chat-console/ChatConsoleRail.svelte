@@ -3,7 +3,7 @@
 	import { consoleState } from './console-state.svelte';
 	import { listResearchForConversationQuery } from '$lib/research/research.remote';
 
-	let activeTab = $state<'Artifacts' | 'Files' | 'Activity'>('Artifacts');
+	let activeTab = $state<'Research' | 'Files' | 'Activity'>('Research');
 
 	const conversationId = $derived(consoleState.conversationId);
 
@@ -108,14 +108,14 @@
 
 <aside class="console-rail">
 	<div class="console-rail__tabs">
-		{#each ['Artifacts', 'Files', 'Activity'] as tab (tab)}
+		{#each ['Research', 'Files', 'Activity'] as tab (tab)}
 			<button
 				type="button"
 				class="console-rail__tab {activeTab === tab ? 'active' : ''}"
 				onclick={() => (activeTab = tab as typeof activeTab)}
 			>
 				{tab}
-				{#if tab === 'Artifacts' && research.length > 0}
+				{#if tab === 'Research' && research.length > 0}
 					<span class="ct">{research.length}</span>
 				{:else if tab === 'Activity' && activityRows.length > 0}
 					<span class="ct">{activityRows.length}</span>
@@ -125,9 +125,9 @@
 	</div>
 
 	<div class="console-rail__body">
-		{#if activeTab === 'Artifacts'}
+		{#if activeTab === 'Research'}
 			{#if research.length === 0}
-				<div class="console-rail__empty">No artifacts for this chat yet.</div>
+				<div class="console-rail__empty">No research runs for this chat yet.</div>
 			{:else}
 				{#each research as r (r.id)}
 					{@const running = isRunningStatus(r.status)}

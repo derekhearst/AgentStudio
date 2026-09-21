@@ -96,15 +96,14 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(byKey.autonomous?.toolPolicy?.kind).toBe('unrestricted')
 		expect(byKey.research?.toolPolicy?.kind).toBe('readOnly')
 		expect(byKey.plan?.toolPolicy?.kind).toBe('readOnly')
-		// Read-only agents must keep the artifact authoring + handoff tools (the whole point)
-		// and the read tools.
-		expect(byKey.research?.toolPolicy?.allow).toContain('present_artifact')
+		// Read-only agents must keep the plan authoring + handoff tools (the whole point)
+		// and the read tools. `file_write` is their one write tool: the plan is a file.
+		expect(byKey.research?.toolPolicy?.allow).toContain('file_write')
 		expect(byKey.research?.toolPolicy?.allow).toContain('request_plan_approval')
 		expect(byKey.research?.toolPolicy?.allow).toContain('web_search')
 		expect(byKey.research?.toolPolicy?.allow).toContain('file_read')
 		expect(byKey.research?.toolPolicy?.allow).not.toContain('shell')
-		expect(byKey.plan?.toolPolicy?.allow).toContain('create_artifact')
-		expect(byKey.plan?.toolPolicy?.allow).toContain('present_artifact')
+		expect(byKey.plan?.toolPolicy?.allow).toContain('file_write')
 		expect(byKey.plan?.toolPolicy?.allow).toContain('request_plan_approval')
 	})
 

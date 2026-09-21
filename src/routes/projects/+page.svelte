@@ -65,7 +65,7 @@
 
 	async function handleDelete(project: ProjectRow) {
 		const fsNote = project.repoKind !== 'none' ? ' Filesystem and git repo will also be removed.' : '';
-		if (!confirm(`Delete "${project.name}"?${fsNote} All artifacts and versions will be lost.`)) return;
+		if (!confirm(`Delete "${project.name}"?${fsNote} This cannot be undone.`)) return;
 		try {
 			await deleteProjectCommand(project.id);
 			await load();

@@ -1,14 +1,8 @@
 export {
 	projects,
-	artifacts,
-	artifactVersions,
 	projectKindEnum,
-	artifactContentTypeEnum,
 	type ProjectRow,
-	type ArtifactRow,
-	type ArtifactVersionRow,
 	type ProjectKind,
-	type ArtifactContentType,
 } from './projects.schema'
 export {
 	slugify,
@@ -18,18 +12,7 @@ export {
 	getProjectBySlug,
 	updateProject,
 	deleteProject,
-	createArtifact,
-	editArtifact,
-	getArtifactById,
-	listArtifactsForProject,
-	getVersionHistory,
-	getVersion,
-	rollbackArtifact,
-	softDeleteArtifact,
 	type CreateProjectInput,
-	type CreateArtifactInput,
-	type EditArtifactInput,
-	type ArtifactWithCurrent,
 } from './projects.server'
 export {
 	listProjectsQuery,
@@ -37,10 +20,4 @@ export {
 	createProjectCommand,
 	updateProjectCommand,
 	deleteProjectCommand,
-	getArtifactQuery,
-	getVersionQuery,
-	createArtifactCommand,
-	editArtifactCommand,
-	rollbackArtifactCommand,
-	softDeleteArtifactCommand,
 } from './projects.remote'

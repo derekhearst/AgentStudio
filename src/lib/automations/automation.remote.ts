@@ -9,7 +9,7 @@ import {
 } from '$lib/automations/automation.server'
 
 const automationModeSchema = z.enum(['chat_followup', 'research', 'maintenance'])
-const automationOutputTargetSchema = z.enum(['chat_session', 'artifact', 'review_inbox'])
+const automationOutputTargetSchema = z.enum(['chat_session', 'review_inbox'])
 
 const createAutomationSchema = z.object({
 	agentId: z.string().uuid().nullable().optional(),

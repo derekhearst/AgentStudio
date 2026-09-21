@@ -18,12 +18,12 @@ import { users } from '$lib/auth/auth.schema'
  *
  *   runTraces — normalized step timeline per chat_run for the trace viewer
  *   reviewItems — every action waiting on a human (approvals, eval failures, stuck jobs,
- *                 hook failures, artifact conflicts, memory conflicts, policy override
+ *                 hook failures, memory conflicts, policy override
  *                 requests). One inbox, all sources.
  *   operationalMetrics — sampled point-in-time measurements (queue depth, tool latency,
  *                        retry rates) for the dashboard charts.
  *
- * Cross-domain pointers (runId, jobId, projectId, artifactId) are declared by-name
+ * Cross-domain pointers (runId, jobId, projectId) are declared by-name
  * on reviewItems so the inbox can deep-link without circular schema imports. Application
  * logic enforces ownership at the read boundary; deletes in those domains don't cascade
  * here (review items survive their source row's GC for forensic visibility).
@@ -43,7 +43,6 @@ export const reviewItemTypeEnum = pgEnum('review_item_type', [
 	'job_failure',
 	'job_stuck',
 	'hook_failure',
-	'artifact_conflict',
 	'memory_conflict',
 	'policy_override_request',
 	// Wave 5 #19 phase 4 — agent successfully opened a pull request via `create_pull_request`.
@@ -102,14 +101,13 @@ export const reviewItems = pgTable(
 		severity: reviewItemSeverityEnum('severity').notNull().default('warning'),
 		// Cross-domain pointers — all by-name, all nullable. The combination depends on item
 		// type: approval_request has runId+sessionId; evaluation_failure has runId; job_failure
-		// has jobId; artifact_conflict has projectId+artifactId; etc.
+		// has jobId; pull_request_ready has runId; etc.
 		runId: uuid('run_id'),
 		sessionId: uuid('session_id'),
 		jobId: uuid('job_id'),
 		projectId: uuid('project_id'),
-		artifactId: uuid('artifact_id'),
 		// Free-form payload: depends on type. For approval_request: { toolName, args, token }.
-		// For evaluation_failure: { verdict, findings }. For artifact_conflict: { candidates }.
+		// For evaluation_failure: { verdict, findings }.
 		payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
 		// One-line summary shown in the inbox without expanding the payload.
 		summary: text('summary'),

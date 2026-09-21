@@ -73,13 +73,13 @@ export type AgentSwitchResult = {
  * text comes from `agents.anchor_prompt` (built-ins seed it) with a generic fallback for
  * user agents.
  *
- * Optional `approvedArtifactId` extends the anchor metadata so the implementer's first round
- * knows which plan artifact it should read before acting (used by request_plan_approval).
+ * Optional `approvedPlanPath` extends the anchor metadata so the implementer's first round
+ * knows which plan file it should read before acting (used by request_plan_approval).
  */
 export async function setConversationAgent(
 	conversationId: string,
 	agentId: string,
-	options: { userId?: string; approvedArtifactId?: string | null } = {},
+	options: { userId?: string; approvedPlanPath?: string | null } = {},
 ): Promise<AgentSwitchResult> {
 	const [conversation] = await db
 		.select({ id: conversations.id, agentId: conversations.agentId, userId: conversations.userId })
@@ -111,8 +111,8 @@ export async function setConversationAgent(
 
 	const baseAnchor =
 		agent.anchorPrompt ?? `[Agent changed to ${agent.name}] You are now acting as ${agent.name}. ${agent.role}`
-	const anchorContent = options.approvedArtifactId
-		? `${baseAnchor}\n\nThe user approved plan artifact ${options.approvedArtifactId}. Call read_artifact with that id before taking any action so you implement against the approved plan.`
+	const anchorContent = options.approvedPlanPath
+		? `${baseAnchor}\n\nThe user approved the plan at ${options.approvedPlanPath}. Call file_read on that path before taking any action so you implement against the approved plan.`
 		: baseAnchor
 
 	const anchorMessageId = await db.transaction(async (tx) => {
@@ -130,7 +130,7 @@ export async function setConversationAgent(
 					type: 'agent_anchor',
 					previousAgentId,
 					agentId,
-					...(options.approvedArtifactId ? { approvedArtifactId: options.approvedArtifactId } : {}),
+					...(options.approvedPlanPath ? { approvedPlanPath: options.approvedPlanPath } : {}),
 				},
 			},
 			tx,
@@ -152,14 +152,6 @@ export async function resolveDefaultAgentId(userId: string, explicit?: string | 
 	if (prefs.defaultAgentId) return prefs.defaultAgentId
 	return getBuiltinAgentId(db, 'chat')
 }
-
-// Pure agent tool-policy helpers re-exported so existing call sites have a single import path.
-export {
-	resolveAgentToolPolicy,
-	filterToolsByAgentPolicy,
-	isToolAllowedByPolicy,
-	type AgentToolPolicy,
-} from './agent-tool-filter'
 
 /**
  * Resolve the agent's effective identity content. Prefers the linked identity skill (so

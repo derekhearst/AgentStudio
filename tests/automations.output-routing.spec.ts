@@ -24,8 +24,6 @@ async function getActiveUserId() {
 async function clearTestAutomations(prefix: string) {
 	const sql = getSql()
 	await sql`delete from review_items where summary like ${`%${prefix}%`}`
-	await sql`delete from artifact_versions where artifact_id in (select id from artifacts where name like ${`%${prefix}%`})`
-	await sql`delete from artifacts where name like ${`%${prefix}%`}`
 	await sql`delete from tasks where title like ${`%${prefix}%`}`
 	await sql`delete from messages where content like ${`%${prefix}%`}`
 	await sql`delete from messages where conversation_id in (select id from conversations where title like ${`${prefix}%`})`
@@ -191,44 +189,6 @@ test.describe('automations/output-routing — chat_session default', () => {
 			expect(messages[0].role).toBe('assistant')
 			expect(messages[0].metadata.source).toBe('automation_maintenance')
 			expect(messages[0].metadata.automationId).toBe(automation.id)
-		} finally {
-			await clearTestAutomations(prefix)
-		}
-	})
-})
-
-test.describe('automations/output-routing — artifact target with no project bound', () => {
-	test('artifact target with no bound project skips with a structured marker (does not throw)', async () => {
-		const prefix = uniquePrefix('automation-out-artifact-noproj')
-		const sql = getSql()
-		const userId = await getActiveUserId()
-		await ensureNoBlockingBudget(userId)
-
-		try {
-			const past = new Date(Date.now() - 5 * 60_000)
-			const [automation] = await sql<{ id: string }[]>`
-				insert into automations (user_id, description, cron_expression, prompt, mode, output_target, next_run_at)
-				values (
-					${userId},
-					${`${prefix} maintenance artifact`},
-					'0 9 * * *',
-					${'Say hello in one word.'},
-					'maintenance'::automation_mode,
-					'artifact'::automation_output_target,
-					${past}
-				)
-				returning id
-			`
-
-			const { runAutomationById } = await import('../src/lib/automations/engine')
-			const result = (await runAutomationById(automation.id)) as { routedTo?: string }
-			expect(result.routedTo).toBe('artifact_skipped')
-
-			// No artifact created.
-			const artifacts = await sql<{ count: number }[]>`
-				select count(*)::int as count from artifacts where name like ${`%${prefix}%`}
-			`
-			expect(artifacts[0].count).toBe(0)
 		} finally {
 			await clearTestAutomations(prefix)
 		}

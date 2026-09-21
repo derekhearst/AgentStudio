@@ -718,7 +718,7 @@ body.console-resizing-row * { cursor: row-resize !important; }
 
 @keyframes console-spin { to { transform: rotate(360deg); } }
 
-/* Artifacts cards */
+/* Research cards */
 .console-art {
 	margin: 8px 8px 12px;
 	padding: 10px 12px;

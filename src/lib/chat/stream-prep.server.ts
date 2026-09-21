@@ -14,7 +14,7 @@
 import { compactMessages, shouldCompact } from '$lib/chat/chat.server'
 import { trimHistoricalToolResults } from '$lib/chat/chat'
 import { getToolDefinitions } from '$lib/tools/tools.server'
-import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-switch.server'
+import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
 import type { LlmMessage } from '$lib/llm/chat.server'

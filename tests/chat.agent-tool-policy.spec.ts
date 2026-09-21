@@ -17,11 +17,8 @@ const READ_ONLY_ALLOW = [
 	'ask_user',
 	'search_tools',
 	'web_search',
-	// Plan/todo authoring + handoff tools — the planner needs to write artifacts.
-	'create_artifact',
-	'edit_artifact',
-	'list_artifacts',
-	'present_artifact',
+	// Plan authoring + handoff — the planner writes the plan to a file, then hands off.
+	'file_write',
 	'request_plan_approval',
 	'file_read',
 	'list_directory',
@@ -41,7 +38,6 @@ const READ_ONLY_ALLOW = [
 	'get_pull_request',
 	'prepare_commit',
 	'list_projects',
-	'read_artifact',
 	'list_automations',
 	'recall_memory',
 	'list_memory',
@@ -82,7 +78,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		expect(filterToolsByAgentPolicy(tools, policy)).toHaveLength(0)
 	})
 
-	test('readOnly keeps allow-listed tools (web_search, file_read, present_artifact, request_plan_approval)', async () => {
+	test('readOnly keeps allow-listed tools (web_search, file_read, file_write, request_plan_approval)', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
 		const tools = [
@@ -98,11 +94,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 			MOCK_TOOL('git_status'),
 			MOCK_TOOL('list_skills'),
 			MOCK_TOOL('read_skill'),
-			MOCK_TOOL('list_artifacts'),
-			MOCK_TOOL('read_artifact'),
-			MOCK_TOOL('create_artifact'),
-			MOCK_TOOL('edit_artifact'),
-			MOCK_TOOL('present_artifact'),
+			MOCK_TOOL('file_write'),
 			MOCK_TOOL('request_plan_approval'),
 			MOCK_TOOL('list_projects'),
 			MOCK_TOOL('ask_user'),
@@ -110,20 +102,16 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual(
 			[
 				'ask_user',
-				'create_artifact',
-				'edit_artifact',
 				'file_read',
+				'file_write',
 				'get_pull_request',
 				'git_status',
-				'list_artifacts',
 				'list_directory',
 				'list_my_repos',
 				'list_projects',
 				'list_pull_requests',
 				'list_skills',
 				'prepare_commit',
-				'present_artifact',
-				'read_artifact',
 				'read_skill',
 				'request_plan_approval',
 				'search_files',

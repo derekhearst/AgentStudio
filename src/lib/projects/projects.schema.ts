@@ -17,27 +17,16 @@ import { users } from '$lib/auth/auth.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 
 /**
- * Projects + Artifacts + Versions.
+ * Projects.
  *
- * Three tables that promote artifacts from "ephemeral SSE block in chat" to first-class
- * durable entities with stable IDs and append-only version history.
+ * A project is a durable container a user creates ("efoil rebuild", "tax research").
+ * Everything the agent writes for a project is a real file in that project's sandbox
+ * working directory — there is no document table here. `(userId, slug)` is unique so
+ * project URLs are stable.
  *
- *   projects → containers a user creates ("efoil rebuild", "tax research")
- *   artifacts → named documents bound to either a project OR a conversation
- *   artifactVersions → immutable per-edit snapshot; rollback = copy old seq forward
- *
- * Identity rules:
- *   - `(userId, slug)` is unique on projects so URLs are stable.
- *   - Artifacts are scoped to either a project or a conversation. Slug uniqueness is
- *     partial — `(project_id, slug)` when project-scoped, `(conversation_id, slug)`
- *     when conversation-scoped.
- *   - `(artifactId, seq)` is unique on artifactVersions so the version number is the
- *     canonical "v3" UI label.
- *
- * The `currentVersionId` denormalization on artifacts gives O(1) latest-content lookup.
- * It's nullable because the chicken-and-egg between artifacts ↔ artifactVersions makes
- * the FK directionally awkward; the application always keeps it consistent and we rely on
- * `artifactVersions.artifactId` (with cascade) for delete integrity.
+ * This module used to also own `artifacts` + `artifact_versions`, which promoted
+ * in-chat documents to versioned DB rows. That whole layer is gone: the filesystem
+ * tools and git are the version history now.
  */
 
 export const projectKindEnum = pgEnum('project_kind', [
@@ -59,14 +48,6 @@ export const projectKindEnum = pgEnum('project_kind', [
  * doesn't require a migration of every existing row.
  */
 export type RepoKind = 'none' | 'local' | 'imported'
-
-export const artifactContentTypeEnum = pgEnum('artifact_content_type', [
-	'markdown',
-	'code',
-	'json',
-	'yaml',
-	'plaintext',
-])
 
 export const projects = pgTable(
 	'projects',
@@ -95,73 +76,5 @@ export const projects = pgTable(
 	}),
 )
 
-export const artifacts = pgTable(
-	'artifacts',
-	{
-		id: uuid('id').primaryKey().defaultRandom(),
-		// An artifact is scoped to either a project or a conversation. Exactly one of these
-		// must be set (CHECK constraint). Project-scoped artifacts live in /projects;
-		// conversation-scoped artifacts are the lightweight in-chat plan/todo/document.
-		projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
-		conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
-		name: text('name').notNull(),
-		slug: text('slug').notNull(),
-		contentType: artifactContentTypeEnum('content_type').notNull().default('markdown'),
-		// Denormalized pointer to the most recent version. Application keeps this consistent;
-		// nullable so the artifact row can be created BEFORE its first version (single
-		// transaction in createArtifact).
-		currentVersionId: uuid('current_version_id'),
-		isActive: boolean('is_active').notNull().default(true),
-		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-	},
-	(t) => ({
-		// Partial uniques so each scope has its own slug namespace.
-		projectSlugUnique: uniqueIndex('artifacts_project_slug_unique')
-			.on(t.projectId, t.slug)
-			.where(sql`${t.projectId} is not null`),
-		conversationSlugUnique: uniqueIndex('artifacts_conversation_slug_unique')
-			.on(t.conversationId, t.slug)
-			.where(sql`${t.conversationId} is not null`),
-		projectIdx: index('artifacts_project_idx').on(t.projectId),
-		conversationIdx: index('artifacts_conversation_idx').on(t.conversationId),
-		activeIdx: index('artifacts_active_idx').on(t.isActive),
-		scopeCheck: check(
-			'artifacts_scope_check',
-			sql`(${t.projectId} is not null) or (${t.conversationId} is not null)`,
-		),
-	}),
-)
-
-export const artifactVersions = pgTable(
-	'artifact_versions',
-	{
-		id: uuid('id').primaryKey().defaultRandom(),
-		artifactId: uuid('artifact_id')
-			.notNull()
-			.references(() => artifacts.id, { onDelete: 'cascade' }),
-		seq: integer('seq').notNull(),
-		content: text('content').notNull(),
-		changeNote: text('change_note'),
-		// Null editor = produced by an agent (not a direct human edit). SET NULL on user delete
-		// so the version row survives for compliance/audit.
-		editedBy: uuid('edited_by').references(() => users.id, { onDelete: 'set null' }),
-		// Optional link to the chat run that produced this edit (audit chain: version → run →
-		// conversation). Declared by-name to avoid a chat_runs import cycle; SET NULL so a GC'd
-		// run doesn't orphan the version.
-		sourceRunId: uuid('source_run_id'),
-		costUsd: numeric('cost_usd', { precision: 12, scale: 4 }),
-		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-	},
-	(t) => ({
-		artifactSeqUnique: unique('artifact_versions_artifact_seq_unique').on(t.artifactId, t.seq),
-		artifactIdx: index('artifact_versions_artifact_idx').on(t.artifactId),
-		createdIdx: index('artifact_versions_created_idx').on(t.createdAt),
-	}),
-)
-
 export type ProjectRow = typeof projects.$inferSelect
-export type ArtifactRow = typeof artifacts.$inferSelect
-export type ArtifactVersionRow = typeof artifactVersions.$inferSelect
 export type ProjectKind = (typeof projectKindEnum.enumValues)[number]
-export type ArtifactContentType = (typeof artifactContentTypeEnum.enumValues)[number]

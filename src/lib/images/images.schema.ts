@@ -5,8 +5,8 @@ import { users } from '$lib/auth/auth.schema'
  * Generated-image audit table.
  *
  * Every successful `image_generate` tool call inserts one row here so the
- * /artifacts feed can list past images alongside research reports and project
- * artifacts. The `url` column points at the provider-hosted image (currently
+ * /research feed can list past images alongside research reports. The `url`
+ * column points at the provider-hosted image (currently
  * OpenRouter) — those URLs may eventually expire, so this row primarily acts
  * as a durable record of "what was generated, when, by whom, with what
  * prompt/cost"; the actual bytes can be rehydrated later if we ever move to

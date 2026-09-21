@@ -1,12 +1,7 @@
 import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import {
-	artifactVersions,
-	artifacts,
 	projects,
-	type ArtifactContentType,
-	type ArtifactRow,
-	type ArtifactVersionRow,
 	type ProjectKind,
 	type ProjectRow,
 	type RepoKind,
@@ -18,12 +13,11 @@ import { credentialUsernameForProvider, parseCloneUrl } from '$lib/source-contro
 import { getActiveAzureConnection, getActiveGithubConnection } from '$lib/source-control/source-control.server'
 
 /**
- * Wave 4 #15 phase 1 — projects + artifacts + version helpers.
+ * Wave 4 #15 phase 1 — project helpers.
  *
  * All operations are user-scoped — listProjects/createProject etc. take a `userId` and the
  * remote layer enforces it. Slug generation is automatic + collision-resilient (appends `-2`,
- * `-3` etc. on conflict). Artifact versions are append-only — even rollback creates a NEW
- * version row that copies the target seq's content forward.
+ * `-3` etc. on conflict).
  */
 
 // ─────────── Slug helpers ───────────
@@ -45,7 +39,6 @@ async function uniqueProjectSlug(userId: string | null, baseSlug: string): Promi
 	throw new Error(`unable to find a unique slug for "${baseSlug}" after 1000 attempts`)
 }
 
-// Artifact CRUD lives in $lib/projects/artifacts.server — re-exported below for back-compat.
 
 // ─────────── Project CRUD ───────────
 
@@ -304,7 +297,6 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 	const [row] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1)
 	if (!row) return { deleted: false }
 
-	// Cascade trims artifacts + versions automatically via FK.
 	// `repositories` has its FK to `projects` declared by-name (not enforced) — clear the
 	// sidecar row explicitly so PRs/branches/checks cascade off it.
 	await db.delete(repositories).where(eq(repositories.projectId, projectId))
@@ -318,22 +310,3 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 
 	return { deleted: result.length > 0 }
 }
-
-// ─────────── Artifact CRUD + versions ───────────
-
-// Artifact CRUD lives in $lib/projects/artifacts.server. Re-exported here so existing imports
-// from $lib/projects/projects.server keep working without code-level migration.
-export {
-	createArtifact,
-	editArtifact,
-	getArtifactById,
-	getVersion,
-	getVersionHistory,
-	listArtifactsForConversation,
-	listArtifactsForProject,
-	rollbackArtifact,
-	softDeleteArtifact,
-	type ArtifactWithCurrent,
-	type CreateArtifactInput,
-	type EditArtifactInput,
-} from './artifacts.server'

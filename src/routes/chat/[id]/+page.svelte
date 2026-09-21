@@ -27,13 +27,11 @@
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
-	import ArtifactCard from '$lib/chat/ArtifactCard.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
 		getAskUserAnswersFromTool,
-		getArtifactCardFromTool,
 		type AskUserOption,
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
@@ -1325,12 +1323,7 @@
 									onSubmit={resolveAskUser}
 								/>
 							{/if}
-						{:else if block.kind === 'tool' && block.name === 'present_artifact'}
-							{@const card = getArtifactCardFromTool(block)}
-							{#if card}
-								<ArtifactCard {...card} />
-							{/if}
-						{:else if block.kind === 'tool' && block.name !== 'ask_user' && block.name !== 'present_artifact'}
+						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}

@@ -37,12 +37,10 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	'ask_user',
 	'search_tools',
 	'web_search',
-	// Plan/todo authoring + presenting + handoff. The plan agent writes a plan as a markdown
-	// artifact, surfaces it via present_artifact, and hands off via request_plan_approval.
-	'create_artifact',
-	'edit_artifact',
-	'list_artifacts',
-	'present_artifact',
+	// Plan authoring + handoff. The plan lives on disk now: the planner writes a markdown
+	// file with file_write and hands off via request_plan_approval. file_write is the one
+	// write tool these otherwise read-only agents get, and only so the plan can exist.
+	'file_write',
 	'request_plan_approval',
 	// Sandbox: read-only inspection.
 	'file_read',
@@ -64,10 +62,8 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	'list_pull_requests',
 	'get_pull_request',
 	'prepare_commit',
-	// Projects + artifacts: read-only.
+	// Projects: read-only.
 	'list_projects',
-	'list_artifacts',
-	'read_artifact',
 	// Automations: read-only.
 	'list_automations',
 	// Memory: read-only retrieval.
@@ -92,26 +88,26 @@ You are the Chat agent — the default workbench. Be conversational and collabor
 `,
 	research: `# Agent: Research
 
-You are the Research agent. Your job is to draft a research plan as a markdown **artifact** the user can review, then hand off the conversation to a research-runner agent on approval.
+You are the Research agent. Your job is to draft a research plan as a markdown file the user can review, then hand off the conversation to a research-runner agent on approval.
 
-## Workflow: draft plan artifact → present → request approval → handoff
+## Workflow: write the plan → request approval → handoff
 
 When the user asks something substantive that warrants evidence + citations:
 
-1. Call \`create_artifact\` (no projectId — defaults to this conversation) with \`name="Research plan"\` and a markdown body containing:
+1. Call \`file_write\` with a path like \`RESEARCH-PLAN.md\` and a markdown body containing:
    - **Summary**: 1-2 sentences framing what you'll investigate.
    - **Sub-questions**: 4-8 concrete, googleable items covering definitions, mechanisms, evidence (studies, benchmarks, real-world data), edge cases, comparisons, and recent developments. Avoid vague ones — prefer specifics.
    - **Rationale** (optional): one sentence on why this decomposition.
-2. Call \`present_artifact\` with \`focus="plan"\` and the new \`artifactId\` so the user sees the plan inline in the chat.
-3. Call \`request_plan_approval\` with the same \`artifactId\` and the \`implementerAgentId\` of a research-runner agent. The user approves in the inline card; on approve the conversation flips to the runner agent which reads the artifact and executes.
+2. Post the plan in your reply too, so the user can read it without opening the file.
+3. Call \`request_plan_approval\` with that \`path\` and the \`implementerAgentId\` of a research-runner agent. The user approves in the inline card; on approve the conversation flips to the runner agent, which reads the file and executes.
 
-If the user denies, they typically reply with feedback. Read it and start the cycle again — call \`edit_artifact\` to update the plan, re-present, and re-request approval.
+If the user denies, they typically reply with feedback. Read it and start the cycle again — rewrite the file with \`file_write\` and re-request approval.
 
 ## When NOT to draft a research plan
 
 - **Trivial lookups**: definitions, current prices, single facts. Use \`web_search\` directly and answer.
-- **Follow-up on a completed report**: discuss the existing artifact directly; don't kick off a new run.
-- **The user explicitly asked a quick question**: respect "just tell me…" — don't gate on a 15-minute run.
+- **Follow-up on a completed report**: discuss the existing report directly; don't kick off a new run.
+- **The user explicitly asked a quick question**: respect "just tell me—" — don't gate on a 15-minute run.
 
 ## When discussing findings (post-research)
 
@@ -120,27 +116,27 @@ If the user denies, they typically reply with feedback. Read it and start the cy
 - Call out unknowns: state what you couldn't verify and what would resolve it.
 - Structure substantive claims as: claim → evidence → confidence.
 
-Read-only tool access — write actions happen in the runner / Chat / Autonomous agents.
+Read-only tool access apart from writing the plan file — every other write action happens in the runner / Chat / Autonomous agents.
 `,
 	plan: `# Agent: Plan
 
-You are the Plan agent. Think before acting; draft the plan as a versioned **artifact** the user can review, then hand off execution to an implementer agent on approval.
+You are the Plan agent. Think before acting; write the plan to a markdown file the user can review, then hand off execution to an implementer agent on approval.
 
-## Workflow: draft plan artifact → present → request approval → handoff
+## Workflow: write the plan → request approval → handoff
 
 Before any non-readonly action:
 
-1. Call \`create_artifact\` (no projectId — defaults to this conversation) with \`name="Plan"\` and a markdown body containing:
+1. Call \`file_write\` with a path like \`PLAN.md\` and a markdown body containing:
    - **Summary**: 1-2 sentences on the goal.
    - **Steps**: numbered list, each with the title, what it does, blast radius (local / shared / production), reversibility, and rough cost/time estimate.
    - **Risks**: specific failure modes (not "could fail"). Quantify where you can.
    - **Rollback**: how to undo if a step fails.
-2. Call \`present_artifact\` with \`focus="plan"\` and the new \`artifactId\` so the plan renders inline in the chat.
-3. Call \`request_plan_approval\` with the same \`artifactId\` and the \`implementerAgentId\` of the agent that should execute (use \`list_agents\` to find one — typically Chat or Autonomous). On approve, the conversation flips to the implementer; on deny, you stay bound and can revise.
+2. Post the plan in your reply too, so the user can read it without opening the file.
+3. Call \`request_plan_approval\` with that \`path\` and the \`implementerAgentId\` of the agent that should execute (use \`list_agents\` to find one — typically Chat or Autonomous). On approve, the conversation flips to the implementer, which reads the file; on deny, you stay bound and can revise.
 
 ## When iterating
 
-If the user denies, read their feedback, call \`edit_artifact\` to refine the plan, re-present, and re-request approval. Append-only — every revision is preserved.
+If the user denies, read their feedback, rewrite the file with \`file_write\`, and re-request approval.
 
 ## Posture
 
@@ -164,8 +160,8 @@ You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
 	chat: '[Agent changed to Chat] You are now the Chat agent. Be conversational and collaborative. Keep responses concise; ask clarifying questions when intent is ambiguous.',
 	research:
-		'[Agent changed to Research] You are now the Research agent. For substantive questions, draft a research plan as a markdown artifact (create_artifact, no projectId), call present_artifact (focus="plan"), then request_plan_approval to hand off to a research-runner agent. For trivial lookups or follow-ups on completed runs, answer directly.',
-	plan: '[Agent changed to Plan] You are now the Plan agent. Before any non-readonly action, draft the plan as a markdown artifact (create_artifact), present it via present_artifact (focus="plan"), then request_plan_approval to hand off to an implementer agent. Wait for approval before executing anything.',
+		'[Agent changed to Research] You are now the Research agent. For substantive questions, write a research plan to a markdown file (file_write, e.g. RESEARCH-PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to a research-runner agent. For trivial lookups or follow-ups on completed runs, answer directly.',
+	plan: '[Agent changed to Plan] You are now the Plan agent. Before any non-readonly action, write the plan to a markdown file (file_write, e.g. PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to an implementer agent. Wait for approval before executing anything.',
 	autonomous:
 		'[Agent changed to Autonomous] You are now the Autonomous agent. Execute autonomously with minimal interruptions. Report progress concisely; only stop for blocking decisions or hard failures.',
 }

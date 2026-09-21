@@ -17,7 +17,6 @@ import {
 } from '$lib/memory/memory.schema'
 import { recallForUser } from '$lib/memory/memory.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
-import { artifacts } from '$lib/projects/projects.schema'
 import { jobs } from '$lib/jobs/jobs.schema'
 import { enqueueJob } from '$lib/jobs/jobs.server'
 import { analyzeReorganization, applyReorganization } from '$lib/memory/reorganize.server'
@@ -139,7 +138,6 @@ export const listMemoryDrawersQuery = query(closetIdSchema, async ({ closetId })
 			tokenCount: memoryDrawers.tokenCount,
 			occurredAt: memoryDrawers.occurredAt,
 			sourceMessageId: memoryDrawers.sourceMessageId,
-			linkedArtifactId: memoryDrawers.linkedArtifactId,
 			sourceExcerpt: sql<string | null>`(
 				select substring(messages.content from 1 for 120) from messages
 				where messages.id = memory_drawers.source_message_id
@@ -308,7 +306,6 @@ export const getMemoryDrawerQuery = query(drawerIdSchema, async ({ id }) => {
 			occurredAt: memoryDrawers.occurredAt,
 			createdAt: memoryDrawers.createdAt,
 			sourceMessageId: memoryDrawers.sourceMessageId,
-			linkedArtifactId: memoryDrawers.linkedArtifactId,
 			closetTopic: memoryClosets.topic,
 			roomId: memoryRooms.id,
 			roomLabel: memoryRooms.label,
@@ -337,16 +334,6 @@ export const getMemoryDrawerQuery = query(drawerIdSchema, async ({ id }) => {
 		sourceMessage = m ?? null
 	}
 
-	let linkedArtifact: { id: string; name: string } | null = null
-	if (row.linkedArtifactId) {
-		const [a] = await db
-			.select({ id: artifacts.id, name: artifacts.name })
-			.from(artifacts)
-			.where(eq(artifacts.id, row.linkedArtifactId))
-			.limit(1)
-		linkedArtifact = a ?? null
-	}
-
 	const kgRows = await db
 		.select({
 			relationId: memoryKgRelations.id,
@@ -362,7 +349,6 @@ export const getMemoryDrawerQuery = query(drawerIdSchema, async ({ id }) => {
 	return {
 		...row,
 		sourceMessage,
-		linkedArtifact,
 		kgRelations: kgRows,
 	}
 })
