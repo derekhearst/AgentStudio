@@ -272,15 +272,48 @@ export function checkFailureDedupeKey(input: {
  * environment variable to debug it. This runs over every excerpt unconditionally.
  */
 export function redactSecrets(text: string): string {
-	return text
-		.replace(/gh[pousr]_[A-Za-z0-9]{16,}/g, '[redacted-token]')
-		.replace(/github_pat_[A-Za-z0-9_]{20,}/g, '[redacted-token]')
-		.replace(/\b(bearer|token|authorization)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [redacted]')
-		.replace(
-			/\b([A-Za-z0-9_]*(?:secret|token|password|api[_-]?key)[A-Za-z0-9_]*)\s*[:=]\s*("?[^\s"']{8,}"?)/gi,
-			'$1=[redacted]',
-		)
-		.replace(/\bx-access-token:[^@\s]+@/gi, 'x-access-token:[redacted]@')
+	return (
+		text
+			// Provider tokens by their published prefixes.
+			.replace(/gh[pousr]_[A-Za-z0-9]{16,}/g, '[redacted-token]')
+			.replace(/github_pat_[A-Za-z0-9_]{20,}/g, '[redacted-token]')
+			// AWS access key IDs. A CI runner commonly carries these even when the
+			// application never touches AWS, and the format is distinctive enough that
+			// matching it cannot swallow ordinary build output.
+			.replace(/\b(AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted-aws-key]')
+			.replace(/\b(bearer|token|authorization)\s+[A-Za-z0-9._~+/=-]{12,}/gi, '$1 [redacted]')
+			// Credentials embedded in a URL: `scheme://user:password@host`.
+			//
+			// This is the one that matters most for THIS code path. A connection string is
+			// the classic way a live credential ends up in plain text, and a failing
+			// migration or test-setup step echoing `DATABASE_URL` is precisely the kind of
+			// build failure whose log tail we harvest. Matching any `\w+://` rather than
+			// enumerating schemes forever means a scheme nobody thought of (clickhouse://,
+			// kafka://, a vendor's own) is covered on the day it shows up.
+			//
+			// Only the password component goes: the scheme, the user and the host survive,
+			// so the line stays diagnosable — "cannot connect to postgres as derek at
+			// 192.168.0.2" is the actual information in that log line, and destroying it
+			// would make the excerpt useless for the thing it exists to explain.
+			.replace(/\b([a-z][a-z0-9+.-]*):\/\/([^\s:/@]+):([^\s/@]+)@/gi, '$1://$2:[redacted]@')
+			// Belt and braces for a token pasted without a scheme in front of it.
+			.replace(/\bx-access-token:[^@\s]+@/gi, 'x-access-token:[redacted]@')
+			// Generic `SOMETHING_SECRET=value`. Runs LAST, and deliberately so: it is the
+			// broadest rule, and when it ran first it ate the tail of any URL whose user
+			// component happened to contain "token" — `x-access-token:…@github.com/o/r`
+			// collapsed to `x-access-token=[redacted]`, losing the host and with it the
+			// only diagnosable part of the line. Letting the structural URL rule go first
+			// keeps `scheme://user:[redacted]@host` intact.
+			//
+			// The value charset excludes `@` for the same reason, and the lookahead stops
+			// the rule re-matching text an earlier rule already redacted — which is what
+			// makes the whole function idempotent, and therefore safe to apply more than
+			// once on the way to the inbox.
+			.replace(
+				/\b([A-Za-z0-9_]*(?:secret|token|password|api[_-]?key)[A-Za-z0-9_]*)\s*[:=]\s*("?(?!\[redacted)[^\s"'@]{8,}"?)/gi,
+				'$1=[redacted]',
+			)
+	)
 }
 
 /**
@@ -311,6 +344,14 @@ export function extractLogExcerpt(
 
 // ─────────── Presentation ───────────
 
+/**
+ * The one-line headline on the review item.
+ *
+ * `title` is `check_run.output.title` — CI-authored free text, which means it is on the
+ * same footing as a log tail and gets the same scrub. A check that titles itself with the
+ * command it just failed to run ("psql postgres://u:pw@host failed") would otherwise put a
+ * live credential in the inbox headline, where it is MORE visible than in the excerpt.
+ */
 export function summarizeCheckFailure(input: {
 	owner: string
 	repo: string
@@ -318,7 +359,7 @@ export function summarizeCheckFailure(input: {
 	checkName: string
 	title?: string | null
 }): string {
-	const suffix = input.title ? ` — ${input.title}` : ''
+	const suffix = input.title ? ` — ${redactSecrets(input.title)}` : ''
 	return `CI failed: ${input.checkName} on ${input.owner}/${input.repo}#${input.prNumber}${suffix}`.slice(0, 500)
 }
 
@@ -329,6 +370,12 @@ export function summarizeCheckFailure(input: {
  * lands in may be hours old and the model has no memory of having opened the PR. It states
  * the facts, then asks for a diagnosis before a change, because the most common wrong move
  * here is to "fix" a flake by rewriting working code.
+ *
+ * Every CI-authored field it embeds is re-scrubbed here even though its callers already
+ * store scrubbed values. Redaction is idempotent, so the duplicate pass costs nothing, and
+ * this way the guarantee is a property of the function rather than of remembering to call
+ * it correctly — a future caller that reads a raw summary straight off a payload cannot
+ * turn a seeded prompt into a credential leak.
  */
 export function buildFixPrompt(input: {
 	owner: string
@@ -350,9 +397,9 @@ export function buildFixPrompt(input: {
 		`Branch: ${input.headBranch}`,
 		input.headSha ? `Commit: ${input.headSha}` : null,
 		input.prUrl ? `Pull request: ${input.prUrl}` : null,
-		input.detailsUrl ? `Check details: ${input.detailsUrl}` : null,
+		input.detailsUrl ? `Check details: ${redactSecrets(input.detailsUrl)}` : null,
 		input.summary ? `\nCheck summary:\n${redactSecrets(input.summary).slice(0, 1_000)}` : null,
-		input.logExcerpt ? `\nLog excerpt (tail):\n\`\`\`\n${input.logExcerpt}\n\`\`\`` : null,
+		input.logExcerpt ? `\nLog excerpt (tail):\n\`\`\`\n${redactSecrets(input.logExcerpt)}\n\`\`\`` : null,
 		'',
 		'Diagnose the failure first and say what actually broke before changing anything.',
 		'If the failure is unrelated to this branch (a flake, an outage, a pre-existing failure on the base branch), say so and stop — do not rewrite working code to chase it.',

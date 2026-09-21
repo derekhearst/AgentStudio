@@ -268,9 +268,94 @@ test.describe('pr-checks/logs — bounded, tailed and scrubbed', () => {
 		expect(redacted).not.toContain('ghs_zzzzzzzzzzzzzzzzzzzz')
 	})
 
-	test('ordinary log text is left alone', () => {
-		const raw = 'FAIL src/lib/thing.spec.ts\n  ● expected 3 to be 4'
-		expect(redactSecrets(raw)).toBe(raw)
+	/**
+	 * The case this path exists to catch. A connection string is how a live credential
+	 * usually ends up in plain text, and a failing migration or test-setup step echoing
+	 * `DATABASE_URL` is exactly the kind of build failure whose log tail gets harvested
+	 * into the review inbox — so this is the most likely route from a red check to a real
+	 * leak, not a hypothetical one.
+	 */
+	test('a password inside a connection string is redacted, whatever the scheme', () => {
+		const urls = [
+			'postgresql://derek:SuperSecret123@192.168.0.2:5432/db',
+			'postgres://derek:SuperSecret123@host/db',
+			'redis://default:SuperSecret123@cache:6379',
+			'amqp://guest:SuperSecret123@rabbit:5672',
+			'mongodb://admin:SuperSecret123@mongo:27017/app',
+			'https://ci-user:SuperSecret123@artifacts.example.com/build.tar',
+			// A scheme nobody enumerated: the generic fallback has to cover it too.
+			'clickhouse://reader:SuperSecret123@analytics:9000',
+		]
+		for (const url of urls) {
+			const redacted = redactSecrets(`psql: could not connect to ${url}`)
+			expect(redacted, url).not.toContain('SuperSecret123')
+			expect(redacted, url).toContain('[redacted]')
+		}
+	})
+
+	test('redacting a connection string keeps the line diagnosable', () => {
+		// Scheme, user and host survive — "cannot reach postgres as derek at 192.168.0.2"
+		// is the actual information in that log line, and destroying it would make the
+		// excerpt useless for the thing it exists to explain.
+		const redacted = redactSecrets('FATAL: postgresql://derek:SuperSecret123@192.168.0.2:5432/db refused')
+		expect(redacted).not.toContain('SuperSecret123')
+		expect(redacted).toContain('postgresql://')
+		expect(redacted).toContain('derek')
+		expect(redacted).toContain('192.168.0.2:5432/db')
+	})
+
+	test('a URL whose user component contains "token" keeps its host', () => {
+		// Regression guard on rule ORDER. The broad `key=value` rule used to run first and
+		// collapse `x-access-token:…@github.com/o/r` to `x-access-token=[redacted]`, taking
+		// the host with it — safe, but it destroyed the only diagnosable part of the line.
+		const redacted = redactSecrets('git clone https://x-access-token:ghs_zzzzzzzzzzzzzzzzzzzz@github.com/o/r')
+		expect(redacted).not.toContain('ghs_zzzzzzzzzzzzzzzzzzzz')
+		expect(redacted).toContain('github.com/o/r')
+	})
+
+	test('redaction is idempotent, so applying it on several hops is safe', () => {
+		// The scrub runs at the excerpt, at the row write, at the inbox payload and again
+		// inside the prompt builder. That belt-and-braces arrangement is only sound if a
+		// second pass is a no-op.
+		for (const raw of [
+			'postgresql://derek:SuperSecret123@192.168.0.2:5432/db',
+			'export GH_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+			'git clone https://x-access-token:ghs_zzzzzzzzzzzzzzzzzzzz@github.com/o/r',
+			'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE',
+		]) {
+			const once = redactSecrets(raw)
+			expect(redactSecrets(once), raw).toBe(once)
+		}
+	})
+
+	test('AWS access key ids are redacted — CI runners carry them even when the app does not', () => {
+		const redacted = redactSecrets('AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE and session ASIAY34FZKBOKMUTVA7Q')
+		expect(redacted).not.toContain('AKIAIOSFODNN7EXAMPLE')
+		expect(redacted).not.toContain('ASIAY34FZKBOKMUTVA7Q')
+		expect(redacted).toContain('[redacted-aws-key]')
+	})
+
+	/**
+	 * The guard in the other direction, and the reason it is worth having: every tightening
+	 * of the patterns above is a chance to start eating ordinary build output. An excerpt
+	 * that redacts the assertion message is worse than no excerpt, because it looks like it
+	 * worked. Anything added to `redactSecrets` has to keep this test green.
+	 */
+	test('ordinary build output is never touched', () => {
+		const innocent = [
+			'FAIL src/lib/thing.spec.ts\n  ● expected 3 to be 4',
+			'Build failed: expected 3 tests to pass, got 2',
+			'Error: connect ECONNREFUSED 127.0.0.1:5432',
+			'npm ERR! code ELIFECYCLE',
+			'See https://github.com/derekhearst/AgentStudio/actions/runs/123456 for details',
+			'  at Object.<anonymous> (/home/runner/work/app/src/index.ts:42:15)',
+			'Downloading https://registry.npmjs.org/svelte/-/svelte-5.57.1.tgz',
+			'warning: 3 vulnerabilities (1 moderate, 2 high)',
+			'tsc: error TS2322: Type \'string\' is not assignable to type \'number\'.',
+		]
+		for (const line of innocent) {
+			expect(redactSecrets(line), line).toBe(line)
+		}
 	})
 })
 
@@ -341,7 +426,14 @@ test.describe('pr-checks/presentation — what the operator and the agent read',
 		expect(prompt.toLowerCase()).toContain('unrelated to this branch')
 	})
 
-	test('a seeded prompt never carries a credential out of a log', () => {
+	/**
+	 * Path coverage for the scrub. Three routes carry CI-authored text out of a build and
+	 * into something a human or a model reads — the log tail, the check's own summary, and
+	 * the check's own title — and all three have to be scrubbed independently. The title
+	 * is the easiest one to forget and the worst one to miss: it becomes the inbox
+	 * headline, which is MORE visible than the excerpt it sits above.
+	 */
+	test('a seeded prompt never carries a credential, whichever field it came from', () => {
 		const prompt = buildFixPrompt({
 			owner: 'o',
 			repo: 'r',
@@ -350,7 +442,23 @@ test.describe('pr-checks/presentation — what the operator and the agent read',
 			prTitle: 't',
 			headBranch: 'b',
 			summary: 'token=ghp_abcdefghijklmnopqrstuvwxyz0123456789 failed',
+			logExcerpt: 'psql postgresql://derek:SuperSecret123@192.168.0.2:5432/db failed',
+			detailsUrl: 'https://ci:SuperSecret123@ci.example.com/job/1',
 		})
 		expect(prompt).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789')
+		expect(prompt).not.toContain('SuperSecret123')
+	})
+
+	test('the review headline is scrubbed too — a check can title itself with its command', () => {
+		const summary = summarizeCheckFailure({
+			owner: 'o',
+			repo: 'r',
+			prNumber: 1,
+			checkName: 'migrate',
+			title: 'psql postgresql://derek:SuperSecret123@192.168.0.2:5432/db failed',
+		})
+		expect(summary).not.toContain('SuperSecret123')
+		// Still says what broke.
+		expect(summary).toContain('migrate')
 	})
 })

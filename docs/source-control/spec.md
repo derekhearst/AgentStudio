@@ -193,9 +193,36 @@ green → red on the same commit produces one further row, not one per poll. A f
 something and it still broke.
 
 The review item carries the failing check name, the commit, a link to the provider's check
-page, the check's own summary, and a tail of the job log where one is available. Everything
-written into it passes through a redaction pass first, so a build that echoed a token into
-its output cannot leak that token into the inbox, a push notification, or a prompt.
+page, the check's own summary, and a tail of the job log where one is available.
+
+**Redaction.** Every piece of CI-authored text on this path is scrubbed before it is stored
+or displayed — the log tail, the check's summary, the check's *title* (which becomes the
+inbox headline and is therefore the most visible spot of all), the provider link, the
+notification body, and the prompt seeded into the fix run. The scrub is idempotent, so it
+is applied at each hop rather than trusted to have happened upstream.
+
+| Shape                                              | Result                                    |
+| -------------------------------------------------- | ----------------------------------------- |
+| `ghp_` / `gho_` / `ghs_` / `github_pat_` tokens     | replaced wholesale                        |
+| `Authorization: Bearer …`                           | value replaced                            |
+| `SOMETHING_SECRET=…`, `api_key=…`, `password=…`     | value replaced                            |
+| `scheme://user:password@host` (any scheme)          | password replaced; scheme, user, host kept |
+| AWS access key ids (`AKIA…` / `ASIA…`)              | replaced wholesale                        |
+
+The connection-string case is the one that matters most here. A failing migration or
+test-setup step echoing `DATABASE_URL` is the single most likely way a live credential
+reaches the review inbox through this feature, and a password inside a URL is invisible to
+every `key=value` pattern. Only the password component is removed — the scheme, user and
+host stay, because "cannot reach postgres as derek at 192.168.0.2" is the actual
+information in that log line and an excerpt that destroyed it would be useless for the
+thing it exists to explain.
+
+Redaction is bounded in the other direction too: ordinary build output must survive intact.
+An excerpt that eats the assertion message is worse than no excerpt, because it looks like
+it worked. `tests/source-control.pr-checks.spec.ts` pins both directions — the credential
+shapes above, and a set of innocent shapes (test failures, stack traces, `ECONNREFUSED`,
+registry URLs, tsc diagnostics) that must come back byte-identical. Any future tightening
+has to keep that guard green.
 
 **Fixing it.** The review item renders a "Fix it" button. Pressing it queues a `pr_fix` job
 that seeds the failure into the conversation the pull request came from — `pull_requests.runId`
@@ -250,7 +277,9 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Push, pull request creation, and merge are policy-evaluable actions and can require approval.
 - CI watching stops the moment a pull request merges or closes, and in any case within 14 days of the PR being opened.
 - A failing check notifies once per (pull request, check, commit). Re-observing the same failure is silent.
-- Log excerpts, check summaries and seeded prompts are redacted before storage; a credential in a build log never reaches the review inbox.
+- Every CI-authored string — log excerpt, check summary, check title, details URL, notification body, seeded prompt — is redacted before storage or display. Redaction is idempotent and applied at each hop rather than trusted upstream.
+- Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
+- Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
 
 ## Roles & Permissions

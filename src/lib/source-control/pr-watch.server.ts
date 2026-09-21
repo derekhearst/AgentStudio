@@ -145,9 +145,13 @@ export async function recordCheckObservation(input: {
 			conclusion: check.conclusion,
 			externalId: check.externalId,
 			checkSource: check.source,
-			...(check.outputTitle ? { outputTitle: check.outputTitle } : {}),
+			// Every CI-authored string is scrubbed on the way IN, so the row itself is safe
+			// to read back into a prompt, an inbox payload or a debug dump later. The
+			// excerpt arrived pre-scrubbed from `extractLogExcerpt`; re-running it is
+			// idempotent and keeps the guarantee local to this write.
+			...(check.outputTitle ? { outputTitle: redactSecrets(check.outputTitle).slice(0, 500) } : {}),
 			...(check.outputSummary ? { outputSummary: redactSecrets(check.outputSummary).slice(0, 2_000) } : {}),
-			...(logExcerpt ? { logExcerpt } : {}),
+			...(logExcerpt ? { logExcerpt: redactSecrets(logExcerpt) } : {}),
 			...(notify ? { notifiedAt: new Date().toISOString() } : {}),
 		},
 	})
@@ -211,9 +215,13 @@ async function raiseCheckFailure(input: {
 				headSha: check.headSha,
 				checkName: check.checkName,
 				conclusion: check.conclusion,
-				detailsUrl: check.detailsUrl,
+				// Every CI-authored field in this payload is scrubbed. The payload is
+				// rendered verbatim in /review's expanded row, so it is the single most
+				// visible place a leaked credential could land.
+				detailsUrl: check.detailsUrl ? redactSecrets(check.detailsUrl) : null,
+				outputTitle: check.outputTitle ? redactSecrets(check.outputTitle).slice(0, 500) : null,
 				outputSummary: check.outputSummary ? redactSecrets(check.outputSummary).slice(0, 1_000) : null,
-				logExcerpt: input.logExcerpt,
+				logExcerpt: input.logExcerpt ? redactSecrets(input.logExcerpt) : null,
 				trigger: input.trigger,
 				originatingRunId: pr.runId,
 				// Read by /review to render the "Fix it" button. The inbox stays generic; it
@@ -237,7 +245,11 @@ async function raiseCheckFailure(input: {
 		const { createNotificationRecord, sendPushToAll } = await import('$lib/notifications/notifications.server')
 		const payload = {
 			title: `CI failed on #${pr.providerPrNumber}`,
-			body: `${check.checkName} — ${repo.owner}/${repo.name}: ${pr.title}`.slice(0, 400),
+			// `checkName` is workflow-authored rather than build output, so it is far less
+			// likely to carry anything — but a push notification goes to a lock screen,
+			// which is the one surface the operator cannot redact after the fact, so it
+			// gets the same scrub as everything else.
+			body: redactSecrets(`${check.checkName} — ${repo.owner}/${repo.name}: ${pr.title}`).slice(0, 400),
 			url: '/review',
 			// One notification slot per (PR, check): a re-fire replaces the banner instead
 			// of stacking another one on the operator's lock screen.
