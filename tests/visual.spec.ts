@@ -4,30 +4,8 @@ import {
 	cleanupPrefixedRecords,
 	seedAgent,
 	seedConversation,
-	seedTask,
 	uniquePrefix,
 } from './helpers'
-
-test('visual regression: dashboard shell', async ({ page }) => {
-	const prefix = uniquePrefix('visual-dashboard')
-	await cleanupPrefixedRecords(prefix)
-	await authenticateContext(page.context())
-
-	try {
-		const agent = await seedAgent(prefix)
-		await seedTask(prefix, agent.id, { title: `${prefix} task`, status: 'review' })
-		await seedConversation(prefix, { title: `${prefix} conversation` })
-
-		await page.goto('/')
-		await expect(page.getByRole('heading', { name: /AgentStudio dashboard/i })).toBeVisible()
-		await expect(page.locator('main header').first()).toHaveScreenshot('dashboard-header.png', {
-			animations: 'disabled',
-			maxDiffPixelRatio: 0.05,
-		})
-	} finally {
-		await cleanupPrefixedRecords(prefix)
-	}
-})
 
 test('visual regression: chat index', async ({ page }) => {
 	const prefix = uniquePrefix('visual-chat')

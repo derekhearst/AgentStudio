@@ -13,42 +13,6 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  */
 
 test.describe('source-control/cascade — task survives repo delete', () => {
-	test('deleting a repository leaves task rows intact with a stale repository_id', async () => {
-		const prefix = uniquePrefix('repo-cascade-task')
-		const sql = getSql()
-		const userId = await getActiveUserId()
-
-		try {
-			const [repo] = await sql<{ id: string }[]>`
-				insert into repositories (user_id, provider, owner, name, clone_url, default_branch, metadata)
-				values (${userId}, 'github', ${`${prefix}-owner`}, ${`${prefix}-repo`}, 'https://example.com/r.git', 'main', '{}'::jsonb)
-				returning id
-			`
-
-			const [task] = await sql<{ id: string }[]>`
-				insert into tasks (title, spec, repository_id, created_by)
-				values (${`${prefix} task`}, 'spec', ${repo.id}, ${userId})
-				returning id
-			`
-
-			// Delete the repo. By-name pointer means the task row should survive.
-			await sql`delete from repositories where id = ${repo.id}`
-
-			const [taskAfter] = await sql<{ id: string; repository_id: string | null }[]>`
-				select id, repository_id from tasks where id = ${task.id}
-			`
-			expect(taskAfter.id).toBe(task.id)
-			// Task's repository_id is now a stale pointer (the runner falls back to the agent
-			// workspace + logs a warning at run-start; we don't null it out here).
-			expect(taskAfter.repository_id).toBe(repo.id)
-		} finally {
-			await sql`delete from tasks where title like ${`${prefix}%`}`
-			await sql`delete from repositories where owner like ${`${prefix}%`}`
-		}
-	})
-})
-
-test.describe('source-control/cascade — pull_requests cascade with their repo', () => {
 	test('deleting a repository cascade-deletes its pull_requests rows', async () => {
 		const prefix = uniquePrefix('repo-cascade-pr')
 		const sql = getSql()

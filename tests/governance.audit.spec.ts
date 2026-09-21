@@ -87,11 +87,10 @@ test.describe('governance/audit — schema invariants', () => {
 		await cleanupPrefixedRecords(prefix)
 		const sql = getSql()
 		try {
-			const [tempUser] = await sql<{ id: string }[]>`
-				insert into users (id, name, username, role)
-				values (${randomUUID()}, ${`${prefix} temp`}, ${`${prefix.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_u`}, 'user'::user_role)
-				returning id
-			`
+			// A foreign owner id with no user row: the instance is single-user
+			// (users_singleton refuses a second), and what is under test is ownership
+			// filtering, not whether another account exists.
+			const tempUser = { id: randomUUID() }
 			const [audit] = await sql<{ id: string }[]>`
 				insert into audit_events (actor_user_id, action, target_type, summary)
 				values (${tempUser.id}, 'agent.config.updated'::audit_action, 'agent', ${`${prefix}: by temp user`})

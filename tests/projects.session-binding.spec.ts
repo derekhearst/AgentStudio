@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
@@ -138,12 +139,10 @@ test.describe('projects/session-binding — conversations.project_id round-trip'
 		const sql = getSql()
 		try {
 			const userId = await getActiveUserId()
-			// Fake "other user" + their project.
-			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username)
-				values ('Other', ${`other-${prefix}`})
-				returning id
-			`
+			// A foreign owner id with no user row: the instance is single-user
+			// (users_singleton refuses a second), and what is under test is ownership
+			// filtering, not whether another account exists.
+			const otherUser = { id: randomUUID() }
 			const [otherProject] = await sql<{ id: string }[]>`
 				insert into projects (user_id, name, slug) values (${otherUser.id}, ${`${prefix} other`}, ${`${prefix}-other`}) returning id
 			`

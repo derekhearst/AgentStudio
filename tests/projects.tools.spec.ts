@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
@@ -48,12 +49,10 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 		const userId = await getActiveUserId()
 		const sql = getSql()
 		try {
-			// Create a fake "other user" + their project.
-			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username)
-				values ('Other User', ${`other-${prefix}`})
-				returning id
-			`
+			// A foreign owner id. The instance is single-user (users_singleton refuses a
+			// second row), and the property under test is ownership filtering, not the
+			// existence of another account — so this is deliberately an id with no user row.
+			const otherUser = { id: randomUUID() }
 			const [otherProject] = await sql<{ id: string }[]>`
 				insert into projects (user_id, name, slug)
 				values (${otherUser.id}, ${`${prefix} other-owned`}, ${`${prefix}-other`})
@@ -65,9 +64,7 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 			`
 			expect(rows).toHaveLength(0)
 
-			// Cleanup the other user.
 			await sql`delete from projects where id = ${otherProject.id}`
-			await sql`delete from users where id = ${otherUser.id}`
 		} finally {
 			await cleanupProjectsToolsPrefix(prefix)
 		}

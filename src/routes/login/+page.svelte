@@ -32,8 +32,13 @@
 
 			<form class="mt-4 space-y-4" onsubmit={submit}>
 				<fieldset class="fieldset">
-					<legend class="fieldset-legend">Password</legend>
+					<!-- A <legend> names the fieldset, not the input, so the field had no
+					     accessible name: screen readers announced an unlabelled text box and
+					     getByLabel('Password') could not find it. An explicit label fixes
+					     both. -->
+					<label class="fieldset-legend" for="password">Password</label>
 					<input
+						id="password"
 						type="password"
 						class="input input-bordered w-full"
 						bind:value={password}

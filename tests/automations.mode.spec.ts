@@ -32,12 +32,12 @@ test.describe('automations/mode — schema invariants', () => {
 		}
 	})
 
-	test('automation_mode enum accepts all four values', async () => {
+	test('automation_mode enum accepts all three values', async () => {
 		const prefix = uniquePrefix('automation-mode-enum')
 		const sql = getSql()
 		try {
 			const userId = await getActiveUserId()
-			for (const mode of ['chat_followup', 'research', 'code', 'maintenance']) {
+			for (const mode of ['chat_followup', 'research', 'maintenance']) {
 				await sql`
 					insert into automations (user_id, description, cron_expression, prompt, mode)
 					values (${userId}, ${`${prefix} ${mode}`}, '0 0 * * *', 'p', ${mode}::automation_mode)
@@ -50,13 +50,13 @@ test.describe('automations/mode — schema invariants', () => {
 				group by mode
 				order by mode
 			`
-			expect(rows.map((r) => r.mode)).toEqual(['chat_followup', 'code', 'maintenance', 'research'])
+			expect(rows.map((r) => r.mode)).toEqual(['chat_followup', 'maintenance', 'research'])
 		} finally {
 			await sql`delete from automations where description like ${`${prefix}%`}`
 		}
 	})
 
-	test('automation_output_target enum accepts all four values', async () => {
+	test('automation_output_target enum accepts all three values', async () => {
 		const prefix = uniquePrefix('automation-target-enum')
 		const sql = getSql()
 		try {
@@ -142,7 +142,7 @@ test.describe('automations/mode — lifecycle metric shape', () => {
 				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'chat_followup', outputTarget: 'chat_session' })}, '1', now() - interval '20 minutes'),
 				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'chat_followup', outputTarget: 'chat_session' })}, '1', now() - interval '15 minutes'),
 				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'research', outputTarget: 'task' })}, '1', now() - interval '10 minutes'),
-				(${`${prefix}.automations.lifecycle.failed`}, ${sql.json({ mode: 'code', outputTarget: 'review_inbox' })}, '1', now() - interval '5 minutes')
+				(${`${prefix}.automations.lifecycle.failed`}, ${sql.json({ mode: 'maintenance', outputTarget: 'review_inbox' })}, '1', now() - interval '5 minutes')
 			`
 			const completed = await sql<{ count: number; mode: string }[]>`
 				select count(*)::int as count, dimension->>'mode' as mode
@@ -159,7 +159,7 @@ test.describe('automations/mode — lifecycle metric shape', () => {
 				select dimension from operational_metrics
 				where metric = ${`${prefix}.automations.lifecycle.failed`}
 			`
-			expect(failed.dimension).toEqual({ mode: 'code', outputTarget: 'review_inbox' })
+			expect(failed.dimension).toEqual({ mode: 'maintenance', outputTarget: 'review_inbox' })
 		} finally {
 			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
 		}

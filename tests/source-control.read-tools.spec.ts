@@ -113,12 +113,8 @@ test.describe('list_pull_requests / get_pull_request — visibility scoping', ()
 		try {
 			// Create a repo owned by a synthetic UUID — the active user never owns it.
 			const otherUserId = '00000000-0000-4000-8000-000000aaaaaa'
-			// Make sure the synthetic user actually exists so the FK doesn't reject.
-			await sql`
-				insert into users (id, name, username)
-				values (${otherUserId}, 'Test User', ${`${prefix}-user`})
-				on conflict (id) do nothing
-			`
+			// No user row is created: repositories.user_id has no enforced FK, and the
+			// instance is single-user, so a foreign id is all the ownership check needs.
 			const [repo] = await sql<{ id: string }[]>`
 				insert into repositories (user_id, provider, owner, name, clone_url, default_branch, metadata)
 				values (${otherUserId}, 'github', ${`${prefix}-owner`}, ${`${prefix}-repo`}, 'https://example.com/repo.git', 'main', '{}'::jsonb)
