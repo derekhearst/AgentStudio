@@ -29,7 +29,8 @@ export async function runMaintenanceModeAutomation(
 	const prompt = `Maintenance run at ${now.toISOString()}\n\n${automation.prompt}`
 	const response = await chat([{ role: 'user', content: prompt }], model)
 
-	void logLlmUsage({
+	// #31 — awaited so the run ledger can record the tick's cost; still non-fatal.
+	const costUsd = await logLlmUsage({
 		source: 'automation',
 		model,
 		tokensIn: response.usage?.promptTokens ?? 0,
@@ -37,7 +38,7 @@ export async function runMaintenanceModeAutomation(
 		userId: automation.userId,
 		agentId: automation.agentId ?? null,
 		metadata: { automationId: automation.id, mode: 'maintenance' },
-	}).catch(() => {})
+	}).catch(() => null)
 
 	const fullSummary = (response.content ?? '').trim()
 	const route = await routeMaintenanceOutput(automation, fullSummary, model, now).catch((err) => {
@@ -52,6 +53,8 @@ export async function runMaintenanceModeAutomation(
 				: null,
 		mode: 'maintenance' as const,
 		summary: fullSummary.slice(0, 500),
+		output: fullSummary,
+		costUsd,
 		outputTarget: automation.outputTarget,
 		routedTo: route.target,
 		reviewItemId: 'reviewItemId' in route ? route.reviewItemId : null,

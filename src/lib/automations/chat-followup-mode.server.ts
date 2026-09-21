@@ -80,16 +80,19 @@ async function runAutomationSynthesis(args: {
 
 	await db.update(conversations).set({ updatedAt: now }).where(eq(conversations.id, conversation.id))
 
-	void logLlmUsage({
+	// #31 — awaited (it was fire-and-forget) so the run ledger can record what the tick
+	// cost. `logLlmUsage` already swallows nothing, so keep the catch: a pricing lookup
+	// miss must not fail a run that has already produced its output.
+	const costUsd = await logLlmUsage({
 		source: 'agent_synthesis',
 		model,
 		tokensIn: response.usage?.promptTokens ?? 0,
 		tokensOut: response.usage?.completionTokens ?? 0,
 		userId: automation.userId,
 		agentId: automation.agentId ?? null,
-	}).catch(() => {})
+	}).catch(() => null)
 
-	return { conversationId: conversation.id }
+	return { conversationId: conversation.id, output: response.content, costUsd }
 }
 
 /**
@@ -203,7 +206,7 @@ async function runAutomationWithAgent(args: {
 			finished: true,
 		})
 
-		return { conversationId: conversation.id, runId: run.id }
+		return { conversationId: conversation.id, runId: run.id, output: loopResult.finalText, costUsd: cost }
 	} catch (error) {
 		await session.updateRun({
 			state: 'failed',

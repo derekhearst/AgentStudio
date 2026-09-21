@@ -1,27 +1,87 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { automations } from '$lib/automations/automation.schema'
+import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
 import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
 import { computeNextRunAt } from './cron'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
 import { runMaintenanceModeAutomation } from './maintenance-mode.server'
 import { runChatFollowupAutomation } from './chat-followup-mode.server'
+import {
+	finishAutomationRun,
+	resetAutomationFailureState,
+	startAutomationRun,
+} from './automation-runs.server'
 
 export { computeNextRunAt } from './cron'
+
+/**
+ * #31 — knobs the caller sets per invocation. Defaults reproduce the pre-#31 behaviour of
+ * a scheduled tick, so existing callers (`runAutomationById(id)`) are unchanged.
+ */
+export type RunAutomationOptions = {
+	/** Who asked for this run. Recorded on the ledger row; also picks the defaults below. */
+	trigger?: AutomationRunTrigger
+	/** 1-based attempt number within the current tick. >1 means this is a retry. */
+	attempt?: number
+	/** The `automation_run` job this execution belongs to, for cross-linking. */
+	jobId?: string | null
+	/**
+	 * Leave `next_run_at` exactly as it is. "Run now" must not move the schedule — pressing
+	 * the button at 09:58 should not push a 10:00 tick to tomorrow. Defaults to true for
+	 * manual runs, false for scheduled ones.
+	 */
+	preserveSchedule?: boolean
+	/**
+	 * Execute even when the row is disabled. Manual runs default to true so an operator can
+	 * verify a fix on an automation that the failure policy switched off.
+	 */
+	allowDisabled?: boolean
+}
+
+/**
+ * The common shape the per-mode handlers report back. Each mode fills in the parts it has:
+ * chat_followup has a conversation (and a chat_run when an agent is attached), research has
+ * a research id, maintenance has a summary. The ledger reads whichever are present.
+ */
+export type AutomationModeResult = {
+	conversationId: string | null
+	runId?: string
+	researchId?: string
+	jobId?: string
+	mode?: string
+	summary?: string
+	/** Text to excerpt into the run row so the history shows what came out. */
+	output?: string | null
+	/** Dollar cost of the run as reported by the cost ledger, when the mode knows it. */
+	costUsd?: string | null
+}
 
 /**
  * Wave 4 #17 phase 5 — public entry point for the automation_run job handler.
  * Looks up the automation by id, dispatches per-mode, then updates last_run_at /
  * next_run_at on the automation row. Throws if the automation is missing or disabled
  * (the job marks failed and won't retry past maxAttempts).
+ *
+ * #31 — every invocation also opens a row in the `automation_runs` ledger and closes it
+ * with the outcome, so the /automations page can show whether past runs actually worked
+ * and link to what they produced.
  */
-export async function runAutomationById(automationId: string, now = new Date()) {
+export async function runAutomationById(
+	automationId: string,
+	now = new Date(),
+	options: RunAutomationOptions = {},
+) {
+	const trigger: AutomationRunTrigger = options.trigger ?? 'schedule'
+	const attempt = Math.max(1, Math.floor(options.attempt ?? 1))
+	const preserveSchedule = options.preserveSchedule ?? trigger === 'manual'
+	const allowDisabled = options.allowDisabled ?? trigger === 'manual'
+
 	const [automation] = await db.select().from(automations).where(eq(automations.id, automationId)).limit(1)
 	if (!automation) {
 		throw new Error(`Automation ${automationId} not found`)
 	}
-	if (!automation.enabled) {
+	if (!automation.enabled && !allowDisabled) {
 		throw new Error(`Automation ${automationId} is disabled`)
 	}
 
@@ -34,17 +94,29 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 		agentId: automation.agentId ?? undefined,
 	})
 	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
-		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now)
+		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now, {
+			trigger,
+			attempt,
+			jobId: options.jobId ?? null,
+		})
 	}
+
+	// #31 — ledger row opens here, so a run that dies mid-flight still leaves a trace.
+	const ledgerRun = await startAutomationRun({
+		automationId: automation.id,
+		userId: automation.userId,
+		mode: automation.mode,
+		trigger,
+		attempt,
+		jobId: options.jobId ?? null,
+		startedAt: now,
+	})
 
 	// Wave 5 #21 phase 4 — per-mode dispatch.
 	const startedAt = Date.now()
 	let success = true
 	try {
-		let result:
-			| { conversationId: string; runId?: string }
-			| { conversationId: string | null; researchId?: string; jobId?: string; mode?: string }
-			| { mode: 'maintenance'; summary: string; conversationId: null }
+		let result: AutomationModeResult
 		if (automation.mode === 'research') {
 			result = await runResearchModeAutomation(automation)
 		} else if (automation.mode === 'maintenance') {
@@ -52,14 +124,41 @@ export async function runAutomationById(automationId: string, now = new Date()) 
 		} else {
 			result = await runChatFollowupAutomation(automation, now)
 		}
-		const nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
+
+		// "Run now" must not disturb the schedule — only a scheduled tick advances it.
+		const nextRunAt = preserveSchedule
+			? automation.nextRunAt
+			: computeNextRunAt(automation.cronExpression, now, automation.timezone)
 		await db
 			.update(automations)
-			.set({ lastRunAt: now, nextRunAt, updatedAt: now })
+			.set(
+				preserveSchedule
+					? { lastRunAt: now, updatedAt: now }
+					: { lastRunAt: now, nextRunAt, updatedAt: now },
+			)
 			.where(eq(automations.id, automation.id))
+
+		await finishAutomationRun(ledgerRun?.id, {
+			status: 'completed',
+			conversationId: result.conversationId ?? null,
+			chatRunId: 'runId' in result ? (result.runId ?? null) : null,
+			researchId: 'researchId' in result ? (result.researchId ?? null) : null,
+			costUsd: 'costUsd' in result ? (result.costUsd ?? null) : null,
+			output: 'output' in result ? result.output : 'summary' in result ? result.summary : null,
+			finishedAt: new Date(),
+		})
+		// A run that worked ends the failure streak — and un-stamps a disabled-by-failure
+		// row, so a manual verification run leaves the card honest.
+		await resetAutomationFailureState(automation.id)
+
 		return { ...result, nextRunAt: nextRunAt?.toISOString() ?? null }
 	} catch (err) {
 		success = false
+		await finishAutomationRun(ledgerRun?.id, {
+			status: 'failed',
+			error: err instanceof Error ? err.message : String(err),
+			finishedAt: new Date(),
+		})
 		throw err
 	} finally {
 		// Wave 5 #21 phase 3 + #20 phase 4 — emit per-mode lifecycle metric so /review/health
@@ -99,7 +198,25 @@ async function handleAutomationBudgetBlocked(
 	automation: typeof automations.$inferSelect,
 	blockedBy: BudgetLimitRow,
 	now: Date,
+	context: { trigger: AutomationRunTrigger; attempt: number; jobId: string | null },
 ) {
+	// #31 — a blocked tick is part of the run history too, with its own status so it is not
+	// confused with a failure (nothing is broken; a cap was hit).
+	const ledgerRun = await startAutomationRun({
+		automationId: automation.id,
+		userId: automation.userId,
+		mode: automation.mode,
+		trigger: context.trigger,
+		attempt: context.attempt,
+		jobId: context.jobId,
+		startedAt: now,
+	})
+	await finishAutomationRun(ledgerRun?.id, {
+		status: 'blocked',
+		error: `Budget block: ${blockedBy.scope} ${blockedBy.period} limit of $${blockedBy.limitUsd}`,
+		finishedAt: now,
+	})
+
 	try {
 		await recordBudgetAlert({
 			limit: blockedBy,
