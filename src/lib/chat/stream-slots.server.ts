@@ -16,6 +16,7 @@ import type { ContextSlot } from '$lib/context/slots.server'
 import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
+import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
 import type { getSettings } from '$lib/settings'
@@ -190,6 +191,8 @@ const ORCHESTRATOR_TOOL_POLICY = [
 	'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
 	"- Don't search speculatively. Match what the user actually asked for.",
 	'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
+	'',
+	...SUBAGENT_RESULT_POLICY_LINES,
 ].join('\n')
 
 const AGENT_TOOL_POLICY = [

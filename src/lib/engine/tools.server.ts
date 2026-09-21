@@ -13,6 +13,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { toolSchemas, toolDescriptions, allToolNames, type ToolName } from '$lib/tools/tool-schemas'
 import { executeTool, type WorkspaceOptions } from '$lib/tools/tools.server'
+import { wrapSubagentResult } from '$lib/agents/subagent-result'
 
 /** MCP namespaces tool names as `mcp__<server>__<tool>`. */
 export const ENGINE_MCP_SERVER = 'agentstudio'
@@ -81,7 +82,11 @@ export function buildToolServer(ctx: ToolServerContext) {
 				if (name === 'run_subagent' && ctx.onRunSubagent) {
 					const req = args as { task: string; context?: string; agentId?: string }
 					const result = await ctx.onRunSubagent(req)
-					return { content: [{ type: 'text' as const, text: result }] }
+					// #34 — a child's text is an observation, not the parent's own reasoning. Wrap it in
+					// a delimiter the child cannot forge before it enters the parent's transcript.
+					return {
+						content: [{ type: 'text' as const, text: wrapSubagentResult(result, { agentName: req.agentId }) }],
+					}
 				}
 
 				if (name === 'ask_user' && ctx.onAskUser) {

@@ -199,11 +199,14 @@ export const metaHandlers: Record<string, ToolHandler> = {
 			},
 		]
 		const response = await llmChat(subagentMessages, 'claude-sonnet-5')
+		const { wrapSubagentResult } = await import('$lib/agents/subagent-result')
 		return {
 			success: true,
 			tool: call.name,
 			input,
-			result: response.content,
+			// #34 — child output is data reported to the parent, wrapped so it cannot read as
+			// the parent's own instructions and cannot forge the wrapper itself.
+			result: wrapSubagentResult(response.content),
 			executionMs: Date.now() - startedAt,
 		}
 	},
