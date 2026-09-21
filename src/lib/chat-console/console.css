@@ -1812,3 +1812,10 @@ a.console-crumbs__seg:hover {
 @media (prefers-reduced-motion: reduce) {
 	.console-msg--sending { transition: none; }
 }
+
+
+/* Initial height for the new-chat composer comes from CSS, not JS, so nothing
+   has to write layout before the user types. */
+.console-composer-wrap.is-large .console-composer__ta {
+	min-height: 120px;
+}

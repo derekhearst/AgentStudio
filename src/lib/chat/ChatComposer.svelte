@@ -89,6 +89,8 @@
 		const trimmed = value.trim()
 		if (!trimmed || busy) return
 		await onSubmit?.(trimmed)
+		// The parent clears `value`; bring the box back down with it.
+		autosize()
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -102,22 +104,25 @@
 	 * Grow the textarea with its content instead of reserving five rows up front.
 	 * Reset to `auto` first or scrollHeight only ever ratchets upward. The cap
 	 * matches `max-height` in console.css, after which the textarea scrolls.
+	 *
+	 * Deliberately NOT an $effect. Writing element height from inside the reactive
+	 * graph re-entered it and blew the update depth
+	 * (`effect_update_depth_exceeded`), which killed Svelte's reactivity for the
+	 * whole page — the stream spinner froze and navigation stopped working. This
+	 * is a DOM concern driven by input, so it runs on input.
 	 */
 	let textarea: HTMLTextAreaElement | undefined = $state()
 	// The new-chat page has nothing else on screen, so the composer is the page's
 	// main affordance and starts tall. Inside a conversation the transcript is the
 	// point, so it starts at one row and grows.
 	const MAX_COMPOSER_HEIGHT = 168
-	const MIN_COMPOSER_HEIGHT = $derived(size === 'large' ? 120 : 22)
+	const minComposerHeight = () => (size === 'large' ? 120 : 22)
 
-	$effect(() => {
-		// Touch `value` so this re-runs on every keystroke, including programmatic clears.
-		value
-		const el = textarea
+	function autosize(el: HTMLTextAreaElement | undefined = textarea) {
 		if (!el) return
 		el.style.height = 'auto'
-		el.style.height = `${Math.min(Math.max(el.scrollHeight, MIN_COMPOSER_HEIGHT), MAX_COMPOSER_HEIGHT)}px`
-	})
+		el.style.height = `${Math.min(Math.max(el.scrollHeight, minComposerHeight()), MAX_COMPOSER_HEIGHT)}px`
+	}
 </script>
 
 <form onsubmit={submit} class="console-composer-wrap {className} {size === 'large' ? 'is-large' : ''}">
@@ -125,6 +130,7 @@
 		<label class="sr-only" for="chat-composer-textarea">Message</label>
 		<textarea
 			bind:this={textarea}
+			oninput={(e) => autosize(e.currentTarget)}
 			id="chat-composer-textarea"
 			class="console-composer__ta"
 			rows="1"
