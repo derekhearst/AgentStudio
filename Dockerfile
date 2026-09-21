@@ -52,6 +52,10 @@ COPY --from=build /app/drizzle ./drizzle
 RUN mkdir -p /workspace && chown bun:bun /workspace
 VOLUME /workspace
 
+# Stamped by the publish workflow so /api/health can say which commit is live (#47).
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 ENV NODE_ENV=production
 ENV PORT=3000
 

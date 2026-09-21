@@ -274,6 +274,67 @@ export async function recordPullRequestCheck(input: {
 	return row
 }
 
+/**
+ * #20 — read one check row by its natural key so the watcher can tell a NEW failure from
+ * the same failure observed again. `recordPullRequestCheck` is an upsert and therefore
+ * cannot answer "what did we have before?"; this is the read half of that edge.
+ */
+export async function getPullRequestCheckByName(
+	pullRequestId: string,
+	checkName: string,
+): Promise<typeof pullRequestChecks.$inferSelect | null> {
+	const [row] = await db
+		.select()
+		.from(pullRequestChecks)
+		.where(and(eq(pullRequestChecks.pullRequestId, pullRequestId), eq(pullRequestChecks.checkName, checkName)))
+		.limit(1)
+	return row ?? null
+}
+
+/**
+ * #20 — narrow provider-state sync for a PR we already have on file.
+ *
+ * Deliberately NOT `recordPullRequest`: that one replaces `metadata` wholesale, which is
+ * correct for "here is the PR as the agent just created it" and wrong for "the poller
+ * noticed the state moved". This merges metadata instead, so a poll cannot erase what the
+ * webhook wrote (or the reverse), and touches only the columns the provider is
+ * authoritative for.
+ */
+export async function syncPullRequestProviderState(input: {
+	pullRequestId: string
+	status: PullRequestStatus
+	providerUrl?: string | null
+	mergedAt?: Date | null
+	closedAt?: Date | null
+	headSha?: string | null
+	metadata?: Record<string, unknown>
+}): Promise<PullRequestRow | null> {
+	const [current] = await db
+		.select({ metadata: pullRequests.metadata })
+		.from(pullRequests)
+		.where(eq(pullRequests.id, input.pullRequestId))
+		.limit(1)
+	if (!current) return null
+
+	const [row] = await db
+		.update(pullRequests)
+		.set({
+			status: input.status,
+			...(input.providerUrl ? { providerUrl: input.providerUrl } : {}),
+			...(input.mergedAt !== undefined ? { mergedAt: input.mergedAt } : {}),
+			...(input.closedAt !== undefined ? { closedAt: input.closedAt } : {}),
+			metadata: {
+				...(current.metadata ?? {}),
+				...(input.metadata ?? {}),
+				...(input.headSha ? { headSha: input.headSha } : {}),
+			},
+			updatedAt: new Date(),
+		})
+		.where(eq(pullRequests.id, input.pullRequestId))
+		.returning()
+	return row ?? null
+}
+
 export async function listChecksForPullRequest(prId: string) {
 	return db
 		.select()

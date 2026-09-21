@@ -1,0 +1,2 @@
+CREATE TYPE "public"."conversation_permission_mode" AS ENUM('default', 'plan', 'acceptEdits', 'bypassPermissions');--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN "permission_mode" "conversation_permission_mode" DEFAULT 'default' NOT NULL;
