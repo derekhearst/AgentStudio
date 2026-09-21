@@ -19,6 +19,7 @@
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
+import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
 import {
 	resolveEffectivePermissionMode,
 	sdkPermissionModeFor,
@@ -180,7 +181,11 @@ const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
  */
 export function sandboxAvailable(): boolean {
 	if (process.env.SANDBOX_DISABLED === '1') return false
-	return process.platform === 'linux'
+	// Probe, never assume. A platform check said "linux, therefore sandboxed" and took
+	// production chat down: `failIfUnavailable` defaults to true, so when bubblewrap could
+	// not initialise inside the container every query() failed in under two seconds with no
+	// output at all. `bubblewrapAvailable()` actually runs `bwrap --version` and caches it.
+	return bubblewrapAvailable()
 }
 
 export function buildEngineOptions(input: EngineOptionsInput): Options {
