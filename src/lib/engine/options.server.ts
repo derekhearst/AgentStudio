@@ -23,8 +23,24 @@ import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerC
 /** Models that run natively on the Claude Code CLI login. */
 const CLAUDE_MODEL_PREFIXES = ['claude-', 'opus', 'sonnet', 'haiku']
 
+/**
+ * Strip an OpenRouter-style vendor prefix.
+ *
+ * Conversations created before the engine migration carry ids like
+ * `anthropic/claude-sonnet-4`, because everything used to be routed through
+ * OpenRouter. The Agent SDK wants the bare id. Without this, every pre-existing
+ * Claude conversation looks like a third-party model and fails closed on the
+ * gateway path.
+ */
+export function normalizeModelId(model: string): string {
+	const slash = model.indexOf('/')
+	if (slash === -1) return model
+	const vendor = model.slice(0, slash).toLowerCase()
+	return vendor === 'anthropic' ? model.slice(slash + 1) : model
+}
+
 export function isClaudeModel(model: string): boolean {
-	const normalized = model.toLowerCase()
+	const normalized = normalizeModelId(model).toLowerCase()
 	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
 }
 
@@ -98,6 +114,7 @@ export class GatewayNotConfiguredError extends Error {
 
 export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const claude = isClaudeModel(input.model)
+	const sdkModel = claude ? normalizeModelId(input.model) : input.model
 	const proxyEnv = claude ? undefined : gatewayEnv(input.model)
 
 	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
@@ -105,7 +122,7 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const { thinking, effort } = resolveThinking(input.reasoningEffort)
 
 	return {
-		model: input.model,
+		model: sdkModel,
 		thinking,
 		...(effort ? { effort } : {}),
 		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools) },

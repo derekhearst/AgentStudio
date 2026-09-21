@@ -23,7 +23,7 @@
 	}
 
 	let {
-		value = 'anthropic/claude-sonnet-4',
+		value = 'claude-sonnet-5',
 		onchange,
 		class: className = '',
 		size = 'default',

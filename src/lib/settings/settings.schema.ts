@@ -4,7 +4,7 @@ import { users } from '../auth/auth.schema'
 export const appSettings = pgTable('app_settings', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
-	defaultModel: text('default_model').notNull().default('anthropic/claude-sonnet-4'),
+	defaultModel: text('default_model').notNull().default('claude-sonnet-5'),
 	transcriptionModel: text('transcription_model').notNull().default('google/gemini-2.5-flash'),
 	notificationPrefs: jsonb('notification_prefs')
 		.$type<{
@@ -55,7 +55,7 @@ export const appSettings = pgTable('app_settings', {
 			enabled: true,
 			topK: 5,
 			useRerank: false,
-			rerankModel: 'anthropic/claude-haiku-4.5',
+			rerankModel: 'claude-haiku-4-5',
 			embeddingModel: 'openai/text-embedding-3-small',
 			autoMine: true,
 		}),

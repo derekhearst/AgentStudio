@@ -85,7 +85,7 @@
 	import { loadReasoningEffort, saveReasoningEffort, type ReasoningEffort } from '$lib/chat/reasoning-effort';
 
 	const conversationId = $derived(page.params.id ?? '');
-	let model = $state('anthropic/claude-sonnet-4');
+	let model = $state('claude-sonnet-5');
 	let reasoningEffort = $state<ReasoningEffort>('none');
 	let reasoningHydratedFor = $state<string | null>(null);
 	let streaming = $state(false);

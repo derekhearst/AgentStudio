@@ -33,8 +33,8 @@ export const DEFAULT_RESEARCH_CONFIG: ResolvedResearchConfig = {
 	// These two model fields are *fallbacks* — when a research run carries a composer-selected
 	// model on `research.model`, the orchestrator overrides both with that value. Per-agent
 	// `agents.config.research` still wins over these defaults but loses to the composer pick.
-	plannerModel: 'anthropic/claude-sonnet-4-6',
-	synthesizerModel: 'anthropic/claude-sonnet-4-6',
+	plannerModel: 'claude-sonnet-5',
+	synthesizerModel: 'claude-sonnet-5',
 	// Defaults bumped (Deep Research rebuild): 5→8, 2→4, 30k→50k. Default initial pass
 	// visits 8×4 = 32 sources. With 3 reflection rounds × ~12 follow-up sources each, a
 	// typical default run lands in the 60-100 source range — Claude Advanced Research

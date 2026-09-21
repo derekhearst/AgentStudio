@@ -13,7 +13,7 @@
 
 	let busy = $state(false);
 	let prompt = $state('');
-	let model = $state('anthropic/claude-sonnet-4');
+	let model = $state('claude-sonnet-5');
 	let agentId = $state<string | null>(null);
 	let reasoningEffort = $state<ReasoningEffort>('none');
 	let reasoningHydrated = $state(false);

@@ -114,7 +114,7 @@ function toChatMessages(messages: LlmMessage[]) {
 	})) as Array<{ role: ChatRole; content: MessageContent }>
 }
 
-export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4'
+export const DEFAULT_MODEL = 'claude-sonnet-5'
 
 let singleton: OpenRouter | null = null
 

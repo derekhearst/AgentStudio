@@ -98,7 +98,7 @@ async function applyAgent(
 			name,
 			role,
 			systemPrompt: source.systemPrompt,
-			model: source.frontmatter.model ?? 'anthropic/claude-sonnet-4',
+			model: source.frontmatter.model ?? 'claude-sonnet-5',
 			config: nextConfig,
 		})
 		return { inserted: true, updated: false, skipped: false, error: null }

@@ -20,7 +20,7 @@ export const agents = pgTable(
 		name: text('name').notNull(),
 		role: text('role').notNull(),
 		systemPrompt: text('system_prompt').notNull(),
-		model: text('model').notNull().default('anthropic/claude-sonnet-4'),
+		model: text('model').notNull().default('claude-sonnet-5'),
 		config: jsonb('config').$type<Record<string, unknown>>().notNull().default({}),
 		status: agentStatusEnum('status').notNull().default('idle'),
 		kind: agentKindEnum('kind').notNull().default('worker'),

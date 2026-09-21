@@ -30,8 +30,8 @@ export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
  * Model context window sizes (in tokens) for compaction calculations.
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-	'anthropic/claude-sonnet-4': 200_000,
-	'anthropic/claude-opus-4': 200_000,
+	'claude-sonnet-5': 200_000,
+	'claude-opus-5': 200_000,
 	'openai/gpt-4o-mini': 128_000,
 }
 

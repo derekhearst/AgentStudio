@@ -11,7 +11,7 @@ import { logLlmUsage } from '$lib/costs/usage'
 import type { RetrievedDrawer } from '$lib/memory/retrieval.server'
 import { logger } from '$lib/observability/logger'
 
-const DEFAULT_RERANK_MODEL = 'anthropic/claude-haiku-4.5'
+const DEFAULT_RERANK_MODEL = 'claude-haiku-4-5'
 
 const RERANK_SYSTEM = `You are a re-ranking judge for a memory retrieval system.
 You will receive a question and a numbered list of candidate memory snippets.

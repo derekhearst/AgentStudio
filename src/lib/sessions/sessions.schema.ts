@@ -14,7 +14,7 @@ export const conversations = pgTable('conversations', {
 	// Nullable at the DB layer so historical rows survive a migration; the application
 	// guarantees a non-null id via `resolveDefaultAgentId` on every new conversation insert.
 	agentId: uuid('agent_id').references(() => agents.id, { onDelete: 'set null' }),
-	model: text('model').notNull().default('anthropic/claude-sonnet-4'),
+	model: text('model').notNull().default('claude-sonnet-5'),
 	// Wave 4 #15 phase 2 — bind a conversation to a project so subsequent agent edits know
 	// where to put new artifacts. Declared by-name (no enforced FK) to avoid a circular import
 	// with $lib/projects. SET NULL semantics enforced via application logic when a project

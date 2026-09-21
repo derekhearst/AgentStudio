@@ -219,7 +219,7 @@ export async function seedBuiltinAgents(
 				name: NAMES[key],
 				role: ROLE_DESCRIPTIONS[key],
 				systemPrompt: promptContent,
-				model: 'anthropic/claude-sonnet-4',
+				model: 'claude-sonnet-5',
 				config: buildToolPolicyConfig(key),
 				status: 'idle',
 				kind: 'orchestrator',

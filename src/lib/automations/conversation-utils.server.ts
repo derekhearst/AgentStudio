@@ -42,7 +42,7 @@ export async function getOrCreateAutomationConversation(
 			title: automation.description,
 			userId: automation.userId,
 			agentId,
-			model: 'anthropic/claude-sonnet-4',
+			model: 'claude-sonnet-5',
 		})
 		.returning()
 

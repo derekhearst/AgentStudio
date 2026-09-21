@@ -11,7 +11,7 @@ import { appSettings } from '$lib/settings/settings.schema'
  * downstream consumer references them.
  */
 export const DEFAULT_SETTINGS = {
-	defaultModel: 'anthropic/claude-sonnet-4',
+	defaultModel: 'claude-sonnet-5',
 	transcriptionModel: 'google/gemini-2.5-flash',
 	notificationPrefs: {
 		taskCompleted: true,
@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS = {
 		enabled: true,
 		topK: 5,
 		useRerank: false,
-		rerankModel: 'anthropic/claude-haiku-4.5',
+		rerankModel: 'claude-haiku-4-5',
 		embeddingModel: 'openai/text-embedding-3-small',
 		autoMine: true,
 	},

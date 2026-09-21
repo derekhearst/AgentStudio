@@ -200,7 +200,7 @@ export const metaHandlers: Record<string, ToolHandler> = {
 				content: input.context ? `Context: ${input.context}\n\nTask: ${input.task}` : `Task: ${input.task}`,
 			},
 		]
-		const response = await llmChat(subagentMessages, 'anthropic/claude-sonnet-4')
+		const response = await llmChat(subagentMessages, 'claude-sonnet-5')
 		return {
 			success: true,
 			tool: call.name,

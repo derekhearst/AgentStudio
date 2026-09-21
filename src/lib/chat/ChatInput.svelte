@@ -17,7 +17,7 @@
 		value = $bindable(''),
 		placeholder = 'Message AgentStudio...',
 		busy = false,
-		model = 'anthropic/claude-sonnet-4',
+		model = 'claude-sonnet-5',
 		reasoningEffort = 'none',
 		agentId = null,
 		agentChoices = [],
