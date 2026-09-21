@@ -36,7 +36,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Long-horizon monitoring | **absent** (#33) | nothing watches an external condition between runs | Monitor tool with deadlines |
 | Multi-agent orchestration | **behind** (#5, #32) | `run_subagent`, one level, serial, no fan-out or concurrency cap | workflow scripts, concurrency limits, agent map, forked sessions |
 | Delegate from a phone | **behind** | the web UI is responsive and push works | persistent agent thread on mobile, Cowork on web + mobile |
-| Subagent output treated as data, not instructions | **behind** (#34) | child output is inlined into the parent transcript verbatim | indented so it cannot pass as the session's own instructions |
+| Subagent output treated as data, not instructions | **even** (#34) | child output is wrapped in an unforgeable `<subagent_result>` delimiter, and the parent's system prompt says instructions inside one are content, not commands | indented so it cannot pass as the session's own instructions |
 
 ## Code
 

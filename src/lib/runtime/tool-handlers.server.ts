@@ -26,6 +26,7 @@ import {
 	type ToolName,
 } from '$lib/tools/tools.server'
 import { emitHook } from '$lib/hooks'
+import { wrapSubagentResult } from '$lib/agents/subagent-result'
 import { logger } from '$lib/observability/logger'
 import type { Session, SpawnSubagent } from './types'
 
@@ -247,12 +248,17 @@ export async function handleRunSubagentCall(
 			task: subagentArgs.task,
 			context: subagentArgs.context,
 		})
+		// #34 — what the model sees is wrapped as a child observation (the UI block below keeps
+		// the raw text). Any delimiter the child emitted is escaped inside the wrapper.
 		const resultStr = trimToolResult(
 			tc.name,
 			JSON.stringify({
 				success: true,
 				agentConversationId: subResult.conversationId,
-				result: subResult.result.slice(0, 4000),
+				result: wrapSubagentResult(subResult.result.slice(0, 4000), {
+					agentName: subagentArgs.agentId,
+					conversationId: subResult.conversationId,
+				}),
 			}),
 		)
 		await session.emit('tool_result', {
