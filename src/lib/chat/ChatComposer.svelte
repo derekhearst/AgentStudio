@@ -94,15 +94,33 @@
 			void submit(e as unknown as SubmitEvent)
 		}
 	}
+
+	/**
+	 * Grow the textarea with its content instead of reserving five rows up front.
+	 * Reset to `auto` first or scrollHeight only ever ratchets upward. The cap
+	 * matches `max-height` in console.css, after which the textarea scrolls.
+	 */
+	let textarea: HTMLTextAreaElement | undefined = $state()
+	const MAX_COMPOSER_HEIGHT = 168
+
+	$effect(() => {
+		// Touch `value` so this re-runs on every keystroke, including programmatic clears.
+		value
+		const el = textarea
+		if (!el) return
+		el.style.height = 'auto'
+		el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT)}px`
+	})
 </script>
 
 <form onsubmit={submit} class="console-composer-wrap {className}">
 	<div class="console-composer">
 		<label class="sr-only" for="chat-composer-textarea">Message</label>
 		<textarea
+			bind:this={textarea}
 			id="chat-composer-textarea"
 			class="console-composer__ta"
-			rows="5"
+			rows="1"
 			{placeholder}
 			bind:value
 			onkeydown={handleKeydown}

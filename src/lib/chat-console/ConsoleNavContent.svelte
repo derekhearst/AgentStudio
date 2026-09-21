@@ -5,7 +5,6 @@
 	import { getConversations } from '$lib/chat';
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
-	import { useResizableSize } from './use-resize.svelte';
 	import { dayKey, dayLabel } from '$lib/util/relative-time';
 
 	const THEME_STORAGE_KEY = 'AgentStudio-theme';
@@ -70,10 +69,6 @@
 	let filters = $state({ status: 'All', project: 'All', env: 'All', lastActivity: 'All' });
 	let groupBy = $state<'Project' | 'Status' | 'Environment' | 'Date' | 'None'>('Date');
 	let sortBy = $state<'Recency' | 'Name' | 'Project'>('Recency');
-
-	// Vertical resize for the Chats panel — drag UP grows the panel (sign = -1).
-	// Disabled in drawer variant since the drawer scrolls as a whole.
-	const chatsHeight = useResizableSize('console:chats-h', 240, 120, 600);
 
 	$effect(() => {
 		void loadConversations();
@@ -183,26 +178,30 @@
 	type IconName =
 		| 'chat' | 'chip' | 'school' | 'bolt' | 'check' | 'folder' | 'dollar'
 		| 'database' | 'edit' | 'cog';
-	const navGroups: Array<{ title: string; items: Array<{ label: string; href: string; icon: IconName }> }> = [
-		{
-			title: 'General',
-			items: [
-				{ label: 'Chats', href: '/', icon: 'chat' },
-				{ label: 'Projects', href: '/projects', icon: 'folder' },
-			],
-		},
-		{
-			title: 'System',
-			items: [
-				{ label: 'Agents', href: '/agents', icon: 'chip' },
-				{ label: 'Skills', href: '/skills', icon: 'school' },
-				{ label: 'Automations', href: '/automations', icon: 'bolt' },
-				{ label: 'Memory', href: '/memory', icon: 'database' },
-				{ label: 'Review', href: '/review', icon: 'edit' },
-				{ label: 'Settings', href: '/settings', icon: 'cog' },
-			],
-		},
+	type NavItem = { label: string; href: string; icon: IconName };
+
+	/**
+	 * Sidebar hierarchy follows what actually gets used: chats dominate, the
+	 * places you browse content sit just above them, and everything
+	 * configuration-shaped is folded into the footer disclosure rather than
+	 * taking six permanent rows above the chat list.
+	 */
+	const primaryNav: NavItem[] = [
+		{ label: 'Chats', href: '/', icon: 'chat' },
+		{ label: 'Projects', href: '/projects', icon: 'folder' },
 	];
+
+	const systemNav: NavItem[] = [
+		{ label: 'Agents', href: '/agents', icon: 'chip' },
+		{ label: 'Skills', href: '/skills', icon: 'school' },
+		{ label: 'Automations', href: '/automations', icon: 'bolt' },
+		{ label: 'Memory', href: '/memory', icon: 'database' },
+		{ label: 'Review', href: '/review', icon: 'edit' },
+		{ label: 'Settings', href: '/settings', icon: 'cog' },
+	];
+
+	// Keep the drawer open when the user is already inside one of those sections.
+	let systemOpen = $state(systemNav.some((item) => isNavActive(item.href)));
 </script>
 
 <div class="console-sb__head">
@@ -219,50 +218,26 @@
 	</button>
 </div>
 
-{#each navGroups as group (group.title)}
-	<div class="console-sb__group">
-		<div class="console-sb__title">{group.title}</div>
-		{#each group.items as item (item.label)}
-			<a
-				href={item.href}
-				class="console-nav-item {isNavActive(item.href) ? 'active' : ''}"
-				onclick={onNavigate}
-			>
-				<span class="ic"><Icon name={item.icon} size={14} /></span>
-				<span>{item.label}</span>
-			</a>
-		{/each}
-	</div>
-{/each}
+<a class="console-sb__newbtn" href="/" onclick={onNavigate}>
+	<Icon name="plus" size={14} />
+	<span>New chat</span>
+</a>
 
-{#if creditsBalance}
-	<button
-		type="button"
-		class="console-sb__credits"
-		title={`OpenRouter credits — click to refresh.\nTotal: ${formatUsd(creditsBalance.totalCredits)}\nUsed: ${formatUsd(creditsBalance.totalUsage)}`}
-		onclick={handleRefreshCredits}
-	>
-		<span class="ic"><Icon name="dollar" size={13} /></span>
-		<span class="l">Credits</span>
-		<span class="v">{formatUsd(creditsBalance.remaining)}</span>
-	</button>
-{/if}
+<div class="console-sb__group">
+	{#each primaryNav as item (item.label)}
+		<a
+			href={item.href}
+			class="console-nav-item {isNavActive(item.href) ? 'active' : ''}"
+			onclick={onNavigate}
+		>
+			<span class="ic"><Icon name={item.icon} size={14} /></span>
+			<span>{item.label}</span>
+		</a>
+	{/each}
+</div>
 
 <!-- Chats panel -->
-<div
-	class="console-sb__chats {variant === 'drawer' ? 'is-drawer' : ''}"
-	style={variant === 'sidebar' ? `height:${chatsHeight.value}px;` : ''}
->
-	{#if variant === 'sidebar'}
-		<button
-			type="button"
-			class="console-resize console-resize--chats is-vert"
-			aria-label="Resize chats panel"
-			onmousedown={(e) => chatsHeight.startDrag(e, 'y', -1)}
-		>
-			<span class="console-resize__grip"></span>
-		</button>
-	{/if}
+<div class="console-sb__chats {variant === 'drawer' ? 'is-drawer' : ''}">
 	<div class="console-sb__search">
 		<Icon name="search" size={13} />
 		<input
@@ -280,9 +255,6 @@
 			</span>
 			<span class="car">▾</span>
 		</button>
-		<a class="console-sb__newchat" href="/" title="New chat" aria-label="New chat" onclick={onNavigate}>
-			<Icon name="plus" size={14} />
-		</a>
 	</div>
 
 	{#if openMenu}
@@ -350,4 +322,47 @@
 			<div class="console-chatempty">No chats match.</div>
 		{/if}
 	</div>
+</div>
+
+<div class="console-sb__foot">
+	<button
+		type="button"
+		class="console-sb__more"
+		aria-expanded={systemOpen}
+		onclick={() => (systemOpen = !systemOpen)}
+	>
+		<span class="ic"><Icon name="cog" size={13} /></span>
+		<span>Manage</span>
+		<span class="car">{systemOpen ? '▾' : '▸'}</span>
+	</button>
+
+	{#if systemOpen}
+		<div class="console-sb__moreitems">
+			{#each systemNav as item (item.label)}
+				<a
+					href={item.href}
+					class="console-nav-item {isNavActive(item.href) ? 'active' : ''}"
+					onclick={onNavigate}
+				>
+					<span class="ic"><Icon name={item.icon} size={14} /></span>
+					<span>{item.label}</span>
+				</a>
+			{/each}
+		</div>
+	{/if}
+
+	{#if creditsBalance}
+		<button
+			type="button"
+			class="console-sb__credits"
+			title={`OpenRouter credits — click to refresh.
+Total: ${formatUsd(creditsBalance.totalCredits)}
+Used: ${formatUsd(creditsBalance.totalUsage)}`}
+			onclick={handleRefreshCredits}
+		>
+			<span class="ic"><Icon name="dollar" size={13} /></span>
+			<span class="l">Credits</span>
+			<span class="v">{formatUsd(creditsBalance.remaining)}</span>
+		</button>
+	{/if}
 </div>
