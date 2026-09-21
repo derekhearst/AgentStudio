@@ -244,7 +244,11 @@
 			</div>
 			<div>
 				<span class="l">Cost</span>
-				<span class="v">{formatCost(consoleState.totalCostUsd)}</span>
+				<!-- Claude runs go through the CLI subscription and have no per-token
+				     price, so a $0.0000 reading is noise rather than information. -->
+				<span class="v" title={consoleState.totalCostUsd > 0 ? 'Metered spend for this conversation' : 'Subscription run — billed by plan, not per token'}>
+					{consoleState.totalCostUsd > 0 ? formatCost(consoleState.totalCostUsd) : 'plan'}
+				</span>
 			</div>
 			<div>
 				<span class="l">Latency</span>

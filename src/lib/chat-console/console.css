@@ -1022,7 +1022,11 @@ body.console-resizing-row * { cursor: row-resize !important; }
 
 /* ── Topbar / breadcrumb ─────────────────────────────────────── */
 .console-topbar {
-	display: grid;
+	/* `display` is deliberately NOT set here. The markup carries
+	   `hidden desktop:grid`, and an unconditional `display: grid` in this file
+	   beats Tailwind's layered `hidden` utility — which rendered this bar
+	   alongside the mobile header below the 1280px desktop breakpoint, showing
+	   the conversation title twice. */
 	grid-template-columns: auto 1fr auto;
 	align-items: center;
 	gap: 14px;
@@ -1151,7 +1155,15 @@ a.console-crumbs__seg:hover {
 	font-family: Consolas, 'Cascadia Code', monospace;
 }
 
-.console-msg__time { font-size: 10px; color: color-mix(in oklab, var(--color-base-content) 35%, transparent); }
+.console-msg__time {
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	opacity: 0;
+	transition: opacity 120ms;
+}
+
+.console-msg:hover .console-msg__time,
+.console-msg__user-wrap:hover .console-msg__time { opacity: 1; }
 .console-msg__model {
 	font-size: 10px;
 	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
@@ -1239,6 +1251,16 @@ a.console-crumbs__seg:hover {
 	align-items: center;
 	gap: 4px;
 	margin-top: 4px;
+	/* Chrome on demand: always-on copy/retry icons and timestamps were most of
+	   the visual noise between messages. Reserve the space so nothing shifts. */
+	opacity: 0;
+	transition: opacity 120ms;
+}
+
+.console-msg:hover .console-msg__actions,
+.console-msg__user-wrap:hover .console-msg__actions,
+.console-msg__actions:focus-within {
+	opacity: 1;
 }
 
 .console-msg--assist > .console-msg__actions { justify-content: flex-start; }
