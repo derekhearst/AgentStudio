@@ -29,6 +29,8 @@ If the target database already contains AgentStudio tables or enums but has no r
 
 Build note: `bun run build` skips database bootstrap entirely. `DATABASE_URL` is only required when the server actually starts.
 
+Schema changes go through `bun run db:generate` — never hand-write a migration or hand-edit `drizzle/meta/_journal.json`. See [`docs/database/database.md`](docs/database/database.md) for the migration workflow, the 2026 snapshot rebaseline, and the known schema drift.
+
 ## Tech Stack
 
 - SvelteKit (Svelte 5, TypeScript)
