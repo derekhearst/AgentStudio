@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+	boolean,
 	index,
 	integer,
 	jsonb,
@@ -27,6 +28,8 @@ import { conversations, messages } from '$lib/sessions/sessions.schema'
 
 export const memoryWingKindEnum = pgEnum('memory_wing_kind', ['person', 'project', 'topic', 'agent'])
 export const memoryDrawerRoleEnum = pgEnum('memory_drawer_role', ['user', 'assistant', 'system', 'note'])
+export const memoryExclusionKindEnum = pgEnum('memory_exclusion_kind', ['regex', 'substring'])
+export const memoryRecallSourceEnum = pgEnum('memory_recall_source', ['chat', 'agent', 'search', 'bench'])
 
 export const memoryWings = pgTable(
 	'memory_wings',
@@ -106,16 +109,88 @@ export const memoryDrawers = pgTable(
 		}>(),
 		tokenCount: integer('token_count').notNull().default(0),
 		sourceMessageId: uuid('source_message_id').references(() => messages.id, { onDelete: 'set null' }),
+		/** Pinned drawers are force-added to the recall candidate pool and get a score boost. */
+		pinned: boolean('pinned').notNull().default(false),
+		/** Never-recall drawers stay browsable in the palace but are excluded from every recall. */
+		neverRecall: boolean('never_recall').notNull().default(false),
+		/** Set when a human rewrites the mined paraphrase; null means "as mined". */
+		editedAt: timestamp('edited_at', { withTimezone: true }),
 		occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	},
 	(t) => [
 		index('memory_drawers_closet_idx').on(t.closetId),
 		index('memory_drawers_user_occurred_idx').on(t.userId, t.occurredAt),
+		index('memory_drawers_user_pinned_idx').on(t.userId, t.pinned),
 		// HNSW index for cosine semantic search; added by hand-edited migration.
 		index('memory_drawers_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
 		index('memory_drawers_content_tsv_idx').using('gin', sql`to_tsvector('english', ${t.content})`),
 		],
+)
+
+/**
+ * Exclusion rules — deny list applied to drawer content *before* the miner embeds or
+ * inserts anything. A matching turn is dropped entirely: it never reaches the embeddings
+ * provider and never lands in `memory_drawers`. Built-in credential rules are seeded per
+ * user (see `exclusions.server.ts`) and can be disabled but not deleted.
+ */
+export const memoryExclusionRules = pgTable(
+	'memory_exclusion_rules',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		name: text('name').notNull(),
+		description: text('description'),
+		kind: memoryExclusionKindEnum('kind').notNull().default('regex'),
+		pattern: text('pattern').notNull(),
+		enabled: boolean('enabled').notNull().default(true),
+		/** Seeded credential rules — editable/disable-able, but not deletable. */
+		builtin: boolean('builtin').notNull().default(false),
+		hitCount: integer('hit_count').notNull().default(0),
+		lastHitAt: timestamp('last_hit_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [
+		index('memory_exclusion_rules_user_idx').on(t.userId),
+		unique('memory_exclusion_rules_user_name_unique').on(t.userId, t.name),
+	],
+)
+
+/**
+ * Recall provenance — one row per drawer per recall, carrying the component scores that
+ * `retrieval.server.ts` already computes. This is what answers "why was this recalled?"
+ * on the drawer, long after the `<memory_context>` block that used it is gone.
+ */
+export const memoryRecallEvents = pgTable(
+	'memory_recall_events',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		userId: uuid('user_id')
+			.notNull()
+			.references(() => users.id, { onDelete: 'cascade' }),
+		drawerId: uuid('drawer_id')
+			.notNull()
+			.references(() => memoryDrawers.id, { onDelete: 'cascade' }),
+		/** The query text recall ran against, truncated for storage. */
+		query: text('query').notNull(),
+		source: memoryRecallSourceEnum('source').notNull().default('chat'),
+		rank: integer('rank').notNull().default(0),
+		semanticScore: real('semantic_score').notNull().default(0),
+		keywordScore: real('keyword_score').notNull().default(0),
+		temporalScore: real('temporal_score').notNull().default(0),
+		pinnedBoost: real('pinned_boost').notNull().default(0),
+		finalScore: real('final_score').notNull().default(0),
+		/** The weights in force for this recall, so an old score is interpretable. */
+		weights: jsonb('weights').$type<{ semantic: number; keyword: number; temporal: number }>(),
+		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(t) => [
+		index('memory_recall_events_drawer_idx').on(t.drawerId, t.createdAt),
+		index('memory_recall_events_user_idx').on(t.userId, t.createdAt),
+	],
 )
 
 export const memoryKgEntities = pgTable(
@@ -167,5 +242,7 @@ export type MemoryWing = typeof memoryWings.$inferSelect
 export type MemoryRoom = typeof memoryRooms.$inferSelect
 export type MemoryCloset = typeof memoryClosets.$inferSelect
 export type MemoryDrawer = typeof memoryDrawers.$inferSelect
+export type MemoryExclusionRule = typeof memoryExclusionRules.$inferSelect
+export type MemoryRecallEvent = typeof memoryRecallEvents.$inferSelect
 export type MemoryKgEntity = typeof memoryKgEntities.$inferSelect
 export type MemoryKgRelation = typeof memoryKgRelations.$inferSelect

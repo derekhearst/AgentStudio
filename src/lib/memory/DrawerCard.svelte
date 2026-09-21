@@ -31,11 +31,21 @@
 	type="button"
 	class="drawer-card role-{drawer.role}"
 	class:is-selected={selected}
+	class:is-blocked={drawer.neverRecall}
 	onclick={() => onSelect?.(drawer.id)}
 >
 	<div class="drawer-card__head">
 		<span class="drawer-card__role">{drawer.role}</span>
 		<span class="drawer-card__tokens">{drawer.tokenCount} tok</span>
+		{#if drawer.pinned}
+			<span class="drawer-card__flag is-pin" title="Pinned — always considered during recall">pin</span>
+		{/if}
+		{#if drawer.neverRecall}
+			<span class="drawer-card__flag is-block" title="Never recalled — excluded from every recall">no recall</span>
+		{/if}
+		{#if drawer.editedAt}
+			<span class="drawer-card__flag" title="Content was edited by hand">edited</span>
+		{/if}
 		<span class="drawer-card__time">{formatTime(drawer.occurredAt)}</span>
 	</div>
 	<div class="drawer-card__content">{drawer.content}</div>
@@ -123,6 +133,30 @@
 
 	.drawer-card__tokens {
 		opacity: 0.75;
+	}
+
+	.drawer-card__flag {
+		padding: 0 4px;
+		border-radius: 3px;
+		border: 1px solid var(--color-base-300);
+		background: var(--color-base-200);
+		font-size: 9px;
+		letter-spacing: 0.06em;
+		color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+	}
+
+	.drawer-card__flag.is-pin {
+		border-color: color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300));
+		color: var(--color-primary);
+	}
+
+	.drawer-card__flag.is-block {
+		border-color: color-mix(in oklab, var(--color-error) 45%, var(--color-base-300));
+		color: var(--color-error);
+	}
+
+	.drawer-card.is-blocked {
+		opacity: 0.68;
 	}
 
 	.drawer-card__time {

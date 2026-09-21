@@ -7,7 +7,13 @@
  *   3. Temporal proximity boost using `question_date` vs drawer.occurredAt.
  *   4. Optional preference-pattern boost (last-mentioned wins).
  *
- * Returns ranked drawer rows joined back to room/closet/wing for context.
+ * User control (issue #37):
+ *   - drawers flagged `never_recall` are excluded from the candidate pool entirely;
+ *   - drawers flagged `pinned` are force-added to the pool even when they fall outside
+ *     the vector top-N, and receive a configurable additive boost.
+ *
+ * Returns ranked drawer rows joined back to room/closet/wing for context, each carrying
+ * its component scores so a bad recall can be explained after the fact.
  */
 
 import { and, eq, sql } from 'drizzle-orm'
@@ -28,9 +34,12 @@ export type RetrievedDrawer = {
 	wingName: string
 	roomLabel: string
 	closetTopic: string
+	pinned: boolean
 	semanticScore: number
 	keywordScore: number
 	temporalScore: number
+	/** Additive boost applied because the drawer is pinned (0 when it is not). */
+	pinnedBoost: number
 	finalScore: number
 }
 
@@ -43,9 +52,13 @@ export type RecallOptions = {
 	queryDate?: Date
 	temporalDecayDays?: number
 	preferenceBoost?: boolean
+	/** Additive score bonus for pinned drawers. */
+	pinnedBoost?: number
+	/** Cap on how many pinned drawers are force-added to the candidate pool. */
+	pinnedPoolSize?: number
 }
 
-const DEFAULTS = {
+export const RECALL_DEFAULTS = {
 	topK: 5,
 	candidatePoolSize: 50,
 	semanticWeight: 1,
@@ -53,7 +66,11 @@ const DEFAULTS = {
 	temporalWeight: 0.25,
 	temporalDecayDays: 30,
 	preferenceBoost: true,
+	pinnedBoost: 0.15,
+	pinnedPoolSize: 25,
 }
+
+const DEFAULTS = RECALL_DEFAULTS
 
 function temporalScore(occurredAt: Date, queryDate: Date | undefined, decayDays: number): number {
 	if (!queryDate) return 0
@@ -85,35 +102,72 @@ export async function recall(userId: string, query: string, options: RecallOptio
 		? sql<number>`coalesce(ts_rank(to_tsvector('english', ${memoryDrawers.content}), to_tsquery('english', ${tsQuery})), 0)`
 		: sql<number>`0`
 
+	const selection = {
+		drawerId: memoryDrawers.id,
+		roomId: memoryRooms.id,
+		closetId: memoryClosets.id,
+		wingId: memoryWings.id,
+		content: memoryDrawers.content,
+		role: memoryDrawers.role,
+		occurredAt: memoryDrawers.occurredAt,
+		conversationId: memoryRooms.conversationId,
+		wingName: memoryWings.name,
+		roomLabel: memoryRooms.label,
+		closetTopic: memoryClosets.topic,
+		pinned: memoryDrawers.pinned,
+		semantic: semanticExpr,
+		keyword: keywordExpr,
+	}
+
+	// `never_recall` drawers stay visible in the palace but are hard-excluded here: the
+	// filter lives in the candidate query so they can never reach a prompt.
+	const recallable = and(
+		eq(memoryDrawers.userId, userId),
+		eq(memoryDrawers.neverRecall, false),
+		sql`${memoryDrawers.embedding} IS NOT NULL`,
+	)
+
 	const rows = await db
-		.select({
-			drawerId: memoryDrawers.id,
-			roomId: memoryRooms.id,
-			closetId: memoryClosets.id,
-			wingId: memoryWings.id,
-			content: memoryDrawers.content,
-			role: memoryDrawers.role,
-			occurredAt: memoryDrawers.occurredAt,
-			conversationId: memoryRooms.conversationId,
-			wingName: memoryWings.name,
-			roomLabel: memoryRooms.label,
-			closetTopic: memoryClosets.topic,
-			semantic: semanticExpr,
-			keyword: keywordExpr,
-		})
+		.select(selection)
 		.from(memoryDrawers)
 		.innerJoin(memoryClosets, eq(memoryClosets.id, memoryDrawers.closetId))
 		.innerJoin(memoryRooms, eq(memoryRooms.id, memoryClosets.roomId))
 		.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
-		.where(and(eq(memoryDrawers.userId, userId), sql`${memoryDrawers.embedding} IS NOT NULL`))
+		.where(recallable)
 		.orderBy(sql`${memoryDrawers.embedding} <=> ${vec}::vector`)
 		.limit(opts.candidatePoolSize)
 
-	const scored: RetrievedDrawer[] = rows.map((row) => {
+	// Pinned drawers are the user saying "always consider this". A boost alone would not
+	// deliver that, because a drawer outside the vector top-N never enters the pool at
+	// all — so fetch them explicitly and merge.
+	const pinnedRows =
+		opts.pinnedPoolSize > 0
+			? await db
+					.select(selection)
+					.from(memoryDrawers)
+					.innerJoin(memoryClosets, eq(memoryClosets.id, memoryDrawers.closetId))
+					.innerJoin(memoryRooms, eq(memoryRooms.id, memoryClosets.roomId))
+					.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
+					.where(and(recallable, eq(memoryDrawers.pinned, true)))
+					.orderBy(sql`${memoryDrawers.embedding} <=> ${vec}::vector`)
+					.limit(opts.pinnedPoolSize)
+			: []
+
+	const seen = new Set(rows.map((row) => row.drawerId))
+	const candidates = [...rows]
+	for (const row of pinnedRows) {
+		if (seen.has(row.drawerId)) continue
+		seen.add(row.drawerId)
+		candidates.push(row)
+	}
+
+	const scored: RetrievedDrawer[] = candidates.map((row) => {
 		const semantic = Number(row.semantic ?? 0)
 		const keyword = Number(row.keyword ?? 0)
 		const temporal = temporalScore(row.occurredAt, opts.queryDate, opts.temporalDecayDays)
-		const finalScore = opts.semanticWeight * semantic + opts.keywordWeight * keyword + opts.temporalWeight * temporal
+		const pinnedBoost = row.pinned ? opts.pinnedBoost : 0
+		const finalScore =
+			opts.semanticWeight * semantic + opts.keywordWeight * keyword + opts.temporalWeight * temporal + pinnedBoost
 		return {
 			drawerId: row.drawerId,
 			roomId: row.roomId,
@@ -126,9 +180,11 @@ export async function recall(userId: string, query: string, options: RecallOptio
 			wingName: row.wingName,
 			roomLabel: row.roomLabel,
 			closetTopic: row.closetTopic,
+			pinned: row.pinned,
 			semanticScore: semantic,
 			keywordScore: keyword,
 			temporalScore: temporal,
+			pinnedBoost,
 			finalScore,
 		}
 	})

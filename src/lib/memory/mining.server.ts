@@ -16,8 +16,15 @@ import { db } from '$lib/db.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
 import { getOrCreateCloset, getOrCreateRoom, getOrCreateWing, type WingKind } from '$lib/memory/palace.server'
-import { embed, toPgVector } from '$lib/memory/embeddings.server'
+import { embed } from '$lib/memory/embeddings.server'
 import { encodeAaak, type AaakTags } from '$lib/memory/aaak.server'
+import {
+	ensureBuiltinExclusionRules,
+	findExclusionMatch,
+	loadCompiledExclusionRules,
+	recordExclusionHits,
+	type CompiledExclusionRule,
+} from '$lib/memory/exclusions.server'
 import { logger } from '$lib/observability/logger'
 
 export type MiningTurn = {
@@ -39,6 +46,10 @@ export type MineResult = {
 	roomIds: string[]
 	closetIds: string[]
 	drawerIds: string[]
+	/** Turns dropped by an exclusion rule before embedding/insert. */
+	excludedTurns: number
+	/** Names of the rules that fired, for the job result + activity feed. */
+	excludedByRule: string[]
 }
 
 const EXTRACTOR_BASE = `You are an information extractor for a hierarchical memory system.
@@ -188,10 +199,50 @@ export async function mineSession(opts: {
 	agentId?: string | null
 	session: MiningSession
 }): Promise<MineResult> {
-	const { userId, agentId, session } = opts
-	if (session.turns.length === 0) {
-		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [] }
+	const { userId, agentId } = opts
+	if (opts.session.turns.length === 0) {
+		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns: 0, excludedByRule: [] }
 	}
+
+	// Exclusion pass runs FIRST — before the extractor LLM call and before embedding — so
+	// content the user asked us never to remember never leaves the process.
+	await ensureBuiltinExclusionRules(userId).catch((error) => {
+		logger.warn('[memory] failed to seed built-in exclusion rules', { err: error })
+	})
+	const exclusionRules = await loadCompiledExclusionRules(userId).catch((error) => {
+		logger.warn('[memory] failed to load exclusion rules; mining without a deny list', { err: error })
+		return [] as CompiledExclusionRule[]
+	})
+
+	const keptTurns: MiningTurn[] = []
+	const firedRuleIds: Array<string | null> = []
+	const firedRuleNames: string[] = []
+	for (const turn of opts.session.turns) {
+		const match = exclusionRules.length > 0 ? findExclusionMatch(turn.content, exclusionRules) : null
+		if (match) {
+			firedRuleIds.push(match.ruleId)
+			firedRuleNames.push(match.ruleName)
+			logger.info('[memory] exclusion rule dropped a turn before mining', {
+				rule: match.ruleName,
+				sample: match.sample,
+				conversationId: opts.session.conversationId ?? null,
+			})
+			continue
+		}
+		keptTurns.push(turn)
+	}
+
+	const excludedTurns = firedRuleNames.length
+	const excludedByRule = [...new Set(firedRuleNames)]
+	if (excludedTurns > 0) {
+		await recordExclusionHits(firedRuleIds)
+	}
+
+	if (keptTurns.length === 0) {
+		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns, excludedByRule }
+	}
+
+	const session: MiningSession = { ...opts.session, turns: keptTurns }
 
 	const recentWings = await db
 		.select({ name: memoryWings.name, kind: memoryWings.kind, aliases: memoryWings.aliases })
@@ -285,6 +336,8 @@ export async function mineSession(opts: {
 		roomIds: [room.id],
 		closetIds: [...closetIdsSet],
 		drawerIds,
+		excludedTurns,
+		excludedByRule,
 	}
 }
 
@@ -294,13 +347,23 @@ export async function mineSessions(opts: {
 	agentId?: string | null
 	sessions: MiningSession[]
 }): Promise<MineResult> {
-	const totals: MineResult = { wingIds: [], roomIds: [], closetIds: [], drawerIds: [] }
+	const totals: MineResult = {
+		wingIds: [],
+		roomIds: [],
+		closetIds: [],
+		drawerIds: [],
+		excludedTurns: 0,
+		excludedByRule: [],
+	}
 	for (const session of opts.sessions) {
 		const result = await mineSession({ userId: opts.userId, agentId: opts.agentId, session })
 		totals.wingIds.push(...result.wingIds)
 		totals.roomIds.push(...result.roomIds)
 		totals.closetIds.push(...result.closetIds)
 		totals.drawerIds.push(...result.drawerIds)
+		totals.excludedTurns += result.excludedTurns
+		totals.excludedByRule.push(...result.excludedByRule)
 	}
+	totals.excludedByRule = [...new Set(totals.excludedByRule)]
 	return totals
 }
