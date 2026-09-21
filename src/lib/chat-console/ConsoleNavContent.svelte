@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getConversations } from '$lib/chat';
+	import { page } from '$app/state';
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
 	import { dayKey, dayLabel } from '$lib/util/relative-time';
@@ -46,7 +47,15 @@
 
 	let conversations = $state<Conversation[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
-	let creditsBalance = $derived(await getCredits());
+	/**
+	 * Belt and braces alongside the layout's chromeless routes: `getCredits` is an
+	 * authenticated query, and calling it without a session throws 401 during SSR — which
+	 * takes down the whole page, not just the balance. The shell should not render on a
+	 * public route at all, but a nav that hard-fails when it does is a sharp edge worth
+	 * removing rather than relying on one guard.
+	 */
+	const authenticated = $derived(page.data?.authenticated === true);
+	let creditsBalance = $derived(authenticated ? await getCredits() : null);
 
 	function formatUsd(value: number): string {
 		if (value >= 100) return `$${value.toFixed(0)}`;
