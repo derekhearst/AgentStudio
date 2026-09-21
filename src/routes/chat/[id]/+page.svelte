@@ -1303,7 +1303,15 @@
 						</span>
 						<span class="console-typing__label">Generating response</span>
 					</div>
-				{:else if streaming}
+				<!--
+					Stop rendering the live stream as soon as `done` hands us the message
+					id. At that point the same content already exists as a pending
+					assistant draft in displayedMessages, but `streaming` stays true until
+					the finally block, which waits on refreshAll() — so both rendered and
+					the reply flashed twice. Handing off here keeps it seamless: the draft
+					is already on screen, so there is no gap either.
+				-->
+				{:else if streaming && !pendingMessageId}
 					{#each streamingBlocks as block (block.id)}
 						{#if block.kind === 'tool' && block.name === 'ask_user'}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
