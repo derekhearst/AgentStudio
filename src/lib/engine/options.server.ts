@@ -170,6 +170,19 @@ const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
 	'TodoWrite',
 ])
 
+/**
+ * Whether the SDK's OS sandbox can run here. Linux only: it is built on bubblewrap, which
+ * the production image installs and a developer box generally does not.
+ *
+ * `SANDBOX_DISABLED=1` is an escape hatch for debugging a container where bubblewrap is
+ * present but broken. It downgrades Bash to approval-gated rather than unconfined, because
+ * `resolveBashPolicy` reads the same signal.
+ */
+export function sandboxAvailable(): boolean {
+	if (process.env.SANDBOX_DISABLED === '1') return false
+	return process.platform === 'linux'
+}
+
 export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const claude = isClaudeModel(input.model)
 	const sdkModel = claude ? normalizeModelId(input.model) : input.model
@@ -208,6 +221,19 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		disallowedTools: [...DISALLOWED_BUILTIN_TOOLS],
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 		permissionMode: sdkPermissionModeFor(effectiveMode.mode),
+		/**
+		 * OS-level confinement for Bash (#15). A command string cannot be checked for
+		 * containment by reading it, so this is the only thing that actually confines one;
+		 * `workspace-guard.ts` asks for approval instead wherever it is unavailable.
+		 *
+		 * `failIfUnavailable` is left at its default (true): if bubblewrap is missing the
+		 * run fails loudly rather than quietly executing unsandboxed, which is the whole
+		 * point. Enabled only on Linux — the image installs bubblewrap, a developer's
+		 * machine may not have it, and a hard failure there would block local work.
+		 */
+		...(sandboxAvailable()
+			? { sandbox: { enabled: true, autoAllowBashIfSandboxed: false } }
+			: {}),
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
 		...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
