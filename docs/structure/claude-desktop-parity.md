@@ -28,7 +28,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 | Feature | Verdict | Ours | Theirs |
 | --- | --- | --- | --- |
-| Recurring scheduled runs | **behind** (#30, #31) | cron only, and the parser handles no ranges or lists, so `0 9 * * 1-5` is unschedulable; times are UTC wall-clock, so "9am" fires at 3am here; no run-now, no history, no retry, silent on failure | Cowork scheduled + on-demand tasks |
+| Recurring scheduled runs | **even** (#30, #31 landed) | full crontab parsing with a per-automation IANA zone (#30); run-now, per-run history with cost and links, bounded retry with backoff, review item + notification on failure, and auto-disable after 5 consecutive failures (#31) | Cowork scheduled + on-demand tasks |
 | Runs with the laptop closed | **win** | the NAS *is* the always-on host; nothing depends on a local device | Cowork runs remotely in beta; earlier it needed the desktop VM |
 | Durable job queue with leases and retries | **win** | real queue, heartbeats, cancellation, `/settings/jobs` | not exposed to the user |
 | Budget enforcement | **win** | daily/monthly caps that actually block a run before it spends | plan limits, no per-workflow budget |
