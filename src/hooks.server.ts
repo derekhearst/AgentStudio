@@ -38,7 +38,7 @@ async function cleanupLegacyCapabilitySkills() {
 // `/api/webhooks` is unauthenticated by design — third-party providers (GitHub, …) POST
 // here without session cookies. The handlers verify provider signatures themselves so the
 // path-level skip is safe; never broaden this prefix without an explicit signature check.
-const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks']
+const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks', '/api/health']
 
 function isPublicPath(pathname: string) {
 	if (pathname.startsWith('/_app') || pathname.startsWith('/favicon')) {

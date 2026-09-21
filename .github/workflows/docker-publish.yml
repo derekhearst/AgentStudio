@@ -5,6 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Serialize builds for main. Three PRs merged within a minute on 2026-09-21 and their
+# builds raced: the second-newest commit's image finished last and won the `:latest` tag,
+# so production ran an image missing the newest migration for 20 minutes while looking
+# perfectly healthy. Newest commit wins; older in-flight builds are cancelled. See #47.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -45,6 +53,8 @@ jobs:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
