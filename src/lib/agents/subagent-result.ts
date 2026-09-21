@@ -20,8 +20,20 @@
 
 export const SUBAGENT_RESULT_TAG = 'subagent_result'
 
-/** Opening or closing delimiter in any casing, with or without stray whitespace after `<`. */
-const DELIMITER_PATTERN = /<[ \t]*(\/?)[ \t]*subagent_result\b/gi
+/**
+ * Anything a child could slip between `<` and the tag name that a reader — human or model —
+ * would not see: every whitespace character (`\s`, which covers newline, CR, form feed, vertical
+ * tab, NBSP, BOM), every control character (`\p{Cc}`, which covers a raw NUL), and every format
+ * character (`\p{Cf}`, which covers the zero-width space / non-joiner / joiner, word joiner and
+ * soft hyphen). `[ \t]*` was too narrow: `<\nsubagent_result>` sailed through unescaped.
+ */
+const DELIMITER_GAP = String.raw`[\s\p{Cc}\p{Cf}]*`
+
+/** Opening or closing delimiter in any casing, with any invisible padding around the slash. */
+const DELIMITER_PATTERN = new RegExp(
+	`<${DELIMITER_GAP}(/?)${DELIMITER_GAP}subagent_result\\b`,
+	'giu',
+)
 
 /**
  * Neutralize any `<subagent_result>` / `</subagent_result>` the child emitted, so the only real
