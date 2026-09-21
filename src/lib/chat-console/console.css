@@ -1794,3 +1794,21 @@ a.console-crumbs__seg:hover {
 	gap: 1px;
 	padding-bottom: 4px;
 }
+
+
+/* A message whose send is still in flight. It stays in the transcript — losing
+   what you typed while the request is running is worse than showing it — but
+   dimmed, so an unsent message never looks like a saved one. */
+.console-msg--sending {
+	opacity: 0.55;
+	transition: opacity 160ms ease-out;
+}
+
+.console-msg--sending .console-msg__bubble,
+.console-msg--sending .console-msg__user-wrap {
+	border-style: dashed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.console-msg--sending { transition: none; }
+}

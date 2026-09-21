@@ -244,6 +244,7 @@
 		<div class="chat-composer-transition">
 			<ChatInput
 				bind:value={prompt}
+				size="large"
 				{busy}
 				{model}
 				{agentId}

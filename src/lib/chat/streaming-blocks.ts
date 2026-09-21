@@ -423,6 +423,12 @@ function buildOptimisticUser(message: PendingUser, model: string, sequence: numb
 		createdAt: message.createdAt,
 		sequence,
 		toolCalls: [] as Array<Record<string, unknown>>,
+		/**
+		 * This bubble is local-only: the send is in flight and nothing is persisted
+		 * yet. The UI dims it so a message that never lands is visibly distinct
+		 * from one that did, rather than looking identical to a saved message.
+		 */
+		optimistic: true as const,
 	}
 }
 

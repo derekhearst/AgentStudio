@@ -27,7 +27,8 @@
 		onReasoningEffortChange,
 		onAgentChange,
 		onCancelGeneration,
-		estimatedRemaining = 128000
+		estimatedRemaining = 128000,
+		size = 'default',
 	} = $props<{
 		value?: string;
 		placeholder?: string;
@@ -45,6 +46,8 @@
 		onAgentChange?: ((agentId: string) => Promise<void> | void) | undefined;
 		onCancelGeneration?: (() => Promise<void> | void) | undefined;
 		estimatedRemaining?: number;
+		/** 'large' starts the composer tall — used on the new-chat page. */
+		size?: 'default' | 'large';
 	}>();
 	let recording = $state(false);
 	let transcribing = $state(false);
@@ -300,6 +303,7 @@
 
 	<ChatComposer
 		bind:value
+		{size}
 		busy={busy || uploadBusy}
 		{model}
 		{reasoningEffort}

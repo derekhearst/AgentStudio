@@ -30,6 +30,8 @@
 		// domain itself produces; the broader fallback keeps historical rows + external
 		// producers (sub-agents / automations) loading.
 		toolCalls?: PersistedToolCall[] | Array<Record<string, unknown>>;
+		/** Local-only bubble: the send has not been persisted yet. */
+		optimistic?: boolean;
 		metadata?: ChatMessageMetadata | null;
 	};
 
@@ -185,7 +187,10 @@
 
 {#if hasRenderableContent}
 {@const ts = (() => { try { const d = new Date(message.createdAt); return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }); } catch { return ''; } })()}
-<article class={`console-msg ${isUser ? 'console-msg--user' : 'console-msg--assist'}`}>
+<article
+	class={`console-msg ${isUser ? 'console-msg--user' : 'console-msg--assist'}${message.optimistic ? ' console-msg--sending' : ''}`}
+	aria-busy={message.optimistic ? 'true' : undefined}
+>
 	{#if isUser}
 		{#if editing}
 			<div bind:this={editorRoot} class="console-msg__edit">

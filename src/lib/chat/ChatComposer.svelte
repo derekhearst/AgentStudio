@@ -34,6 +34,7 @@
 		onAddFiles,
 		onMicClick,
 		class: className = '',
+		size = 'default',
 	}: {
 		value?: string
 		busy?: boolean
@@ -54,6 +55,8 @@
 		onAddFiles?: (() => Promise<void> | void) | undefined
 		onMicClick?: (() => Promise<void> | void) | undefined
 		class?: string
+		/** 'large' starts the composer tall — used on the new-chat page. */
+		size?: 'default' | 'large'
 	} = $props()
 
 	let reasoningMenuOpen = $state(false)
@@ -101,7 +104,11 @@
 	 * matches `max-height` in console.css, after which the textarea scrolls.
 	 */
 	let textarea: HTMLTextAreaElement | undefined = $state()
+	// The new-chat page has nothing else on screen, so the composer is the page's
+	// main affordance and starts tall. Inside a conversation the transcript is the
+	// point, so it starts at one row and grows.
 	const MAX_COMPOSER_HEIGHT = 168
+	const MIN_COMPOSER_HEIGHT = $derived(size === 'large' ? 120 : 22)
 
 	$effect(() => {
 		// Touch `value` so this re-runs on every keystroke, including programmatic clears.
@@ -109,11 +116,11 @@
 		const el = textarea
 		if (!el) return
 		el.style.height = 'auto'
-		el.style.height = `${Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT)}px`
+		el.style.height = `${Math.min(Math.max(el.scrollHeight, MIN_COMPOSER_HEIGHT), MAX_COMPOSER_HEIGHT)}px`
 	})
 </script>
 
-<form onsubmit={submit} class="console-composer-wrap {className}">
+<form onsubmit={submit} class="console-composer-wrap {className} {size === 'large' ? 'is-large' : ''}">
 	<div class="console-composer">
 		<label class="sr-only" for="chat-composer-textarea">Message</label>
 		<textarea
