@@ -1,82 +1,121 @@
-# Claude Desktop parity audit
+# AgentStudio vs Claude Desktop
 
-Snapshot: 2026-09-21, against AgentStudio at `c793c53` (post artifacts + Azure removal).
+Snapshot: 2026-09-21, AgentStudio at `a459c99`.
 
-Claude Desktop is two products in one window: the **chat** tab (claude.ai) and the **Code** tab (Claude Code sessions). AgentStudio competes with both — it is a custom UI over the same Claude Agent SDK that powers Code, with a chat workbench on top. This audit walks both sides feature by feature and marks each one.
+Claude Desktop is now three products in one window: **chat** (claude.ai), **Code** (Claude Code sessions), and **Cowork** — the agentic workspace for non-coding work, which is the one that competes most directly with what AgentStudio is for. AgentStudio is a custom UI over the same Claude Agent SDK that powers Code, with a chat workbench, a tool registry, a memory system and a cron scheduler on top.
 
-Legend: **have** · **partial** — exists but materially thinner · **gap** — nothing equivalent · **n/a** — deliberately not wanted here.
+This is a head-to-head: every row says who is actually better, not just who has the feature.
 
----
+**Sources** (checked 2026-09-21, because my training data stops in May 2026 and both products moved a lot since): the [claude-code CHANGELOG](https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md), the [Claude apps release notes](https://support.claude.com/en/articles/12138966-release-notes), [checkpointing docs](https://docs.claude.com/en/docs/claude-code/checkpointing), and [Enabling Claude Code to work more autonomously](https://www.anthropic.com/news/enabling-claude-code-to-work-more-autonomously).
 
-## Chat tab
+**Verdict scale**, from our side:
 
-| Feature | AgentStudio | Notes |
-| --- | --- | --- |
-| Streaming replies with token-level deltas | have | SSE with `delta` frames and typing interpolation |
-| Extended thinking, summarized | have | `thinking: adaptive`, effort picker in the composer |
-| Model picker per conversation | have | Claude ids direct; others need the gateway (#9) |
-| Web search | have | `web_search` tool |
-| Web fetch / page reading | have | `web_fetch`, `pdf_read` |
-| Code execution | have | `run_code` (Bun sandbox), `shell` |
-| Image generation | have | `image_generate`; video too, which Claude has no equivalent for |
-| File attachments | have | upload endpoint + composer attachments |
-| Voice dictation | have | record → `/api/transcribe` |
-| Text-to-speech playback | partial | `/api/tts` exists but nothing in the UI calls it |
-| Deep research with citations | have | `/research`, approval-gated plan → background run |
-| Memory across conversations | have | Memory Palace, richer than Claude's |
-| Skills | have | full CRUD at `/skills`, plus skill hooks |
-| Artifacts / side-panel documents | n/a | removed on purpose (#13); files on disk instead |
-| Projects with instructions + knowledge | partial | projects are repos; no per-project instruction block or uploaded knowledge base |
-| Connect external MCP servers | gap | AgentStudio *serves* MCP at `/api/mcp` but cannot consume one |
-| Conversation rename | have | `updateConversationMeta` |
-| Conversation pin / archive / folders | gap | delete is the only lifecycle action |
-| Search across all conversations | partial | client-side filter over loaded titles + last message only |
-| Share or export a conversation | gap | no export path at all |
-| Incognito / temporary chat | gap | every conversation is mined into memory |
-| Writing styles / output styles | gap | agent system prompts are the only lever |
-| Usage and cost surfaced in chat | partial | HUD shows context %; spend lives in `/activity` and budget settings |
-| Scheduled / recurring runs | have | `/automations` with cron, ahead of Claude here |
-| Push notifications on completion | have | web push + in-app |
-
-## Code tab
-
-| Feature | AgentStudio | Notes |
-| --- | --- | --- |
-| Agent SDK session loop | have | `$lib/engine`, resume via stored session id |
-| Session list, live run dock | have | sidebar recents + `RunningSessionsDock` |
-| Per-tool approval gates | have | `canUseTool` + per-user approval settings |
-| Permission modes (plan / acceptEdits / bypass) | gap | only `default`; the Plan agent approximates plan mode via a different mechanism |
-| Plan → implement handoff | have | `request_plan_approval` flips the bound agent |
-| Subagents | partial | in-house `run_subagent`; SDK-native subagents pending (#5) |
-| Built-in filesystem + shell tools | partial | in-house registry *and* the SDK's built-ins are both live; transcripts show `ToolSearch` next to `web_search` |
-| Diff view for edits | gap | tool results render as raw JSON in a card |
-| Todo list rendering | gap | nothing consumes `TodoWrite` |
-| Checkpoints / rewind | partial | edit-message + `deleteMessagesAfter` rewinds the transcript, not the filesystem |
-| Terminal panel | gap | `shell` output only appears inside a tool card |
-| Git worktrees / branch per session | gap | one working directory per project |
-| Repo import + clone | have | `/projects` import flow (GitHub or clone URL) |
-| Commit / push / open PR | have | `prepare_commit`, `push_branch`, `create_pull_request`, all approval-gated |
-| CI status + auto-fix after a PR | gap | PR lands in `/review`, then nothing watches it |
-| Hooks | have | `/settings/hooks`, bus + builtins |
-| Slash commands | gap | no command palette in the composer |
-| `@`-file mentions | gap | paths are typed by hand |
-| Context auto-compaction | have | threshold-based, plus manual compact |
-| Cost / token accounting per run | have | `/activity`, `/runs/[id]`, budget gates |
-| Session transcript export | gap | no export |
-| Remote control / hand off to another device | n/a | single-user self-hosted; the web UI is already reachable anywhere |
-| Background tasks | have | durable job queue + automations |
+| | |
+| --- | --- |
+| **win** | we do it better, and the difference is real |
+| **even** | different shapes, same outcome |
+| **behind** | they do it better, but ours works |
+| **far behind** | ours is a stub, or the gap changes what you can do |
+| **absent** | we have nothing |
+| **n/a** | deliberately not competing |
 
 ---
 
-## What actually matters
+## Agentic work — the part that matters most here
 
-Ranked by what a single self-hosted operator would feel first:
+This is the Cowork comparison, and it is the one I got wrong in the first draft: I had us "ahead of Claude" on scheduling. Cowork has had scheduled recurring tasks since Feb 2026, and since July 2026 they run server-side with no device online.
 
-1. **Two tool surfaces at once** (#15). The SDK's built-ins and the in-house registry are both exposed. Pick one.
-2. **No diff view** (#16). The most-used thing Claude Code renders is the one thing a code session here cannot show.
-3. **No external MCP** (#17). Every integration has to be written into the tool registry by hand.
-4. **Conversation management** (#18). No pin, archive, export, or real search once the list gets long.
-5. **Per-session permission mode** (#19). Per-tool settings are global; a session cannot be "just plan" or "just go".
-6. **CI after the PR** (#20). The agent can open a pull request and then loses interest in it.
+| Feature | Verdict | Ours | Theirs |
+| --- | --- | --- | --- |
+| Recurring scheduled runs | **even** | `/automations` with cron, per-automation model + agent + budget, maintenance/research/chat-followup modes | Cowork scheduled + on-demand tasks |
+| Runs with the laptop closed | **win** | the NAS *is* the always-on host; nothing depends on a local device | Cowork runs remotely in beta; earlier it needed the desktop VM |
+| Durable job queue with leases and retries | **win** | real queue, heartbeats, cancellation, `/settings/jobs` | not exposed to the user |
+| Budget enforcement | **win** | daily/monthly caps that actually block a run before it spends | plan limits, no per-workflow budget |
+| Unattended failure surfacing | **win** | `/review` inbox with dedupe, plus web push | notifications only |
+| Long-horizon monitoring | **absent** | nothing watches an external condition between runs | Monitor tool with deadlines |
+| Multi-agent orchestration | **behind** | `run_subagent`, one level, no fan-out control | workflow scripts, concurrency limits, agent map, forked sessions |
+| Delegate from a phone | **behind** | the web UI is responsive and push works | persistent agent thread on mobile, Cowork on web + mobile |
 
-The rest: #21 todo list, #22 slash commands + `@`-mentions, #23 project instructions + knowledge, #24 filesystem checkpoints, #25 temporary chats, #26 shell output as a terminal, #27 the unused TTS endpoint. #28 tracks them all.
+## Code
+
+| Feature | Verdict | Ours | Theirs |
+| --- | --- | --- | --- |
+| Agent SDK session loop, resume | **even** | `$lib/engine`, session id persisted per conversation | same SDK |
+| Streaming with thinking | **even** | `delta` + `reasoning` frames, adaptive thinking, effort picker | same |
+| Tool approval | **behind** | per-tool global settings + mandatory-approval list | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
+| Permission modes (plan / acceptEdits / bypass) | **absent** | hardcoded `default`; the Plan agent is a persona, not a mode | four modes, switchable mid-session |
+| Diff rendering | **far behind** | raw JSON in a tool card | inline diffs with per-hunk accept/reject |
+| Checkpoints and rewind | **far behind** | rewinds the transcript only; files stay written | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both |
+| Todo list | **absent** | nothing consumes it | pinned, updated in place |
+| Terminal / command output | **far behind** | JSON-escaped blob in a card, nothing streams | streamed terminal output |
+| Git worktrees | **absent** | one working directory per project | worktree-per-agent with cleanup safety |
+| Repo import and clone | **win** | first-class: import creates a project, clones into a sandbox, sidecar repo row | you point it at a directory |
+| Commit / push / PR | **even** | approval-gated tools, PR recorded and surfaced in `/review` | same, plus richer GitHub triggers |
+| Code review of a PR | **absent** | — | `/ultrareview`, merge-aware follow-up reviews |
+| CI watch and fix | **absent** | PR is opened, then nothing looks at it again | cloud sessions react to CI |
+| Hooks | **even** | `/settings/hooks`, event bus, skill hooks | same idea, dialog-managed |
+| Sub-agent output isolation | **behind** | subagent text is inlined into the transcript | indented result so it cannot pass as instructions |
+| Background tasks | **even** | job queue | background bash + completion notices |
+| Session cost accounting | **win** | per-run rows, `/activity`, `/runs/[id]`, ledger per tool call | session cost in a dialog |
+
+## Chat
+
+| Feature | Verdict | Ours | Theirs |
+| --- | --- | --- | --- |
+| Streaming, thinking, model picker | **even** | | |
+| Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
+| Code execution | **even** | `run_code` in Bun, sandboxed, tools callable from inside the script | analysis tool / sandboxed Python |
+| File attachments | **behind** | upload + attach, no per-type handling | images, PDFs, office docs, with extraction |
+| Voice dictation | **even** | record → `/api/transcribe` | same |
+| Text-to-speech | **far behind** | endpoint + setting exist, nothing calls them | shipped |
+| Deep research | **even** | approval-gated plan, background run, cited report | same shape |
+| Memory | **win** | Memory Palace: wing/room/closet/drawer, hybrid vector + tsvector + temporal recall, mining pipeline | categorized entries, Topics editor, sensitive-topics exclusion — better *managed*, thinner retrieval |
+| Memory management UI | **behind** | `/memory` browser | Topics editor, per-item delete, sensitive-topic exclusion |
+| Skills | **even** | full CRUD, skill hooks, agent identity skills | same, plus a marketplace |
+| Plugins / marketplace | **absent** | — | plugin system, marketplace, admin controls, `claude plugin eval` |
+| Connect external MCP servers | **absent** | we *serve* MCP at `/api/mcp`, we cannot consume one | first-class, OAuth, `/mcp`, managed policies |
+| Connectors (Slack, M365, Salesforce…) | **absent** | — | write-capable connectors, Claude Tag for Slack |
+| Computer use | **far behind** | `browser_screenshot` only | screen access, click, navigate (research preview) |
+| Artifacts / side-panel documents | **n/a** | removed in #13 — files on disk and git instead | versioned, publishable, in-place draft editing |
+| Preview a file or a website in a side panel | **absent** | the right rail shows research runs or nothing (#29) | artifact + document preview |
+| Inline charts and visualizations | **absent** | markdown only | interactive charts, diagrams, Claude Design |
+| Conversation rename | **even** | `updateConversationMeta` | same |
+| Pin / archive / folders | **absent** | delete only | full |
+| Search across conversations | **far behind** | client-side filter over loaded rows | server-side across all history |
+| Export a conversation | **absent** | — | export |
+| Temporary / incognito chat | **n/a** | delete covers it here | incognito |
+| Usage digest | **absent** | `/activity` is raw rows | smart reports, monthly recap |
+| Image generation | **win** | `image_generate` | — |
+| Video generation | **win** | `video_generate` with async job polling | — |
+
+---
+
+## Where we actually stand
+
+**We win on being a server.** Always-on host, durable queue, budgets that block, a review inbox, real cost ledgers, image and video generation. Everything in that list is infrastructure Anthropic has no reason to build for a single user, and it is the reason this project exists. Cowork closed the scheduling gap but it cannot enforce a monthly dollar cap or show you a per-tool-call ledger.
+
+**We are even on the core loop.** Same SDK, same models, same thinking, same research shape. Chat with an agent and the experience is comparable.
+
+**We are far behind on the session surface.** Diffs, checkpoints, terminal output, todo list, permission modes — five things Claude Code does that turn a long run from opaque to legible. None are hard; together they are most of the felt difference.
+
+**We are not in the game on the ecosystem.** MCP consumption, plugins, connectors, computer use. Each is a large build, and the first one (#17) unlocks the rest by letting someone else do the work.
+
+---
+
+## Ranked for how this box is actually used
+
+Weighted for: the NAS is the host, repeating jobs are the point, you rarely open files locally, and the one thing you use a side panel for is previewing a file or a website.
+
+1. **[#29](https://github.com/derekhearst/AgentStudio/issues/29) preview pane for files and websites** — the only side-panel feature you actually use, and we have nothing. Answers the open half of #14.
+2. **[#15](https://github.com/derekhearst/AgentStudio/issues/15) two tool surfaces** — invisible but wrong: half the calls dodge approval settings and cost accounting.
+3. **[#20](https://github.com/derekhearst/AgentStudio/issues/20) CI watch** — the unattended loop that closes without you, which is the whole premise of running this on a NAS.
+4. **[#17](https://github.com/derekhearst/AgentStudio/issues/17) external MCP** — the one build that stops every future integration from being hand-written.
+5. **[#19](https://github.com/derekhearst/AgentStudio/issues/19) per-session permission mode** — long autonomous runs need "just go" without loosening global settings.
+6. **[#18](https://github.com/derekhearst/AgentStudio/issues/18) conversation search, pin, archive, export** — the pile only grows.
+7. **[#24](https://github.com/derekhearst/AgentStudio/issues/24) filesystem checkpoints** — matters more, not less, when you let it run unattended.
+8. **[#16](https://github.com/derekhearst/AgentStudio/issues/16) diff view** and **[#26](https://github.com/derekhearst/AgentStudio/issues/26) terminal output** — demoted from the first draft: they are for watching work you mostly do not watch.
+9. **[#21](https://github.com/derekhearst/AgentStudio/issues/21) todo list**, **[#22](https://github.com/derekhearst/AgentStudio/issues/22) slash commands + `@`-mentions**, **[#23](https://github.com/derekhearst/AgentStudio/issues/23) project instructions**, **[#27](https://github.com/derekhearst/AgentStudio/issues/27) the dead TTS endpoint**.
+
+Not chasing: artifacts (#13, removed on purpose), incognito chat (deleting a chat covers it), remote control and device handoff (the web UI is already reachable anywhere), plugin marketplaces and enterprise connector governance (no second user to govern).
+
+Open question worth deciding before spending much: **Cowork is now the product this most resembles.** Where it overlaps — scheduled agentic work on your own files — Anthropic will keep shipping. The parts of AgentStudio that stay valuable are the ones tied to this being *your server*: budgets, ledgers, the review queue, cron with real job semantics, and tools Anthropic will not ship. Worth weighting the roadmap toward those instead of chasing session-surface parity.
