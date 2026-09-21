@@ -40,10 +40,10 @@
 	const ARG_PLACEHOLDERS: Partial<Record<MonitorObservableTool, string>> = {
 		web_fetch: '{ "url": "https://example.com/releases" }',
 		web_search: '{ "query": "acme widgets release" }',
-		search_files: '{ "query": "TODO", "path": "src" }',
-		file_read: '{ "path": "notes.md" }',
+		Grep: '{ "pattern": "TODO", "path": "src" }',
+		Read: '{ "file_path": "notes.md" }',
 		file_info: '{ "path": "notes.md" }',
-		list_directory: '{ "path": "." }',
+		Glob: '{ "pattern": "**/*", "path": "." }',
 		git_status: '{}',
 		git_log: '{ "max": 5 }',
 		git_diff: '{}',

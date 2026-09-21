@@ -69,9 +69,9 @@ test.describe('runs/resume — replay events from terminated run', () => {
 		const seeded = await seedRunWithEvents(prefix, {
 			state: 'completed',
 			events: [
-				{ type: 'tool_call', payload: { id: 'a', name: 'shell' } },
+				{ type: 'tool_call', payload: { id: 'a', name: 'Bash' } },
 				{ type: 'tool_result', payload: { id: 'a', success: true } },
-				{ type: 'tool_call', payload: { id: 'b', name: 'shell' } },
+				{ type: 'tool_call', payload: { id: 'b', name: 'Bash' } },
 				{ type: 'done', payload: { messageId: 'm1' } },
 			],
 		})

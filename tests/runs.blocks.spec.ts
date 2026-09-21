@@ -63,7 +63,7 @@ test.describe('runs/blocks — stream blocks and round counter persist', () => {
 				{ kind: 'text', content: 'hello world' },
 				{
 					kind: 'tool',
-					name: 'shell',
+					name: 'Bash',
 					arguments: { command: 'echo hi' },
 					result: { stdout: 'hi\n' },
 					success: true,
@@ -75,7 +75,7 @@ test.describe('runs/blocks — stream blocks and round counter persist', () => {
 			const row = await readRun(seeded.runId)
 			expect(row!.stream_blocks).toHaveLength(3)
 			expect(row!.stream_blocks[0]).toMatchObject({ kind: 'thinking', content: 'considering options' })
-			expect(row!.stream_blocks[2]).toMatchObject({ kind: 'tool', name: 'shell', success: true })
+			expect(row!.stream_blocks[2]).toMatchObject({ kind: 'tool', name: 'Bash', success: true })
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

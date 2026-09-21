@@ -286,7 +286,7 @@ test.describe('monitors/condition — model path', () => {
 
 test.describe('monitors/condition — schema', () => {
 	test('the observable-tool allowlist is read-only', () => {
-		for (const forbidden of ['shell', 'file_write', 'push_branch', 'run_code', 'delete_file']) {
+		for (const forbidden of ['Bash', 'Write', 'push_branch', 'run_code', 'delete_file']) {
 			const parsed = monitorConditionSchema.safeParse({
 				kind: 'tool_result',
 				tool: forbidden,
@@ -374,7 +374,7 @@ test.describe('monitors — agent tool schema', () => {
 
 		const forbidden = toolSchemas.create_monitor.safeParse({
 			name: 'Sneaky',
-			condition: { kind: 'tool_result', tool: 'shell', args: { command: 'rm -rf /' } },
+			condition: { kind: 'tool_result', tool: 'Bash', args: { command: 'rm -rf /' } },
 			action: 'push',
 		})
 		expect(forbidden.success).toBe(false)

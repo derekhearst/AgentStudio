@@ -270,8 +270,8 @@ export async function prepareAttachmentPrompt(input: PrepareAttachmentsInput): P
 			notes.push(`- \`${path}\` — video "${attachment.filename}". The model cannot view it directly.`)
 			continue
 		}
-		if (canUse('file_read')) {
-			notes.push(`- \`${path}\` — attached file "${attachment.filename}" (${mime}). Read it with \`file_read\`.`)
+		if (canUse('Read')) {
+			notes.push(`- \`${path}\` — attached file "${attachment.filename}" (${mime}). Read it with \`Read\`.`)
 		} else {
 			warnings.push(
 				`${describe(attachment, mime)} was placed in the agent workspace at \`${path}\`, but this agent has no file-reading tool, so it cannot open it.`,

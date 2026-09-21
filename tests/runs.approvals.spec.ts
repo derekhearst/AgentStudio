@@ -64,7 +64,7 @@ test.describe('runs/approvals — pending tool approvals are persistent', () => 
 				set pending_approvals = ${sql.json([
 					{
 						token,
-						toolName: 'shell',
+						toolName: 'Bash',
 						args: { command: 'echo hi' },
 						requestedAt: new Date().toISOString(),
 					},
@@ -163,7 +163,7 @@ test.describe('runs/approvals — pending tool approvals are persistent', () => 
 				set pending_approvals = ${sql.json([
 					{
 						token,
-						toolName: 'shell',
+						toolName: 'Bash',
 						args: {},
 						requestedAt: new Date().toISOString(),
 					},

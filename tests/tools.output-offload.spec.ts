@@ -19,7 +19,7 @@ test.describe('tools/output-offload — pure trim shape', () => {
 		const small = 'tiny shell output'
 		let sinkCalls = 0
 		const result = await trimWithOffload({
-			toolName: 'shell',
+			toolName: 'Bash',
 			content: small,
 			callId: 'call-1',
 			offload: () => {
@@ -34,11 +34,11 @@ test.describe('tools/output-offload — pure trim shape', () => {
 	})
 
 	test('shell output above the limit gets head + tail + handle, sink fires', async () => {
-		const limit = getToolOutputLimit('shell')
+		const limit = getToolOutputLimit('Bash')
 		const big = 'A'.repeat(Math.floor(limit / 2)) + 'MIDDLE-MARKER' + 'B'.repeat(limit)
 		let captured: { handle: string; size: number } | null = null
 		const result = await trimWithOffload({
-			toolName: 'shell',
+			toolName: 'Bash',
 			content: big,
 			callId: 'call-shell-big',
 			offload: (handle, full) => {
@@ -64,7 +64,7 @@ test.describe('tools/output-offload — pure trim shape', () => {
 		const head = 'HEADER\n'.repeat(50)
 		const tail = 'STDERR-LINE\n'.repeat(2000)
 		const result = await trimWithOffload({
-			toolName: 'shell',
+			toolName: 'Bash',
 			content: head + tail,
 			callId: 'call-tail-bias',
 		})
@@ -108,7 +108,7 @@ test.describe('tools/output-offload — pure trim shape', () => {
 	test('offload sink failure does not throw — visible head+tail still returned', async () => {
 		const big = 'A'.repeat(50_000)
 		const result = await trimWithOffload({
-			toolName: 'shell',
+			toolName: 'Bash',
 			content: big,
 			callId: 'call-sink-fail',
 			offload: () => {
@@ -149,7 +149,7 @@ test.describe('tools/output-offload — server wrapper materializes to disk', ()
 				'../src/lib/workspace/workspace.server'
 			)
 			const result = await trimWithOffload({
-				toolName: 'shell',
+				toolName: 'Bash',
 				content: big,
 				callId,
 				offload: async (handle, full) => {

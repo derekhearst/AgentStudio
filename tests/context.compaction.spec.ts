@@ -13,7 +13,7 @@ function tool(content: string, toolCallId: string): LlmMessage {
 	return { role: 'tool', content, toolCallId }
 }
 
-const callA = { id: 'A', type: 'function', function: { name: 'shell', arguments: '{}' } } as const
+const callA = { id: 'A', type: 'function', function: { name: 'Bash', arguments: '{}' } } as const
 const callB = { id: 'B', type: 'function', function: { name: 'web_search', arguments: '{}' } } as const
 
 test.describe('chat/compaction — findSafeSplitPoint preserves tool call/result pairs', () => {

@@ -72,7 +72,7 @@ test.describe('runs/events — append-only event log', () => {
 		try {
 			for (const [type, payload] of [
 				['compaction', { tokensBefore: 12000 }],
-				['tool_call', { id: 'call_1', name: 'shell' }],
+				['tool_call', { id: 'call_1', name: 'Bash' }],
 				['tool_result', { id: 'call_1', success: true }],
 				['done', { messageId: 'msg_1' }],
 			] as const) {

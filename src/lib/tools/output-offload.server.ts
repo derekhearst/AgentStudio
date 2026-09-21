@@ -13,7 +13,7 @@ export type ServerTrimInput = Omit<TrimWithOffloadInput, 'offload'> & {
 /**
  * Server-side wrapper around `trimWithOffload`. Persists the full payload to
  * `<workspace>/.tool-outputs/<callId>.txt` inside the resolved per-run workspace so the model
- * can recover it via `file_read('.tool-outputs/<callId>.txt')` after enabling the sandbox group.
+ * can recover it via `Read` on `.tool-outputs/<callId>.txt`.
  *
  * No-op offload when the content fits the per-tool limit (the file is never created in the
  * common small-output path).

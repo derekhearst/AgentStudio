@@ -18,6 +18,7 @@
 
 import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
+import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
@@ -65,6 +66,18 @@ export type EngineRunInput = {
 	 * including `bypassPermissions`; see `./permission-mode`.
 	 */
 	permissionMode?: ConversationPermissionMode
+	/**
+	 * Absolute path of the run's workspace. Every built-in filesystem call is confined to
+	 * it — see `./workspace-guard`. Omit only for runs that touch no filesystem; omitting
+	 * it disables containment, so it is not a default to reach for.
+	 */
+	workspaceRoot?: string | null
+	/**
+	 * How `Bash` is contained here. Defaults to the host's capability: the OS sandbox on
+	 * Linux, human approval anywhere it is unavailable, because a command string cannot
+	 * be checked for containment by reading it.
+	 */
+	bashPolicy?: BashPolicy
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
 	/**
@@ -177,9 +190,23 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	// doesn't emit a second one.
 	const callEmitted = new Set<string>()
 
+	/**
+	 * Workspace containment (#15). The SDK's built-in Read/Write/Edit/Bash call the
+	 * filesystem directly, so `canUseTool` is the only place left that can keep them
+	 * inside the run's workspace — `cwd` is a working directory, not a jail.
+	 *
+	 * `workspaceRoot` being absent means the run has no workspace to be confined to
+	 * (a synthesis path with no filesystem work), and the guard stands down.
+	 */
+	const workspaceRoot = input.workspaceRoot ?? null
+	const bashPolicy: BashPolicy = input.bashPolicy ?? resolveBashPolicy({})
+
 	// `canUseTool` is installed whenever anything could be gated. A non-default mode gates
 	// on its own — plan mode refuses writes even in a run with no approval surface at all.
-	const gatingEnabled = approvalsEnabled || permissionMode !== 'default'
+	// Containment forces it on regardless: without it, a default-mode run with approvals
+	// disabled would install no hook at all, and the built-ins would reach the host
+	// filesystem unchecked. That is the one case that must never be optimised away.
+	const gatingEnabled = approvalsEnabled || permissionMode !== 'default' || workspaceRoot !== null
 
 	const options: Options = {
 		...input.options,
@@ -192,7 +219,20 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
 
 						const id = takeToolUseId(name, toolInput) ?? `pending-${name}-${Date.now()}`
-						const gate = gateFor(name)
+
+						// ── Containment first. No permission mode may waive it, including
+						// bypassPermissions: a mode says how much the operator trusts the
+						// agent, never whether it may leave its workspace.
+						const containment = workspaceRoot
+							? guardWorkspaceAccess({ toolName: name, toolInput, workspaceRoot, bashPolicy })
+							: ({ verdict: 'allow' } as const)
+
+						const gate =
+							containment.verdict === 'deny'
+								? ({ gate: 'deny', reason: containment.reason } as const)
+								: containment.verdict === 'ask'
+									? ({ gate: 'ask', reason: containment.reason } as const)
+									: gateFor(name)
 
 						/** Moves the UI's pending block to "executing" using the same id. */
 						const allow = async (): Promise<PermissionResult> => {

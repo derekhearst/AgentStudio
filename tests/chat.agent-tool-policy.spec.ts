@@ -18,11 +18,11 @@ const READ_ONLY_ALLOW = [
 	'search_tools',
 	'web_search',
 	// Plan authoring + handoff — the planner writes the plan to a file, then hands off.
-	'file_write',
+	'Write',
 	'request_plan_approval',
-	'file_read',
-	'list_directory',
-	'search_files',
+	'Read',
+	'Glob',
+	'Grep',
 	'file_info',
 	'browser_screenshot',
 	'web_fetch',
@@ -46,7 +46,7 @@ const READ_ONLY_ALLOW = [
 test.describe('agent-tool-policy — unrestricted policy', () => {
 	test('unrestricted passes every tool through', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const tools = [MOCK_TOOL('shell'), MOCK_TOOL('file_write'), MOCK_TOOL('push_branch')]
+		const tools = [MOCK_TOOL('Bash'), MOCK_TOOL('Write'), MOCK_TOOL('push_branch')]
 		expect(filterToolsByAgentPolicy(tools, { kind: 'unrestricted' })).toEqual(tools)
 	})
 
@@ -64,9 +64,9 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
 		const tools = [
-			MOCK_TOOL('shell'),
-			MOCK_TOOL('file_write'),
-			MOCK_TOOL('file_patch'),
+			MOCK_TOOL('Bash'),
+			MOCK_TOOL('Write'),
+			MOCK_TOOL('Edit'),
 			MOCK_TOOL('delete_file'),
 			MOCK_TOOL('push_branch'),
 			MOCK_TOOL('create_pull_request'),
@@ -84,9 +84,9 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		const tools = [
 			MOCK_TOOL('web_search'),
 			MOCK_TOOL('web_fetch'),
-			MOCK_TOOL('file_read'),
-			MOCK_TOOL('list_directory'),
-			MOCK_TOOL('search_files'),
+			MOCK_TOOL('Read'),
+			MOCK_TOOL('Glob'),
+			MOCK_TOOL('Grep'),
 			MOCK_TOOL('list_my_repos'),
 			MOCK_TOOL('list_pull_requests'),
 			MOCK_TOOL('get_pull_request'),
@@ -94,7 +94,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 			MOCK_TOOL('git_status'),
 			MOCK_TOOL('list_skills'),
 			MOCK_TOOL('read_skill'),
-			MOCK_TOOL('file_write'),
+			MOCK_TOOL('Write'),
 			MOCK_TOOL('request_plan_approval'),
 			MOCK_TOOL('list_projects'),
 			MOCK_TOOL('ask_user'),
@@ -102,11 +102,11 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual(
 			[
 				'ask_user',
-				'file_read',
-				'file_write',
+				'Read',
+				'Write',
 				'get_pull_request',
 				'git_status',
-				'list_directory',
+				'Glob',
 				'list_my_repos',
 				'list_projects',
 				'list_pull_requests',
@@ -114,7 +114,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 				'prepare_commit',
 				'read_skill',
 				'request_plan_approval',
-				'search_files',
+				'Grep',
 				'web_fetch',
 				'web_search',
 			].sort(),
@@ -136,12 +136,12 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 test.describe('agent-tool-policy — resolver round-trips JSON config', () => {
 	test('resolveAgentToolPolicy parses readOnly config from agents.config.toolPolicy', async () => {
 		const { resolveAgentToolPolicy, filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const config = { toolPolicy: { kind: 'readOnly', allow: ['web_search', 'file_read'] } }
+		const config = { toolPolicy: { kind: 'readOnly', allow: ['web_search', 'Read'] } }
 		const policy = resolveAgentToolPolicy(config)
 		expect(policy.kind).toBe('readOnly')
-		const tools = [MOCK_TOOL('web_search'), MOCK_TOOL('shell'), MOCK_TOOL('file_read')]
+		const tools = [MOCK_TOOL('web_search'), MOCK_TOOL('Bash'), MOCK_TOOL('Read')]
 		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual([
-			'file_read',
+			'Read',
 			'web_search',
 		])
 	})

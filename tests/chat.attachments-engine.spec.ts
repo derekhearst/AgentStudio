@@ -113,7 +113,7 @@ test.describe('engine/attachments — PDFs go through the workspace', () => {
 		const prepared = await prepareAttachmentPrompt({
 			text: 'summarise this',
 			attachments: [attachment({ filename: 'spec.pdf', mimeType: 'application/pdf' })],
-			availableTools: new Set(['pdf_read', 'file_read']),
+			availableTools: new Set(['pdf_read', 'Read']),
 			io: io({
 				stage: async (a) => {
 					staged.push(a.filename)

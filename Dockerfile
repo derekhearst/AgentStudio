@@ -1,5 +1,9 @@
 # ---------- base ----------
 FROM oven/bun:1 AS base
+# bubblewrap backs the Agent SDK's `sandbox` option, the only thing that can confine a Bash
+# call to the workspace — a command string cannot be checked for containment by reading it.
+# Without it the engine falls back to asking approval for every shell command; see
+# src/lib/engine/workspace-guard.ts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	chromium \
 	fonts-liberation \
@@ -19,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	curl \
 	wget \
 	ca-certificates \
+	bubblewrap \
 	&& rm -rf /var/lib/apt/lists/*
 
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

@@ -142,6 +142,47 @@ export function resolveRunPermissionMode(input: {
 	return resolveEffectivePermissionMode(input)
 }
 
+/**
+ * Built-in SDK tools that replaced the in-house filesystem and shell registry entries (#15).
+ *
+ * Kept as data rather than inferred, because two layers have to agree with it: the
+ * containment guard in `./workspace-guard`, which knows how each one names its path
+ * argument, and the read-only agent allowlist.
+ */
+export const BUILTIN_FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep'] as const
+export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell'] as const
+
+/**
+ * Built-ins we deliberately refuse, because an in-house tool does the same job *and* more.
+ *
+ * `WebSearch` / `WebFetch`: ours route through the self-hosted SearXNG at `SEARXNG_URL`
+ * and write a `logToolUsage` row per call with an operator-tunable per-call cost. The SDK's
+ * are billed server-side and invisible to the ledger, so letting both exist would silently
+ * move spend off the books depending on which one the model happened to pick.
+ */
+export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch'] as const
+
+/** Membership test so the allowlist can carry both surfaces without qualifying built-ins. */
+const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
+	...BUILTIN_FILE_TOOLS,
+	...BUILTIN_SHELL_TOOLS,
+	'NotebookEdit',
+	'TodoWrite',
+])
+
+/**
+ * Whether the SDK's OS sandbox can run here. Linux only: it is built on bubblewrap, which
+ * the production image installs and a developer box generally does not.
+ *
+ * `SANDBOX_DISABLED=1` is an escape hatch for debugging a container where bubblewrap is
+ * present but broken. It downgrades Bash to approval-gated rather than unconfined, because
+ * `resolveBashPolicy` reads the same signal.
+ */
+export function sandboxAvailable(): boolean {
+	if (process.env.SANDBOX_DISABLED === '1') return false
+	return process.platform === 'linux'
+}
+
 export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const claude = isClaudeModel(input.model)
 	const sdkModel = claude ? normalizeModelId(input.model) : input.model
@@ -163,9 +204,36 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		thinking,
 		...(effort ? { effort } : {}),
 		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools) },
-		...(input.allowedTools ? { allowedTools: input.allowedTools.map(qualifiedToolName) } : {}),
+		// A scoped run names its in-house tools (MCP-qualified) plus the built-ins it may
+		// use. An unscoped run omits allowedTools entirely, which is how the SDK expresses
+		// "everything" — the built-ins are the filesystem surface now, so they must not be
+		// filtered out by an allowlist that only knows MCP names.
+		...(input.allowedTools
+			? {
+					allowedTools: [
+						...input.allowedTools
+							.filter((name) => !BUILTIN_TOOL_SET.has(name))
+							.map(qualifiedToolName),
+						...input.allowedTools.filter((name) => BUILTIN_TOOL_SET.has(name)),
+					],
+				}
+			: {}),
+		disallowedTools: [...DISALLOWED_BUILTIN_TOOLS],
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 		permissionMode: sdkPermissionModeFor(effectiveMode.mode),
+		/**
+		 * OS-level confinement for Bash (#15). A command string cannot be checked for
+		 * containment by reading it, so this is the only thing that actually confines one;
+		 * `workspace-guard.ts` asks for approval instead wherever it is unavailable.
+		 *
+		 * `failIfUnavailable` is left at its default (true): if bubblewrap is missing the
+		 * run fails loudly rather than quietly executing unsandboxed, which is the whole
+		 * point. Enabled only on Linux — the image installs bubblewrap, a developer's
+		 * machine may not have it, and a hard failure there would block local work.
+		 */
+		...(sandboxAvailable()
+			? { sandbox: { enabled: true, autoAllowBashIfSandboxed: false } }
+			: {}),
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
 		...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),

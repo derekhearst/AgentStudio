@@ -57,8 +57,11 @@ import {
 	GatewayNotConfiguredError,
 	isClaudeModel,
 	resolveRunPermissionMode,
+	sandboxAvailable,
 } from '$lib/engine/options.server'
+import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
+import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -423,6 +426,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						requiresApproval: (name) =>
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
+						// Confines every built-in filesystem call to this run's workspace (#15).
+						// Resolved the same way the run's own tools resolve it, so the guard and
+						// the tools can never disagree about where the workspace is.
+						// Bash is confined by the OS where bubblewrap exists (the production image
+						// ships it) and gated on approval where it does not — never silently
+						// unconfined. Both halves read the same signal so they cannot disagree.
+						bashPolicy: resolveBashPolicy({ sandboxAvailable: sandboxAvailable() }),
+						workspaceRoot: resolveWorkspaceRoot({
+							userId: user.id,
+							runId: run.id,
+							persistentKey: workspaceConfig?.persistentKey ?? null,
+							worktree: workspaceConfig?.worktreeConfig ?? null,
+							projectId: conversation.projectId ?? null,
+						}),
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {

@@ -12,7 +12,7 @@ import { registerHook } from './bus.server'
  * shows up in `hook_invocations.success = false`.
  */
 
-const ACTIVITY_LOGGED_TOOLS = new Set(['shell', 'file_write', 'file_patch', 'file_replace', 'delete_file', 'move_file'])
+const ACTIVITY_LOGGED_TOOLS = new Set(['Bash', 'Write', 'Edit', 'delete_file', 'move_file'])
 
 let registered = false
 
@@ -21,8 +21,8 @@ export function registerBuiltinHooks(): void {
 	registered = true
 
 	// `after_tool`: emit an activity row for impactful filesystem / shell calls so the user-
-	// facing activity feed shows what the agent did. Read-only tools (file_read, list_directory,
-	// search_files, web_search, etc.) are intentionally excluded — they're noise in the feed.
+	// facing activity feed shows what the agent did. Read-only tools (Read, Glob, Grep,
+	// web_search, etc.) are intentionally excluded — they're noise in the feed.
 	registerHook('after_tool', 'activity-impactful-tools', async (payload) => {
 		if (!ACTIVITY_LOGGED_TOOLS.has(payload.toolName)) return
 		const verb = payload.success ? 'ran' : 'failed running'

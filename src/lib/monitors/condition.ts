@@ -43,15 +43,15 @@ export const MONITOR_DEFAULT_MODEL = 'anthropic/claude-haiku-4.5'
 /**
  * Tools a condition may observe with. Deliberately a read-only allowlist — a monitor runs
  * unattended on a timer with no human in the loop, so it may look at the world but never
- * change it. `shell`, `file_write`, `push_branch` and friends are absent by construction.
+ * change it. `Bash`, `Write`, `push_branch` and friends are absent by construction.
  */
 export const MONITOR_OBSERVABLE_TOOLS = [
 	'web_fetch',
 	'web_search',
-	'search_files',
-	'file_read',
+	'Grep',
+	'Read',
 	'file_info',
-	'list_directory',
+	'Glob',
 	'git_status',
 	'git_log',
 	'git_diff',

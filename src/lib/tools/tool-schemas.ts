@@ -21,39 +21,11 @@ import {
 
 export const toolSchemas = {
 	web_search: z.object({ query: z.string().min(1) }),
-	shell: z.object({ command: z.string().min(1) }),
-	file_read: z.object({
-		path: z.string().min(1),
-		startLine: z.number().int().min(1).optional(),
-		endLine: z.number().int().min(1).optional(),
-	}),
-	file_write: z.object({ path: z.string().min(1), content: z.string() }),
-	file_patch: z.object({ patch: z.string().min(1) }),
-	file_replace: z.object({
-		path: z.string().min(1),
-		oldStr: z.string().min(1),
-		newStr: z.string(),
-		requireUnique: z.boolean().default(true),
-		replaceAll: z.boolean().default(false),
-	}),
-	list_directory: z.object({
-		path: z.string().min(1).optional(),
-		depth: z.number().int().min(0).max(6).default(1),
-		includeHidden: z.boolean().default(false),
-	}),
 	delete_file: z.object({ path: z.string().min(1), recursive: z.boolean().default(false) }),
 	move_file: z.object({
 		fromPath: z.string().min(1),
 		toPath: z.string().min(1),
 		overwrite: z.boolean().default(false),
-	}),
-	search_files: z.object({
-		query: z.string().min(1),
-		path: z.string().min(1).optional(),
-		maxResults: z.number().int().min(1).max(200).default(50),
-		isRegex: z.boolean().default(false),
-		includeIgnored: z.boolean().default(false),
-		caseSensitive: z.boolean().default(false),
 	}),
 	file_info: z.object({ path: z.string().min(1) }),
 	browser_screenshot: z.object({ url: z.string().url().optional() }),
@@ -303,16 +275,8 @@ export function normalizeToolName(name: string): ToolName | null {
 
 export const toolDescriptions: Record<ToolName, string> = {
 	web_search: 'Search the web for information.',
-	shell: 'Run a shell command in the sandboxed environment.',
-	file_read: 'Read a file from the sandbox filesystem, optionally by line range.',
-	file_write: 'Write content to a file in the sandbox filesystem.',
-	file_patch: 'Apply a unified diff patch to files in the sandbox workspace.',
-	file_replace:
-		'Replace an exact string in a file. By default requires exactly one match, making edits deterministic and retry-safe.',
-	list_directory: 'List files and directories with depth and hidden-file controls.',
 	delete_file: 'Delete a file or directory (recursive deletes require explicit recursive=true).',
 	move_file: 'Move or rename a file/directory within the sandbox workspace.',
-	search_files: 'Search file contents in the workspace (ripgrep-style) with optional regex and ignore controls.',
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
 	browser_screenshot: 'Take a screenshot of a web page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
@@ -393,12 +357,6 @@ export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
 	web_search: [
 		{ query: 'sveltekit remote functions 2026' },
 		{ query: 'pgvector hnsw vs ivfflat benchmark' },
-	],
-	shell: [
-		// Use shell when nothing more specific fits — but prefer file_read / list_directory
-		// / git_status / search_files when they apply.
-		{ command: 'bun run check' },
-		{ command: 'bunx prisma generate' },
 	],
 	run_code: [
 		// Parallel batching pattern — the canonical reason to use run_code instead of individual
