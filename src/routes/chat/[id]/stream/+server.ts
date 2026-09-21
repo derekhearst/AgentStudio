@@ -59,6 +59,7 @@ import {
 	resolveRunPermissionMode,
 } from '$lib/engine/options.server'
 import { runEngineStream } from '$lib/engine/stream.server'
+import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -423,6 +424,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						requiresApproval: (name) =>
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
+						// Confines every built-in filesystem call to this run's workspace (#15).
+						// Resolved the same way the run's own tools resolve it, so the guard and
+						// the tools can never disagree about where the workspace is.
+						workspaceRoot: resolveWorkspaceRoot({
+							userId: user.id,
+							runId: run.id,
+							persistentKey: workspaceConfig?.persistentKey ?? null,
+							worktree: workspaceConfig?.worktreeConfig ?? null,
+							projectId: conversation.projectId ?? null,
+						}),
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {

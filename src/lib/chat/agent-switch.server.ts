@@ -112,7 +112,7 @@ export async function setConversationAgent(
 	const baseAnchor =
 		agent.anchorPrompt ?? `[Agent changed to ${agent.name}] You are now acting as ${agent.name}. ${agent.role}`
 	const anchorContent = options.approvedPlanPath
-		? `${baseAnchor}\n\nThe user approved the plan at ${options.approvedPlanPath}. Call file_read on that path before taking any action so you implement against the approved plan.`
+		? `${baseAnchor}\n\nThe user approved the plan at ${options.approvedPlanPath}. Call Read on that path before taking any action so you implement against the approved plan.`
 		: baseAnchor
 
 	const anchorMessageId = await db.transaction(async (tx) => {

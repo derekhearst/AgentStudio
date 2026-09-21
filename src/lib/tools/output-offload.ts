@@ -12,7 +12,7 @@ import { logger } from '$lib/observability/logger'
  *      run-event log, or any other durable surface.
  *
  * The model sees enough of the head and tail to keep reasoning, plus a clear pointer to recover
- * the full content via `file_read` (sandbox group) when it actually needs the middle.
+ * the full content via `Read` when it actually needs the middle.
  */
 
 export type OffloadHandle = string
@@ -43,8 +43,8 @@ export type TrimWithOffloadResult = {
 
 const DEFAULT_LIMITS: Record<string, number> = {
 	web_search: 6000,
-	file_read: 32000,
-	shell: 16000,
+	Read: 32000,
+	Bash: 16000,
 	browser_screenshot: Infinity,
 	run_subagent: 16000,
 	git_diff: 16000,
@@ -59,7 +59,7 @@ const FALLBACK_LIMIT = 16000
  * column headers) and the tail tends to carry the "what just happened" (errors, summary lines).
  */
 function headTailRatio(toolName: string): { headFrac: number; tailFrac: number } {
-	if (toolName === 'shell') return { headFrac: 0.4, tailFrac: 0.6 } // shell stderr is usually at the end
+	if (toolName === 'Bash') return { headFrac: 0.4, tailFrac: 0.6 } // shell stderr is usually at the end
 	if (toolName === 'git_log') return { headFrac: 0.85, tailFrac: 0.15 } // newest commits first
 	return { headFrac: 0.6, tailFrac: 0.4 }
 }
@@ -107,7 +107,7 @@ export async function trimWithOffload(input: TrimWithOffloadInput): Promise<Trim
 	}
 
 	const handle = `.tool-outputs/${input.callId}.txt`
-	const elision = `\n\n[output offloaded; full size: ${fullSize} chars. To read the full payload, call file_read('${handle}') after enabling the sandbox capability.]\n\n`
+	const elision = `\n\n[output offloaded; full size: ${fullSize} chars. To read the full payload, call Read on '${handle}'.]\n\n`
 
 	const budget = Math.max(0, limit - elision.length)
 	const { headFrac, tailFrac } = headTailRatio(input.toolName)

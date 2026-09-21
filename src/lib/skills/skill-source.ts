@@ -15,7 +15,7 @@ import { extractFrontmatter, serializeFrontmatter } from '$lib/util/frontmatter'
  *   category: tool                               # optional; lands fully in PR-3
  *   tags: [system, companion, sandbox]           # optional
  *   # (companion_groups / companion_tools removed alongside the enable_capability concept)
- *   companion_tools: [shell, file_patch]         # optional
+ *   companion_tools: [Bash, Edit]         # optional
  *   enabled: true                                # optional, defaults to true
  *   ---
  *

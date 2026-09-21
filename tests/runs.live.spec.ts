@@ -218,7 +218,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 			const runMid = await readChatRun(conversationId)
 			expect(runMid.state).toBe('waiting_tool_approval')
 			expect(runMid.pending_approvals.find((e) => e.token === pendingToken)).toMatchObject({
-				toolName: 'shell',
+				toolName: 'Bash',
 			})
 			expect(runMid.pending_approvals.find((e) => e.token === pendingToken)?.decision).toBeUndefined()
 			expect(runMid.next_event_seq).toBeGreaterThan(0)
@@ -268,10 +268,10 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 			const persistedBlocks = assistantMsg!.metadata.blocks ?? []
 			expect(persistedBlocks.length).toEqual(runFinal.stream_blocks.length)
 			expect(persistedBlocks.map((b) => b.kind)).toEqual(runFinal.stream_blocks.map((b) => b.kind))
-			expect(persistedBlocks.some((b) => b.kind === 'tool' && b.name === 'shell')).toBeTruthy()
-			const shellBlock = persistedBlocks.find((b) => b.kind === 'tool' && b.name === 'shell')!
+			expect(persistedBlocks.some((b) => b.kind === 'tool' && b.name === 'Bash')).toBeTruthy()
+			const shellBlock = persistedBlocks.find((b) => b.kind === 'tool' && b.name === 'Bash')!
 			expect(shellBlock.success).toBe(true)
-			expect(assistantMsg!.tool_calls.some((tc) => tc.name === 'shell')).toBeTruthy()
+			expect(assistantMsg!.tool_calls.some((tc) => tc.name === 'Bash')).toBeTruthy()
 		} finally {
 			abort.abort()
 			await setApprovalRequiredTools(userId, [])

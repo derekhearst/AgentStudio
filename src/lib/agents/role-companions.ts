@@ -27,7 +27,7 @@ const ROLE_GROUP_KEYWORDS: Record<string, string[]> = {
 		'builder',
 		'implementer',
 		'implementation',
-		'shell',
+		'Bash',
 		'fix',
 		'debug',
 		'debugger',

@@ -38,14 +38,14 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	'search_tools',
 	'web_search',
 	// Plan authoring + handoff. The plan lives on disk now: the planner writes a markdown
-	// file with file_write and hands off via request_plan_approval. file_write is the one
+	// file with Write and hands off via request_plan_approval. Write is the one
 	// write tool these otherwise read-only agents get, and only so the plan can exist.
-	'file_write',
+	'Write',
 	'request_plan_approval',
 	// Sandbox: read-only inspection.
-	'file_read',
-	'list_directory',
-	'search_files',
+	'Read',
+	'Glob',
+	'Grep',
 	'file_info',
 	'browser_screenshot',
 	'web_fetch',
@@ -94,14 +94,14 @@ You are the Research agent. Your job is to draft a research plan as a markdown f
 
 When the user asks something substantive that warrants evidence + citations:
 
-1. Call \`file_write\` with a path like \`RESEARCH-PLAN.md\` and a markdown body containing:
+1. Call \`Write\` with a path like \`RESEARCH-PLAN.md\` and a markdown body containing:
    - **Summary**: 1-2 sentences framing what you'll investigate.
    - **Sub-questions**: 4-8 concrete, googleable items covering definitions, mechanisms, evidence (studies, benchmarks, real-world data), edge cases, comparisons, and recent developments. Avoid vague ones — prefer specifics.
    - **Rationale** (optional): one sentence on why this decomposition.
 2. Post the plan in your reply too, so the user can read it without opening the file.
 3. Call \`request_plan_approval\` with that \`path\` and the \`implementerAgentId\` of a research-runner agent. The user approves in the inline card; on approve the conversation flips to the runner agent, which reads the file and executes.
 
-If the user denies, they typically reply with feedback. Read it and start the cycle again — rewrite the file with \`file_write\` and re-request approval.
+If the user denies, they typically reply with feedback. Read it and start the cycle again — rewrite the file with \`Write\` and re-request approval.
 
 ## When NOT to draft a research plan
 
@@ -126,7 +126,7 @@ You are the Plan agent. Think before acting; write the plan to a markdown file t
 
 Before any non-readonly action:
 
-1. Call \`file_write\` with a path like \`PLAN.md\` and a markdown body containing:
+1. Call \`Write\` with a path like \`PLAN.md\` and a markdown body containing:
    - **Summary**: 1-2 sentences on the goal.
    - **Steps**: numbered list, each with the title, what it does, blast radius (local / shared / production), reversibility, and rough cost/time estimate.
    - **Risks**: specific failure modes (not "could fail"). Quantify where you can.
@@ -136,7 +136,7 @@ Before any non-readonly action:
 
 ## When iterating
 
-If the user denies, read their feedback, rewrite the file with \`file_write\`, and re-request approval.
+If the user denies, read their feedback, rewrite the file with \`Write\`, and re-request approval.
 
 ## Posture
 
@@ -160,8 +160,8 @@ You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
 	chat: '[Agent changed to Chat] You are now the Chat agent. Be conversational and collaborative. Keep responses concise; ask clarifying questions when intent is ambiguous.',
 	research:
-		'[Agent changed to Research] You are now the Research agent. For substantive questions, write a research plan to a markdown file (file_write, e.g. RESEARCH-PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to a research-runner agent. For trivial lookups or follow-ups on completed runs, answer directly.',
-	plan: '[Agent changed to Plan] You are now the Plan agent. Before any non-readonly action, write the plan to a markdown file (file_write, e.g. PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to an implementer agent. Wait for approval before executing anything.',
+		'[Agent changed to Research] You are now the Research agent. For substantive questions, write a research plan to a markdown file (Write, e.g. RESEARCH-PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to a research-runner agent. For trivial lookups or follow-ups on completed runs, answer directly.',
+	plan: '[Agent changed to Plan] You are now the Plan agent. Before any non-readonly action, write the plan to a markdown file (Write, e.g. PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to an implementer agent. Wait for approval before executing anything.',
 	autonomous:
 		'[Agent changed to Autonomous] You are now the Autonomous agent. Execute autonomously with minimal interruptions. Report progress concisely; only stop for blocking decisions or hard failures.',
 }

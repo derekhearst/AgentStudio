@@ -55,7 +55,7 @@ export type WorkspaceTarget = {
  *
  * `stage` resolves the same workspace root the run's tools resolve
  * (`resolveWorkspaceRoot` with identical inputs), so the path handed to the
- * model is exactly the path `pdf_read` / `file_read` will open.
+ * model is exactly the path `pdf_read` / `Read` will open.
  */
 export function createAttachmentIo(target: WorkspaceTarget): AttachmentIo {
 	return {

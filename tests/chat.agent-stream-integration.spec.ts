@@ -111,7 +111,7 @@ test.describe('chat/agent-stream-integration — Research toolPolicy audit', () 
 		const policy = row?.config?.toolPolicy
 		expect(policy?.kind).toBe('readOnly')
 		const allow = new Set(policy?.allow ?? [])
-		const writeTools = ['push_branch', 'create_pull_request', 'clone_repository', 'shell', 'file_write']
+		const writeTools = ['push_branch', 'create_pull_request', 'clone_repository', 'Bash', 'Write']
 		for (const tool of writeTools) {
 			expect(allow.has(tool), `${tool} must NOT be in the Research allow-list`).toBe(false)
 		}

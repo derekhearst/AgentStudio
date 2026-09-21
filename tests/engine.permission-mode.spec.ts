@@ -59,7 +59,7 @@ test.describe('permission-mode — mandatory approval survives every mode', () =
 	})
 
 	test('bypassPermissions auto-allows ordinary tools, so the gate above is not vacuous', () => {
-		for (const tool of ['shell', 'file_write', 'file_read', 'clone_repository', 'run_code']) {
+		for (const tool of ['Bash', 'Write', 'Read', 'clone_repository', 'run_code']) {
 			expect(
 				resolveToolGate({ mode: 'bypassPermissions', toolName: tool, settingsRequiresApproval: true })
 					.gate,
@@ -96,13 +96,13 @@ test.describe('permission-mode — mandatory approval survives every mode', () =
 test.describe('permission-mode — default', () => {
 	test('defers entirely to the per-tool settings', () => {
 		expect(
-			resolveToolGate({ mode: 'default', toolName: 'shell', settingsRequiresApproval: true }).gate,
+			resolveToolGate({ mode: 'default', toolName: 'Bash', settingsRequiresApproval: true }).gate,
 		).toBe('ask')
 		expect(
-			resolveToolGate({ mode: 'default', toolName: 'shell', settingsRequiresApproval: false }).gate,
+			resolveToolGate({ mode: 'default', toolName: 'Bash', settingsRequiresApproval: false }).gate,
 		).toBe('allow')
 		expect(
-			resolveToolGate({ mode: 'default', toolName: 'file_write', settingsRequiresApproval: true })
+			resolveToolGate({ mode: 'default', toolName: 'Write', settingsRequiresApproval: true })
 				.gate,
 		).toBe('ask')
 	})
@@ -110,7 +110,7 @@ test.describe('permission-mode — default', () => {
 
 test.describe('permission-mode — plan', () => {
 	test('refuses every write and every other side effect', () => {
-		for (const tool of ['shell', 'run_code', 'file_patch', 'delete_file', 'clone_repository', 'create_project']) {
+		for (const tool of ['Bash', 'run_code', 'Edit', 'delete_file', 'clone_repository', 'create_project']) {
 			const decision = resolveToolGate({ mode: 'plan', toolName: tool, settingsRequiresApproval: false })
 			expect(decision.gate, `${tool} must be denied in plan mode`).toBe('deny')
 			expect(decision.reason).toContain('Plan mode')
@@ -128,7 +128,7 @@ test.describe('permission-mode — plan', () => {
 	})
 
 	test('read-only tools still run, so the agent can actually investigate', () => {
-		for (const tool of ['file_read', 'list_directory', 'search_files', 'git_diff', 'web_search', 'read_skill']) {
+		for (const tool of ['Read', 'Glob', 'Grep', 'git_diff', 'web_search', 'read_skill']) {
 			expect(
 				resolveToolGate({ mode: 'plan', toolName: tool, settingsRequiresApproval: false }).gate,
 				`${tool} should be readable in plan mode`,
@@ -140,7 +140,7 @@ test.describe('permission-mode — plan', () => {
 		// The Plan agent writes PLAN.md and hands the path to request_plan_approval (see
 		// READ_ONLY_TOOL_NAMES in $lib/agents/builtin-agents.server.ts). Denying file_write
 		// outright would break that handoff, so plan mode surfaces it for approval instead.
-		const write = resolveToolGate({ mode: 'plan', toolName: 'file_write', settingsRequiresApproval: false })
+		const write = resolveToolGate({ mode: 'plan', toolName: 'Write', settingsRequiresApproval: false })
 		expect(write.gate).toBe('ask')
 		const handoff = resolveToolGate({
 			mode: 'plan',
@@ -153,7 +153,7 @@ test.describe('permission-mode — plan', () => {
 
 test.describe('permission-mode — acceptEdits', () => {
 	test('file edits run without asking', () => {
-		for (const tool of ['file_write', 'file_patch', 'file_replace', 'delete_file', 'move_file']) {
+		for (const tool of ['Write', 'Edit', 'Edit', 'delete_file', 'move_file']) {
 			expect(
 				resolveToolGate({ mode: 'acceptEdits', toolName: tool, settingsRequiresApproval: true }).gate,
 				`${tool} should be auto-approved by acceptEdits`,
@@ -163,7 +163,7 @@ test.describe('permission-mode — acceptEdits', () => {
 
 	test('everything else is still gated by the settings', () => {
 		expect(
-			resolveToolGate({ mode: 'acceptEdits', toolName: 'shell', settingsRequiresApproval: true }).gate,
+			resolveToolGate({ mode: 'acceptEdits', toolName: 'Bash', settingsRequiresApproval: true }).gate,
 		).toBe('ask')
 		expect(
 			resolveToolGate({ mode: 'acceptEdits', toolName: 'run_code', settingsRequiresApproval: true })
@@ -273,8 +273,8 @@ test.describe('permission-mode — parsing and metadata', () => {
 	})
 
 	test('stripToolNamespace handles bare and MCP-qualified names', () => {
-		expect(stripToolNamespace('file_write')).toBe('file_write')
-		expect(stripToolNamespace('mcp__agentstudio__file_write')).toBe('file_write')
+		expect(stripToolNamespace('Write')).toBe('Write')
+		expect(stripToolNamespace('mcp__agentstudio__file_write')).toBe('Write')
 		expect(stripToolNamespace('mcp__agentstudio__push_branch')).toBe('push_branch')
 	})
 })

@@ -108,8 +108,8 @@ test.describe('chat/stream-live — research mode end-to-end', () => {
 				where conversation_id = ${conv.id}
 				  and role = 'assistant'
 				  and (
-					tool_calls @> ${sql.json([{ name: 'shell' }])}
-					or tool_calls @> ${sql.json([{ name: 'file_write' }])}
+					tool_calls @> ${sql.json([{ name: 'Bash' }])}
+					or tool_calls @> ${sql.json([{ name: 'Write' }])}
 					or tool_calls @> ${sql.json([{ name: 'push_branch' }])}
 					or tool_calls @> ${sql.json([{ name: 'create_pull_request' }])}
 				  )

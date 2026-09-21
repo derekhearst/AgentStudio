@@ -96,32 +96,38 @@ const TOOL_COPY: Record<string, ToolCopy> = {
 		completed: 'Searched the web',
 		denied: 'Web search was denied',
 	},
-	search_files: {
+	Grep: {
 		inProgress: 'Searching files',
 		completed: 'Searched files',
 		denied: 'File search was denied',
 	},
-	file_read: {
+	Glob: {
+		inProgress: 'Listing files',
+		completed: 'Listed files',
+		denied: 'File listing was denied',
+	},
+	Read: {
 		inProgress: 'Reading a file',
 		completed: 'Read a file',
 		denied: 'File read was denied',
 	},
-	file_write: {
+	Write: {
 		inProgress: 'Writing a file',
 		completed: 'Wrote a file',
 		denied: 'File write was denied',
 	},
-	file_patch: {
-		inProgress: 'Applying file patch',
-		completed: 'Applied file patch',
-		denied: 'File patch was denied',
+	// Edit covers what file_patch and file_replace used to do separately.
+	Edit: {
+		inProgress: 'Editing a file',
+		completed: 'Edited a file',
+		denied: 'File edit was denied',
 	},
-	file_replace: {
-		inProgress: 'Replacing text in files',
-		completed: 'Replaced text in files',
-		denied: 'File replace was denied',
+	MultiEdit: {
+		inProgress: 'Editing files',
+		completed: 'Edited files',
+		denied: 'File edit was denied',
 	},
-	shell: {
+	Bash: {
 		inProgress: 'Running shell command',
 		completed: 'Ran shell command',
 		failed: 'Shell command failed',
@@ -190,11 +196,11 @@ export function getFriendlyToolLabel(name: string, args: unknown, status: ToolCa
 			? (copy?.completed ?? `Completed ${fallbackToolLabel(name).toLowerCase()}`)
 			: (copy?.inProgress ?? `${fallbackToolLabel(name)} in progress`)
 
-	if (query && ['web_search', 'search_files'].includes(name)) {
+	if (query && ['web_search', 'Grep'].includes(name)) {
 		return `${base} for "${query}"`
 	}
 
-	if (path && ['file_read', 'file_write', 'file_patch', 'file_replace', 'browser_navigate'].includes(name)) {
+	if (path && ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'browser_navigate'].includes(name)) {
 		return `${base}: ${path}`
 	}
 
@@ -350,8 +356,8 @@ function findToolNameForToolMessage(messages: LlmMessage[], toolMsgIndex: number
 export function trimToolResult(toolName: string, resultStr: string): string {
 	const limits: Record<string, number> = {
 		web_search: 6000,
-		file_read: 32000,
-		shell: 16000,
+		Read: 32000,
+		Bash: 16000,
 		browser_screenshot: Infinity,
 		run_subagent: 16000,
 	}

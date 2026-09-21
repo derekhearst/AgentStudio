@@ -137,16 +137,16 @@ test.describe('cost/tool-usage — non-LLM tool spend ledger', () => {
 		try {
 			await sql`
 				insert into tool_usage (user_id, tool_name, unit_type)
-				values (${userId}, 'shell', 'call')
+				values (${userId}, 'Bash', 'call')
 			`
 			const [row] = await sql<{ cost: string; units: string }[]>`
-				select cost, units from tool_usage where user_id = ${userId} and tool_name = 'shell'
+				select cost, units from tool_usage where user_id = ${userId} and tool_name = 'Bash'
 				order by created_at desc limit 1
 			`
 			expect(parseFloat(row.cost)).toBe(0)
 			expect(parseFloat(row.units)).toBe(0)
 		} finally {
-			await sql`delete from tool_usage where user_id = ${userId} and tool_name = 'shell'`
+			await sql`delete from tool_usage where user_id = ${userId} and tool_name = 'Bash'`
 			await cleanupPrefixedRecords(prefix)
 		}
 	})
