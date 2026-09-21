@@ -49,6 +49,12 @@ export const reviewItemTypeEnum = pgEnum('review_item_type', [
 	// Operator surfaces the PR in /review without monitoring chat; payload carries the PR
 	// number, html url, and originating run id.
 	'pull_request_ready',
+	// #20 — CI went red on a PR the agent opened. Distinct from `pull_request_ready`
+	// because it is an outcome, not a handoff: the payload carries the failing check name,
+	// the commit it failed on, a redacted log excerpt, and the `fixCommand` the inbox
+	// renders as a "Fix it" button. Deduped per (PR, check, commit) so a flapping check is
+	// one row, not one per poll.
+	'pull_request_checks_failed',
 	// Wave 5 #21 phase 4 (output routing) — maintenance-mode automation tick wrote its
 	// summary to the review inbox via `outputTarget = review_inbox`. Payload carries the
 	// automation id, mode, and a truncated summary.

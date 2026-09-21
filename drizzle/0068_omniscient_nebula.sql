@@ -1,0 +1,1 @@
+ALTER TYPE "public"."review_item_type" ADD VALUE 'pull_request_checks_failed' BEFORE 'automation_summary';

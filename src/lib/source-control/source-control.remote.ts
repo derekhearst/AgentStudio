@@ -161,3 +161,50 @@ export const listGithubImportCandidatesQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	return listGithubImportCandidates(user.id)
 })
+
+/**
+ * #20 — the "Fix it" button on a `pull_request_checks_failed` review item.
+ *
+ * Enqueues rather than running inline: a fix run is an agent loop that can take minutes,
+ * and it must survive the request that started it. The operator gets a job id back
+ * immediately and the run appears in the originating conversation when it finishes.
+ *
+ * Ownership is re-checked inside `startPullRequestFixRun` — this boundary establishes WHO
+ * is asking, the job establishes whether the PR is theirs.
+ */
+const startFixSchema = z.object({
+	pullRequestId: z.string().uuid(),
+	checkName: z.string().trim().max(400).nullable().optional(),
+	reviewItemId: z.string().uuid().nullable().optional(),
+})
+
+export const startPullRequestFixCommand = command(startFixSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const { enqueueJob } = await import('$lib/jobs/jobs.server')
+	const job = await enqueueJob({
+		type: 'pr_fix',
+		queue: 'default',
+		// Operator pressed a button; this outranks background polling.
+		priority: 90,
+		// Keyed on the review item, not on (PR, check). `(type, dedupeKey)` is unique
+		// FOREVER — a key that does not move would make the second press of "Fix it" hand
+		// back the first, long-completed job instead of running anything. One review item
+		// is one failure on one commit, so one fix run per item is the right grain, and a
+		// later failure opens a new item and is therefore fixable again. Without an item
+		// id we fall back to a minute bucket: a double-click collapses, a deliberate retry
+		// a minute later does not.
+		dedupeKey: input.reviewItemId
+			? `pr_fix:item:${input.reviewItemId}`
+			: `pr_fix:${input.pullRequestId}:${input.checkName ?? 'latest'}:${new Date(
+					Math.floor(Date.now() / 60_000) * 60_000,
+				).toISOString()}`,
+		payload: {
+			pullRequestId: input.pullRequestId,
+			userId: user.id,
+			checkName: input.checkName ?? null,
+			reviewItemId: input.reviewItemId ?? null,
+		},
+		userId: user.id,
+	})
+	return { jobId: job.id, status: job.status }
+})

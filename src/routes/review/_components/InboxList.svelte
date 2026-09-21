@@ -3,6 +3,7 @@
 		listReviewItemsQuery,
 		resolveReviewItemCommand,
 	} from '$lib/observability/review.remote';
+	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
@@ -34,6 +35,7 @@
 		{ value: 'memory_conflict', label: 'Memory conflict' },
 		{ value: 'policy_override_request', label: 'Policy override request' },
 		{ value: 'pull_request_ready', label: 'Pull request ready' },
+		{ value: 'pull_request_checks_failed', label: 'PR checks failed' },
 		{ value: 'automation_summary', label: 'Automation summary' },
 		{ value: 'monitor_fired', label: 'Monitor fired' },
 	];
@@ -56,6 +58,43 @@
 
 	function fmtDate(d: Date | string) {
 		return new Date(d).toLocaleString();
+	}
+
+	/**
+	 * #20 — "Fix it" on a CI failure. The inbox stays generic: it does not know what a
+	 * pull request is, only that a payload carrying `fixCommand: 'pr_fix'` has an action
+	 * available and which ids to pass along. The work is enqueued, so the button returns
+	 * immediately and the agent's reply lands in the conversation that opened the PR.
+	 */
+	let fixing = $state<string | null>(null);
+
+	type FixablePayload = { fixCommand?: string; pullRequestId?: string; checkName?: string };
+
+	function fixTarget(payload: Record<string, unknown>): FixablePayload | null {
+		const p = payload as FixablePayload;
+		if (p.fixCommand !== 'pr_fix' || typeof p.pullRequestId !== 'string') return null;
+		return p;
+	}
+
+	async function handleFix(itemId: string, payload: Record<string, unknown>) {
+		const target = fixTarget(payload);
+		if (!target?.pullRequestId) return;
+		fixing = itemId;
+		try {
+			const result = await startPullRequestFixCommand({
+				pullRequestId: target.pullRequestId,
+				checkName: target.checkName ?? null,
+				reviewItemId: itemId,
+			});
+			alert(
+				`Fix run queued (job ${result.jobId.slice(0, 8)}). The agent replies in the conversation that opened the pull request.`
+			);
+			onChange();
+		} catch (e) {
+			alert(e instanceof Error ? e.message : 'Failed to queue the fix run');
+		} finally {
+			fixing = null;
+		}
 	}
 
 	function severityTone(severity: string): string {
@@ -192,6 +231,16 @@
 								{/if}
 								{#if item.status === 'open' || item.status === 'in_progress'}
 									<div class="flex gap-2 pt-2">
+										{#if fixTarget(item.payload)}
+											<button
+												class="btn btn-xs btn-primary"
+												type="button"
+												disabled={fixing === item.id}
+												onclick={() => handleFix(item.id, item.payload)}
+											>
+												{fixing === item.id ? 'Queueing…' : 'Fix it'}
+											</button>
+										{/if}
 										<button class="btn btn-xs btn-success" type="button" onclick={() => handleResolve(item.id, 'resolve')}>
 											Resolve
 										</button>
