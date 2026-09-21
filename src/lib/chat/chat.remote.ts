@@ -16,6 +16,11 @@ import {
 } from '$lib/chat/agent-switch.server'
 import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import {
+	describePermissionMode,
+	PERMISSION_MODES,
+	requiresExplicitConfirm,
+} from '$lib/engine/permission-mode'
 
 const updateConversationMetaSchema = z.object({
 	id: z.string().uuid(),
@@ -354,6 +359,19 @@ const setConversationAgentSchema = z.object({
 	agentId: z.string().uuid(),
 })
 
+/**
+ * #19 — per-conversation permission mode.
+ *
+ * `bypassPermissions` needs `confirmed: true`. The chat UI asks first, but the flag is
+ * enforced here so the dangerous mode can never be set by a bare POST to the remote
+ * function; everything else takes the default path.
+ */
+const setConversationPermissionModeSchema = z.object({
+	conversationId: z.string().uuid(),
+	mode: z.enum(PERMISSION_MODES),
+	confirmed: z.boolean().optional(),
+})
+
 const setDefaultAgentSchema = z.object({ agentId: z.string().uuid() })
 
 const setShowRightPanelSchema = z.object({ showRightPanel: z.boolean() })
@@ -380,6 +398,25 @@ export const setShowRightPanel = command(setShowRightPanelSchema, async ({ showR
 	const prefs = await writeShowRightPanel(user.id, showRightPanel)
 	return { success: true as const, showRightPanel: prefs.showRightPanel }
 })
+
+export const setConversationPermissionMode = command(
+	setConversationPermissionModeSchema,
+	async ({ conversationId, mode, confirmed }) => {
+		const user = requireAuthenticatedRequestUser()
+		if (requiresExplicitConfirm(mode) && confirmed !== true) {
+			throw new Error(
+				`Switching this conversation to "${mode}" needs an explicit confirmation. ${describePermissionMode(mode)}`,
+			)
+		}
+		const updated = await db
+			.update(conversations)
+			.set({ permissionMode: mode, updatedAt: new Date() })
+			.where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+			.returning({ id: conversations.id, permissionMode: conversations.permissionMode })
+		if (updated.length === 0) throw new Error('Conversation not found')
+		return { success: true as const, permissionMode: updated[0].permissionMode }
+	},
+)
 
 export const setConversationAgent = command(setConversationAgentSchema, async ({ conversationId, agentId }) => {
 	const user = requireAuthenticatedRequestUser()

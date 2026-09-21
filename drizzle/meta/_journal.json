@@ -474,8 +474,22 @@
     {
       "idx": 67,
       "version": "7",
-      "when": 1790024078710,
-      "tag": "0067_same_exiles",
+      "when": 1790024123560,
+      "tag": "0067_lethal_valkyrie",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790025788150,
+      "tag": "0068_omniscient_nebula",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790025854191,
+      "tag": "0069_ordinary_aqueduct",
       "breakpoints": true
     }
   ]

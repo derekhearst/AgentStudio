@@ -27,6 +27,7 @@
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
+	import PermissionModeSelect from '$lib/chat/PermissionModeSelect.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		parseJsonFallback,
@@ -1208,6 +1209,15 @@
 					<span class="console-crumbs__cur">{conversationData.conversation.title}</span>
 				</div>
 				<div class="console-topbar__chips">
+					<!-- #19: the active permission mode, always visible so a session left on bypass is obvious. -->
+					<PermissionModeSelect
+						conversationId={conversationData.conversation.id}
+						permissionMode={conversationData.conversation.permissionMode}
+						disabled={streaming}
+						onChange={(next) => {
+							if (conversationData) conversationData.conversation.permissionMode = next;
+						}}
+					/>
 					{#if streaming}
 						<span class="console-chip is-run">
 							<span class="pulse-dot"></span>
@@ -1257,8 +1267,16 @@
 				</button>
 			</div>
 
-			<!-- Mobile chips row: running, pending, context, cost -->
+			<!-- Mobile chips row: permission mode, running, pending, context, cost -->
 			<div class="console-mobile-chips">
+				<PermissionModeSelect
+					conversationId={conversationData.conversation.id}
+					permissionMode={conversationData.conversation.permissionMode}
+					disabled={streaming}
+					onChange={(next) => {
+						if (conversationData) conversationData.conversation.permissionMode = next;
+					}}
+				/>
 				{#if streaming}
 					<span class="console-chip is-run">
 						<span class="pulse-dot" style="width:5px;height:5px;border-radius:999px;background:currentColor;display:inline-block;"></span>

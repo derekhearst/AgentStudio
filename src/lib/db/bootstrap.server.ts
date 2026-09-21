@@ -256,6 +256,15 @@ async function registerJobHandlers(): Promise<void> {
 	}
 
 	try {
+		const { registerPullRequestWatchJobHandlers } = await import(
+			'$lib/source-control/pr-watch-handler.server'
+		)
+		registerPullRequestWatchJobHandlers()
+	} catch (err) {
+		console.warn('[db] PR watch handler registration failed (non-fatal):', err)
+	}
+
+	try {
 		const { registerMetricsJobHandlers } = await import(
 			'$lib/observability/metrics-handler.server'
 		)

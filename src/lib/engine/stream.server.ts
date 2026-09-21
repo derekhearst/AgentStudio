@@ -18,10 +18,17 @@
 
 import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
+import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
 export type ApprovalDecision = { allow: true } | { allow: false; reason: string }
+
+/**
+ * Tools the host renders itself, so the engine must not emit tool frames for them.
+ * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ */
+const HOST_OWNED_TOOLS = new Set(['ask_user'])
 
 export type EngineRunInput = {
 	/**
@@ -41,11 +48,23 @@ export type EngineRunInput = {
 	 */
 	requestApproval?: (call: { id: string; name: string; input: Record<string, unknown> }) => Promise<ApprovalDecision>
 	/**
-	 * Whether a tool needs human approval. Only these get a `tool_pending` block:
-	 * the SDK does not call `canUseTool` for tools it can run outright, so
-	 * showing everything as pending leaves blocks that never resolve.
+	 * Whether the per-tool *settings* alone require human approval — i.e. the tool is in
+	 * `settings.toolConfig.approvalRequiredTools` (or the `'*'` wildcard), unioned with
+	 * `MANDATORY_APPROVAL_TOOLS`.
+	 *
+	 * This is only one input to the decision now: `permissionMode` composes with it in
+	 * `resolveToolGate`, which is what actually decides allow / ask / deny. Tools the gate
+	 * would auto-allow get no `tool_pending` block — the SDK does not always call
+	 * `canUseTool`, so showing everything as pending leaves blocks that never resolve.
 	 */
 	requiresApproval?: (toolName: string) => boolean
+	/**
+	 * #19 — the conversation's permission mode. Decides, together with `requiresApproval`,
+	 * whether each call is allowed outright, routed through `requestApproval`, or refused.
+	 * The mandatory-approval tools are routed through `requestApproval` in every mode,
+	 * including `bypassPermissions`; see `./permission-mode`.
+	 */
+	permissionMode?: ConversationPermissionMode
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
 	/**
@@ -138,22 +157,70 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		return queue && queue.length > 0 ? (queue.shift() ?? null) : null
 	}
 
+	const permissionMode: ConversationPermissionMode = input.permissionMode ?? 'default'
 	const approvalsEnabled = Boolean(input.requestApproval)
-	const needsApproval = (name: string) => approvalsEnabled && (input.requiresApproval?.(name) ?? true)
+
+	/**
+	 * One decision point, shared by the pending-block predicate below and by `canUseTool`,
+	 * so the block the user sees and the answer the SDK gets can never disagree.
+	 */
+	const gateFor = (name: string): ToolGateDecision =>
+		resolveToolGate({
+			mode: permissionMode,
+			toolName: name,
+			settingsRequiresApproval: input.requiresApproval?.(name) ?? true,
+		})
+
+	/** True when the call will reach `canUseTool` with something other than a straight allow. */
+	const needsApproval = (name: string) => gateFor(name).gate !== 'allow'
 	// Tools whose `tool_call` frame has already gone out, so the approval path
 	// doesn't emit a second one.
 	const callEmitted = new Set<string>()
 
+	// `canUseTool` is installed whenever anything could be gated. A non-default mode gates
+	// on its own — plan mode refuses writes even in a run with no approval surface at all.
+	const gatingEnabled = approvalsEnabled || permissionMode !== 'default'
+
 	const options: Options = {
 		...input.options,
-		...(input.requestApproval
+		...(gatingEnabled
 			? {
 					canUseTool: async (toolName, toolInput, { signal }): Promise<PermissionResult> => {
 						const name = bareToolName(toolName)
+						// The host owns ask_user end to end (see the assistant branch below): it
+						// renders its own card, so no tool_call / tool_pending frame may go out.
+						if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
+
 						const id = takeToolUseId(name, toolInput) ?? `pending-${name}-${Date.now()}`
+						const gate = gateFor(name)
+
+						/** Moves the UI's pending block to "executing" using the same id. */
+						const allow = async (): Promise<PermissionResult> => {
+							if (!callEmitted.has(id)) {
+								callEmitted.add(id)
+								await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+							}
+							return { behavior: 'allow' }
+						}
+						const deny = async (message: string): Promise<PermissionResult> => {
+							await emit('tool_denied', { id })
+							return { behavior: 'deny', message }
+						}
+
+						if (gate.gate === 'allow') return allow()
+						if (gate.gate === 'deny') return deny(gate.reason ?? 'Refused by the conversation permission mode.')
+
+						// gate === 'ask'. Without an approval surface there is nobody to ask, so the
+						// call fails closed — the same posture `push_branch` takes in a detached run.
+						if (!input.requestApproval) {
+							return deny(
+								gate.reason ??
+									`${name} requires operator approval and this run has no approval surface.`,
+							)
+						}
 
 						const decision = await Promise.race([
-							input.requestApproval!({ id, name, input: toolInput }),
+							input.requestApproval({ id, name, input: toolInput }),
 							new Promise<ApprovalDecision>((resolve) => {
 								signal.addEventListener('abort', () => resolve({ allow: false, reason: 'Run aborted' }), {
 									once: true,
@@ -161,16 +228,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							}),
 						])
 
-						if (!decision.allow) {
-							await emit('tool_denied', { id })
-							return { behavior: 'deny', message: decision.reason }
-						}
-						// Moves the UI's pending block to "executing" using the same id.
-						if (!callEmitted.has(id)) {
-							callEmitted.add(id)
-							await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
-						}
-						return { behavior: 'allow' }
+						if (!decision.allow) return deny(decision.reason)
+						return allow()
 					},
 				}
 			: {}),
@@ -223,11 +282,16 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					continue
 				}
 
+				// Park the id for canUseTool unconditionally. The SDK calls canUseTool for MCP
+				// tools whether or not we want to gate them, and an unparked call would mint a
+				// synthetic `pending-*` id there — emitting a second tool_call frame the UI
+				// renders as a duplicate, and a tool_denied the UI cannot match to a block.
+				const key = callKey(name, block.input)
+				idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+
 				if (needsApproval(name)) {
-					// Park the id for canUseTool and show the block as awaiting approval.
-					// The tool_call frame is emitted from canUseTool once approved.
-					const key = callKey(name, block.input)
-					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+					// Show the block as awaiting approval; the tool_call frame is emitted from
+					// canUseTool once approved (or a tool_denied if it is refused).
 					await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
 				} else {
 					callEmitted.add(id)

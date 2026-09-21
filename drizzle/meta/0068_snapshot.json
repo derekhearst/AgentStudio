@@ -1,6 +1,6 @@
 {
-  "id": "09ed260b-23cc-4b8c-bf22-744168a2ff8a",
-  "prevId": "91909464-5a56-41ab-8c6c-d52c76af7086",
+  "id": "a1296611-6090-4234-8079-c5db00c3a696",
+  "prevId": "09ed260b-23cc-4b8c-bf22-744168a2ff8a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -7143,6 +7143,7 @@
         "memory_conflict",
         "policy_override_request",
         "pull_request_ready",
+        "pull_request_checks_failed",
         "automation_summary",
         "monitor_fired"
       ]

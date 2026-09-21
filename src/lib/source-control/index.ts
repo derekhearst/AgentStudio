@@ -31,6 +31,8 @@ export {
 	listPullRequestsForRepository,
 	getPullRequestById,
 	recordPullRequestCheck,
+	getPullRequestCheckByName,
+	syncPullRequestProviderState,
 	listChecksForPullRequest,
 	recordBranch,
 	listBranchesForRepository,
@@ -49,5 +51,43 @@ export {
 	detachRepositoryCommand,
 	getRepositoryDetailQuery,
 	listGithubImportCandidatesQuery,
+	startPullRequestFixCommand,
 } from './source-control.remote'
 export { isGithubOAuthConfigured } from './github-oauth.server'
+
+// #20 — CI watch. The pure half is safe to import anywhere; the server half is only
+// reachable from the job handler, the webhook route and the remote command.
+export {
+	checkFailureDedupeKey,
+	dedupeChecksByName,
+	extractLogExcerpt,
+	isWatchWindowOpen,
+	isWatchablePullRequestStatus,
+	mapCheckRunStatus,
+	mapCommitStatusState,
+	mapProviderPullRequestState,
+	normalizeCheckRun,
+	normalizeCommitStatus,
+	redactSecrets,
+	shouldNotifyFailure,
+	summarizeCheckFailure,
+	buildFixPrompt,
+	PR_WATCH_MAX_AGE_DAYS,
+	PR_WATCH_DISPATCH_INTERVAL_MS,
+	PR_WATCH_MAX_PRS_PER_TICK,
+	type NormalizedCheck,
+	type PreviousCheckState,
+	type WatchStopReason,
+} from './pr-checks'
+export {
+	dispatchPullRequestWatch,
+	listWatchablePullRequests,
+	pollPullRequestChecks,
+	recordCheckObservation,
+	type CheckObservationOutcome,
+	type DispatchPullRequestWatchResult,
+	type PollPullRequestResult,
+	type WatchablePullRequest,
+} from './pr-watch.server'
+export { startPullRequestFixRun, type StartPullRequestFixResult } from './pr-fix.server'
+export { registerPullRequestWatchJobHandlers } from './pr-watch-handler.server'

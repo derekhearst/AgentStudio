@@ -1,6 +1,6 @@
 {
-  "id": "09ed260b-23cc-4b8c-bf22-744168a2ff8a",
-  "prevId": "91909464-5a56-41ab-8c6c-d52c76af7086",
+  "id": "d2eecb6c-c6d5-4f6d-84cd-b25dfab84eb1",
+  "prevId": "a1296611-6090-4234-8079-c5db00c3a696",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -734,6 +734,123 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chat_rail_preview": {
+      "name": "chat_rail_preview",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tab": {
+          "name": "tab",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'Preview'"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'none'"
+        },
+        "target": {
+          "name": "target",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "chat_rail_preview_user_idx": {
+          "name": "chat_rail_preview_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chat_rail_preview_conversation_id_conversations_id_fk": {
+          "name": "chat_rail_preview_conversation_id_conversations_id_fk",
+          "tableFrom": "chat_rail_preview",
+          "tableTo": "conversations",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "chat_rail_preview_user_id_users_id_fk": {
+          "name": "chat_rail_preview_user_id_users_id_fk",
+          "tableFrom": "chat_rail_preview",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "chat_rail_preview_conversation_id_unique": {
+          "name": "chat_rail_preview_conversation_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conversation_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -7143,6 +7260,7 @@
         "memory_conflict",
         "policy_override_request",
         "pull_request_ready",
+        "pull_request_checks_failed",
         "automation_summary",
         "monitor_fired"
       ]

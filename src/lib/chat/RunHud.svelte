@@ -1,4 +1,11 @@
 <script lang="ts">
+	import {
+		describePermissionMode,
+		normalizePermissionMode,
+		PERMISSION_MODE_LABELS,
+		type ConversationPermissionMode,
+	} from '$lib/engine/permission-mode';
+
 	type StreamingBlock = {
 		kind: 'thinking' | 'text' | 'tool' | 'subagent'
 		[key: string]: unknown
@@ -12,6 +19,7 @@
 		conversationId: _conversationId,
 		runId = null,
 		mode = 'chat',
+		permissionMode = 'default',
 		streamingBlocks = [] as StreamingBlock[],
 		pendingApprovalCount = 0,
 		pendingQuestion = false,
@@ -25,6 +33,12 @@
 		conversationId: string
 		runId?: string | null
 		mode?: 'chat' | 'research' | 'plan' | 'agent'
+		/**
+		 * #19 — the conversation's permission mode. Always rendered when it is not `default`,
+		 * and rendered in error colours for `bypassPermissions`: leaving a session on bypass
+		 * and forgetting is the failure this badge exists to prevent.
+		 */
+		permissionMode?: ConversationPermissionMode
 		streamingBlocks?: StreamingBlock[]
 		pendingApprovalCount?: number
 		pendingQuestion?: boolean
@@ -53,7 +67,17 @@
 		contextWindow > 0 ? Math.min(100, Math.round((tokenEstimate / contextWindow) * 100)) : 0,
 	)
 
-	const visible = $derived(streaming || pendingQuestion || pendingApprovalCount > 0)
+	const activePermissionMode = $derived(normalizePermissionMode(permissionMode))
+	const showPermissionBadge = $derived(activePermissionMode !== 'default')
+	const permissionBadgeClass = $derived(
+		activePermissionMode === 'bypassPermissions' ? 'badge-error' : 'badge-outline',
+	)
+
+	// The HUD normally hides itself when nothing is in flight. A session left on bypass is
+	// exactly the state a user forgets about, so a non-default mode keeps it on screen.
+	const visible = $derived(
+		streaming || pendingQuestion || pendingApprovalCount > 0 || showPermissionBadge,
+	)
 
 	const statusLabel = $derived.by(() => {
 		if (pendingQuestion) return 'Waiting for your answer'
@@ -78,6 +102,17 @@
 			<span class="badge badge-sm {statusColor}">{statusLabel}</span>
 			{#if mode !== 'chat'}
 				<span class="badge badge-sm badge-outline capitalize">{mode}</span>
+			{/if}
+
+			{#if showPermissionBadge}
+				<span
+					class="badge badge-sm {permissionBadgeClass}"
+					data-testid="run-hud-permission-mode"
+					data-permission-mode={activePermissionMode}
+					title={describePermissionMode(activePermissionMode)}
+				>
+					{PERMISSION_MODE_LABELS[activePermissionMode]}
+				</span>
 			{/if}
 
 			<div class="flex-1 truncate text-xs text-base-content/70">

@@ -115,6 +115,28 @@ If a server fails to connect at run start, its capability group is silently omit
 
 If a tool is in `environment.approvalRequiredTools`, the loop suspends via `session.pendingApproval` before executing. The suspension is durable — the loop can resume after a process restart because approvals are persisted in the `runs` table, not held in memory.
 
+### Permission mode (per conversation)
+
+Per-tool approval settings say what always needs a confirmation; the permission mode says how much *this session* is trusted. It is stored on `conversations.permission_mode`, changed from the chat header at any point, and picked up by the next turn. The two compose in `resolveToolGate` (`src/lib/engine/permission-mode.ts`), which is the single decision point for allow / ask / deny.
+
+| Mode                | What it does                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `default`           | The per-tool settings decide. Unchanged behaviour.                                              |
+| `plan`              | Read-only. Anything that would change something is refused with a message telling the agent to plan instead. The plan file itself is the one exception and is surfaced for approval. |
+| `acceptEdits`       | File edits run without asking. Everything else is still gated.                                  |
+| `bypassPermissions` | Everything is auto-approved **except** the mandatory-approval tools. Needs an explicit confirm, and is refused outside an interactive chat run. |
+
+Two rules hold in every mode, including bypass:
+
+1. **The mandatory-approval tools stay gated.** `push_branch`, `create_pull_request` and `request_plan_approval` are classified `mandatory-approval`, which `resolveToolGate` checks before any mode branch runs.
+2. **The SDK is never told `bypassPermissions`.** That mode stops the SDK calling `canUseTool`, which is the only place AgentStudio's gate gets a say — so the bypass is applied in our own gate and the SDK is left on `default`. `sdkPermissionModeFor` owns that mapping.
+
+`bypassPermissions` is refused on any run whose `chat_runs.source` is not `chat_stream` — a detached sub-agent or an automation on a timer has no operator to approve anything. This is the same rule `push_branch` enforces in `assertInteractiveChatSurface`; here it downgrades the run to `default` rather than failing it.
+
+Tools are classified by **capability**, not by literal name (`TOOL_CAPABILITY_RULES`), so issue #15's swap to the SDK's built-in tools does not silently un-gate anything: the rules already carry `Write` / `Edit` / `MultiEdit` / `NotebookEdit` alongside `file_write` / `file_patch`, and an unrecognised tool falls through to `mutate`, which fails closed.
+
+The mode is orthogonal to the bound **agent**. The Plan agent changes the persona (write a plan, hand off via `request_plan_approval`); `plan` mode changes what the runtime permits. Running both is the strict case, and it works: plan mode leaves the plan-file write and the handoff available, as approvals.
+
 ### Sub-agent spawning
 
 A sub-agent run is a `runAgentLoop` call with:
