@@ -13,7 +13,22 @@
 
 	let { children } = $props();
 
-	const isLoginRoute = $derived(page.url.pathname.startsWith('/login'));
+	/**
+	 * Routes that render bare, without the console shell.
+	 *
+	 * These are the paths `PUBLIC_PATH_PREFIXES` in hooks.server.ts lets through without a
+	 * session. The shell's nav fetches the credit balance, which is an authenticated query,
+	 * so rendering it on a public route threw 401 before the page's own content mattered —
+	 * `/demo` returned 401 for exactly this reason, and `/setup` only escaped because the
+	 * setup gate returns before the layout runs. Keep this list in step with that one: a
+	 * visitor with no session has no business seeing a sidebar of chats they cannot open.
+	 */
+	const CHROMELESS_PREFIXES = ['/login', '/setup', '/demo'];
+	const isChromeless = $derived(
+		CHROMELESS_PREFIXES.some(
+			(prefix) => page.url.pathname === prefix || page.url.pathname.startsWith(`${prefix}/`),
+		),
+	);
 	const isChatRoute = $derived(page.url.pathname.startsWith('/chat'));
 	const isChatOrHome = $derived(isChatRoute || page.url.pathname === '/');
 
@@ -79,7 +94,7 @@
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-{#if isLoginRoute}
+{#if isChromeless}
 	{@render children()}
 {:else}
 	<ChatConsoleShell activePath={page.url.pathname} showRail={isChatOrHome}>
