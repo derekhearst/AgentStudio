@@ -1,11 +1,33 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Icon from './Icon.svelte';
+	import PreviewPane from './PreviewPane.svelte';
 	import { consoleState } from './console-state.svelte';
+	import { hydratePreviewState, previewState, setRailTab } from './preview-state.svelte';
+	import { RAIL_TABS, type RailTab } from './preview-kinds';
 	import { listResearchForConversationQuery } from '$lib/research/research.remote';
 
-	let activeTab = $state<'Research' | 'Files' | 'Activity'>('Research');
+	/*
+	 * #29 — Preview is a fourth tab rather than a replacement for Files.
+	 *
+	 * Files is a placeholder today, but it is a placeholder for source control,
+	 * which is being built out separately; folding preview into it would make one
+	 * tab mean two unrelated things ("what changed in the repo" vs "show me this
+	 * thing"). What Preview does take from Files is the default position: the rail
+	 * used to open on a tab that says "No research runs for this chat yet" most of
+	 * the time, and now opens on the one surface that is useful with nothing
+	 * running, because its empty state is an input you can act on.
+	 */
+	const activeTab = $derived(previewState.tab);
 
 	const conversationId = $derived(consoleState.conversationId);
+
+	// Restore what this chat was last looking at. `untrack` so the store writes
+	// hydration performs don't feed back into this effect.
+	$effect(() => {
+		const id = conversationId;
+		untrack(() => void hydratePreviewState(id));
+	});
 
 	// Research runs for the current conversation, polled lazily through the remote query.
 	const researchQuery = $derived.by(() => {
@@ -108,11 +130,11 @@
 
 <aside class="console-rail">
 	<div class="console-rail__tabs">
-		{#each ['Research', 'Files', 'Activity'] as tab (tab)}
+		{#each RAIL_TABS as tab (tab)}
 			<button
 				type="button"
 				class="console-rail__tab {activeTab === tab ? 'active' : ''}"
-				onclick={() => (activeTab = tab as typeof activeTab)}
+				onclick={() => setRailTab(tab as RailTab)}
 			>
 				{tab}
 				{#if tab === 'Research' && research.length > 0}
@@ -124,8 +146,10 @@
 		{/each}
 	</div>
 
-	<div class="console-rail__body">
-		{#if activeTab === 'Research'}
+	<div class="console-rail__body {activeTab === 'Preview' ? 'is-preview' : ''}">
+		{#if activeTab === 'Preview'}
+			<PreviewPane {conversationId} />
+		{:else if activeTab === 'Research'}
 			{#if research.length === 0}
 				<div class="console-rail__empty">No research runs for this chat yet.</div>
 			{:else}

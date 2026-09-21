@@ -141,6 +141,7 @@ Notes:
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
 - UI spec: `docs/ui/spec.md`
+- Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 
 ## Projects

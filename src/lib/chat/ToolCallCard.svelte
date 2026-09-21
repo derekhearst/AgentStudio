@@ -5,6 +5,13 @@
 		getWebSearchPreview,
 		parseJsonValue,
 	} from './chat';
+	import Icon from '$lib/chat-console/Icon.svelte';
+	import { toolPreviewTargets } from '$lib/chat-console/preview-targets';
+	import {
+		openFilePreview,
+		proposeUrlPreview,
+		revealRail,
+	} from '$lib/chat-console/preview-state.svelte';
 
 	let {
 		name,
@@ -61,6 +68,20 @@
 	const statusIcon = $derived(
 		isDenied ? 'blocked' : isFailed ? 'failed' : isPending ? 'pending' : isExecuting ? 'executing' : 'done',
 	);
+
+	/*
+	 * #29 — preview affordances. A file path opens straight in the rail (the
+	 * preview endpoint re-checks containment). A URL does NOT: tool output is
+	 * attacker-influenced, so it is handed to the rail as a proposal that shows
+	 * the URL and waits for a click.
+	 */
+	const previewTargets = $derived(toolPreviewTargets(name, parsedArgs, parsedResult ?? result));
+
+	function activatePreview(target: (typeof previewTargets)[number]) {
+		if (target.kind === 'file') openFilePreview(target.path);
+		else proposeUrlPreview(target.url, target.source);
+		revealRail();
+	}
 
 	const isScreenshot = $derived(name === 'browser_screenshot');
 	const screenshotSrc = $derived.by(() => {
@@ -145,6 +166,24 @@
 	</summary>
 
 	<div class="collapse-content space-y-2 px-2 pb-2 text-sm">
+		{#if previewTargets.length > 0}
+			<div class="flex flex-wrap items-center">
+				{#each previewTargets as target (target.kind === 'file' ? target.path : target.url)}
+					<button
+						type="button"
+						class="console-prev-chip"
+						title={target.kind === 'file'
+							? `Preview ${target.path}`
+							: `Show ${target.url} in the preview rail (not loaded until you confirm)`}
+						onclick={() => activatePreview(target)}
+					>
+						<Icon name={target.kind === 'file' ? 'file' : 'globe'} size={10} />
+						<span>{target.label}</span>
+					</button>
+				{/each}
+			</div>
+		{/if}
+
 		{#if argumentsText}
 			<pre class="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-base-200/40 p-2 text-[11px] tablet:text-xs">{argumentsText}</pre>
 		{/if}
