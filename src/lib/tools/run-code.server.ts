@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { planConfinedSpawn } from './sandbox-exec.server'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
@@ -180,7 +181,36 @@ export async function runCodeTool(input: RunCodeInput): Promise<RunCodeResult> {
 		}
 		await mkdir(env.TMPDIR, { recursive: true })
 
-		const child = spawn('bun', ['run', bootstrapPath], {
+		/**
+		 * Confine the child to its workspace (#54). The `tools` proxy gates tool calls, but
+		 * the script is ordinary JavaScript — `await import('node:fs')` reaches the host
+		 * filesystem directly, and `cwd` does not stop an absolute path.
+		 *
+		 * On Linux the absence of bubblewrap is a misconfigured image rather than a
+		 * platform limit, so the run fails closed instead of silently executing unconfined.
+		 * Off Linux there is nothing to fall back to, so it runs with a warning — a
+		 * developer machine stays usable and the log says what is missing.
+		 */
+		// No extra binds: the bootstrap, the user script and TMPDIR all live under
+		// `<workspace>/.run-code` and `<workspace>/.tmp`, so the workspace bind already
+		// covers them. Binding them separately would be shadowed by that bind anyway.
+		const plan = planConfinedSpawn({ command: 'bun', args: ['run', bootstrapPath], workspace })
+		if (!plan.confined) {
+			// Escape hatch for a container where bubblewrap is present but broken. Explicit,
+			// logged, and never the default — an unconfined run has to be someone's decision.
+			const allowUnsandboxed = process.env.RUN_CODE_ALLOW_UNSANDBOXED === '1'
+			if (process.platform === 'linux' && !allowUnsandboxed) {
+				throw new Error(
+					'run_code cannot start: bubblewrap is unavailable, so the script could not be confined to its workspace. Install bubblewrap in the image or set RUN_CODE_ALLOW_UNSANDBOXED=1 to accept an unconfined run.',
+				)
+			}
+			logger.warn('[run_code] running unconfined', {
+				platform: process.platform,
+				reason: allowUnsandboxed ? 'RUN_CODE_ALLOW_UNSANDBOXED=1' : 'no bubblewrap on this platform',
+			})
+		}
+
+		const child = spawn(plan.command, plan.args, {
 			cwd: workspace,
 			env,
 			stdio: ['ignore', 'pipe', 'pipe'],
