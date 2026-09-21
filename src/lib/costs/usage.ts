@@ -8,6 +8,9 @@ export type LlmUsageSource =
 	| 'agent_synthesis'
 	| 'subagent'
 	| 'automation'
+	// #33 — the cheap yes/no call a `model_question` monitor makes on each check. Its own
+	// source so monitor spend is separable from scheduled automation spend in the ledger.
+	| 'monitor'
 	| 'evaluator'
 	| 'titlegen'
 	| 'image_gen'

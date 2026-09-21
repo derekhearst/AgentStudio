@@ -7,6 +7,7 @@ import type { ToolHandler } from '../handler-types'
 import { agentAutomationHandlers } from './agents-automations.server'
 import { filesystemHandlers } from './filesystem.server'
 import { mediaHandlers } from './media.server'
+import { monitorHandlers } from './monitors.server'
 import { metaHandlers } from './meta.server'
 import { projectsHandlers } from './projects.server'
 import { skillsHandlers } from './skills.server'
@@ -20,6 +21,7 @@ export const TOOL_HANDLERS: Record<string, ToolHandler> = {
 	...mediaHandlers,
 	...sourceControlHandlers,
 	...agentAutomationHandlers,
+	...monitorHandlers,
 	...skillsHandlers,
 	...metaHandlers,
 }

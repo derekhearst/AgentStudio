@@ -32,6 +32,7 @@ const REVIEW_ITEM_TYPES = [
 	'policy_override_request',
 	'pull_request_ready',
 	'automation_summary',
+	'monitor_fired',
 ] as const
 
 const REVIEW_ITEM_STATUSES = ['open', 'in_progress', 'resolved', 'dismissed'] as const

@@ -33,6 +33,7 @@ const STATIC_ROUTES: SmokeRoute[] = [
 	{ name: 'agents/new', path: '/agents/new' },
 	{ name: 'skills', path: '/skills' },
 	{ name: 'automations', path: '/automations' },
+	{ name: 'monitors', path: '/monitors' },
 	{ name: 'projects', path: '/projects' },
 	{ name: 'source-control', path: '/source-control' },
 	{ name: 'activity', path: '/activity' },

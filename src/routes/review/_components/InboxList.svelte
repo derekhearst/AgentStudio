@@ -35,6 +35,7 @@
 		{ value: 'policy_override_request', label: 'Policy override request' },
 		{ value: 'pull_request_ready', label: 'Pull request ready' },
 		{ value: 'automation_summary', label: 'Automation summary' },
+		{ value: 'monitor_fired', label: 'Monitor fired' },
 	];
 
 	async function handleResolve(itemId: string, action: string) {
