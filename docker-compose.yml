@@ -1,13 +1,28 @@
+# Mirrors the live TrueNAS custom app `agentstudio` (192.168.0.2, host port 1234,
+# proxied as https://agentstudio.derekhearst.com). Keep this file and
+# `midclt call app.config agentstudio` in sync — this is the source the app was
+# created from, and a redeploy from a stale copy is how you lose the Claude login.
+#
+# Names are lowercase because that is what the app was created with; changing them
+# recreates the container under a new name.
+
 services:
-  AgentStudio:
-    image: ghcr.io/derekhearst/AgentStudio:latest
-    container_name: AgentStudio
+  agentstudio:
+    image: ghcr.io/derekhearst/agentstudio:latest
+    container_name: agentstudio
     restart: unless-stopped
+    # uid/gid 950 = truenas_admin. Without the remap, anything the agent writes to
+    # /workspace is root-owned and undeletable, because sudo needs a password there.
+    user: "950:950"
     ports:
       - "1234:3000"
     volumes:
-      - /mnt/Apps/Apps/AgentStudio/workspace:/workspace
+      # HOME for the container. Holds ~/.claude, which is the Claude Code CLI login
+      # the Agent SDK runs on — lose this mount and every chat fails to authenticate.
+      - /mnt/Apps/Apps/AgentStudioHome:/data
+      - /mnt/Apps/Apps/AgentStudioHome/workspace:/workspace
     environment:
+      - HOME=/data
       - DATABASE_URL=${DATABASE_URL}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - AUTH_PASSWORD=${AUTH_PASSWORD}
@@ -17,22 +32,33 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - ORIGIN=${ORIGIN}
+      - GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID}
+      - GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET}
+      # Legacy name for APP_ENCRYPTION_KEY, which is what `encryption.server.ts`
+      # actually prefers. The live app sets CLAIM_KEY only, so the stored GitHub
+      # token is encrypted under this value — switching to APP_ENCRYPTION_KEY with a
+      # different secret makes that token undecryptable and the connection has to be
+      # re-authorized.
+      - CLAIM_KEY=${CLAIM_KEY}
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      # The live app also sets USER_NAME=CaptainDerek. Nothing in the codebase reads
+      # it; left out here rather than carried forward.
     security_opt:
       - seccomp:unconfined
     shm_size: 1gb
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
+  # Pulls a new :latest within ~100s of the GitHub Actions image build finishing —
+  # that push-to-main → live window is the whole deploy process.
   watchtower:
     image: containrrr/watchtower
-    container_name: watchtower-AgentStudio
+    container_name: watchtower-agentstudio
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_POLL_INTERVAL=100
       - WATCHTOWER_LABEL_ENABLE=true
-    command: --interval 300
