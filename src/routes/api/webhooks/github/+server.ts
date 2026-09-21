@@ -111,6 +111,11 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 		updated++
 	}
 
+	// #20 — this is also how CI watching STOPS. `listWatchablePullRequests` derives
+	// watchability from `pull_requests.status`, so recording the merge/close above is the
+	// only thing needed to retire the watch: the next dispatch tick simply does not select
+	// this row. There is no separate watch record to forget to clean up.
+
 	// Notify the inbox on terminal transitions so the operator sees PR outcomes without
 	// monitoring chat. Best-effort; dedupeKey covers re-deliveries from GitHub.
 	if (newStatus === 'merged' || newStatus === 'closed') {
@@ -134,40 +139,94 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 	return { ok: true, updated: updated > 0, status: newStatus ?? 'unchanged' }
 }
 
-async function handleCheckRunEvent(payload: unknown): Promise<{ ok: boolean; recorded: number }> {
+/**
+ * #20 — a `check_run` delivery is the PRIMARY CI-watch trigger where a webhook is
+ * configured: immediate, and it costs no API quota. Everything past the parse is shared
+ * with the polling fallback (`recordCheckObservation`), so the two triggers cannot drift
+ * into disagreeing about what a check means or when it is worth telling someone.
+ *
+ * What this path adds over the plain upsert it replaces:
+ *   - a review item + notification on the pass→fail edge, deduped per (PR, check, commit)
+ *   - the head SHA, the check-run id and the check's output summary on the row
+ *   - a log excerpt fetched with the repo owner's token, when we have one
+ *
+ * A repo whose owner has no active GitHub connection still gets its check rows written;
+ * only the excerpt is omitted. A missing token degrades the detail, never the record.
+ */
+async function handleCheckRunEvent(payload: unknown): Promise<{ ok: boolean; recorded: number; notified: number }> {
 	const fields = extractCheckRunEventFields(payload)
-	if (!fields) return { ok: true, recorded: 0 }
-	if (fields.prNumbers.length === 0) return { ok: true, recorded: 0 }
+	if (!fields) return { ok: true, recorded: 0, notified: 0 }
+	if (fields.prNumbers.length === 0) return { ok: true, recorded: 0, notified: 0 }
 
 	const repos = await db
 		.select()
 		.from(repositories)
 		.where(and(eq(repositories.owner, fields.owner), eq(repositories.name, fields.repo)))
-	if (repos.length === 0) return { ok: true, recorded: 0 }
+	if (repos.length === 0) return { ok: true, recorded: 0, notified: 0 }
+
+	const { recordCheckObservation } = await import('$lib/source-control/pr-watch.server')
 
 	let recorded = 0
+	let notified = 0
 	for (const repo of repos) {
 		for (const prNumber of fields.prNumbers) {
 			const [pr] = await db
-				.select({ id: pullRequests.id })
+				.select()
 				.from(pullRequests)
 				.where(and(eq(pullRequests.repositoryId, repo.id), eq(pullRequests.providerPrNumber, prNumber)))
 				.limit(1)
 			if (!pr) continue
-			await recordPullRequestCheck({
-				pullRequestId: pr.id,
-				checkName: fields.checkName,
-				status: fields.status,
-				detailsUrl: fields.detailsUrl,
-				startedAt: fields.startedAt ? new Date(fields.startedAt) : null,
-				finishedAt: fields.finishedAt ? new Date(fields.finishedAt) : null,
-				metadata: { source: 'github_webhook', action: fields.action },
-			})
-			recorded++
+			try {
+				const outcome = await recordCheckObservation({
+					pr,
+					repo,
+					check: fields.check,
+					trigger: 'webhook',
+					fetchExcerpt: (check) => fetchExcerptForCheck(repo.userId, repo.owner, repo.name, check),
+				})
+				recorded++
+				if (outcome.notified) notified++
+			} catch (err) {
+				// One repo row failing must not abandon the rest of the fan-out, and the
+				// delivery still returns 200 so GitHub does not disable the webhook.
+				logger.warn('[github-webhook] check observation failed', {
+					owner: fields.owner,
+					repo: fields.repo,
+					prNumber,
+					error: err instanceof Error ? err.message : String(err),
+				})
+			}
 		}
 	}
 
-	// Tree-shake guard: imported but only used through the typed schema reference.
+	// Tree-shake guards: imported for their typed schema references only.
 	void pullRequestChecks
-	return { ok: true, recorded }
+	void recordPullRequestCheck
+	return { ok: true, recorded, notified }
+}
+
+/**
+ * Best-effort log tail for a failing Actions check, fetched with the repo owner's stored
+ * token. Returns null for every failure mode — no connection, a non-Actions check, an
+ * expired log — because a review item without an excerpt is still worth opening. The token
+ * is used and discarded; it is never logged or written to the row.
+ */
+async function fetchExcerptForCheck(
+	userId: string | null,
+	owner: string,
+	repo: string,
+	check: { externalId: number | null },
+): Promise<string | null> {
+	if (!userId || check.externalId === null) return null
+	try {
+		const { getActiveGithubConnection } = await import('$lib/source-control/github-provider.server')
+		const conn = await getActiveGithubConnection(userId)
+		if (!conn) return null
+		const { fetchActionsJobLog } = await import('$lib/source-control/github-api.server')
+		const { extractLogExcerpt } = await import('$lib/source-control/pr-checks')
+		const raw = await fetchActionsJobLog(conn.accessToken, owner, repo, check.externalId)
+		return raw ? extractLogExcerpt(raw) : null
+	} catch {
+		return null
+	}
 }

@@ -1,5 +1,13 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { mapCheckRunStatus, normalizeCheckRun, type NormalizedCheck } from './pr-checks'
 import type { PullRequestStatus, PullRequestCheckStatus } from './source-control.schema'
+
+/**
+ * #20 — `mapCheckRunStatus` moved to `pr-checks.ts` so the poller and the webhook share
+ * one mapping (and so the pure spec for it does not drag `node:crypto` in). Re-exported
+ * here because this is where callers and the existing spec look for it.
+ */
+export { mapCheckRunStatus }
 
 /**
  * Wave 5 #19 phase 5 — GitHub webhook ingestion helpers.
@@ -82,36 +90,6 @@ export function mapPullRequestStatus(
 	}
 }
 
-/**
- * Map a `check_run` event's status + conclusion to our check status enum.
- * Mid-flight checks have `conclusion=null`; we fall back to GitHub's `status`.
- */
-export function mapCheckRunStatus(input: {
-	status: 'queued' | 'in_progress' | 'completed' | string
-	conclusion: string | null
-}): PullRequestCheckStatus {
-	if (input.status !== 'completed') {
-		if (input.status === 'in_progress') return 'running'
-		return 'pending' // queued + anything else GitHub adds defaults to pending
-	}
-	switch (input.conclusion) {
-		case 'success':
-		case 'neutral':
-			return 'success'
-		case 'failure':
-		case 'timed_out':
-		case 'action_required':
-		case 'stale':
-			return 'failure'
-		case 'cancelled':
-			return 'canceled'
-		case 'skipped':
-			return 'skipped'
-		default:
-			return 'failure'
-	}
-}
-
 export type PullRequestEventFields = {
 	action: string
 	owner: string
@@ -189,6 +167,14 @@ export type CheckRunEventFields = {
 	startedAt: string | null
 	finishedAt: string | null
 	prNumbers: number[]
+	/**
+	 * #20 — the same check, flattened the way the poller flattens it. Carries the head SHA,
+	 * the check-run id (the Actions job id, which is how a log excerpt is reachable) and
+	 * the check's own output summary, none of which the flat fields above kept. The route
+	 * writes rows from THIS, so a webhook delivery and a poll of the same commit produce
+	 * byte-identical state.
+	 */
+	check: NormalizedCheck
 }
 
 /**
@@ -222,6 +208,8 @@ export function extractCheckRunEventFields(payload: unknown): CheckRunEventField
 		status: ghStatus,
 		conclusion: typeof conclusion === 'string' ? conclusion : null,
 	})
+	const check = normalizeCheckRun(checkRun)
+	if (!check) return null
 
 	const prNumbers: number[] = []
 	const prs = checkRun.pull_requests
@@ -242,5 +230,6 @@ export function extractCheckRunEventFields(payload: unknown): CheckRunEventField
 		startedAt: typeof checkRun.started_at === 'string' ? checkRun.started_at : null,
 		finishedAt: typeof checkRun.completed_at === 'string' ? checkRun.completed_at : null,
 		prNumbers,
+		check,
 	}
 }
