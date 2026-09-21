@@ -52,7 +52,12 @@ import {
 	resolveParentMessage,
 	resolveSkillTopK,
 } from '$lib/chat/stream-prep.server'
-import { buildEngineOptions, GatewayNotConfiguredError, isClaudeModel } from '$lib/engine/options.server'
+import {
+	buildEngineOptions,
+	GatewayNotConfiguredError,
+	isClaudeModel,
+	resolveRunPermissionMode,
+} from '$lib/engine/options.server'
 import { runEngineStream } from '$lib/engine/stream.server'
 import {
 	formatAttachmentWarnings,
@@ -171,6 +176,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// ── Approval policy ────────────────────────────────────────────────────────
 	const { approvalRequiredTools } = await buildApprovalRequiredSet(currentSettings)
 
+	/*
+	 * #19 — the conversation's permission mode composes with the per-tool settings above.
+	 * `RUN_SOURCE` is a const because this endpoint only ever opens interactive runs; it is
+	 * named so the bypass refusal below reads as the rule it is rather than a literal.
+	 * bypassPermissions is downgraded to default on any other surface, exactly as
+	 * `push_branch` refuses outside an interactive chat run.
+	 */
+	const RUN_SOURCE = 'chat_stream' as const
+	const permission = resolveRunPermissionMode({
+		requested: conversation.permissionMode,
+		runSource: RUN_SOURCE,
+	})
+	if (permission.downgraded) {
+		logger.warn('[chat/stream] permission mode downgraded', {
+			conversationId: body.conversationId,
+			requested: conversation.permissionMode,
+			reason: permission.reason,
+		})
+	}
+
 	// ── Budget guard, before the run row so a block leaves no orphan ───────────
 	const budgetGuard = await enforceBudgetGuard({
 		userId: user.id,
@@ -186,7 +211,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			userId: user.id,
 			agentId: conversation.agentId,
 			state: 'running',
-			source: 'chat_stream',
+			source: RUN_SOURCE,
 			label: body.regenerate ? 'Regenerating response' : 'Generating response',
 			startedAt: new Date(),
 			lastHeartbeatAt: new Date(),
@@ -298,6 +323,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
 			allowedTools: scopedTools,
+			permissionMode: permission.mode,
+			runSource: RUN_SOURCE,
 			resumeSessionId: conversation.sdkSessionId ?? undefined,
 			tools: {
 				userId: user.id,
@@ -391,11 +418,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
 						},
-						requiresApproval: (name) => approvalRequiredTools.has(name),
+						// Settings-only view; `permissionMode` composes with it inside the engine's
+						// `resolveToolGate`, which is what decides allow / ask / deny.
+						requiresApproval: (name) =>
+							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
+						permissionMode: permission.mode,
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {
-										if (!approvalRequiredTools.has(name)) return { allow: true }
 										const token = `${run.id}:${id}`
 										await enqueuePendingApproval(
 											run.id,

@@ -1,5 +1,5 @@
 {
-  "id": "74c76707-ab10-417e-854f-e22fa9221cd1",
+  "id": "09ed260b-23cc-4b8c-bf22-744168a2ff8a",
   "prevId": "91909464-5a56-41ab-8c6c-d52c76af7086",
   "version": "7",
   "dialect": "postgresql",
@@ -805,6 +805,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "permission_mode": {
+          "name": "permission_mode",
+          "type": "conversation_permission_mode",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
         },
         "created_at": {
           "name": "created_at",
@@ -7135,7 +7143,6 @@
         "memory_conflict",
         "policy_override_request",
         "pull_request_ready",
-        "pull_request_checks_failed",
         "automation_summary",
         "monitor_fired"
       ]
@@ -7208,6 +7215,16 @@
         "completed",
         "failed",
         "canceled"
+      ]
+    },
+    "public.conversation_permission_mode": {
+      "name": "conversation_permission_mode",
+      "schema": "public",
+      "values": [
+        "default",
+        "plan",
+        "acceptEdits",
+        "bypassPermissions"
       ]
     },
     "public.pull_request_check_status": {

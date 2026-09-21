@@ -16,9 +16,16 @@
  * switch, not something to blend.
  */
 
-import type { EffortLevel, Options, PermissionMode, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
+import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
+import {
+	resolveEffectivePermissionMode,
+	sdkPermissionModeFor,
+	type ConversationPermissionMode,
+	type EffectivePermissionMode,
+	type RunSurface,
+} from './permission-mode'
 
 /** Models that run natively on the Claude Code CLI login. */
 const CLAUDE_MODEL_PREFIXES = ['claude-', 'opus', 'sonnet', 'haiku']
@@ -78,7 +85,18 @@ export type EngineOptionsInput = {
 	/** Tool names (bare) the run is allowed to call. Omit for all of them. */
 	allowedTools?: string[]
 	systemPrompt?: string
-	permissionMode?: PermissionMode
+	/**
+	 * The conversation's own mode (`conversations.permission_mode`). Not the SDK's union —
+	 * `sdkPermissionModeFor` decides what the SDK is actually told, and deliberately never
+	 * emits `bypassPermissions`, because that would stop `canUseTool` being called and take
+	 * the mandatory-approval gate with it. See `./permission-mode`.
+	 */
+	permissionMode?: ConversationPermissionMode
+	/**
+	 * `chat_runs.source` for this run. `bypassPermissions` is refused on anything but
+	 * `chat_stream`, the same way `push_branch` is.
+	 */
+	runSource?: RunSurface
 	maxTurns?: number
 	cwd?: string
 	/** Resume a prior SDK session instead of starting a new one. */
@@ -112,6 +130,18 @@ export class GatewayNotConfiguredError extends Error {
 	}
 }
 
+/**
+ * Resolve the mode this run may actually use. Re-exported from the pure module so callers
+ * have one import, and called again inside `buildEngineOptions` so a caller that forgets to
+ * resolve still cannot smuggle `bypassPermissions` into an automation run.
+ */
+export function resolveRunPermissionMode(input: {
+	requested: unknown
+	runSource: RunSurface | string | null | undefined
+}): EffectivePermissionMode {
+	return resolveEffectivePermissionMode(input)
+}
+
 export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const claude = isClaudeModel(input.model)
 	const sdkModel = claude ? normalizeModelId(input.model) : input.model
@@ -121,6 +151,13 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 
 	const { thinking, effort } = resolveThinking(input.reasoningEffort)
 
+	// Second application of the same rule the caller should already have applied. Idempotent,
+	// and it means no future caller can hand the SDK a bypass it is not entitled to.
+	const effectiveMode = resolveEffectivePermissionMode({
+		requested: input.permissionMode,
+		runSource: input.runSource ?? 'chat_stream',
+	})
+
 	return {
 		model: sdkModel,
 		thinking,
@@ -128,7 +165,7 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools) },
 		...(input.allowedTools ? { allowedTools: input.allowedTools.map(qualifiedToolName) } : {}),
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
-		permissionMode: input.permissionMode ?? 'default',
+		permissionMode: sdkPermissionModeFor(effectiveMode.mode),
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
 		...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
