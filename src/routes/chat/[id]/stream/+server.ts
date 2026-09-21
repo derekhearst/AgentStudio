@@ -54,6 +54,13 @@ import {
 } from '$lib/chat/stream-prep.server'
 import { buildEngineOptions, GatewayNotConfiguredError, isClaudeModel } from '$lib/engine/options.server'
 import { runEngineStream } from '$lib/engine/stream.server'
+import {
+	formatAttachmentWarnings,
+	prepareAttachmentPrompt,
+	singleUserMessageStream,
+	type ChatAttachment,
+} from '$lib/engine/attachments.server'
+import { createAttachmentIo } from '$lib/engine/attachment-io.server'
 import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { logger } from '$lib/observability/logger'
 
@@ -63,7 +70,7 @@ type StreamPayload = {
 	model?: string
 	reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 	regenerate?: boolean
-	attachments?: Array<{ id: string; filename: string; mimeType: string; size: number; url: string }>
+	attachments?: ChatAttachment[]
 }
 
 export const POST: RequestHandler = async ({ request, locals }) => {
@@ -256,6 +263,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		}
 	}
 
+	/*
+	 * #36 — attachments used to be declared on the payload and then never read,
+	 * so an uploaded screenshot reached the database and the composer but never
+	 * the model. Images now ride as content blocks (which forces the SDK's
+	 * streaming-input form), non-image files are staged into the same sandbox
+	 * workspace the run's tools resolve, and anything undeliverable produces a
+	 * warning the user actually sees instead of a silent drop.
+	 */
+	const preparedPrompt = await prepareAttachmentPrompt({
+		text: body.content ?? '',
+		attachments: body.attachments,
+		availableTools: scopedTools ? new Set(scopedTools) : null,
+		io: createAttachmentIo({
+			userId: user.id,
+			runId: run.id,
+			persistentKey: workspaceConfig?.persistentKey ?? null,
+			worktree: workspaceConfig?.worktreeConfig ?? null,
+			projectId: conversation.projectId ?? null,
+		}),
+	})
+	const attachmentNotice = formatAttachmentWarnings(preparedPrompt.warnings)
+	if (preparedPrompt.warnings.length > 0) {
+		logger.warn('[chat/stream] attachments not fully delivered', {
+			runId: run.id,
+			warnings: preparedPrompt.warnings,
+		})
+	}
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
@@ -329,9 +364,20 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					appliedEdits: [],
 				})
 
+				/*
+				 * The chat page has no generic notice channel and is off-limits to
+				 * this change, so an attachment warning goes out as the first text of
+				 * the turn and is persisted with the assistant message below. That
+				 * way it is visible live AND after a reload — the one thing the old
+				 * behaviour never was.
+				 */
+				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
+
 				const summary = await runEngineStream(
 					{
-						prompt: body.content ?? '',
+						prompt: preparedPrompt.content
+							? singleUserMessageStream(preparedPrompt.content)
+							: preparedPrompt.text,
 						options: engineOptions,
 						emit,
 						onSessionId: (sessionId) => {
@@ -368,6 +414,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								: undefined,
 				})
 
+				// Fold the attachment notice into the persisted turn so the reloaded
+				// message matches what the user watched stream in.
+				if (attachmentNotice) {
+					const first = summary.blocks[0]
+					if (first && first.kind === 'text') first.content = `${attachmentNotice}${first.content}`
+					else summary.blocks.unshift({ kind: 'text', content: attachmentNotice })
+				}
+
 				await persistRunBlocks(run.id, summary.blocks)
 
 				const totalMs = Date.now() - startedAt
@@ -397,7 +451,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					conversationId: body.conversationId,
 					parentMessageId,
 					model: routedModel,
-					content: summary.text || '(no output)',
+					content: `${attachmentNotice}${summary.text || '(no output)'}`,
 					promptTokens: summary.usage.inputTokens,
 					completionTokens: summary.usage.outputTokens,
 					ttftMs: summary.ttftMs,
@@ -414,6 +468,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						sdkSessionId: summary.sessionId,
 						numTurns: summary.numTurns,
 						blocks: summary.blocks.length > 0 ? summary.blocks : undefined,
+						attachmentWarnings:
+							preparedPrompt.warnings.length > 0 ? preparedPrompt.warnings : undefined,
 					},
 					toolCalls: [],
 					runId: run.id,

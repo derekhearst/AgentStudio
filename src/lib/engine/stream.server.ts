@@ -16,7 +16,7 @@
  * a sequence number, exactly as before.
  */
 
-import { query, type PermissionResult, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
@@ -24,7 +24,13 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 export type ApprovalDecision = { allow: true } | { allow: false; reason: string }
 
 export type EngineRunInput = {
-	prompt: string
+	/**
+	 * A plain string for a text-only turn, or an async iterable of user messages
+	 * when the turn carries content blocks. The SDK only accepts non-string
+	 * content (images) in streaming-input mode, which is what the iterable form
+	 * selects — see `attachments.server.ts`.
+	 */
+	prompt: string | AsyncIterable<SDKUserMessage>
 	options: Options
 	/**
 	 * Decide whether a tool may run. Return a promise that settles when the user
