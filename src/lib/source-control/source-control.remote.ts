@@ -3,19 +3,15 @@ import { z } from 'zod'
 import {
 	countLegacySyncedRepositories,
 	detachRepository,
-	disconnectAzureForUser,
 	disconnectGithubForUser,
 	getRepositoryDetail,
 	importRepository,
-	listActiveAzureConnections,
-	listAzureImportCandidates,
 	listConnections,
 	listGithubImportCandidates,
 	listImportedRepositories,
 	pullRepositoryLatest,
 } from './source-control.server'
 import { isGithubOAuthConfigured } from './github-oauth.server'
-import { isAzureDevOpsOAuthConfigured } from './azure-devops-oauth.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 /**
@@ -24,7 +20,7 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
  * The page lists only IMPORTED repos (rows where `metadata.localPath` is set). Bulk-sync
  * is no longer triggered from the UI; the agent's `sync_my_repos` tool keeps that surface.
  *
- * OAuth connect/callback handlers live in /source-control/{github,azure-devops}/* SvelteKit
+ * OAuth connect/callback handlers live in /source-control/github/* SvelteKit
  * endpoints (server-side redirects).
  */
 
@@ -37,7 +33,6 @@ export const getSourceControlOverviewQuery = query(async () => {
 	])
 	return {
 		githubConfigured: isGithubOAuthConfigured(),
-		azureConfigured: isAzureDevOpsOAuthConfigured(),
 		legacySyncedCount: legacyCount,
 		connections: connections.map((c) => ({
 			id: c.id,
@@ -66,11 +61,6 @@ export const getSourceControlOverviewQuery = query(async () => {
 export const disconnectGithubCommand = command(async () => {
 	const user = requireAuthenticatedRequestUser()
 	return disconnectGithubForUser(user.id)
-})
-
-export const disconnectAzureCommand = command(async () => {
-	const user = requireAuthenticatedRequestUser()
-	return disconnectAzureForUser(user.id)
 })
 
 const importSchema = z.object({
@@ -170,17 +160,4 @@ export const getRepositoryDetailQuery = query(repoIdSchema, async ({ repositoryI
 export const listGithubImportCandidatesQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	return listGithubImportCandidates(user.id)
-})
-
-export const listAzureImportCandidatesQuery = query(async () => {
-	const user = requireAuthenticatedRequestUser()
-	const [{ candidates, errorMessage }, connections] = await Promise.all([
-		listAzureImportCandidates(user.id),
-		listActiveAzureConnections(user.id),
-	])
-	return {
-		candidates,
-		errorMessage,
-		orgs: connections.map((c) => c.providerAccount),
-	}
 })

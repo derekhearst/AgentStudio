@@ -43,50 +43,6 @@ test.describe('source-control/parse-clone-url — provider detection', () => {
 		}
 	})
 
-	test('parses Azure DevOps dev.azure.com URLs', async () => {
-		const { parseCloneUrl } = await import('../src/lib/source-control/parse-clone-url')
-
-		const variants = [
-			'https://dev.azure.com/myorg/myproject/_git/myrepo',
-			'https://dev.azure.com/myorg/myproject/_git/myrepo.git',
-			'https://dev.azure.com/myorg/myproject/_git/myrepo/',
-			'https://myorg@dev.azure.com/myorg/myproject/_git/myrepo',
-		]
-
-		for (const input of variants) {
-			const parsed = parseCloneUrl(input)
-			expect(parsed.provider, `failed for ${input}`).toBe('azure_devops')
-			if (parsed.provider !== 'azure_devops') continue
-			expect(parsed.org).toBe('myorg')
-			expect(parsed.project).toBe('myproject')
-			expect(parsed.repo).toBe('myrepo')
-			expect(parsed.cloneUrl).toBe('https://dev.azure.com/myorg/myproject/_git/myrepo')
-			expect(parsed.htmlUrl).toBe('https://dev.azure.com/myorg/myproject/_git/myrepo')
-		}
-	})
-
-	test('parses Azure DevOps legacy visualstudio.com URLs (with and without DefaultCollection)', async () => {
-		const { parseCloneUrl } = await import('../src/lib/source-control/parse-clone-url')
-
-		const variants = [
-			'https://myorg.visualstudio.com/myproject/_git/myrepo',
-			'https://myorg.visualstudio.com/myproject/_git/myrepo.git',
-			'https://myorg.visualstudio.com/DefaultCollection/myproject/_git/myrepo',
-			'https://myorg.visualstudio.com/DefaultCollection/myproject/_git/myrepo.git',
-		]
-
-		for (const input of variants) {
-			const parsed = parseCloneUrl(input)
-			expect(parsed.provider, `failed for ${input}`).toBe('azure_devops')
-			if (parsed.provider !== 'azure_devops') continue
-			expect(parsed.org).toBe('myorg')
-			expect(parsed.project).toBe('myproject')
-			expect(parsed.repo).toBe('myrepo')
-			// legacy URLs are normalized to the dev.azure.com canonical form
-			expect(parsed.cloneUrl).toBe('https://dev.azure.com/myorg/myproject/_git/myrepo')
-		}
-	})
-
 	test('falls back to generic local provider for self-hosted HTTPS URLs', async () => {
 		const { parseCloneUrl } = await import('../src/lib/source-control/parse-clone-url')
 
@@ -141,15 +97,6 @@ test.describe('source-control/parse-clone-url — provider detection', () => {
 		expect(() => parseCloneUrl('ftp://example.com/repo')).toThrow(/Unsupported clone URL/)
 	})
 
-	test('Azure DevOps SSH URLs are not matched (parser only supports HTTPS for Azure)', async () => {
-		const { parseCloneUrl } = await import('../src/lib/source-control/parse-clone-url')
-
-		// The parser intentionally does not support Azure SSH because the OAuth flow
-		// hands out HTTPS tokens; an SSH URL would have no usable credential path.
-		expect(() => parseCloneUrl('git@ssh.dev.azure.com:v3/myorg/myproject/myrepo')).toThrow(
-			/Unsupported clone URL/,
-		)
-	})
 })
 
 test.describe('source-control/parse-clone-url — credential helper username', () => {
@@ -159,7 +106,6 @@ test.describe('source-control/parse-clone-url — credential helper username', (
 		)
 
 		expect(credentialUsernameForProvider('github')).toBe('x-access-token')
-		expect(credentialUsernameForProvider('azure_devops')).toBe('oauth2')
 		expect(credentialUsernameForProvider('local')).toBe('')
 		expect(credentialUsernameForProvider('gitlab')).toBe('')
 		expect(credentialUsernameForProvider('unknown')).toBe('')
@@ -174,15 +120,6 @@ test.describe('source-control/parse-clone-url — mirror owner/name', () => {
 
 		const parsed = parseCloneUrl('https://github.com/anthropics/claude-code.git')
 		expect(mirrorOwnerName(parsed)).toEqual({ owner: 'anthropics', name: 'claude-code' })
-	})
-
-	test('uses org+repo (drops project segment) for Azure DevOps repos', async () => {
-		const { parseCloneUrl, mirrorOwnerName } = await import(
-			'../src/lib/source-control/parse-clone-url'
-		)
-
-		const parsed = parseCloneUrl('https://dev.azure.com/myorg/myproject/_git/myrepo')
-		expect(mirrorOwnerName(parsed)).toEqual({ owner: 'myorg', name: 'myrepo' })
 	})
 
 	test('uses owner+name for generic local repos', async () => {

@@ -26,12 +26,8 @@ import {
 	switchProjectBranch,
 } from './project-git.server'
 import {
-	disconnectAzureForUser,
 	disconnectGithubForUser,
-	isAzureDevOpsOAuthConfigured,
 	isGithubOAuthConfigured,
-	listActiveAzureConnections,
-	listAzureImportCandidates,
 	listConnections,
 	listGithubImportCandidates,
 } from './connections.server'
@@ -40,7 +36,7 @@ import {
  * Projects SvelteKit remote surface, expanded with repo controls.
  *
  * The /projects pages call into this module for everything: the connection cards, the
- * 4-mode creation flow (none/local/github/azure/url), and all repo-level git operations
+ * creation flow (none/local/github/url) and all repo-level git operations
  * (status, branches, commits, pull, push, commit, diff). The legacy /source-control page
  * is going away — nothing else should still import from $lib/source-control/source-control.remote.
  */
@@ -76,20 +72,12 @@ const githubSourceSchema = z.object({
 	repo: z.string().trim().min(1).max(120),
 	cloneUrl: z.string().trim().min(1).max(2000),
 })
-const azureSourceSchema = z.object({
-	type: z.literal('azure'),
-	org: z.string().trim().min(1).max(120),
-	project: z.string().trim().min(1).max(120),
-	repo: z.string().trim().min(1).max(120),
-	cloneUrl: z.string().trim().min(1).max(2000),
-})
 const urlSourceSchema = z.object({
 	type: z.literal('url'),
 	cloneUrl: z.string().trim().min(1).max(2000),
 })
 const importSourceSchema = z.discriminatedUnion('type', [
 	githubSourceSchema,
-	azureSourceSchema,
 	urlSourceSchema,
 ])
 
@@ -162,7 +150,6 @@ export const getProjectsOverviewQuery = query(async () => {
 	const [conns] = await Promise.all([listConnections(user.id)])
 	return {
 		githubConfigured: isGithubOAuthConfigured(),
-		azureConfigured: isAzureDevOpsOAuthConfigured(),
 		connections: conns.map((c) => ({
 			id: c.id,
 			provider: c.provider,
@@ -181,27 +168,9 @@ export const disconnectGithubCommand = command(async () => {
 	return disconnectGithubForUser(user.id)
 })
 
-export const disconnectAzureCommand = command(async () => {
-	const user = requireAuthenticatedRequestUser()
-	return disconnectAzureForUser(user.id)
-})
-
 export const listGithubImportCandidatesQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	return listGithubImportCandidates(user.id)
-})
-
-export const listAzureImportCandidatesQuery = query(async () => {
-	const user = requireAuthenticatedRequestUser()
-	const [{ candidates, errorMessage }, conns] = await Promise.all([
-		listAzureImportCandidates(user.id),
-		listActiveAzureConnections(user.id),
-	])
-	return {
-		candidates,
-		errorMessage,
-		orgs: conns.map((c) => c.providerAccount),
-	}
 })
 
 // ─────────── Project repo controls (status / branches / commits / pull / push / commit / diff) ───────────

@@ -1,28 +1,24 @@
 <script lang="ts">
 	import {
 		createProjectCommand,
-		listAzureImportCandidatesQuery,
 		listGithubImportCandidatesQuery,
 		listProjectsQuery,
 	} from '$lib/projects/projects.remote'
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number]
 	type GithubCandidate = Awaited<ReturnType<typeof listGithubImportCandidatesQuery>>['candidates'][number]
-	type AzureCandidate = Awaited<ReturnType<typeof listAzureImportCandidatesQuery>>['candidates'][number]
-	type RepoMode = 'none' | 'local' | 'github' | 'azure' | 'url'
+	type RepoMode = 'none' | 'local' | 'github' | 'url'
 
 	let {
 		open,
 		initialTab = 'none',
 		githubAvailable,
-		azureAvailable,
 		onCreated,
 		onClose,
 	}: {
 		open: boolean
 		initialTab?: RepoMode
 		githubAvailable: boolean
-		azureAvailable: boolean
 		onCreated: () => void
 		onClose: () => void
 	} = $props()
@@ -39,7 +35,6 @@
 		none: 'Empty',
 		local: 'Local repo',
 		github: 'From GitHub',
-		azure: 'From Azure',
 		url: 'From URL',
 	}
 
@@ -55,10 +50,6 @@
 	let githubLoading = $state(false)
 	let githubError = $state<string | null>(null)
 	let githubFilter = $state('')
-	let azureCandidates = $state<AzureCandidate[]>([])
-	let azureLoading = $state(false)
-	let azureError = $state<string | null>(null)
-	let azureFilter = $state('')
 
 	$effect(() => {
 		if (!open) return
@@ -72,20 +63,12 @@
 		formDefaultBranch = 'main'
 		formCloneUrl = ''
 		if (modalTab === 'github' && githubCandidates.length === 0) void loadGithubCandidates()
-		if (modalTab === 'azure' && azureCandidates.length === 0) void loadAzureCandidates()
 	})
 
 	const filteredGithub = $derived(
 		githubFilter.trim()
 			? githubCandidates.filter((c) => `${c.owner}/${c.name}`.toLowerCase().includes(githubFilter.toLowerCase()))
 			: githubCandidates,
-	)
-	const filteredAzure = $derived(
-		azureFilter.trim()
-			? azureCandidates.filter((c) =>
-					`${c.org}/${c.project}/${c.name}`.toLowerCase().includes(azureFilter.toLowerCase()),
-				)
-			: azureCandidates,
 	)
 
 	async function loadGithubCandidates() {
@@ -102,20 +85,6 @@
 		}
 	}
 
-	async function loadAzureCandidates() {
-		azureLoading = true
-		azureError = null
-		try {
-			const res = await listAzureImportCandidatesQuery()
-			azureCandidates = res.candidates
-			if (res.errorMessage) azureError = res.errorMessage
-		} catch (e) {
-			azureError = e instanceof Error ? e.message : 'Failed to load Azure repos'
-		} finally {
-			azureLoading = false
-		}
-	}
-
 	function deriveNameFromUrl(url: string): string {
 		const match = url.match(/[/:]([^/:]+?)(?:\.git)?\/?$/)
 		return match ? match[1] : 'New project'
@@ -125,7 +94,6 @@
 		modalTab = tab
 		formError = null
 		if (tab === 'github' && githubCandidates.length === 0) void loadGithubCandidates()
-		if (tab === 'azure' && azureCandidates.length === 0) void loadAzureCandidates()
 	}
 
 	async function submitCreate(input: Parameters<typeof createProjectCommand>[0]) {
@@ -182,22 +150,6 @@
 		})
 	}
 
-	async function submitAzure(cand: AzureCandidate) {
-		await submitCreate({
-			name: formName.trim() || `${cand.org}/${cand.name}`,
-			kind: 'code',
-			description: formDescription.trim() || undefined,
-			repoMode: 'imported',
-			source: {
-				type: 'azure',
-				org: cand.org,
-				project: cand.project,
-				repo: cand.name,
-				cloneUrl: cand.cloneUrl,
-			},
-		})
-	}
-
 	async function submitUrl(event: Event) {
 		event.preventDefault()
 		const url = formCloneUrl.trim()
@@ -224,7 +176,7 @@
 			</div>
 
 			<div class="tabs tabs-bordered mb-3 flex-wrap">
-				{#each ['none', 'local', 'github', 'azure', 'url'] as RepoMode[] as tab (tab)}
+				{#each ['none', 'local', 'github', 'url'] as RepoMode[] as tab (tab)}
 					<button
 						type="button"
 						class="tab {modalTab === tab ? 'tab-active' : ''}"
@@ -242,12 +194,12 @@
 			<!-- Shared name/kind/description fieldset -->
 			<div class="grid gap-2 mb-3 sm:grid-cols-2">
 				<fieldset class="fieldset">
-					<legend class="fieldset-legend text-xs">Name {modalTab === 'github' || modalTab === 'azure' ? '(optional, defaults to repo name)' : ''}</legend>
+					<legend class="fieldset-legend text-xs">Name {modalTab === 'github' ? '(optional, defaults to repo name)' : ''}</legend>
 					<input
 						type="text"
 						class="input input-sm input-bordered"
 						bind:value={formName}
-						placeholder={modalTab === 'github' || modalTab === 'azure' ? 'owner/repo' : 'e.g. Efoil Rebuild'}
+						placeholder={modalTab === 'github' ? 'owner/repo' : 'e.g. Efoil Rebuild'}
 						maxlength="120"
 					/>
 				</fieldset>
@@ -361,55 +313,6 @@
 						</ul>
 					{/if}
 				{/if}
-			{:else if modalTab === 'azure'}
-				{#if !azureAvailable}
-					<div class="alert alert-warning text-sm">
-						<span>Connect Azure DevOps first — <a class="link" href="/source-control/azure-devops/connect">connect now</a>.</span>
-					</div>
-				{:else}
-					<div class="mb-2 flex items-center gap-2">
-						<input
-							type="search"
-							class="input input-sm input-bordered flex-1"
-							bind:value={azureFilter}
-							placeholder="Filter by org/project/repo…"
-						/>
-						<button type="button" class="btn btn-ghost btn-sm" onclick={loadAzureCandidates} disabled={azureLoading}>
-							{azureLoading ? 'Loading…' : 'Refresh'}
-						</button>
-					</div>
-					{#if azureError}
-						<div class="alert alert-warning mb-2 py-2 text-xs">{azureError}</div>
-					{/if}
-					{#if azureLoading && azureCandidates.length === 0}
-						<p class="py-6 text-center text-sm opacity-60">Loading repos…</p>
-					{:else if filteredAzure.length === 0}
-						<p class="py-6 text-center text-sm opacity-60">
-							{azureFilter ? 'No matches.' : 'No repos available — try refreshing.'}
-						</p>
-					{:else}
-						<ul class="max-h-96 space-y-1 overflow-y-auto">
-							{#each filteredAzure.slice(0, 200) as cand (`${cand.org}/${cand.project}/${cand.name}`)}
-								<li class="flex flex-wrap items-center gap-2 rounded-lg border border-base-300/60 bg-base-100 p-2">
-									<div class="min-w-0 flex-1">
-										<div class="flex flex-wrap items-center gap-2">
-											<span class="font-mono text-sm font-semibold">{cand.org}/{cand.project}/{cand.name}</span>
-											<code class="text-[10px] opacity-60">{cand.defaultBranch}</code>
-										</div>
-									</div>
-									<button
-										type="button"
-										class="btn btn-primary btn-xs"
-										onclick={() => submitAzure(cand)}
-										disabled={creating}
-									>
-										{creating ? '…' : 'Clone & create'}
-									</button>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				{/if}
 			{:else if modalTab === 'url'}
 				<form onsubmit={submitUrl}>
 					<fieldset class="fieldset mb-3">
@@ -418,13 +321,12 @@
 							type="text"
 							class="input input-sm input-bordered"
 							bind:value={formCloneUrl}
-							placeholder="https://github.com/owner/repo · https://dev.azure.com/org/project/_git/repo · any clone URL"
+							placeholder="https://github.com/owner/repo · any clone URL"
 							required
 						/>
 					</fieldset>
 					<p class="mb-3 text-xs opacity-65">
-						Public repos work without auth. Private GitHub requires the GitHub OAuth connection above; private
-						Azure DevOps requires the Azure connection.
+						Public repos work without auth. Private GitHub repos require the GitHub OAuth connection above.
 					</p>
 					<div class="flex justify-end gap-2">
 						<button type="button" class="btn btn-ghost btn-sm" onclick={onClose} disabled={creating}>Cancel</button>

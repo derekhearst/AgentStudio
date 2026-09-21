@@ -22,7 +22,7 @@ Every project carries a `repo_kind`:
 
 - **none** — database row only, no directory on disk. Useful as a label/grouping; the agent has nowhere project-specific to write.
 - **local** — `git init`'d at the project's sandbox path (`<SANDBOX_WORKSPACE>/<userId>/projects/<projectId>`) with a README and an initial commit. No remote.
-- **imported** — cloned from a remote (GitHub / Azure DevOps / plain URL) into the same sandbox path, paired with a `repositories` sidecar row remembering where it came from.
+- **imported** — cloned from a remote (GitHub or any plain clone URL) into the same sandbox path, paired with a `repositories` sidecar row remembering where it came from.
 
 Filesystem work happens *after* the database insert commits. If the `git init` or clone fails, the project row is deleted again and the directory cleaned up — a failed import leaves nothing behind.
 
@@ -50,7 +50,7 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 2. Give it a name and a kind, then pick how it should exist on disk:
    - no repo (database row only),
    - a new local repo, or
-   - an import from a connected GitHub / Azure DevOps account or a clone URL.
+   - an import from the connected GitHub account or a clone URL.
 3. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
 
 ### Work in a project

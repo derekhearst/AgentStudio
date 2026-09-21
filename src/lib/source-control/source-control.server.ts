@@ -16,7 +16,6 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { credentialUsernameForProvider, mirrorOwnerName, parseCloneUrl } from './parse-clone-url'
 import { getActiveGithubConnection } from './github-provider.server'
-import { getActiveAzureConnection } from './azure-provider.server'
 import { materializeRepoMirror } from './repo-mirror.server'
 import { listRecentCommits, type GitCommitSummary } from './git-local.server'
 import { createProject, getProjectById } from '$lib/projects/projects.server'
@@ -335,7 +334,7 @@ void and // tree-shake guard
  * Decryption failures (token-rotation gone wrong, key changed) flip the connection to
  * `status='error'` and return null — the user re-runs the OAuth flow to recover.
  */
-// GitHub + Azure DevOps OAuth integration moved to focused provider modules.
+// GitHub OAuth integration moved to a focused provider module.
 // Re-exported here so existing import paths ($lib/source-control/source-control.server)
 // keep working for callers in projects/, source-control.remote.ts, and the OAuth callbacks.
 export {
@@ -345,13 +344,6 @@ export {
 	listGithubImportCandidates,
 	type GithubImportCandidate,
 } from './github-provider.server'
-export {
-	getActiveAzureConnection,
-	listActiveAzureConnections,
-	disconnectAzureForUser,
-	listAzureImportCandidates,
-	type AzureImportCandidate,
-} from './azure-provider.server'
 
 // ─────────── Import flow ───────────
 // Repository import / pull / detail / detach moved to repository-import.server.

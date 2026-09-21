@@ -42,7 +42,7 @@ export const projectKindEnum = pgEnum('project_kind', [
  *
  *   'none'     — no filesystem footprint (legacy / database-only project)
  *   'local'    — `git init`'d at <SANDBOX_WORKSPACE>/<userId>/projects/<projectId>, no remote
- *   'imported' — cloned from a remote (GitHub / Azure / URL); paired with a `repositories` sidecar row
+ *   'imported' — cloned from a remote (GitHub or any clone URL); paired with a `repositories` sidecar row
  *
  * Stored as a plain text column rather than an enum so adding a future kind (e.g. 'submodule')
  * doesn't require a migration of every existing row.

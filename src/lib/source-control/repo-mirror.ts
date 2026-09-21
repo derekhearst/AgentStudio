@@ -12,8 +12,8 @@ import { join } from 'node:path'
 // First char rejects leading dot so a malicious repo name like `.git` can't collide with
 // the real `.git` metadata dir; subsequent chars allow dots so `repo.name` round-trips.
 const SAFE_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}$/
-// Default username matches GitHub OAuth's `x-access-token` convention. Azure DevOps and
-// generic-PAT callers override via `credentialUsername`. The literal `$GIT_TOKEN` is
+// Default username matches GitHub OAuth's `x-access-token` convention. Generic-PAT
+// callers override via `credentialUsername`. The literal `$GIT_TOKEN` is
 // expanded by the bash function shipped with git-credential-helper at runtime.
 const DEFAULT_CREDENTIAL_USERNAME = 'x-access-token'
 const SAFE_USERNAME = /^[A-Za-z0-9._-]{0,64}$/

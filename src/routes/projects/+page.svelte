@@ -8,7 +8,6 @@
 		deleteProjectCommand,
 		getProjectsOverviewQuery,
 		disconnectGithubCommand,
-		disconnectAzureCommand,
 	} from '$lib/projects/projects.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import ConnectionsPanel from '$lib/projects/components/ConnectionsPanel.svelte';
@@ -17,7 +16,7 @@
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number];
 	type Overview = Awaited<ReturnType<typeof getProjectsOverviewQuery>>;
-	type RepoMode = 'none' | 'local' | 'github' | 'azure' | 'url';
+	type RepoMode = 'none' | 'local' | 'github' | 'url';
 
 	let projects = $state<ProjectRow[]>([]);
 	let overview = $state<Overview | null>(null);
@@ -30,9 +29,6 @@
 	const errorParam = $derived(page.url.searchParams.get('error'));
 	const githubAvailable = $derived(
 		overview?.connections.some((c) => c.provider === 'github' && c.status === 'active') ?? false,
-	);
-	const azureAvailable = $derived(
-		overview?.connections.some((c) => c.provider === 'azure_devops' && c.status === 'active') ?? false,
 	);
 
 	onMount(() => void load());
@@ -83,16 +79,6 @@
 			error = e instanceof Error ? e.message : 'Disconnect failed';
 		}
 	}
-
-	async function disconnectAzure() {
-		if (!confirm('Disconnect all Azure DevOps connections? Imported projects keep their local clone.')) return;
-		try {
-			await disconnectAzureCommand();
-			await load();
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Disconnect failed';
-		}
-	}
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
@@ -116,7 +102,6 @@
 		<ConnectionsPanel
 			{overview}
 			onDisconnectGithub={disconnectGithub}
-			onDisconnectAzure={disconnectAzure}
 		/>
 
 		{#if loading}
@@ -143,7 +128,6 @@
 	open={modalOpen}
 	initialTab={modalInitialTab}
 	{githubAvailable}
-	{azureAvailable}
 	onCreated={handleProjectCreated}
 	onClose={closeModal}
 />

@@ -2,7 +2,7 @@
  * GitHub OAuth integration: connection lookup, repo sync, disconnect, import candidates.
  *
  * Extracted from source-control.server.ts so the GitHub-specific surface (token decrypt,
- * remote fetch, sync upsert) is editable in isolation from Azure DevOps + the generic
+ * remote fetch, sync upsert) is editable in isolation from the generic
  * repository CRUD. The shared helpers (`markConnectionStatus`, repository row plumbing)
  * still live in source-control.server.ts.
  */

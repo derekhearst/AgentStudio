@@ -17,7 +17,6 @@ import type { ProjectRow } from '$lib/projects/projects.schema'
 import { credentialUsernameForProvider, mirrorOwnerName, parseCloneUrl } from './parse-clone-url'
 import { materializeRepoMirror } from './repo-mirror.server'
 import { listRecentCommits, type GitCommitSummary } from './git-local.server'
-import { getActiveAzureConnection } from './azure-provider.server'
 import { getActiveGithubConnection } from './github-provider.server'
 import {
 	repositories,
@@ -48,8 +47,7 @@ export type ImportRepositoryResult = {
  * Source control redesign — orchestrator for the new "Import repository" flow.
  *
  *   1. Parse the URL to figure out provider + identity segments.
- *   2. Resolve auth: GitHub uses the active OAuth token; Azure DevOps looks up a per-org
- *      OAuth connection; local URLs use no auth.
+ *   2. Resolve auth: GitHub uses the active OAuth token; generic URLs use no auth.
  *   3. Materialize the repo's local mirror (clone or fetch).
  *   4. Auto-create a `code` Project unless the caller passed an existing `projectId`.
  *   5. Insert the repository row with `metadata.localPath` (the import marker the page
@@ -73,16 +71,6 @@ export async function importRepository(input: ImportRepositoryInput): Promise<Im
 			)
 		}
 		token = conn.accessToken
-	} else if (parsed.provider === 'azure_devops') {
-		const conn = await getActiveAzureConnection(input.userId, parsed.org)
-		if (conn) {
-			token = conn.accessToken
-		} else {
-			// Fall back to anonymous; public Azure repos work that way and the operator
-			// can connect later if a private clone fails.
-			token = ''
-			credentialUsername = ''
-		}
 	} else {
 		token = ''
 		credentialUsername = ''
@@ -120,9 +108,6 @@ export async function importRepository(input: ImportRepositoryInput): Promise<Im
 		lastImportedAt: new Date().toISOString(),
 		htmlUrl: parsed.htmlUrl,
 		cloneUrl: parsed.cloneUrl,
-	}
-	if (parsed.provider === 'azure_devops') {
-		baseMetadata.azure = { org: parsed.org, project: parsed.project, repo: parsed.repo }
 	}
 	if (parsed.provider === 'local') {
 		baseMetadata.host = parsed.host
@@ -192,17 +177,6 @@ export async function pullRepositoryLatest(
 		const conn = await getActiveGithubConnection(userId)
 		if (!conn) throw new Error('GitHub connection unavailable. Reconnect at /source-control.')
 		token = conn.accessToken
-	} else if (repo.provider === 'azure_devops') {
-		const azure = (repo.metadata as { azure?: { org?: string } }).azure
-		if (azure?.org) {
-			const conn = await getActiveAzureConnection(userId, azure.org)
-			if (conn) {
-				token = conn.accessToken
-			} else {
-				token = ''
-				credentialUsername = ''
-			}
-		}
 	}
 
 	const mirror = await materializeRepoMirror({

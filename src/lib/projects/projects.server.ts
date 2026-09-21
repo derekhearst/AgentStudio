@@ -10,7 +10,7 @@ import { repositories, type RepositoryRow } from '$lib/source-control/source-con
 import { logger } from '$lib/observability/logger'
 import { cloneIntoProject, deleteProjectFs, initLocalProjectRepo } from './project-fs.server'
 import { credentialUsernameForProvider, parseCloneUrl } from '$lib/source-control/parse-clone-url'
-import { getActiveAzureConnection, getActiveGithubConnection } from '$lib/source-control/source-control.server'
+import { getActiveGithubConnection } from '$lib/source-control/source-control.server'
 
 /**
  * Wave 4 #15 phase 1 — project helpers.
@@ -43,15 +43,8 @@ async function uniqueProjectSlug(userId: string | null, baseSlug: string): Promi
 // ─────────── Project CRUD ───────────
 
 export type GithubSource = { type: 'github'; owner: string; repo: string; cloneUrl: string }
-export type AzureSource = {
-	type: 'azure'
-	org: string
-	project: string
-	repo: string
-	cloneUrl: string
-}
 export type UrlSource = { type: 'url'; cloneUrl: string }
-export type ImportSource = GithubSource | AzureSource | UrlSource
+export type ImportSource = GithubSource | UrlSource
 
 export type CreateProjectInput = {
 	userId: string
@@ -151,7 +144,7 @@ async function importIntoProject(
 	source: ImportSource,
 ): Promise<CreateProjectResult> {
 	// Resolve provider, identity, and credentials from the discriminated source union.
-	let provider: 'github' | 'azure_devops' | 'local'
+	let provider: 'github' | 'local'
 	let owner: string
 	let name: string
 	let cloneUrl: string
@@ -171,24 +164,10 @@ async function importIntoProject(
 		token = conn.accessToken
 		credentialUsername = 'x-access-token'
 		providerMetadata = { htmlUrl: `https://github.com/${owner}/${name}` }
-	} else if (source.type === 'azure') {
-		provider = 'azure_devops'
-		owner = source.org
-		name = source.repo
-		cloneUrl = source.cloneUrl
-		const conn = await getActiveAzureConnection(userId, source.org)
-		if (conn) {
-			token = conn.accessToken
-			credentialUsername = 'oauth2'
-		}
-		providerMetadata = {
-			htmlUrl: cloneUrl,
-			azure: { org: source.org, project: source.project, repo: source.repo },
-		}
 	} else {
 		// URL paste — defer to the parser to figure out what it is.
 		const parsed = parseCloneUrl(source.cloneUrl)
-		provider = parsed.provider === 'github' ? 'github' : parsed.provider === 'azure_devops' ? 'azure_devops' : 'local'
+		provider = parsed.provider === 'github' ? 'github' : 'local'
 		cloneUrl = parsed.cloneUrl
 		credentialUsername = credentialUsernameForProvider(provider)
 		if (parsed.provider === 'github') {
@@ -200,18 +179,6 @@ async function importIntoProject(
 				credentialUsername = 'x-access-token'
 			}
 			providerMetadata = { htmlUrl: parsed.htmlUrl }
-		} else if (parsed.provider === 'azure_devops') {
-			owner = parsed.org
-			name = parsed.repo
-			const conn = await getActiveAzureConnection(userId, parsed.org)
-			if (conn) {
-				token = conn.accessToken
-				credentialUsername = 'oauth2'
-			}
-			providerMetadata = {
-				htmlUrl: parsed.htmlUrl,
-				azure: { org: parsed.org, project: parsed.project, repo: parsed.repo },
-			}
 		} else {
 			owner = parsed.owner
 			name = parsed.name
