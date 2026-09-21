@@ -61,6 +61,12 @@ export type EngineRunSummary = {
 	durationMs: number
 	numTurns: number
 	error: string | null
+	/**
+	 * Sequence id of the last frame emitted here. The caller MUST continue its own
+	 * numbering from this — the resume endpoint replays "events with id strictly
+	 * greater than `since`", so a reused id silently drops or double-replays a frame.
+	 */
+	lastSeq: number
 }
 
 type Emit = (event: string, payload: unknown) => void
@@ -213,6 +219,7 @@ export async function runEngineStream(
 				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
 				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
 				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+				lastSeq: seq,
 			}
 		}
 	}
@@ -226,5 +233,6 @@ export async function runEngineStream(
 		durationMs: 0,
 		numTurns: 0,
 		error: null,
+		lastSeq: seq,
 	}
 }

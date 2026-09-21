@@ -273,8 +273,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					seq,
 				)
 
-				// runEngineStream emitted its own frames after `seq`; keep numbering monotonic.
-				seq += 1
+				// Continue from where the engine stopped; reusing ids breaks stream resume.
+				seq = summary.lastSeq
 
 				const totalMs = Date.now() - startedAt
 				const claudeRun = isClaudeModel(routedModel)
