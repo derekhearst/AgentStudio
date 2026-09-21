@@ -4,6 +4,18 @@ import { agents } from '$lib/agents/agents.schema'
 
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool'])
 
+/**
+ * #19 — per-conversation permission mode. Values mirror `PERMISSION_MODES` in
+ * `$lib/engine/permission-mode` (kept as a literal list here so the schema file stays free
+ * of application imports; `tests/engine.permission-mode.spec.ts` pins the two together).
+ */
+export const conversationPermissionModeEnum = pgEnum('conversation_permission_mode', [
+	'default',
+	'plan',
+	'acceptEdits',
+	'bypassPermissions',
+])
+
 export const conversations = pgTable('conversations', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	title: text('title').notNull(),
@@ -27,6 +39,11 @@ export const conversations = pgTable('conversations', {
 	// on every request. Null until the first run completes, and for conversations
 	// that predate the engine migration — those start a fresh SDK session.
 	sdkSessionId: text('sdk_session_id'),
+	// #19 — how much this session is allowed to do without asking. Orthogonal to the bound
+	// agent: the agent sets the persona, this sets what the runtime permits. Changeable
+	// mid-session; the next turn picks it up. `bypassPermissions` never reaches a detached
+	// or automation run — see `resolveEffectivePermissionMode`.
+	permissionMode: conversationPermissionModeEnum('permission_mode').notNull().default('default'),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
