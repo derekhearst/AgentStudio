@@ -38,6 +38,12 @@ export default defineConfig({
 		env: {
 			...process.env,
 			E2E_MOCK_EXTERNALS: '0',
+			// The suite exercises the login redirect and the unauthenticated posture of
+			// public routes. `AUTH_DEV_BYPASS=1` in a developer's .env attaches every
+			// request to the singleton user, so those specs can never fail honestly — and
+			// several were failing because of it. Force it off for the test server; a
+			// developer's own dev server is unaffected.
+			AUTH_DEV_BYPASS: '0',
 			// Default values for env vars that gate test coverage. Operators can override
 			// via .env or the shell env to point at real services. The webhook secret here
 			// is a test-only constant so the webhook endpoint tests always run end-to-end.

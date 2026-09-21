@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Composer agent dropdown writes through to DB (replaces the prior `chat.mode-selector` spec
@@ -7,17 +7,6 @@ import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } fro
  */
 
 const PLAN_AGENT_ID = '00000000-0000-4000-8000-0000000a6e73'
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function seedConversation(prefix: string, userId: string, agentId: string | null = null) {
 	const sql = getSql()

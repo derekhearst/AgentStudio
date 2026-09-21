@@ -60,7 +60,7 @@ test.describe('agent-tool-policy — unrestricted policy', () => {
 })
 
 test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)', () => {
-	test('readOnly strips destructive tools (shell, file_write, push_branch)', async () => {
+	test('readOnly strips destructive tools (Bash, Edit, push_branch)', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
 		const tools = [
@@ -78,7 +78,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 		expect(filterToolsByAgentPolicy(tools, policy)).toHaveLength(0)
 	})
 
-	test('readOnly keeps allow-listed tools (web_search, file_read, file_write, request_plan_approval)', async () => {
+	test('readOnly keeps allow-listed tools (web_search, Read, Write, request_plan_approval)', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
 		const tools = [

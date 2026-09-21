@@ -3,6 +3,8 @@ import {
 	authenticateContext,
 	cleanupPrefixedRecords,
 	expectRealAssistantReply,
+	getActiveUserId,
+	getBuiltinAgentId,
 	getSql,
 	uniquePrefix,
 } from './helpers'
@@ -21,22 +23,14 @@ import {
  * skip when env vars are missing, but the global setup already enforces them.
  */
 
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
-
 async function seedConversation(prefix: string, userId: string, mode: 'chat' | 'research' = 'chat') {
+	// `conversations.mode` was dropped when modes became agents; the posture now comes from
+	// the bound agent, so the same distinction is expressed by which built-in is attached.
+	const agentId = await getBuiltinAgentId(mode)
 	const sql = getSql()
 	const [row] = await sql<{ id: string }[]>`
-		insert into conversations (title, user_id, model, total_tokens, total_cost, mode)
-		values (${`${prefix} convo`}, ${userId}, 'anthropic/claude-sonnet-4', 0, '0', ${mode}::chat_mode)
+		insert into conversations (title, user_id, model, total_tokens, total_cost, agent_id)
+		values (${`${prefix} convo`}, ${userId}, 'claude-sonnet-5', 0, '0', ${agentId})
 		returning id
 	`
 	return row

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #15 phase 1 — Projects schema invariants.
@@ -8,17 +8,6 @@ import { getSql, uniquePrefix } from './helpers'
  * and cascade-on-user-delete behavior. Plus a small slugify pure-module test for the URL
  * generation rules.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupProjectPrefix(prefix: string) {
 	const sql = getSql()

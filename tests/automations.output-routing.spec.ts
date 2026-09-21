@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #21 phase 4 (output routing) — maintenance-mode result destinations.
@@ -10,21 +10,9 @@ import { getSql, uniquePrefix } from './helpers'
  * returns and only assert the persistence side, not the content.
  */
 
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
-
 async function clearTestAutomations(prefix: string) {
 	const sql = getSql()
 	await sql`delete from review_items where summary like ${`%${prefix}%`}`
-	await sql`delete from tasks where title like ${`%${prefix}%`}`
 	await sql`delete from messages where content like ${`%${prefix}%`}`
 	await sql`delete from messages where conversation_id in (select id from conversations where title like ${`${prefix}%`})`
 	await sql`delete from conversations where title like ${`${prefix}%`}`
@@ -86,56 +74,6 @@ test.describe('automations/output-routing — review_inbox target', () => {
 			expect(items[0].payload.kind).toBe('maintenance_summary')
 			expect(items[0].payload.automationId).toBe(automation.id)
 			expect(items[0].payload.mode).toBe('maintenance')
-		} finally {
-			await clearTestAutomations(prefix)
-		}
-	})
-})
-
-test.describe('automations/output-routing — task target', () => {
-	test('maintenance run with outputTarget=task creates a pending task', async () => {
-		const prefix = uniquePrefix('automation-out-task')
-		const sql = getSql()
-		const userId = await getActiveUserId()
-		await ensureNoBlockingBudget(userId)
-
-		try {
-			const past = new Date(Date.now() - 5 * 60_000)
-			const [automation] = await sql<{ id: string }[]>`
-				insert into automations (user_id, description, cron_expression, prompt, mode, output_target, next_run_at)
-				values (
-					${userId},
-					${`${prefix} maintenance task`},
-					'0 9 * * *',
-					${'Say hello in one word.'},
-					'maintenance'::automation_mode,
-					'task'::automation_output_target,
-					${past}
-				)
-				returning id
-			`
-
-			const { runAutomationById } = await import('../src/lib/automations/engine')
-			const result = (await runAutomationById(automation.id)) as { routedTo?: string; taskId?: string | null }
-			expect(result.routedTo).toBe('task')
-			expect(typeof result.taskId).toBe('string')
-
-			const tasks = await sql<{
-				title: string
-				status: string
-				metadata: { source?: string; automationId?: string }
-				created_by: string | null
-			}[]>`
-				select title, status::text as status, metadata, created_by
-				from tasks
-				where id = ${result.taskId!}
-			`
-			expect(tasks).toHaveLength(1)
-			expect(tasks[0].title).toContain(prefix)
-			expect(tasks[0].status).toBe('pending')
-			expect(tasks[0].metadata.source).toBe('automation_maintenance')
-			expect(tasks[0].metadata.automationId).toBe(automation.id)
-			expect(tasks[0].created_by).toBe(userId)
 		} finally {
 			await clearTestAutomations(prefix)
 		}

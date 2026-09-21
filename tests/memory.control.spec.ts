@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Issue #37 — storage contract for the memory control layer.
@@ -12,13 +12,6 @@ import { getSql, uniquePrefix } from './helpers'
  */
 
 /** Single-user auth (migration 0050): there is exactly one row in `users`. */
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`select id from users order by created_at asc limit 1`
-	if (!user) throw new Error('No user found')
-	return user.id
-}
-
 async function cleanupMemoryPrefix(prefix: string) {
 	const sql = getSql()
 	await sql`delete from memory_exclusion_rules where name like ${`${prefix}%`}`

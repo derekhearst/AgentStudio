@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #17 phase 5 finish — automation_run + automations_dispatch job migration contract.
@@ -15,17 +15,6 @@ import { getSql, uniquePrefix } from './helpers'
  * Live execution is exercised by the in-process scheduler tick + worker dispatch (the
  * dev server picks up due automations once they're enabled).
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupAutomationJobsPrefix(prefix: string) {
 	const sql = getSql()

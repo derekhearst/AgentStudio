@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #17 phase 5 partial — memory_mine job migration contract.
@@ -12,17 +12,6 @@ import { getSql, uniquePrefix } from './helpers'
  * Live mining still runs through the existing memory tests + the chat-stream live tests
  * (which now exercise the enqueue → worker → mineConversation path automatically).
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupMinePrefix(prefix: string) {
 	const sql = getSql()

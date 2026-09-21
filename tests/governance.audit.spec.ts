@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 3 #12 phase 1 — governance audit schema invariants.
@@ -10,17 +10,6 @@ import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
  * up in those tests' return values. This spec covers the schema directly: enum acceptance,
  * FK behavior on actor delete, the index shape used by the dashboard's filters.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 test.describe('governance/audit — schema invariants', () => {
 	test('inserting an audit event with all fields round-trips', async () => {
@@ -98,11 +87,10 @@ test.describe('governance/audit — schema invariants', () => {
 		await cleanupPrefixedRecords(prefix)
 		const sql = getSql()
 		try {
-			const [tempUser] = await sql<{ id: string }[]>`
-				insert into users (id, name, username, role)
-				values (${randomUUID()}, ${`${prefix} temp`}, ${`${prefix.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_u`}, 'user'::user_role)
-				returning id
-			`
+			// A foreign owner id with no user row: the instance is single-user
+			// (users_singleton refuses a second), and what is under test is ownership
+			// filtering, not whether another account exists.
+			const tempUser = { id: randomUUID() }
 			const [audit] = await sql<{ id: string }[]>`
 				insert into audit_events (actor_user_id, action, target_type, summary)
 				values (${tempUser.id}, 'agent.config.updated'::audit_action, 'agent', ${`${prefix}: by temp user`})

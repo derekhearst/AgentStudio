@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #17 phase 1 — durable job queue schema + lifecycle invariants.
@@ -17,17 +17,6 @@ import { getSql, uniquePrefix } from './helpers'
  * implicitly when a registered handler runs against a real job. This spec owns the durable
  * storage shape so a regression in the migration is caught immediately.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupJobsPrefix(prefix: string) {
 	const sql = getSql()

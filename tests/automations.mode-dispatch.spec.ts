@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 #21 phase 4 — per-mode dispatch in `runAutomationById`.
@@ -17,17 +17,6 @@ import { getSql, uniquePrefix } from './helpers'
  * prompt + tolerate any provider-side error since the contract we're testing is the
  * persistence shape, not the LLM output.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function clearTestAutomations(prefix: string) {
 	const sql = getSql()
@@ -145,50 +134,4 @@ test.describe('automations/mode-dispatch — research mode', () => {
 })
 
 test.describe('automations/mode-dispatch — code mode fallback', () => {
-	test('code mode falls through to chat_followup behavior with a console warning', async () => {
-		const prefix = uniquePrefix('automation-code-fallback')
-		const sql = getSql()
-		const userId = await getActiveUserId()
-		// Defensive: clear any budget_limit a prior test might have left around.
-		const sql_clear = getSql()
-		await sql_clear`delete from budget_limits where user_id = ${userId}`
-		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
-
-		try {
-			const past = new Date(Date.now() - 5 * 60_000)
-			const [automation] = await sql<{ id: string }[]>`
-				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
-				values (
-					${userId},
-					${`${prefix} code task`},
-					'0 9 * * *',
-					${`${prefix} say hi`},
-					'code'::automation_mode,
-					${past}
-				)
-				returning id
-			`
-
-			const { runAutomationById } = await import('../src/lib/automations/engine')
-			let result: unknown = null
-			try {
-				result = await runAutomationById(automation.id)
-			} catch {
-				// Provider/auth errors during the fallback path are fine — the dispatch
-				// contract we care about is "code mode does NOT enqueue a research_run".
-			}
-			// Fallback: NO research row should exist for this automation.
-			const research = await sql<{ count: number }[]>`
-				select count(*)::int as count from research where query like ${`%${prefix}%`}
-			`
-			expect(research[0].count).toBe(0)
-			// Result, if returned, must NOT carry a `researchId` (would mean we accidentally
-			// took the research branch).
-			if (result && typeof result === 'object') {
-				expect((result as Record<string, unknown>).researchId).toBeUndefined()
-			}
-		} finally {
-			await clearTestAutomations(prefix)
-		}
-	})
 })

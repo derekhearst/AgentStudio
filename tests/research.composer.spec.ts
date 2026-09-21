@@ -3,7 +3,7 @@ import { authenticateContext, getSql, uniquePrefix } from './helpers'
 
 /**
  * Deep Research is triggered by the Research agent writing a plan to a markdown file
- * (file_write + request_plan_approval), not via a separate composer
+ * (Write + request_plan_approval), not via a separate composer
  * button. These tests assert:
  *
  *   - The home page composer does NOT surface a "Start Deep Research" button.
@@ -54,7 +54,7 @@ test.describe('research/composer — agent-driven trigger', () => {
 		const sql = getSql()
 		try {
 			const [user] = await sql<{ id: string }[]>`
-				select id from users where is_active = true and deleted_at is null limit 1
+				select id from users order by created_at asc limit 1
 			`
 			if (!user) test.fail()
 

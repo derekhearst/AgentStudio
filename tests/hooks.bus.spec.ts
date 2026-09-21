@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 3 #13 phase 1 — hook_invocations log + bus contract.
@@ -15,17 +15,6 @@ import { cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
  * up. tests/automations.runtime.spec.ts already exercises that path; the rows will be visible
  * in hook_invocations after a successful run.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function setupRun(prefix: string, userId: string) {
 	const sql = getSql()

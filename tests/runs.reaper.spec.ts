@@ -117,12 +117,10 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		const otherUsername = `e2e_other_${randomUUID().slice(0, 12)}`
 
 		try {
-			// Seed a second user and assign the run to them.
-			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username, role, is_active)
-				values (${`${prefix} other`}, ${otherUsername}, 'user', true)
-				returning id
-			`
+			// A foreign owner id with no user row: the instance is single-user
+			// (users_singleton refuses a second), and what is under test is ownership
+			// filtering, not whether another account exists.
+			const otherUser = { id: randomUUID() }
 			const conversationId = await seedConversation(prefix, otherUser.id)
 			const runId = await seedRun({
 				conversationId,

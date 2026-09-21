@@ -202,42 +202,22 @@ export async function seedAgent(
 	return row
 }
 
-export async function seedTask(
-	prefix: string,
-	agentId: string,
-	overrides?: {
-		title?: string
-		description?: string
-		status?: 'pending' | 'running' | 'review' | 'completed' | 'failed'
-		priority?: number
-	},
-) {
-	const sql = getSql()
-	const [row] = await sql<{ id: string; title: string }[]>`
-		insert into agent_tasks (agent_id, title, description, status, priority, result)
-		values (
-			${agentId},
-			${overrides?.title ?? `${prefix} Task`},
-			${overrides?.description ?? `${prefix} task description`},
-			${overrides?.status ?? 'pending'},
-			${overrides?.priority ?? 2},
-			'{}'::jsonb
-		)
-		returning id, title
-	`
-	return row
-}
-
 /**
  * Resolve the built-in Chat agent id. Conversations require a non-null agent_id after the
  * modes-into-agents migration; tests that don't care about which agent the conversation is
  * bound to fall back to this helper.
  */
-export async function getBuiltinChatAgentId(): Promise<string> {
+export async function getBuiltinAgentId(key: 'chat' | 'research' | 'plan' | 'autonomous'): Promise<string> {
 	const sql = getSql()
-	const [row] = await sql<{ id: string }[]>`select id from agents where builtin_key = 'chat' limit 1`
-	if (!row) throw new Error('Built-in Chat agent not seeded — restart dev server to run seedBuiltinAgents()')
+	const [row] = await sql<{ id: string }[]>`select id from agents where builtin_key = ${key} limit 1`
+	if (!row) {
+		throw new Error(`Built-in ${key} agent not seeded — restart the dev server to run seedBuiltinAgents()`)
+	}
 	return row.id
+}
+
+export async function getBuiltinChatAgentId(): Promise<string> {
+	return getBuiltinAgentId('chat')
 }
 
 export async function seedConversation(
@@ -654,4 +634,26 @@ export async function cleanupExtendedPrefix(prefix: string): Promise<void> {
 
 	// Then run the legacy cleanup for the older domains (agents/conversations/messages/etc).
 	await cleanupPrefixedRecords(prefix)
+}
+
+/**
+ * The instance's user.
+ *
+ * Every spec used to carry its own copy of this, all of them filtering on
+ * `is_active`/`deleted_at` and ordering by `role = 'admin'` — columns migration 0050
+ * dropped when the app became single-user. That broke 52 spec files at once, and because
+ * nothing in CI runs the suite it stayed broken silently.
+ *
+ * One copy now, and it asks the only question a single-user instance can answer: which
+ * user is there.
+ */
+export async function getActiveUserId(): Promise<string> {
+	const sql = getSql()
+	const [user] = await sql<{ id: string }[]>`select id from users order by created_at asc limit 1`
+	if (!user) {
+		throw new Error(
+			'No user found. The instance is not provisioned — run the setup flow, or seed one the way global-setup does.',
+		)
+	}
+	return user.id
 }

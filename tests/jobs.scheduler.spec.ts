@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #17 phase 4 — in-process job scheduler contract.
@@ -14,17 +14,6 @@ import { getSql, uniquePrefix } from './helpers'
  * exercised via dynamic import. Live tick-driven dispatch is exercised by the boot flow:
  * the dev server registers workspace_gc at boot and the worker picks it up.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupSchedulerPrefix(prefix: string) {
 	const sql = getSql()

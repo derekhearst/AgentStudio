@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 const BASE_URL = 'http://127.0.0.1:4173'
 const STREAM_TIMEOUT_MS = 90_000
@@ -72,18 +72,6 @@ async function seedConversationOwnedBy(userId: string, prefix: string) {
 		returning id
 	`
 	return row.id
-}
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users
-		where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
 }
 
 async function readChatRun(conversationId: string) {
@@ -193,7 +181,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 		await setApprovalRequiredTools(userId, ['*'])
 
 		const conversationId = await seedConversationOwnedBy(userId, prefix)
-		const prompt = `Use the shell tool to run the command \`echo "${prefix}-payload"\`. Do not produce any other tool calls or text first.`
+		const prompt = `Use the Bash tool to run the command \`echo "${prefix}-payload"\`. Do not produce any other tool calls or text first.`
 
 		const cookie = await buildCookieHeader(context)
 		const abort = new AbortController()
@@ -379,7 +367,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 		await setApprovalRequiredTools(userId, ['*'])
 
 		const conversationId = await seedConversationOwnedBy(userId, prefix)
-		const prompt = `Use the shell tool to run \`echo "${prefix}-resume"\`. No other output first.`
+		const prompt = `Use the Bash tool to run \`echo "${prefix}-resume"\`. No other output first.`
 
 		const cookie = await buildCookieHeader(context)
 		const initialAbort = new AbortController()

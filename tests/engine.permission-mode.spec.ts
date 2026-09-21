@@ -138,7 +138,7 @@ test.describe('permission-mode — plan', () => {
 
 	test('plan mode and the Plan agent compose: the plan file write is asked for, not refused', () => {
 		// The Plan agent writes PLAN.md and hands the path to request_plan_approval (see
-		// READ_ONLY_TOOL_NAMES in $lib/agents/builtin-agents.server.ts). Denying file_write
+		// READ_ONLY_TOOL_NAMES in $lib/agents/builtin-agents.server.ts). Denying Write
 		// outright would break that handoff, so plan mode surfaces it for approval instead.
 		const write = resolveToolGate({ mode: 'plan', toolName: 'Write', settingsRequiresApproval: false })
 		expect(write.gate).toBe('ask')
@@ -274,7 +274,7 @@ test.describe('permission-mode — parsing and metadata', () => {
 
 	test('stripToolNamespace handles bare and MCP-qualified names', () => {
 		expect(stripToolNamespace('Write')).toBe('Write')
-		expect(stripToolNamespace('mcp__agentstudio__file_write')).toBe('Write')
+		expect(stripToolNamespace('mcp__agentstudio__Write')).toBe('Write')
 		expect(stripToolNamespace('mcp__agentstudio__push_branch')).toBe('push_branch')
 	})
 })

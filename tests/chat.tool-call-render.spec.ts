@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 5 Tier 2 + #19 P3 — chat UI rendering of the merged ToolCallCard.
@@ -14,17 +14,6 @@ import { authenticateContext, cleanupPrefixedRecords, getSql, uniquePrefix } fro
  * depend on an LLM round-trip. The same approach as the existing chat.askuser-render
  * spec — exercises the chat-detail page's block rendering for finalized messages.
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function seedConversationWithToolBlock(
 	prefix: string,

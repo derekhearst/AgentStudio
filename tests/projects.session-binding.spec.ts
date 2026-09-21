@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { getSql, uniquePrefix } from './helpers'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
 /**
  * Wave 4 #15 phase 2 finish — sessions.project_id binding contract.
@@ -13,17 +14,6 @@ import { getSql, uniquePrefix } from './helpers'
  *   - deleting the bound project leaves a stale conversation.project_id pointer until the
  *     application notices (intentional — preserves the audit chain even after project GC)
  */
-
-async function getActiveUserId() {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`
-		select id from users where is_active = true and deleted_at is null
-		order by case when role = 'admin' then 0 else 1 end, created_at asc
-		limit 1
-	`
-	if (!user) throw new Error('No active user found')
-	return user.id
-}
 
 async function cleanupSessionBindingPrefix(prefix: string) {
 	const sql = getSql()
@@ -149,12 +139,10 @@ test.describe('projects/session-binding — conversations.project_id round-trip'
 		const sql = getSql()
 		try {
 			const userId = await getActiveUserId()
-			// Fake "other user" + their project.
-			const [otherUser] = await sql<{ id: string }[]>`
-				insert into users (name, username, role, is_active)
-				values ('Other', ${`other-${prefix}`}, 'user', true)
-				returning id
-			`
+			// A foreign owner id with no user row: the instance is single-user
+			// (users_singleton refuses a second), and what is under test is ownership
+			// filtering, not whether another account exists.
+			const otherUser = { id: randomUUID() }
 			const [otherProject] = await sql<{ id: string }[]>`
 				insert into projects (user_id, name, slug) values (${otherUser.id}, ${`${prefix} other`}, ${`${prefix}-other`}) returning id
 			`
