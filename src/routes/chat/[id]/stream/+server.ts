@@ -193,6 +193,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	try {
 		engineOptions = buildEngineOptions({
 			model: routedModel,
+			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
 			allowedTools: scopedTools,
 			resumeSessionId: conversation.sdkSessionId ?? undefined,
@@ -278,6 +279,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				const totalMs = Date.now() - startedAt
 				const claudeRun = isClaudeModel(routedModel)
+				const tokensPerSec =
+					totalMs > 0 && summary.usage.outputTokens > 0
+						? Math.round((summary.usage.outputTokens / (totalMs / 1000)) * 100) / 100
+						: null
 
 				// Subscription runs have no per-token price, so record tokens and force the
 				// dollar figure to zero rather than inventing one from list pricing.
@@ -302,13 +307,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					content: summary.text || '(no output)',
 					promptTokens: summary.usage.inputTokens,
 					completionTokens: summary.usage.outputTokens,
-					ttftMs: null,
+					ttftMs: summary.ttftMs,
 					totalMs,
-					tokensPerSec: null,
+					tokensPerSec,
 					cost: messageCost,
 					metadata: {
 						modelSelection,
 						reasoningEffort,
+						reasoningTokens: summary.reasoningTokens,
 						tokensCacheWrite: summary.usage.cacheCreationTokens,
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
@@ -365,10 +371,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					tokensOut: summary.usage.outputTokens,
 					tokensCacheWrite: summary.usage.cacheCreationTokens,
 					tokensCacheRead: summary.usage.cacheReadTokens,
-					reasoningTokens: 0,
-					ttftMs: null,
+					reasoningTokens: summary.reasoningTokens,
+					ttftMs: summary.ttftMs,
 					totalMs,
-					tokensPerSec: null,
+					tokensPerSec,
 					cost: parseFloat(messageCost),
 					modelSelection,
 					subscription: claudeRun,

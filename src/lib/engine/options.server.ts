@@ -16,7 +16,7 @@
  * switch, not something to blend.
  */
 
-import type { Options, PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import type { EffortLevel, Options, PermissionMode, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
 
@@ -28,8 +28,36 @@ export function isClaudeModel(model: string): boolean {
 	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
 }
 
+/** AgentStudio's six-level control mapped onto the SDK's five effort levels. */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+const EFFORT_MAP: Record<Exclude<ReasoningEffort, 'none'>, EffortLevel> = {
+	minimal: 'low',
+	low: 'low',
+	medium: 'medium',
+	high: 'high',
+	xhigh: 'xhigh',
+}
+
+/**
+ * Current models take `thinking: {type:'adaptive'}` and control depth with
+ * `effort`; the fixed token-budget form is deprecated. 'none' turns thinking
+ * off outright, which also means no `reasoning` frames reach the UI.
+ */
+export function resolveThinking(effort: ReasoningEffort | undefined): {
+	thinking: ThinkingConfig
+	effort?: EffortLevel
+} {
+	if (!effort || effort === 'none') return { thinking: { type: 'disabled' } }
+	// `display` defaults to 'omitted' on current models, which streams thinking
+	// blocks with empty text — the UI would show a long pause and no reasoning.
+	// 'summarized' is what makes the `reasoning` frames carry content.
+	return { thinking: { type: 'adaptive', display: 'summarized' }, effort: EFFORT_MAP[effort] }
+}
+
 export type EngineOptionsInput = {
 	model: string
+	reasoningEffort?: ReasoningEffort
 	tools: ToolServerContext
 	/** Tool names (bare) the run is allowed to call. Omit for all of them. */
 	allowedTools?: string[]
@@ -74,8 +102,12 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 
 	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
 
+	const { thinking, effort } = resolveThinking(input.reasoningEffort)
+
 	return {
 		model: input.model,
+		thinking,
+		...(effort ? { effort } : {}),
 		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools) },
 		...(input.allowedTools ? { allowedTools: input.allowedTools.map(qualifiedToolName) } : {}),
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),

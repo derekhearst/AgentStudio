@@ -61,6 +61,13 @@ export type EngineRunSummary = {
 	durationMs: number
 	numTurns: number
 	error: string | null
+	/** Time to first token, straight from the SDK result. */
+	ttftMs: number | null
+	/**
+	 * Thinking tokens, accumulated from the SDK's `thinking_tokens` system
+	 * frames. The SDK calls these estimates, so treat them as such.
+	 */
+	reasoningTokens: number
 	/**
 	 * Sequence id of the last frame emitted here. The caller MUST continue its own
 	 * numbering from this — the resume endpoint replays "events with id strictly
@@ -91,6 +98,7 @@ export async function runEngineStream(
 
 	let sessionId: string | null = null
 	let finalText = ''
+	let reasoningTokens = 0
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
 
@@ -145,6 +153,11 @@ export async function runEngineStream(
 		if (typeof msg.session_id === 'string' && !sessionId) {
 			sessionId = msg.session_id
 			input.onSessionId?.(sessionId)
+		}
+
+		if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
+			reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
+			continue
 		}
 
 		// Token-level text and thinking, from includePartialMessages.
@@ -219,6 +232,8 @@ export async function runEngineStream(
 				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
 				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
 				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+				ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
+				reasoningTokens,
 				lastSeq: seq,
 			}
 		}
@@ -233,6 +248,8 @@ export async function runEngineStream(
 		durationMs: 0,
 		numTurns: 0,
 		error: null,
+		ttftMs: null,
+		reasoningTokens,
 		lastSeq: seq,
 	}
 }
