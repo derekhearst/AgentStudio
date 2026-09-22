@@ -117,7 +117,7 @@
 				<div class="flex flex-1 flex-wrap items-start justify-between gap-2">
 					<div class="min-w-0 flex-1">
 						<div class="flex flex-wrap items-center gap-2">
-							<h1 class="text-lg font-bold leading-tight sm:text-xl">{r.label ?? '(unnamed run)'}</h1>
+							<h2 class="text-lg font-bold leading-tight sm:text-xl">{r.label ?? '(unnamed run)'}</h2>
 							<span class="badge badge-sm {stateTone(r.state)}">{r.state}</span>
 							<span class="badge badge-sm badge-outline">{r.source}</span>
 						</div>

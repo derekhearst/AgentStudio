@@ -250,12 +250,12 @@
 										<button class="btn btn-ghost btn-xs" onclick={cancelEdit}>Cancel</button>
 									</div>
 								{:else}
-									<h1 class="text-2xl font-bold">
+									<h2 class="text-2xl font-bold">
 										<button class="hover:text-primary" onclick={() => startEdit('name')} title="Edit name">{s.name}</button>
 										{#if isSystemSkill}
 											<span class="badge badge-primary badge-sm align-middle">built-in</span>
 										{/if}
-									</h1>
+									</h2>
 								{/if}
 
 								{#if editingField === 'description'}

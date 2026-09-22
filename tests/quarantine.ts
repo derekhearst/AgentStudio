@@ -30,7 +30,7 @@ export const LIVE_SPECS: readonly string[] = [
 ]
 
 /**
- * Meant to get shorter. 42 → 38 → 31 → 28.
+ * Meant to get shorter. 42 → 38 → 31 → 28 → 23.
  *
  * A warning for whoever works on the rest. Run these as a subset and nearly all pass; run
  * the whole suite and most of them fail. They are not simply stale — they interfere, and
@@ -43,11 +43,9 @@ export const LIVE_SPECS: readonly string[] = [
  * settings re-reading cached remote queries after every mutation, and a missing VAPID
  * config failing a notification that had already been written.
  *
- * Count on 2026-09-21: 28.
+ * Count on 2026-09-21: 23.
  */
 export const KNOWN_FAILING: readonly string[] = [
-	'tests/agents.builtin-agents.spec.ts',
-	'tests/agents.spec.ts',
 	'tests/automations.budget-gate.spec.ts',
 	'tests/automations.mode.spec.ts',
 	'tests/automations.runtime.spec.ts',
@@ -64,15 +62,14 @@ export const KNOWN_FAILING: readonly string[] = [
 	'tests/crud/mobile/navigation.crud.spec.ts',
 	'tests/crud/projects.crud.spec.ts',
 	'tests/crud/research.crud.spec.ts',
-	'tests/governance.audit.spec.ts',
 	'tests/observability.review.spec.ts',
 	'tests/projects.session-binding.spec.ts',
 	'tests/projects.tools.spec.ts',
-	'tests/research.composer.spec.ts',
-	'tests/runs.reaper.spec.ts',
 	'tests/source-control.github-webhook.spec.ts',
 	'tests/source-control.read-tools.spec.ts',
 	'tests/source-control.spec.ts',
+	// Screenshot baselines are platform-specific (`-win32.png`), so this can never pass on
+	// a Linux runner. It needs Linux baselines generated in CI before it can come off.
 	'tests/visual.spec.ts',
 ]
 

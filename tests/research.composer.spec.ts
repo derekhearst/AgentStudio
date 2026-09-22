@@ -42,7 +42,13 @@ test.describe('research/composer — agent-driven trigger', () => {
 		await authenticateContext(page.context())
 		await page.goto('/research')
 		await expect(page.getByRole('heading', { name: /^Research$/ })).toBeVisible()
-		await expect(page.getByText(/Multi-step Deep Research runs/i)).toBeVisible()
+		// The "Multi-step Deep Research runs" blurb this used to look for is gone. The page's
+		// own description now lives in PageHeader's subtitle, which renders only in the
+		// mobile header, so assert on the feed filters instead — they are the page's actual
+		// entry point and they render at every width.
+		for (const label of ['All', 'Research', 'Images']) {
+			await expect(page.getByRole('button', { name: label, exact: true })).toBeVisible()
+		}
 	})
 
 	test('research row schema accepts a pre-seeded plan (post-handoff runner path)', async () => {
@@ -58,12 +64,16 @@ test.describe('research/composer — agent-driven trigger', () => {
 			`
 			if (!user) test.fail()
 
-			const seededPlan = JSON.stringify([
+			// `sql.json(...)`, not `JSON.stringify(...)::jsonb`. postgres.js sends a JS string
+			// as a text parameter, so the cast stored a JSON *scalar* — the column held
+			// `"[\"...\"]"` rather than an array, and `Array.isArray` was right to say no.
+			// The schema was never the problem; the insert was.
+			const seededPlan = [
 				'What is the current consensus on X?',
 				'What evidence supports the consensus?',
 				'What are the main disagreements?',
 				'What recent developments could shift the consensus?',
-			])
+			]
 			const [r] = await sql<{
 				id: string
 				query: string
@@ -77,7 +87,7 @@ test.describe('research/composer — agent-driven trigger', () => {
 					${`${prefix} agent-driven query`},
 					'planning'::research_status,
 					NULL,
-					${seededPlan}::jsonb
+					${sql.json(seededPlan)}
 				)
 				returning id, query, status::text as status, conversation_id, plan
 			`
@@ -85,6 +95,11 @@ test.describe('research/composer — agent-driven trigger', () => {
 			expect(r.status).toBe('planning')
 			expect(Array.isArray(r.plan)).toBe(true)
 			expect(r.plan.length).toBe(4)
+			const [stored] = await sql<{ t: string; n: number }[]>`
+				select jsonb_typeof(plan) as t, jsonb_array_length(plan) as n from research where id = ${r.id}
+			`
+			expect(stored.t, 'the column must hold a jsonb array, not a stringified one').toBe('array')
+			expect(stored.n).toBe(4)
 		} finally {
 			await cleanupResearchPrefix(prefix)
 		}

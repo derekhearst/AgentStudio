@@ -82,32 +82,25 @@ test.describe('governance/audit — schema invariants', () => {
 		}
 	})
 
-	test('actor FK SET NULL on user delete preserves the audit row for compliance', async () => {
-		const prefix = uniquePrefix('audit-fk')
-		await cleanupPrefixedRecords(prefix)
+	test('the actor FK is declared ON DELETE SET NULL so audit rows survive a user delete', async () => {
+		// This used to insert an audit row against a randomly generated user id and then
+		// "delete the user". There was never a user: `actor_user_id` is a real foreign key,
+		// so the insert itself failed. Nor can the scenario be staged for real — a unique
+		// index on `(true)` makes `users` single-row, and deleting the one account the whole
+		// suite shares to watch a cascade is not a trade worth making.
+		//
+		// The claim worth protecting is the schema rule: if the FK were ever changed to
+		// CASCADE, deleting an account would erase its audit trail. Postgres records the
+		// rule in the catalog, so assert it there. `confdeltype` is 'n' for SET NULL, 'c'
+		// for CASCADE, 'a' for NO ACTION, 'r' for RESTRICT.
 		const sql = getSql()
-		try {
-			// A foreign owner id with no user row: the instance is single-user
-			// (users_singleton refuses a second), and what is under test is ownership
-			// filtering, not whether another account exists.
-			const tempUser = { id: randomUUID() }
-			const [audit] = await sql<{ id: string }[]>`
-				insert into audit_events (actor_user_id, action, target_type, summary)
-				values (${tempUser.id}, 'agent.config.updated'::audit_action, 'agent', ${`${prefix}: by temp user`})
-				returning id
-			`
-
-			// Hard-delete the user.
-			await sql`delete from users where id = ${tempUser.id}`
-
-			const [after] = await sql<{ actor_user_id: string | null; summary: string }[]>`
-				select actor_user_id, summary from audit_events where id = ${audit.id}
-			`
-			expect(after.actor_user_id, 'audit row survives user delete').toBeNull()
-			expect(after.summary).toContain(prefix)
-		} finally {
-			await cleanupPrefixedRecords(prefix)
-		}
+		const [constraint] = await sql<{ confdeltype: string }[]>`
+			select confdeltype
+			from pg_constraint
+			where conname = 'audit_events_actor_user_id_users_id_fk'
+		`
+		expect(constraint, 'the actor foreign key is missing entirely').toBeDefined()
+		expect(constraint.confdeltype, 'deleting a user must null the actor, never delete the audit row').toBe('n')
 	})
 
 	test('filtering by action + target_type uses the indexes', async () => {
