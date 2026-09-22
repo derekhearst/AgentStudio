@@ -174,6 +174,21 @@ row at all. The parity doc still scores "session cost accounting" as a **win**; 
 accounting still works, but the per-tool-call ledger is now thin enough that #38's "spend by
 tool" digest would be misleading if built on it today.
 
+**Fixed.** The engine reports every completed call to its caller (`onToolResult`) and the
+chat route writes a row for each one — `unitType: 'call'`, cost zero, carrying the edited
+path or the command string taken from the typed result.
+
+Worth being precise about what that does and does not fix. These calls run locally and spend
+no money; their real price is tokens, already accounted per run. So this restores **call
+counts, not spend** — the same thing `web_search` has always done for the self-hosted SearXNG
+backend ("cost defaults to 0 but the call count is still tracked"). Budget limits sum `cost`,
+so a ledger full of zero-cost rows cannot move a limit, deliberately: inventing a price for a
+local `Read` would corrupt the one number in this system that is allowed to block a run.
+
+So #38's "most-used tools" and `/activity`'s picture of what happened are now answerable.
+Its "spend by model / by agent / by automation" was always the `llm_usage` ledger's job and
+is unaffected either way.
+
 ---
 
 ## Issue by issue
