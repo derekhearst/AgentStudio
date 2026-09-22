@@ -143,6 +143,28 @@ Fix is a choice, not a puzzle: either delete `search_tools` and this slot text f
 engine path, or re-implement gating for real against the MCP server. Given the whole
 registry is ~50 tools and the built-ins carry the hot path now, I would delete it.
 
+**Fixed.** `search_tools` is no longer registered on the engine surface
+(`ENGINE_EXCLUDED_TOOLS` in `src/lib/engine/builtin-tools.ts`) and both tool-policy
+variants dropped the deferred-loading paragraphs. The old loop keeps its copy, because
+gating is genuinely live there — `getToolDefinitions` filters by `toolDisclosure` tier, so
+a subagent really does need the escape hatch until `$lib/runtime` goes with #5/#8.
+
+**And the same defect, one level worse: `run_code` cannot run on the engine path at all.**
+`runCodeTool` throws unless `toolUserContext` carries a `runtime` — it needs
+`currentToolNames()` to decide what the script may call, and a `session` to route the
+approvals its nested calls go through. The only code that ever supplies one is
+`$lib/runtime/tool-handlers.server:359`. The engine passes a workspace with no runtime, so
+every engine-path call ends at *"run_code requires runtime context … It can only be invoked
+from inside the chat loop."*
+
+It was registered anyway, with a ~1,200-character description — the longest in the registry
+— shipping in the tool definitions of every request, and a wasted round every time the model
+believed it. It is now excluded alongside `search_tools`. Note what this means for the
+parity table above: **`run_code` is a `broken` row, not an `even` one.** "Every tool is
+callable from inside the script" has not been true on this path since the engine migration.
+Restoring it means giving the engine its own approval route for nested calls, which is a
+piece of work in its own right, not a line change.
+
 **The per-tool-call cost ledger covers three tools.** `logToolUsage` has exactly two callers
 outside its own module — `handlers/web.server.ts:27` and `handlers/media.server.ts:41`.
 Built-in `Read` / `Write` / `Edit` / `Bash` calls never reach `onExecuted`

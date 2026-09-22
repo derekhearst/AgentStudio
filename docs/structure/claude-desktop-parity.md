@@ -69,7 +69,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | --- | --- | --- | --- |
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
-| Code execution | **even** | `run_code` in Bun, sandboxed, and every tool is callable from inside the script — better for fan-out, no chart output | analysis tool / sandboxed Python, renders charts |
+| Code execution | **broken** | `run_code` throws on the engine path — it needs a runtime context only the old loop supplies, so every call since the engine migration has returned "can only be invoked from inside the chat loop". Unregistered from the engine surface rather than left advertised; see the re-audit | analysis tool / sandboxed Python, renders charts |
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
