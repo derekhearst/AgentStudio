@@ -8,6 +8,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      update_snapshots:
+        description: >-
+          Regenerate visual-regression baselines and upload them as an artifact.
+          Screenshot baselines are per-platform, so the Linux set has to be produced on
+          the runner that will compare against it — generating it on a developer machine,
+          or in a local container with different fonts, yields a baseline that does not
+          match. Download the artifact, commit it, and let a normal run verify.
+        type: boolean
+        default: false
 
 # A PR that gets three pushes in a minute does not need three full runs; keep the newest.
 # `main` is not cancelled — a push there is a merge someone will read the result of.
@@ -93,7 +103,28 @@ jobs:
         run: mkdir -p "$SANDBOX_WORKSPACE"
 
       - name: Run tests
+        if: ${{ github.event.inputs.update_snapshots != 'true' }}
         run: bunx playwright test
+
+      # Baseline regeneration. Only the visual specs, and `--update-snapshots` makes the
+      # run write rather than compare, so it says nothing about whether the suite passes.
+      - name: Regenerate visual baselines
+        if: ${{ github.event.inputs.update_snapshots == 'true' }}
+        # `E2E_QUARANTINE=0` so this still works while visual.spec.ts is on the quarantine
+        # list — otherwise `testIgnore` filters it out and the run finds no tests, which
+        # exits successfully and uploads nothing. The explicit path keeps the scope to the
+        # visual specs regardless.
+        env:
+          E2E_QUARANTINE: '0'
+        run: bunx playwright test tests/visual.spec.ts --update-snapshots
+
+      - name: Upload regenerated baselines
+        if: ${{ github.event.inputs.update_snapshots == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines-linux
+          path: tests/visual.spec.ts-snapshots/
+          retention-days: 7
 
       - name: Upload report on failure
         if: failure()
