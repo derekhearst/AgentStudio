@@ -217,10 +217,14 @@ The following components implement the canonical desktop and mobile shells. Doma
 
 | Zone             | Component                               | Notes                                                                                       |
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Left rail        | `src/lib/ui/Sidebar.svelte`             | w-48 (tablet), w-56 (desktop). Contains nav groups, RunningSessionsDock, and settings link. |
-| Running sessions | `src/lib/ui/RunningSessionsDock.svelte` | Renders inside left rail above settings. Live SSE from `/api/chat/monitor`.                 |
-| Center canvas    | `<main>` in `src/routes/+layout.svelte` | Thread, HUD, composer. Responsive rounding on tablet+.                                      |
-| Right workbench  | `src/lib/ui/SidePanel.svelte`           | 320 px aside panel. Mode-aware content (RecentChats, SkillStats, …).                        |
+| Left rail        | `src/lib/chat-console/ConsoleNavContent.svelte` | Nav groups, recent chats, and a collapsible "Manage" section for the system pages. |
+| Center canvas    | `<main>` in `src/lib/chat-console/ChatConsoleShell.svelte` | Thread and composer.                                             |
+| Right rail       | `src/lib/chat-console/ChatConsoleRail.svelte` | Shown on chat and home only (`showRail`).                                           |
+
+> This table described a layout built around `src/lib/ui/Sidebar.svelte`, `RunningSessionsDock.svelte`
+> and `SidePanel.svelte`. The console redesign replaced all three and none of them were
+> still imported by anything; they were deleted along with the rest of the dead components.
+> The rows above name what actually renders now.
 
 ### Mobile (< `tablet` breakpoint)
 

@@ -96,7 +96,6 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
 
-The `PromptPreviewPanel` component provides an inline preview of how the assembled system prompt will look given current settings, used on the agent and settings pages.
 
 ## Roles & Permissions
 
