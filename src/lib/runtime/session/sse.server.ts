@@ -32,9 +32,13 @@ export function createSseSession(opts: SseSessionOptions): Session & {
 	/** Set false by the safe-controller wrapper if the client disconnects mid-stream. */
 	disconnect(): void
 	/**
-	 * Duck-typed safe controller wrapper for legacy callers (runInlineSubagent) that take a
+	 * Duck-typed safe controller wrapper for callers that take a
 	 * `ReadableStreamDefaultController<Uint8Array>` directly. Shares the same `clientConnected`
 	 * flag as the Session so a disconnect propagates to both surfaces.
+	 *
+	 * Its last caller was `runInlineSubagent`, deleted with #5 — the chat path delegates
+	 * through the SDK now and never builds a second session. Kept because the wrapper is
+	 * also what makes a mid-stream disconnect safe for the Session itself.
 	 */
 	readonly safeController: ReadableStreamDefaultController<Uint8Array>
 } {

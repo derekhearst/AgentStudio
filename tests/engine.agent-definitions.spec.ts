@@ -4,6 +4,7 @@ import {
 	agentDefinitionFrom,
 	agentKey,
 	buildAgentDefinitions,
+	qualifyAgentTools,
 	type AgentRowForDefinition,
 } from '../src/lib/engine/agent-definitions'
 
@@ -12,9 +13,9 @@ import {
  *
  * Pure-function tests: no DB, no SvelteKit, so this runs without Postgres or a dev server.
  *
- * Nothing wires these into a run yet — that is the rest of #5, and it needs the loop to
- * route messages by `parent_tool_use_id` first. These pin the decisions so that wiring
- * cannot quietly change them.
+ * `loadSubagentDefinitions` (the server half) feeds the result into `Options.agents`, so a
+ * `Task` call naming one of these keys reaches that agent. These pin the decisions the
+ * wiring depends on.
  */
 
 function row(overrides: Partial<AgentRowForDefinition> = {}): AgentRowForDefinition {
@@ -45,6 +46,22 @@ test.describe('what is offered to the model', () => {
 
 	test('an agent with no prompt is not offered', () => {
 		expect(agentDefinitionFrom(row({ prompt: '   ' }), { parentIsClaude: true })).toBeNull()
+	})
+
+	test("an in-house tool is namespaced, an SDK built-in is not", () => {
+		// The failure this prevents is silent: the SDK reads a `tools` entry that matches
+		// nothing as "this agent has no such tool", so a bare `file_write` would leave a
+		// scoped agent with a shorter surface than its config asked for and no error anywhere.
+		expect(qualifyAgentTools(['file_write', 'Read', 'web_search'])).toEqual([
+			'mcp__agentstudio__file_write',
+			'Read',
+			'mcp__agentstudio__web_search',
+		])
+
+		const scoped = agentDefinitionFrom(row({ allowedTools: ['file_write'] }), {
+			parentIsClaude: true,
+		})
+		expect(scoped?.definition.tools).toEqual(['mcp__agentstudio__file_write'])
 	})
 
 	test('every subagent is refused ask_user', () => {

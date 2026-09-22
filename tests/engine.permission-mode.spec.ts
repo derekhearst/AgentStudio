@@ -312,4 +312,23 @@ test.describe('permission-mode — capabilities rather than literal names', () =
 			resolveToolGate({ mode: 'acceptEdits', toolName: 'Bash', settingsRequiresApproval: true }).gate,
 		).toBe('ask')
 	})
+
+	test('Task counts as a mutation, so plan mode refuses to delegate (#5)', () => {
+		// A `Task` call changes nothing by itself — what it costs is decided by the child.
+		// Plan mode hands the SDK 'default', and nothing here has established that a child's
+		// own calls reach `canUseTool`, so delegation would be an unobserved channel out of
+		// a read-only mode. Refused until that is proven, not assumed safe.
+		expect(toolCapabilities('Task').has('read')).toBe(false)
+		expect(toolCapabilities('Task').has('mutate')).toBe(true)
+		expect(resolveToolGate({ mode: 'plan', toolName: 'Task', settingsRequiresApproval: false }).gate).toBe(
+			'deny',
+		)
+		// It is ordinary work in every other mode: the settings decide, as for any tool.
+		expect(
+			resolveToolGate({ mode: 'default', toolName: 'Task', settingsRequiresApproval: false }).gate,
+		).toBe('allow')
+		expect(
+			resolveToolGate({ mode: 'default', toolName: 'Task', settingsRequiresApproval: true }).gate,
+		).toBe('ask')
+	})
 })

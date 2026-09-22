@@ -17,8 +17,9 @@
  */
 
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
-import { BUILTIN_TOOL_SET, DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
+import { BUILTIN_TOOL_SET, DISALLOWED_BUILTIN_TOOLS, SUBAGENT_TOOL } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
+import type { EngineAgentDefinition } from './agent-definitions'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
@@ -113,6 +114,12 @@ export type EngineOptionsInput = {
 	 * existed in name, though not the one it had in fact.
 	 */
 	projectSettingsTrusted?: boolean | null
+	/**
+	 * The agents this run may delegate to, keyed by the name a `Task` call gives (#5).
+	 * Built by `./agent-definitions.server`. Omitted or empty means no delegation — the
+	 * SDK's own general-purpose agent is still reachable, but nothing of ours is.
+	 */
+	agents?: Record<string, EngineAgentDefinition>
 }
 
 /**
@@ -162,6 +169,7 @@ export {
 	BUILTIN_SHELL_TOOLS,
 	BUILTIN_TOOL_SET,
 	DISALLOWED_BUILTIN_TOOLS,
+	SUBAGENT_TOOL,
 } from './builtin-tools'
 
 /**
@@ -190,6 +198,8 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 
 	const { thinking, effort } = resolveThinking(input.reasoningEffort)
 
+	const agents = input.agents && Object.keys(input.agents).length > 0 ? input.agents : null
+
 	// Second application of the same rule the caller should already have applied. Idempotent,
 	// and it means no future caller can hand the SDK a bypass it is not entitled to.
 	const effectiveMode = resolveEffectivePermissionMode({
@@ -213,6 +223,10 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 							.filter((name) => !BUILTIN_TOOL_SET.has(name))
 							.map(qualifiedToolName),
 						...input.allowedTools.filter((name) => BUILTIN_TOOL_SET.has(name)),
+						// Delegation is only reachable through `Task`, so a scoped run that was
+						// given agents has to be allowed to call it — otherwise the definitions
+						// are described in the prompt and the tool that uses them is filtered out.
+						...(agents ? [SUBAGENT_TOOL] : []),
 					],
 				}
 			: {}),
@@ -249,6 +263,18 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		// Needed for token-level `delta` frames; without it text only arrives in
 		// whole-message chunks and the UI loses its typing effect.
 		includePartialMessages: true,
+		...(agents ? { agents } : {}),
+		/*
+		 * Without this the SDK forwards only a subagent's tool_use/tool_result blocks —
+		 * "enough for a heartbeat counter", as its own docs put it. The subagent card shows
+		 * what a delegated agent said, which is the half that is omitted by default; the
+		 * routing in `./stream.server` keeps it out of the parent's reply.
+		 *
+		 * Set unconditionally rather than only when `agents` is non-empty: the SDK's own
+		 * general-purpose agent is reachable through `Task` whether or not we define any,
+		 * so a child transcript can appear either way.
+		 */
+		forwardSubagentText: true,
 		...(proxyEnv ? { env: proxyEnv } : {}),
 	}
 }

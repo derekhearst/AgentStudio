@@ -196,6 +196,19 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 		note: 'Naming-convention fallback: list_*/get_*/read_* are read-only by construction.',
 	},
 
+	// 3b. Delegation. Deliberately NOT read-only, though a `Task` call does nothing by
+	//     itself: what it costs is decided by the child, and the child's own calls are only
+	//     gated if they reach `canUseTool` — which this codebase has not established they
+	//     do. `sdkPermissionModeFor` hands the SDK 'default' in plan mode, so nothing else
+	//     is enforcing read-only either. Classifying delegation as a mutation means plan
+	//     mode refuses it outright rather than allowing a channel whose contents it cannot
+	//     see. Revisit as `read` once a child's tool call is observed reaching the gate.
+	{
+		match: /^task$/i,
+		capabilities: ['mutate'],
+		note: 'SUBAGENT_TOOL — delegation is only as read-only as the agent it delegates to.',
+	},
+
 	// 4. File edits — what acceptEdits auto-approves.
 	{
 		match: /^(file_patch|file_replace|delete_file|move_file|copy_file)$/i,

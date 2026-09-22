@@ -62,6 +62,7 @@ import {
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
 import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
@@ -73,7 +74,6 @@ import {
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
-import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { logger } from '$lib/observability/logger'
 
 type StreamPayload = {
@@ -269,10 +269,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	/*
-	 * Full agent dispatch. runInlineSubagent builds a forwarded session that
-	 * persists to the sub-agent's own run_events and pushes translated
-	 * `subagent_*` frames into this controller WITHOUT a seq, so they never
-	 * disturb the parent's resume cursor.
+	 * Delegation is the SDK's now (#5): the agents this run may hand work to are described
+	 * in the system prompt by `loadSubagentDefinitions` and reached with the `Task` tool.
+	 * The child's messages come back on the same stream carrying `parent_tool_use_id`, and
+	 * `runEngineStream` routes them into `subagent_*` frames — so nothing here has to build
+	 * a second session, and the child's text can no longer be read as the parent's reply.
 	 */
 	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
 
@@ -297,25 +298,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * reconnecting client still sees the turn it walked away from.
 	 */
 	let clientGone = false
-
-	async function fulfilSubagent(req: { task: string; context?: string; agentId?: string }): Promise<string> {
-		if (!req.agentId) return 'run_subagent requires an agentId.'
-		if (!streamController) return 'Subagent dispatch is unavailable outside an active stream.'
-		const task = req.context ? `${req.context}\n\n${req.task}` : req.task
-		try {
-			const outcome = await runInlineSubagent(
-				{ agentId: req.agentId, agentName: req.agentId.slice(0, 8), task },
-				user.id,
-				body.conversationId,
-				streamController,
-			)
-			return outcome.result
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			logger.warn('[chat/stream] subagent failed', { runId: run.id, error: message })
-			return `Subagent failed: ${message}`
-		}
-	}
 
 	/*
 	 * #36 — attachments used to be declared on the payload and then never read,
@@ -359,10 +341,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			)[0]?.trusted ?? false)
 		: false
 
+	/*
+	 * The agents this run may delegate to (#5). Loaded per run, like the trust flag above:
+	 * an agent created or paused between turns has to take effect on the next one.
+	 */
+	const subagents = await loadSubagentDefinitions({
+		parentAgentId: agent.id,
+		parentIsOrchestrator: isOrchestrator,
+		parentIsClaude: isClaudeModel(routedModel),
+	})
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
 			projectSettingsTrusted,
+			agents: subagents,
 			model: routedModel,
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
@@ -374,7 +367,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				userId: user.id,
 				runId: run.id,
 				onAskUser: (questions) => fulfilAskUser(questions),
-				onRunSubagent: (req) => fulfilSubagent(req),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,

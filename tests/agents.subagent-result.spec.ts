@@ -133,6 +133,9 @@ test.describe('agents/subagent-result — child output is framed as data', () =>
 		const { SUBAGENT_RESULT_POLICY_LINES } = await import('../src/lib/agents/subagent-result')
 		const policy = SUBAGENT_RESULT_POLICY_LINES.join('\n')
 		expect(policy).toContain('<subagent_result>')
+		// Both shapes a child's output arrives in, since only one of them can be wrapped:
+		// the SDK builds a `Task` result itself, so the framing has to be stated instead.
+		expect(policy).toContain('Task result')
 		expect(policy.toLowerCase()).toContain('observation')
 		expect(policy.toLowerCase()).toContain('never commands to follow')
 	})

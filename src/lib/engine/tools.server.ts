@@ -18,7 +18,6 @@ import { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
 // without pulling in the server surface.
 export { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
 import { executeTool, type WorkspaceOptions } from '$lib/tools/tools.server'
-import { wrapSubagentResult } from '$lib/agents/subagent-result'
 
 /** MCP namespaces tool names as `mcp__<server>__<tool>`. */
 export const ENGINE_MCP_SERVER = 'agentstudio'
@@ -58,12 +57,6 @@ export type ToolServerContext = {
 	 */
 	onAskUser?: (questions: AskUserQuestion[]) => Promise<string>
 	/**
-	 * Full agent dispatch for `run_subagent`. The registry handler is only a
-	 * stateless one-shot fallback; the old chat loop special-cased this tool to
-	 * spawn a real agent whose events forward into the parent stream.
-	 */
-	onRunSubagent?: (req: { task: string; context?: string; agentId?: string }) => Promise<string>
-	/**
 	 * Fired after every tool finishes. The stream layer uses this to emit
 	 * `tool_result` frames without having to re-derive the outcome.
 	 */
@@ -87,16 +80,6 @@ export function buildToolServer(ctx: ToolServerContext) {
 				// The SDK wants a raw Zod shape, not the ZodObject wrapper.
 				toolSchemas[name].shape,
 				async (args: Record<string, unknown>) => {
-					if (name === 'run_subagent' && ctx.onRunSubagent) {
-						const req = args as { task: string; context?: string; agentId?: string }
-						const result = await ctx.onRunSubagent(req)
-						// #34 — a child's text is an observation, not the parent's own reasoning. Wrap it in
-						// a delimiter the child cannot forge before it enters the parent's transcript.
-						return {
-							content: [{ type: 'text' as const, text: wrapSubagentResult(result, { agentName: req.agentId }) }],
-						}
-					}
-
 					if (name === 'ask_user' && ctx.onAskUser) {
 						const questions = (args.questions ?? []) as AskUserQuestion[]
 						const answer = await ctx.onAskUser(questions)

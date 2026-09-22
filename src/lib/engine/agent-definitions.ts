@@ -1,13 +1,15 @@
 /**
  * Maps AgentStudio's `agents` rows onto the SDK's `Options.agents` (#5).
  *
- * The migration left subagents on the old hand-written loop (`$lib/agents/inline-subagent`
- * → `$lib/runtime`), which is why `$lib/runtime` cannot be deleted (#8) and why a
- * multi-agent conversation loses its inline rendering. The SDK has native subagents: define
- * them here, and the model delegates by calling the `Task` tool.
+ * The migration left subagents on the old hand-written loop (`$lib/agents/inline-subagent`,
+ * now deleted → `$lib/runtime`), reached by an in-house `run_subagent` tool that dispatched on an
+ * `agentId` — a uuid nothing ever put in the model's context, so it could name an agent
+ * only by guessing one. The SDK has native subagents: define them here, and the model
+ * delegates by calling `Task` with a key it was actually told about.
  *
  * This module is the pure half — row in, `AgentDefinition` out — so the decisions below can
- * be read and tested without a database.
+ * be read and tested without a database. `./agent-definitions.server` decides which agents
+ * a run is offered; `buildEngineOptions` puts the result in `Options.agents`.
  *
  * ## The decisions, and why
  *
@@ -26,6 +28,9 @@
  * is a documented value rather than a guess.
  */
 
+import { BUILTIN_TOOL_SET } from './builtin-tools'
+import { OWN_MCP_SERVER } from './permission-mode'
+
 /** The subset of `AgentDefinition` this app populates. Mirrors the SDK type structurally. */
 export type EngineAgentDefinition = {
 	description: string
@@ -43,8 +48,24 @@ export type AgentRowForDefinition = {
 	prompt: string
 	model: string | null
 	status: string
-	/** From `agents.config.allowedTools` when the agent has a fixed surface; null for all tools. */
+	/**
+	 * From `agents.config.allowedTools` when the agent has a fixed surface; null for all
+	 * tools. Bare names — `qualifyAgentTools` namespaces them on the way into a definition.
+	 */
 	allowedTools?: readonly string[] | null
+}
+
+/**
+ * Name an agent's fixed tool surface the way the SDK sees it.
+ *
+ * `agents.config.allowedTools` holds bare names, and this app's own tools are served by an
+ * in-process MCP server — so an unqualified `file_write` in a subagent's `tools` list
+ * matches nothing, and the SDK reads "no tool matched" as an agent with no tools at all
+ * rather than as a mistake. The SDK's built-ins are already unqualified and must be left
+ * alone. Same transformation `buildEngineOptions` applies to the parent's `allowedTools`.
+ */
+export function qualifyAgentTools(allowedTools: readonly string[]): string[] {
+	return allowedTools.map((name) => (BUILTIN_TOOL_SET.has(name) ? name : `mcp__${OWN_MCP_SERVER}__${name}`))
 }
 
 /** Tools no subagent may call, whatever its own allow-list says. */
@@ -110,7 +131,7 @@ export function agentDefinitionFrom(
 	}
 
 	if (row.allowedTools && row.allowedTools.length > 0) {
-		definition.tools = [...row.allowedTools]
+		definition.tools = qualifyAgentTools(row.allowedTools)
 	}
 
 	return { key: agentKey(row.name), definition }

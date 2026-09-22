@@ -19,6 +19,8 @@ import { allToolNames } from '../src/lib/tools/tool-schemas'
  *     loaded tools that were already in its tools array.
  *   - `run_code` throws on this path outright: it needs a `runtime` in `toolUserContext`
  *     that only `$lib/runtime/tool-handlers.server` supplies.
+ *   - `run_subagent` dispatched by `agentId`, a uuid nothing ever put in the model's
+ *     context. Replaced by the SDK's `Task` against `Options.agents` (#5), not removed.
  *
  * Every name in the exclusion set must still be a real tool, because a typo there silently
  * excludes nothing and the lie comes back.
@@ -43,6 +45,13 @@ test('run_code is not on the engine surface', () => {
 	expect(ENGINE_EXCLUDED_TOOLS.has('run_code')).toBe(true)
 })
 
+test('run_subagent is not on the engine surface', () => {
+	// Delegation is `Task` now. Two tools for one job would mean the model could pick the
+	// one that renders no nested transcript — and could only name an agent by guessing a
+	// uuid. Do not register it back while `Options.agents` is what describes the agents.
+	expect(ENGINE_EXCLUDED_TOOLS.has('run_subagent')).toBe(true)
+})
+
 test('the exclusions stay narrow — everything else is still exposed', () => {
 	// A guard against the set quietly becoming a dumping ground. These are the tools the
 	// engine path exists to offer; none of them should ever appear in the exclusions.
@@ -50,7 +59,6 @@ test('the exclusions stay narrow — everything else is still exposed', () => {
 		'web_search',
 		'web_fetch',
 		'ask_user',
-		'run_subagent',
 		'create_monitor',
 		'create_automation',
 		'push_branch',
@@ -60,5 +68,5 @@ test('the exclusions stay narrow — everything else is still exposed', () => {
 	for (const name of mustBeExposed) {
 		expect(ENGINE_EXCLUDED_TOOLS.has(name)).toBe(false)
 	}
-	expect(ENGINE_EXCLUDED_TOOLS.size).toBe(2)
+	expect(ENGINE_EXCLUDED_TOOLS.size).toBe(3)
 })
