@@ -10,12 +10,19 @@
  *   tool_call     { id, name, arguments }
  *   tool_result   { id, name, success, executionMs, result, details? }
  *   tool_denied   { id }
+ *   tool_progress { id, elapsedSeconds }
+ *   notice        { kind, level, title, detail, persist }
+ *   background_tasks { tasks: [{ id, type, description }] }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
  * a sequence number, exactly as before.
  *
- * `details` is the one addition since: the SDK's typed tool output, distilled by
+ * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
+ * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
+ * always has.
+ *
+ * `details` is the SDK's typed tool output, distilled by
  * `./tool-result-details` for the built-ins whose result is worth rendering as something
  * other than a JSON blob — a diff, a terminal, a todo list (#16, #26, #21). It is optional
  * on purpose, so a consumer that does not know about it, or a block persisted before it
@@ -27,6 +34,7 @@ import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { toolResultDetails } from './tool-result-details'
+import { interpretSdkMessage } from './sdk-notices'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
@@ -336,6 +344,32 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
+				continue
+			}
+
+			/*
+			 * Everything the loop used to drop on the floor: compaction boundaries, API
+			 * retries, model fallbacks, permission refusals, rate limits, background-task
+			 * activity and per-call progress. `interpretSdkMessage` returns null for every
+			 * message handled below, so this is safe here and keeps the branches that follow
+			 * unchanged.
+			 */
+			const interpreted = interpretSdkMessage(msg)
+			if (interpreted) {
+				if (interpreted.kind === 'notice') {
+					// Persisted notices become blocks so a reloaded transcript still explains
+					// itself; the transient ones are live-only. See `./sdk-notices`.
+					if (interpreted.notice.persist) blocks.push({ kind: 'notice', notice: interpreted.notice })
+					await emit('notice', interpreted.notice)
+				} else if (interpreted.kind === 'background_tasks') {
+					// REPLACE semantics — the payload is the whole live set.
+					await emit('background_tasks', { tasks: interpreted.tasks })
+				} else {
+					await emit('tool_progress', {
+						id: interpreted.toolUseId,
+						elapsedSeconds: interpreted.elapsedSeconds,
+					})
+				}
 				continue
 			}
 

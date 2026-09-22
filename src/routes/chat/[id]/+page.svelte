@@ -25,6 +25,7 @@
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
+	import RunNoticeCard from '$lib/chat/RunNoticeCard.svelte';
 	import FileEditCard from '$lib/chat/FileEditCard.svelte';
 	import ShellOutputCard from '$lib/chat/ShellOutputCard.svelte';
 	import TodoListCard from '$lib/chat/TodoListCard.svelte';
@@ -50,9 +51,11 @@
 		applySubagentStart,
 		applySubagentToolCall,
 		applySubagentToolResult,
+		applyNotice,
 		applyToolCall,
 		applyToolDenied,
 		applyToolPending,
+		applyToolProgress,
 		applyToolResult,
 		buildDisplayedMessages,
 		estimateTokens,
@@ -102,6 +105,15 @@
 	let waitingForFirstToken = $state(false);
 	let streamAbortController = $state<AbortController | null>(null);
 	let stoppedByUser = $state(false);
+	/**
+	 * Live background tasks, from the SDK's `background_tasks_changed` frame.
+	 *
+	 * REPLACE semantics — each frame carries the whole live set, so this is assigned, never
+	 * merged. Cleared when a turn starts, because the set belongs to the run.
+	 */
+	let backgroundTasks = $state<Array<{ id: string; type: string; description: string }>>([]);
+	/** Monotonic, because the transcript's `{#each}` is keyed and duplicate keys throw. */
+	let noticeSeq = 0;
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 	type LiveContextStats = {
@@ -351,7 +363,9 @@
 				? `${b.id}:${b.status}:${b.expanded}:${b.result?.length ?? 0}`
 				: b.kind === 'thinking'
 					? `${b.id}:${b.content.length}:${b.reasoningTokens ?? 0}`
-					: `${b.id}:${b.content.length}`
+					: b.kind === 'notice'
+						? `${b.id}:${b.notice.kind}`
+						: `${b.id}:${b.content.length}`
 		).join('|');
 		scrollToBottom();
 	});
@@ -741,6 +755,7 @@
 		waitingForFirstToken = true;
 		streamAbortController = abortController;
 		stoppedByUser = false;
+		backgroundTasks = [];
 		liveContextStats = null;
 		let streamHandshakeSucceeded = false;
 		try {
@@ -866,6 +881,28 @@
 
 					if (eventName === 'tool_denied') {
 						streamingBlocks = applyToolDenied(streamingBlocks, payload.id);
+					}
+
+					if (eventName === 'notice' && payload?.title) {
+						waitingForFirstToken = false;
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
+						streamingBlocks = applyNotice(
+							streamingBlocks,
+							payload as Parameters<typeof applyNotice>[1],
+							`notice-${++noticeSeq}`
+						);
+					}
+
+					if (eventName === 'tool_progress') {
+						streamingBlocks = applyToolProgress(streamingBlocks, {
+							id: payload.id,
+							elapsedSeconds: payload.elapsedSeconds ?? 0,
+						});
+					}
+
+					if (eventName === 'background_tasks') {
+						backgroundTasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
 					}
 
 					if (eventName === 'subagent_start') {
@@ -1143,7 +1180,9 @@
 	});
 
 	$effect(() => {
-		consoleState.streamingBlocks = streamingBlocks.map((b) => {
+		consoleState.streamingBlocks = streamingBlocks.flatMap((b) => {
+			// Notices are run-level events, not activity — the rail lists what the agent did.
+			if (b.kind === 'notice') return [];
 			if (b.kind === 'tool') {
 				return {
 					kind: 'tool',
@@ -1261,6 +1300,12 @@
 					{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 						<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
 					{/if}
+					{#each backgroundTasks as task (task.id)}
+						<span class="console-bgtask" title={`${task.description} (${task.type})`}>
+							<span class="pulse-dot"></span>
+							<span>{task.description}</span>
+						</span>
+					{/each}
 				</div>
 			</div>
 
@@ -1317,6 +1362,12 @@
 				{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 					<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
 				{/if}
+				{#each backgroundTasks as task (task.id)}
+					<span class="console-bgtask" title={`${task.description} (${task.type})`}>
+						<span class="pulse-dot"></span>
+						<span>{task.description}</span>
+					</span>
+				{/each}
 				{#if contextMetrics.total > 0}
 					<span class="console-chip">{(contextMetrics.used / 1000).toFixed(1)}K / {(contextMetrics.total / 1000).toFixed(0)}K</span>
 				{/if}
@@ -1393,6 +1444,8 @@
 							<ShellOutputCard details={block.details} success={block.status !== 'failed'} />
 						{:else if block.kind === 'tool' && block.details?.kind === 'todo'}
 							<TodoListCard details={block.details} />
+						{:else if block.kind === 'notice'}
+							<RunNoticeCard notice={block.notice} />
 						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<ToolCallCard
 								name={block.name}
@@ -1400,6 +1453,7 @@
 								result={block.result ?? ''}
 								status={block.status}
 								executionMs={block.executionMs ?? null}
+								elapsedSeconds={block.elapsedSeconds ?? null}
 								expanded={block.expanded}
 								token={block.token ?? null}
 								onApprove={approveToolCall}

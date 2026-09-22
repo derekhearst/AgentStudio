@@ -11,6 +11,7 @@
 
 import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
 import type { ToolResultDetails } from '../engine/tool-result-details'
+import type { RunNotice } from '../engine/sdk-notices'
 
 export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
 
@@ -30,6 +31,12 @@ export type ToolBlock = {
 	executionMs?: number | null
 	expanded: boolean
 	token?: string | null
+	/**
+	 * Seconds this call has been running, from the SDK's `tool_progress` heartbeats. Those
+	 * carry no partial output, so this is what makes the spinner honest — it says "still
+	 * going, 40s in" rather than just spinning.
+	 */
+	elapsedSeconds?: number | null
 	/**
 	 * Typed output for the built-ins worth rendering specially — diff, terminal, todo list.
 	 * Rides the `tool_result` frame; absent for every other tool, which is what keeps the
@@ -59,7 +66,13 @@ export type SubagentBlock = {
 	expanded: boolean
 }
 
-export type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | SubagentBlock
+export type NoticeBlock = {
+	kind: 'notice'
+	id: string
+	notice: RunNotice
+}
+
+export type StreamingBlock = TextBlock | ToolBlock | ThinkingBlock | SubagentBlock | NoticeBlock
 
 /** Concatenate all text-block content. Used to surface the full assistant draft. */
 export function getPartialText(blocks: StreamingBlock[]): string {
@@ -106,6 +119,14 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				content: block.content,
 				reasoningTokens: block.reasoningTokens ?? null,
 			})
+		} else if (block.kind === 'notice') {
+			/*
+			 * Every notice is shown live, but only the durable ones belong in the transcript —
+			 * the same decision the engine makes when it builds its own blocks. Without this
+			 * test a turn the user stopped would persist its API retries, because this path
+			 * (the client's partial save) is the one that runs when no `done` arrives.
+			 */
+			if (block.notice.persist) out.push({ kind: 'notice', notice: block.notice })
 		} else if (block.kind === 'subagent') {
 			out.push({
 				kind: 'subagent',
@@ -312,6 +333,37 @@ export function reconcilePendingDrafts<RemoteMsg extends RemoteUserShape & { id:
  * Pure transform — mutates nothing. Returns the same array shape (with one
  * block updated) when the id matches, else returns the input unchanged.
  */
+/**
+ * `notice` frame — append a run-level notice to the transcript.
+ *
+ * Appended rather than folded into the current text block: a compaction boundary or a
+ * permission refusal is not something the assistant said, and reading it as if it were
+ * would be worse than not showing it.
+ */
+export function applyNotice(blocks: StreamingBlock[], notice: RunNotice, id: string): StreamingBlock[] {
+	return [
+		...blocks.map((b) => (b.kind === 'thinking' || b.kind === 'tool' ? { ...b, expanded: false } : b)),
+		{ kind: 'notice' as const, id, notice },
+	]
+}
+
+/**
+ * `tool_progress` frame — record how long an in-flight call has been running.
+ *
+ * A heartbeat for a call that already finished is ignored rather than resurrecting it: the
+ * frames race with `tool_result`, and a completed card must not start counting again.
+ */
+export function applyToolProgress(
+	blocks: StreamingBlock[],
+	payload: { id: string; elapsedSeconds: number },
+): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'tool' && b.id === payload.id && (b.status === 'executing' || b.status === 'approved')
+			? { ...b, elapsedSeconds: payload.elapsedSeconds }
+			: b,
+	)
+}
+
 export function applyToolDenied(blocks: StreamingBlock[], toolId: string): StreamingBlock[] {
 	return blocks.map((b) =>
 		b.kind === 'tool' && b.id === toolId ? { ...b, status: 'denied' as const, expanded: true } : b,

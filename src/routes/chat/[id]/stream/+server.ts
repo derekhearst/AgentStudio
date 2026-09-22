@@ -379,7 +379,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 * with no `id:` at all, which the SSE consumer already handles, so they
 			 * never move the resume cursor.
 			 */
-			const NON_PERSISTED = new Set(['delta', 'reasoning'])
+			/*
+			 * `tool_progress` joins delta/reasoning here: it is a heartbeat the SDK sends for
+			 * every in-flight call, so persisting one would mean a row per tick per tool. It
+			 * carries nothing a replay needs either — a resumed client learns the call is still
+			 * running from the block itself.
+			 *
+			 * `notice` and `background_tasks` are NOT in this set on purpose: they are sparse,
+			 * and a client that reconnects mid-turn should still learn that the context was
+			 * compacted or that three commands are running in the background.
+			 */
+			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress'])
 
 			/** Closing a cancelled controller throws as well, and is just as harmless. */
 			const closeStream = (c: ReadableStreamDefaultController<Uint8Array>) => {

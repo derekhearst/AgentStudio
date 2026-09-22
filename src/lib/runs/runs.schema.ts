@@ -3,6 +3,7 @@ import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import type { ToolResultDetails } from '$lib/engine/tool-result-details'
+import type { RunNotice } from '$lib/engine/sdk-notices'
 
 export const chatRunStateEnum = pgEnum('chat_run_state', [
 	'queued',
@@ -61,6 +62,16 @@ export type StreamBlock =
 			 * the raw `result` string is still there either way. See `$lib/engine/tool-result-details`.
 			 */
 			details?: ToolResultDetails
+	  }
+	| {
+			/**
+			 * A run-level event the SDK reported that is worth a line in the transcript — a
+			 * compaction boundary, a model fallback, a tool a permission rule refused. Only the
+			 * notices that still mean something after the turn are persisted; see
+			 * `$lib/engine/sdk-notices`.
+			 */
+			kind: 'notice'
+			notice: RunNotice
 	  }
 
 export type RunEventPayload = unknown

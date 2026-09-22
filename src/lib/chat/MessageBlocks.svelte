@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { renderMarkdown } from '$lib/chat/chat';
 	import FileEditCard from './FileEditCard.svelte';
+	import RunNoticeCard from './RunNoticeCard.svelte';
 	import ShellOutputCard from './ShellOutputCard.svelte';
 	import SubagentBlockCard from './SubagentBlockCard.svelte';
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
@@ -23,6 +24,7 @@
 	 *   - tool/ask_user → inline question + (if available) the answer bubble
 	 *   - tool + details → the card for that shape (diff / terminal / todo)
 	 *   - tool (other)  → ToolCallCard
+	 *   - notice        → RunNoticeCard
 	 *   - thinking      → ThinkingBlockCard
 	 *   - subagent      → SubagentBlockCard
 	 *   - text          → rendered markdown
@@ -95,6 +97,10 @@
 				result={typeof block.result === 'string' ? block.result : JSON.stringify(block.result ?? {}, null, 2)}
 				status={block.success === false ? 'failed' : 'completed'}
 			/>
+		</div>
+	{:else if block.kind === 'notice' && block.notice}
+		<div class="mb-1.5 w-full">
+			<RunNoticeCard notice={block.notice} />
 		</div>
 	{:else if block.kind === 'thinking' && block.content?.trim()}
 		<div class="mb-1.5 w-full">
