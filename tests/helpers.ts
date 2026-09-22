@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Page } from '@playwright/test'
 import postgres from 'postgres'
@@ -12,11 +12,20 @@ let cachedEnv: ParsedEnv | null = null
 let cachedEnvValues: Map<string, string> | null = null
 let sqlClient: postgres.Sql | null = null
 
+/**
+ * Test configuration, from `.env` when it exists and from the process environment
+ * otherwise.
+ *
+ * It used to read `.env` unconditionally, which is fine on a developer's machine and
+ * fatal anywhere else: on CI there is no such file, and the first run failed 366 tests
+ * with a single ENOENT. Real environment variables take precedence, because that is how
+ * a runner — or anyone overriding a value for one run — expects to be heard.
+ */
 function parseEnvFile() {
 	if (cachedEnv) return cachedEnv
 
 	const envPath = join(process.cwd(), '.env')
-	const raw = readFileSync(envPath, 'utf8')
+	const raw = existsSync(envPath) ? readFileSync(envPath, 'utf8') : ''
 	const values = new Map<string, string>()
 
 	for (const line of raw.split(/\r?\n/)) {
@@ -32,11 +41,17 @@ function parseEnvFile() {
 		values.set(key, value)
 	}
 
+	// The real environment wins over the file: a CI runner sets these directly, and a
+	// developer overriding one for a single run should not be silently ignored.
+	for (const [key, value] of Object.entries(process.env)) {
+		if (typeof value === 'string' && value.length > 0) values.set(key, value)
+	}
+
 	cachedEnvValues = values
 
 	const DATABASE_URL = values.get('DATABASE_URL')
 	if (!DATABASE_URL) {
-		throw new Error('DATABASE_URL must exist in .env for Playwright tests')
+		throw new Error('DATABASE_URL must be set, in .env or the environment, for Playwright tests')
 	}
 
 	cachedEnv = { DATABASE_URL }
