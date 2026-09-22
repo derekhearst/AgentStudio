@@ -109,14 +109,42 @@ wants to live as long as the conversation — but it is the single change that u
 most rows, and it is the one piece of infrastructure work I would do before any of the
 feature issues.
 
-### 3. `settingSources` is never set, so the repo's own configuration is invisible
+### 3. `settingSources` is never set — and that is the opposite of what I first wrote
 
-No occurrence of `settingSources` in `src/`. The SDK defaults to loading none, which means
-for a project whose working directory is a real repo we ignore its `CLAUDE.md`, its
-`.claude/commands/`, its `.claude/skills/` and its `.claude/settings.json`.
+**Corrected 2026-09-22.** This section originally said "the SDK defaults to loading none,
+which means … we ignore its `CLAUDE.md`". That was wrong, and wrong in the dangerous
+direction. I read it off a type declaration instead of testing it, and it was load-bearing
+for a conclusion about isolation.
 
-That is most of **#23**, and it is one option field rather than a schema change. See the
-per-issue note below for what remains after that.
+The SDK passes `--setting-sources` to the CLI **only when the option is set**, and documents
+the omitted case as "all sources are loaded (matches CLI defaults)". Checked against
+0.3.278 with the SDK's own `resolveSettings`, which reads the cascade without spawning the
+CLI or needing a credential, against a directory containing a `.claude/settings.json`:
+
+```
+OMITTED  env: {"SMOKING_GUN":"loaded-from-repo"} | allow: ["Bash(rm -rf /)"]
+EMPTY [] env: null                               | allow: null
+```
+
+So not setting the option never meant a project's `CLAUDE.md` was ignored. It meant every
+run with a working directory merged in whatever `.claude/settings.json` was sitting there —
+in an imported repo, authored by whoever wrote that repo — with `permissions.allow` and
+`env` among the keys that came through. The CLI does filter an escalating
+`permissions.defaultMode` out of repo-committed tiers (the SDK exposes the same filter as
+`filterEscalatingDefaultMode`), but allow-rules and hooks are honoured.
+
+**Fixed.** `settingSources` is now always explicit: `[]` by default, `['project']` for a
+project whose committed configuration the operator has marked trusted
+(`projects.settings_trusted`). `local` is never loaded — `.claude/settings.local.json` is
+gitignored, so it does not arrive with a clone, it arrives by being written into the
+sandbox, which the agent can do; trust cannot come from a file the untrusted party can
+write. `user` is never loaded either. See `$lib/engine/setting-sources`.
+
+That makes **#23** a trust gate rather than a feature switch, and it is a column plus a UI,
+not the one option field I claimed. The per-issue note below is corrected to match.
+
+The lesson worth keeping: a claim about a dependency's default that a security conclusion
+rests on should be executed, not read. The check took two minutes.
 
 ---
 
@@ -284,9 +312,15 @@ it is the same join `compact_boundary` and per-message context accounting want.
 
 ### #23 — project instructions and knowledge
 
-`settingSources: ['project']` makes a repo's `CLAUDE.md`, commands and skills load the way
-they do in Claude Code. That is the better default the issue itself guesses at, and it makes
-an imported repo behave the way its own contributors expect.
+**Done, and not as scoped here — see the correction in finding 3.** Project settings were
+already loading, because an omitted `settingSources` means "load everything". So this was
+never "switch the feature on"; it was "decide, and gate the decision".
+
+`settingSources` is now always explicit: `[]` unless the operator has marked the project's
+committed configuration trusted, `['project']` when they have. That trusted side is the
+feature this issue wanted — the repo's `CLAUDE.md`, commands and skills — and the untrusted
+side is the isolation the rest of the app always assumed. `projects.settings_trusted` holds
+the answer; the project page explains what trusting costs and asks twice before granting it.
 
 What remains after that is genuinely small:
 - for `repo_kind = 'none'` projects there is no repo to read from — write the DB field to a
@@ -294,10 +328,16 @@ What remains after that is genuinely small:
   there is exactly one mechanism rather than two
 - the knowledge directory is a directory plus a listing on the project page; no RAG, as filed
 
-Worth noting the security consequence before flipping it: loading project settings means a
-cloned repo can ship hooks and permission rules. `settingSources` should be opt-in per
-project, defaulting on for `local` and off for freshly `imported` until someone has looked at
-it — the same posture Claude Code takes on trusting a new folder.
+The security consequence is why it is a gate rather than a default: loading project settings
+means a cloned repo can ship hooks and permission allow-rules, and `settingSources` offers
+one tier for those and for `CLAUDE.md` together — they cannot be separated. Trust therefore
+has to mean what it says. I did not take the earlier suggestion of defaulting it on for
+`repo_kind = 'local'`: a `local` project's working directory is also where the agent writes,
+so "we created it" is not the same as "a human wrote what is in it". Everything starts
+untrusted.
+
+Behaviour change to expect on deploy: a project whose `CLAUDE.md` was being honoured
+silently stops being honoured until someone trusts it.
 
 ### #17 — external MCP servers
 
