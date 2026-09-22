@@ -2,6 +2,10 @@
 
 Snapshot: 2026-09-21, AgentStudio at `a459c99`.
 
+> **Re-audited 2026-09-22** — see [`parity-reaudit-2026-09-22.md`](parity-reaudit-2026-09-22.md).
+> Several rows below were scored before #15/#19/#29 landed, and several of the open issues
+> describe work the Agent SDK already does. Read the re-audit before picking one up.
+
 Claude Desktop is now three products in one window: **chat** (claude.ai), **Code** (Claude Code sessions), and **Cowork** — the agentic workspace for non-coding work, which is the one that competes most directly with what AgentStudio is for. AgentStudio is a custom UI over the same Claude Agent SDK that powers Code, with a chat workbench, a tool registry, a memory system and a cron scheduler on top.
 
 This is a head-to-head: every row says who is actually better, not just who has the feature.
