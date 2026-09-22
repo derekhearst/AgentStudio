@@ -61,6 +61,7 @@ import {
 } from '$lib/engine/options.server'
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
+import { registerRunHandle } from '$lib/engine/run-registry.server'
 import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
@@ -272,6 +273,28 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 */
 	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
 
+	/*
+	 * Set while the SDK session is live, so the stream's `cancel` can stop the run.
+	 *
+	 * Without this, "Stop" only aborted the browser's fetch: the server's loop kept pulling
+	 * from the CLI, which kept spending tokens and kept executing tools until the turn ended
+	 * on its own. The socket was the only thing that stopped.
+	 */
+	let releaseRunHandle: (() => void) | null = null
+	let interruptSession: (() => Promise<void>) | null = null
+
+	/*
+	 * True once the client's connection is gone. `enqueue` on a cancelled controller throws,
+	 * and the run does not stop at the same instant the socket does — the interrupt still
+	 * has to travel to the CLI, produce a final `result`, and come back through persistence.
+	 * Every frame in that window would otherwise throw and turn an ordinary stop into a
+	 * failed run with a `TypeError` where its reply should be.
+	 *
+	 * Run events keep being written either way: they are what `stream/resume` replays, so a
+	 * reconnecting client still sees the turn it walked away from.
+	 */
+	let clientGone = false
+
 	async function fulfilSubagent(req: { task: string; context?: string; agentId?: string }): Promise<string> {
 		if (!req.agentId) return 'run_subagent requires an agentId.'
 		if (!streamController) return 'Subagent dispatch is unavailable outside an active stream.'
@@ -358,9 +381,30 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 */
 			const NON_PERSISTED = new Set(['delta', 'reasoning'])
 
+			/** Closing a cancelled controller throws as well, and is just as harmless. */
+			const closeStream = (c: ReadableStreamDefaultController<Uint8Array>) => {
+				if (clientGone) return
+				try {
+					c.close()
+				} catch {
+					clientGone = true
+				}
+			}
+
+			/** Enqueue unless the client is gone; a lost frame must never fail the run. */
+			const send = (frame: Uint8Array) => {
+				if (clientGone) return
+				try {
+					controller.enqueue(frame)
+				} catch {
+					// Raced with cancellation between the check and the write.
+					clientGone = true
+				}
+			}
+
 			const emit = async (event: string, payload: unknown) => {
 				if (NON_PERSISTED.has(event)) {
-					controller.enqueue(encodeSseFrame(event, payload))
+					send(encodeSseFrame(event, payload))
 					return
 				}
 				let seq: number | undefined
@@ -375,7 +419,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						error: error instanceof Error ? error.message : String(error),
 					})
 				}
-				controller.enqueue(encodeSseFrame(event, payload, seq))
+				send(encodeSseFrame(event, payload, seq))
 			}
 
 			emitFrame = emit
@@ -410,6 +454,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							: preparedPrompt.text,
 						options: engineOptions,
 						emit,
+						onHandle: (handle) => {
+							// Published under the run id so a different request — the dock's
+							// dismiss — can stop this run too, not just this connection.
+							releaseRunHandle = registerRunHandle(run.id, handle)
+							interruptSession = () => handle.interrupt()
+						},
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
 							// next turn to resume rather than silently start a new session.
@@ -577,7 +627,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					subscription: claudeRun,
 				})
 				await emit('done', { messageId: assistantMessage.id, ...(summary.error ? { error: summary.error } : {}) })
-				controller.close()
+				closeStream(controller)
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
 				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
@@ -586,7 +636,41 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
 					.where(eq(chatRuns.id, run.id))
 				await emit('done', { error: errorMessage })
-				controller.close()
+				closeStream(controller)
+			} finally {
+				// The handle is only good while the turn is live; a stale entry would let a
+				// later dismiss write to a CLI that has already exited.
+				releaseRunHandle?.()
+				releaseRunHandle = null
+				interruptSession = null
+			}
+		},
+
+		/**
+		 * The client went away — it hit Stop, navigated, or lost the connection.
+		 *
+		 * `cancel` is the reliable signal for that: the browser aborting its fetch closes
+		 * the response, and the platform cancels this stream. Interrupting here is what
+		 * makes Stop actually stop, rather than merely stop *watching*: the CLI ends the
+		 * turn, the run loop sees an ordinary `result`, and the partial turn is persisted
+		 * and accounted like any other.
+		 *
+		 * Nothing is awaited on the caller's behalf beyond the interrupt itself — the
+		 * `start` body is still running and owns its own teardown.
+		 */
+		async cancel() {
+			clientGone = true
+			const interrupt = interruptSession
+			if (!interrupt) return
+			try {
+				await interrupt()
+				logger.info('[chat/stream] client disconnected, interrupted the run', { runId: run.id })
+			} catch (error) {
+				// Commonest cause is benign: the turn finished as the connection dropped.
+				logger.warn('[chat/stream] interrupt after disconnect failed', {
+					runId: run.id,
+					error: String(error),
+				})
 			}
 		},
 	})

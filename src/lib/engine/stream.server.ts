@@ -27,6 +27,7 @@ import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { toolResultDetails } from './tool-result-details'
+import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
@@ -87,6 +88,16 @@ export type EngineRunInput = {
 	bashPolicy?: BashPolicy
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
+	/**
+	 * Called once, synchronously, with a handle on the live SDK session.
+	 *
+	 * The `Query` returned by `query()` is a control channel as well as an iterable —
+	 * `interrupt()` and friends are control requests written to the CLI's stdin while the
+	 * turn runs. Handing it to the caller is what lets a *different* request stop this one;
+	 * see `./run-registry.server`. The handle stops working once the turn ends, which is
+	 * why the registry entry is released in the caller's `finally`.
+	 */
+	onHandle?: (handle: EngineQueryHandle) => void
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -282,160 +293,207 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			: {}),
 	}
 
-	for await (const message of query({ prompt: input.prompt, options }) as AsyncIterable<SDKMessage>) {
-		const msg = message as Record<string, any>
+	/*
+	 * Keep the object `query()` returns, rather than casting it straight to an iterable.
+	 *
+	 * It is both the message stream and the session's control channel: `interrupt()`,
+	 * `stopTask()` and `getContextUsage()` are control requests written to the CLI's stdin
+	 * while the turn is in flight. The SDK always spawns the CLI with
+	 * `--input-format stream-json` and only closes stdin once the *first result* of a
+	 * string-prompt turn arrives, so these work for the whole run and stop working the
+	 * moment it ends — which is exactly the window a stop button cares about.
+	 *
+	 * The handle deliberately exposes no way to pull messages. A second consumer calling
+	 * `next()` on this iterator would steal frames from the loop below.
+	 */
+	const session = query({ prompt: input.prompt, options })
 
-		if (typeof msg.session_id === 'string' && !sessionId) {
-			sessionId = msg.session_id
-			input.onSessionId?.(sessionId)
-		}
+	input.onHandle?.({
+		interrupt: async () => {
+			await session.interrupt()
+		},
+		stopTask: async (taskId: string) => {
+			await session.stopTask(taskId)
+		},
+		getContextUsage: async () => {
+			try {
+				return await session.getContextUsage()
+			} catch {
+				// Reading the context is never worth failing a turn over.
+				return null
+			}
+		},
+	})
 
-		if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
-			reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
-			continue
-		}
+	try {
+		for await (const message of session as AsyncIterable<SDKMessage>) {
+			const msg = message as Record<string, any>
 
-		// Token-level text and thinking, from includePartialMessages.
-		if (msg.type === 'stream_event') {
-			const ev = msg.event as Record<string, any> | undefined
-			if (ev?.type === 'content_block_delta') {
-				const delta = ev.delta as Record<string, any>
-				if (delta?.type === 'text_delta' && delta.text) {
-					finalText += delta.text
-					appendContent('text', delta.text)
-					await emit('delta', { content: delta.text })
+			if (typeof msg.session_id === 'string' && !sessionId) {
+				sessionId = msg.session_id
+				input.onSessionId?.(sessionId)
+			}
+
+			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
+				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
+				continue
+			}
+
+			// Token-level text and thinking, from includePartialMessages.
+			if (msg.type === 'stream_event') {
+				const ev = msg.event as Record<string, any> | undefined
+				if (ev?.type === 'content_block_delta') {
+					const delta = ev.delta as Record<string, any>
+					if (delta?.type === 'text_delta' && delta.text) {
+						finalText += delta.text
+						appendContent('text', delta.text)
+						await emit('delta', { content: delta.text })
+					}
+					if (delta?.type === 'thinking_delta' && delta.thinking) {
+						appendContent('thinking', delta.thinking)
+						await emit('reasoning', { content: delta.thinking })
+					}
 				}
-				if (delta?.type === 'thinking_delta' && delta.thinking) {
-					appendContent('thinking', delta.thinking)
-					await emit('reasoning', { content: delta.thinking })
+				continue
+			}
+
+			if (msg.type === 'assistant') {
+				for (const block of msg.message?.content ?? []) {
+					if (block.type !== 'tool_use') continue
+					const name = bareToolName(String(block.name))
+					const id = String(block.id)
+					toolNames.set(id, name)
+					toolInputs.set(id, block.input ?? null)
+
+					if (name === 'ask_user') {
+						// The host's onAskUser owns this one: it mints the answer token,
+						// emits the `ask_user` frame and blocks until the user replies.
+						// Emitting a tool_call here would render it as an ordinary
+						// collapsed tool block alongside the card.
+						continue
+					}
+
+					// Park the id for canUseTool unconditionally. The SDK calls canUseTool for MCP
+					// tools whether or not we want to gate them, and an unparked call would mint a
+					// synthetic `pending-*` id there — emitting a second tool_call frame the UI
+					// renders as a duplicate, and a tool_denied the UI cannot match to a block.
+					const key = callKey(name, block.input)
+					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+
+					if (needsApproval(name)) {
+						// Show the block as awaiting approval; the tool_call frame is emitted from
+						// canUseTool once approved (or a tool_denied if it is refused).
+						await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					} else {
+						callEmitted.add(id)
+						await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					}
+				}
+				continue
+			}
+
+			if (msg.type === 'user') {
+				/**
+				 * `tool_use_result` carries the tool's full typed Output object — the diff behind an
+				 * `Edit`, the streams behind a `Bash`, the list behind a `TodoWrite` — while
+				 * `message.content` carries only the text the model reads. It sits on the message
+				 * rather than on the block, so it is only attributable when the message answers
+				 * exactly one call; with two we would be guessing which one it describes, and a
+				 * diff rendered against the wrong file is worse than no diff.
+				 */
+				// `content` is a MessageParam's, so it is a string as legitimately as it is an array
+				// of blocks — `.filter` on the string form would throw and take the turn with it.
+				const content = Array.isArray(msg.message?.content) ? msg.message.content : []
+				const resultBlocks = content.filter((b: { type?: string }) => b?.type === 'tool_result')
+				const structured = resultBlocks.length === 1 ? msg.tool_use_result : undefined
+
+				for (const block of msg.message?.content ?? []) {
+					if (block.type !== 'tool_result') continue
+					const id = String(block.tool_use_id)
+					const raw = block.content
+					const text = Array.isArray(raw)
+						? raw.map((c: { text?: string }) => c.text ?? '').join('')
+						: typeof raw === 'string'
+							? raw
+							: JSON.stringify(raw ?? null)
+					const toolName = toolNames.get(id) ?? 'unknown'
+					const toolArguments = toolInputs.get(id) ?? null
+					const details = toolResultDetails(toolName, structured, toolArguments)
+					blocks.push({
+						kind: 'tool',
+						name: toolName,
+						arguments: toolArguments,
+						result: text,
+						success: block.is_error !== true,
+						executionMs: 0,
+						...(details ? { details } : {}),
+					})
+					await emit('tool_result', {
+						id,
+						name: toolName,
+						success: block.is_error !== true,
+						executionMs: null,
+						result: text,
+						...(details ? { details } : {}),
+					})
+				}
+				continue
+			}
+
+			if (msg.type === 'result') {
+				const u = (msg.usage ?? {}) as Record<string, number>
+				for (let i = blocks.length - 1; i >= 0; i--) {
+					const b = blocks[i]
+					if (b.kind === 'thinking') {
+						b.reasoningTokens = reasoningTokens
+						break
+					}
+				}
+				return {
+					text: finalText,
+					sessionId,
+					usage: {
+						inputTokens: u.input_tokens ?? 0,
+						outputTokens: u.output_tokens ?? 0,
+						cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+						cacheReadTokens: u.cache_read_input_tokens ?? 0,
+						costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
+					},
+					durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
+					numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
+					error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+					blocks,
+					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
+					reasoningTokens,
 				}
 			}
-			continue
 		}
 
-		if (msg.type === 'assistant') {
-			for (const block of msg.message?.content ?? []) {
-				if (block.type !== 'tool_use') continue
-				const name = bareToolName(String(block.name))
-				const id = String(block.id)
-				toolNames.set(id, name)
-				toolInputs.set(id, block.input ?? null)
-
-				if (name === 'ask_user') {
-					// The host's onAskUser owns this one: it mints the answer token,
-					// emits the `ask_user` frame and blocks until the user replies.
-					// Emitting a tool_call here would render it as an ordinary
-					// collapsed tool block alongside the card.
-					continue
-				}
-
-				// Park the id for canUseTool unconditionally. The SDK calls canUseTool for MCP
-				// tools whether or not we want to gate them, and an unparked call would mint a
-				// synthetic `pending-*` id there — emitting a second tool_call frame the UI
-				// renders as a duplicate, and a tool_denied the UI cannot match to a block.
-				const key = callKey(name, block.input)
-				idByCall.set(key, [...(idByCall.get(key) ?? []), id])
-
-				if (needsApproval(name)) {
-					// Show the block as awaiting approval; the tool_call frame is emitted from
-					// canUseTool once approved (or a tool_denied if it is refused).
-					await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
-				} else {
-					callEmitted.add(id)
-					await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
-				}
-			}
-			continue
+		// The iterator ended without a `result` message — treat as a completed run
+		// with no usage rather than inventing numbers.
+		return {
+			text: finalText,
+			sessionId,
+			usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+			durationMs: 0,
+			numTurns: 0,
+			error: null,
+			blocks,
+			ttftMs: null,
+			reasoningTokens,
 		}
-
-		if (msg.type === 'user') {
-			/**
-			 * `tool_use_result` carries the tool's full typed Output object — the diff behind an
-			 * `Edit`, the streams behind a `Bash`, the list behind a `TodoWrite` — while
-			 * `message.content` carries only the text the model reads. It sits on the message
-			 * rather than on the block, so it is only attributable when the message answers
-			 * exactly one call; with two we would be guessing which one it describes, and a
-			 * diff rendered against the wrong file is worse than no diff.
-			 */
-			// `content` is a MessageParam's, so it is a string as legitimately as it is an array
-			// of blocks — `.filter` on the string form would throw and take the turn with it.
-			const content = Array.isArray(msg.message?.content) ? msg.message.content : []
-			const resultBlocks = content.filter((b: { type?: string }) => b?.type === 'tool_result')
-			const structured = resultBlocks.length === 1 ? msg.tool_use_result : undefined
-
-			for (const block of msg.message?.content ?? []) {
-				if (block.type !== 'tool_result') continue
-				const id = String(block.tool_use_id)
-				const raw = block.content
-				const text = Array.isArray(raw)
-					? raw.map((c: { text?: string }) => c.text ?? '').join('')
-					: typeof raw === 'string'
-						? raw
-						: JSON.stringify(raw ?? null)
-				const toolName = toolNames.get(id) ?? 'unknown'
-				const toolArguments = toolInputs.get(id) ?? null
-				const details = toolResultDetails(toolName, structured, toolArguments)
-				blocks.push({
-					kind: 'tool',
-					name: toolName,
-					arguments: toolArguments,
-					result: text,
-					success: block.is_error !== true,
-					executionMs: 0,
-					...(details ? { details } : {}),
-				})
-				await emit('tool_result', {
-					id,
-					name: toolName,
-					success: block.is_error !== true,
-					executionMs: null,
-					result: text,
-					...(details ? { details } : {}),
-				})
-			}
-			continue
+	} finally {
+		/*
+		 * Tear the CLI down on every exit path, including the `return` from inside the loop
+		 * and an interrupt that ends the turn early. Returning from a `for await` already
+		 * calls the iterator's `return()`, and the SDK's cleanup is idempotent, so this is
+		 * belt-and-braces against an exception path that skips it and leaves a child process
+		 * holding the workspace.
+		 */
+		try {
+			session.close()
+		} catch {
+			// Already gone. Nothing to do and nothing worth logging.
 		}
-
-		if (msg.type === 'result') {
-			const u = (msg.usage ?? {}) as Record<string, number>
-			for (let i = blocks.length - 1; i >= 0; i--) {
-				const b = blocks[i]
-				if (b.kind === 'thinking') {
-					b.reasoningTokens = reasoningTokens
-					break
-				}
-			}
-			return {
-				text: finalText,
-				sessionId,
-				usage: {
-					inputTokens: u.input_tokens ?? 0,
-					outputTokens: u.output_tokens ?? 0,
-					cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
-					cacheReadTokens: u.cache_read_input_tokens ?? 0,
-					costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
-				},
-				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
-				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
-				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
-				blocks,
-				ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
-				reasoningTokens,
-			}
-		}
-	}
-
-	// The iterator ended without a `result` message — treat as a completed run
-	// with no usage rather than inventing numbers.
-	return {
-		text: finalText,
-		sessionId,
-		usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
-		durationMs: 0,
-		numTurns: 0,
-		error: null,
-		blocks,
-		ttftMs: null,
-		reasoningTokens,
 	}
 }

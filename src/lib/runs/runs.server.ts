@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, isNotNull, isNull, lt } from 'drizzle-orm'
+import { interruptRun } from '$lib/engine/run-registry.server'
 import { db } from '$lib/db.server'
 import { chatRuns } from '$lib/runs/runs.schema'
 
@@ -131,6 +132,17 @@ export async function reapStuckRuns(opts?: {
 		)
 		.returning({ id: chatRuns.id })
 
+	/*
+	 * A reaped run is almost always already dead — the usual cause is a process restart that
+	 * left the row behind. But "almost always" is not "always": a run genuinely wedged on a
+	 * tool that never returns is still holding an SDK session, and having just declared it
+	 * canceled we should stop it rather than leave it spending. `interruptRun` no-ops for
+	 * every id this process does not hold, which is most of them.
+	 */
+	for (const { id } of reaped) {
+		await interruptRun(id, 'Reaped as stuck by the maintenance tick')
+	}
+
 	return { reapedCount: reaped.length, reapedIds: reaped.map((r) => r.id) }
 }
 
@@ -142,6 +154,12 @@ export async function reapStuckRuns(opts?: {
  * `runs_reap.5min` tick. Ownership is enforced — the row must belong to the calling user
  * AND still be in an active state with `finishedAt IS NULL`. Idempotent: a second call on
  * the same id finds nothing to update and returns `success: false`.
+ *
+ * Marking the row canceled is not the same as stopping the work. When the run is live in
+ * this process we also interrupt its SDK session, so a dismissed run stops spending rather
+ * than running on invisibly behind a row that claims it is canceled. `interruptRun` returns
+ * false for a run this process does not hold — a worker-owned run, or one whose turn just
+ * ended — and the row update below stands on its own in that case, exactly as before.
  */
 export async function dismissStuckRun(
 	userId: string,
@@ -160,6 +178,12 @@ export async function dismissStuckRun(
 			),
 		)
 		.returning({ id: chatRuns.id })
+
+	// Only after the ownership-checked update succeeds: the WHERE clause above is what
+	// proves the caller may stop this run at all.
+	if (updated.length > 0) {
+		await interruptRun(runId, 'Dismissed by user from the running-sessions dock')
+	}
 
 	return { success: updated.length > 0 }
 }
