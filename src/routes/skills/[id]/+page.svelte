@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import { page } from '$app/state';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import {
@@ -132,7 +133,14 @@
 	}
 
 	async function handleDelete() {
-		if (!skill || skill.isSystem || !confirm('Delete this skill and all its files?')) return;
+		if (!skill || skill.isSystem) return;
+		const ok = await confirmDialog({
+			title: 'Delete this skill?',
+			message: 'The skill and all its files will be deleted. This cannot be undone.',
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		await deleteSkillCommand({ id: skill.id });
 		goto('/skills');
 	}
@@ -188,7 +196,13 @@
 
 	async function handleDeleteFile(fileId: string) {
 		if (skill?.isSystem) return;
-		if (!confirm('Delete this file?')) return;
+		const ok = await confirmDialog({
+			title: 'Delete this file?',
+			message: 'This cannot be undone.',
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		await deleteSkillFileCommand({ fileId });
 		await refresh();
 	}

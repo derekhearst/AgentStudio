@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import { page } from '$app/state';
 	import {
 		listProjectsQuery,
@@ -61,7 +62,13 @@
 
 	async function handleDelete(project: ProjectRow) {
 		const fsNote = project.repoKind !== 'none' ? ' Filesystem and git repo will also be removed.' : '';
-		if (!confirm(`Delete "${project.name}"?${fsNote} This cannot be undone.`)) return;
+		const ok = await confirmDialog({
+			title: `Delete "${project.name}"?`,
+			message: `${fsNote.trim() ? fsNote.trim() + ' ' : ''}This cannot be undone.`,
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		try {
 			await deleteProjectCommand(project.id);
 			await load();
@@ -71,7 +78,14 @@
 	}
 
 	async function disconnectGithub() {
-		if (!confirm('Disconnect GitHub? Your stored token will be revoked. Imported projects keep their local clone.')) return;
+		const ok = await confirmDialog({
+			title: 'Disconnect GitHub?',
+			message:
+				'Your stored token will be revoked. Imported projects keep their local clone.',
+			confirmLabel: 'Disconnect',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		try {
 			await disconnectGithubCommand();
 			await load();

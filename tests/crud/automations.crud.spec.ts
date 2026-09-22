@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, uniquePrefix, waitForHydration, withErrorCapture } from '../helpers'
+import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, uniquePrefix, waitForHydration, withErrorCapture } from '../helpers'
 
 /**
  * /automations — CRUD lifecycle for cron-driven automations.
@@ -74,11 +74,11 @@ test.describe('/automations — CRUD lifecycle', () => {
 				)
 
 				// ── Delete
-				page.on('dialog', (d) => void d.accept())
 				await page.reload()
 				await waitForHydration(page)
 				const cardAfterEnable = page.locator('article').filter({ hasText: description })
 				await cardAfterEnable.first().getByRole('button', { name: 'Delete', exact: true }).click()
+				await answerConfirmDialog(page, 'Delete')
 				await pollDb(
 					() => sql<{ count: number }[]>`select count(*)::int as count from automations where id = ${automationId}`,
 					(rows) => rows[0]?.count === 0,

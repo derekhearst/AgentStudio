@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, uniquePrefix, waitForHydration, withErrorCapture } from '../helpers'
+import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, uniquePrefix, waitForHydration, withErrorCapture } from '../helpers'
 
 /**
  * /projects + /projects/[id] CRUD lifecycle.
@@ -22,9 +22,6 @@ test.describe('/projects — CRUD lifecycle', () => {
 		await authenticateContext(context)
 		const sql = getSql()
 		const projectName = `${prefix} Project`
-
-		// Auto-accept every confirm() dialog (delete project uses confirm).
-		page.on('dialog', (d) => void d.accept())
 
 		try {
 			await withErrorCapture(page, async () => {
@@ -66,6 +63,7 @@ test.describe('/projects — CRUD lifecycle', () => {
 				const projectCard = page.locator('div.group').filter({ hasText: projectName }).first()
 				await expect(projectCard).toBeVisible()
 				await projectCard.getByRole('button', { name: 'Delete project' }).click()
+				await answerConfirmDialog(page, 'Delete')
 				await pollDb(
 					() => sql<{ count: number }[]>`select count(*)::int as count from projects where id = ${projectId}`,
 					(rows) => rows[0]?.count === 0,

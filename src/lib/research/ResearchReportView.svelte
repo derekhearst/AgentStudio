@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import {
 		getResearchDetailQuery,
 		cancelResearchCommand,
@@ -55,7 +56,14 @@
 	}
 
 	async function handleCancel() {
-		if (!confirm('Cancel this research run? In-flight LLM calls may still complete in the background.')) return;
+		const ok = await confirmDialog({
+			title: 'Cancel this research run?',
+			message: 'In-flight LLM calls may still complete in the background.',
+			confirmLabel: 'Cancel run',
+			cancelLabel: 'Keep running',
+			variant: 'warning'
+		});
+		if (!ok) return;
 		canceling = true;
 		try {
 			await cancelResearchCommand(id);

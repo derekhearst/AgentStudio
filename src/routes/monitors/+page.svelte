@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import {
 		cancelMonitorCommand,
 		checkMonitorNowCommand,
@@ -55,8 +56,15 @@
 		}
 	}
 
-	function handleCancel(monitor: MonitorRow) {
-		if (!window.confirm(`Cancel monitor "${monitor.name}"? This cannot be undone.`)) return;
+	async function handleCancel(monitor: MonitorRow) {
+		const ok = await confirmDialog({
+			title: `Cancel monitor "${monitor.name}"?`,
+			message: 'This cannot be undone.',
+			confirmLabel: 'Cancel monitor',
+			cancelLabel: 'Keep it',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		void withBusy(monitor, async () => {
 			await cancelMonitorCommand({ id: monitor.id });
 			return `Canceled "${monitor.name}".`;

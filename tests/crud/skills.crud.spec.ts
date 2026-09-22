@@ -1,14 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-	authenticateContext,
-	cleanupExtendedPrefix,
-	expectNoHorizontalOverflow,
-	getSql,
-	pollDb,
-	seedSkill,
-	uniquePrefix,
-	withErrorCapture,
-} from '../helpers'
+import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, seedSkill, uniquePrefix, withErrorCapture } from '../helpers'
 
 /**
  * /skills + /skills/[id] CRUD lifecycle.
@@ -111,9 +102,9 @@ test.describe('/skills — CRUD lifecycle', () => {
 				)
 
 				// ── Delete: file
-				page.on('dialog', (d) => void d.accept())
 				const fileRowAgain = page.locator('div.rounded-lg').filter({ hasText: fileName }).first()
 				await fileRowAgain.locator('button[title="Delete"]').click()
+				await answerConfirmDialog(page, 'Delete')
 				await pollDb(
 					() => sql<{ count: number }[]>`select count(*)::int as count from skill_files where id = ${fileId}`,
 					(rows) => rows[0]?.count === 0,
@@ -122,6 +113,7 @@ test.describe('/skills — CRUD lifecycle', () => {
 
 				// ── Delete: the entire skill
 				await page.getByRole('button', { name: 'Delete skill' }).click()
+				await answerConfirmDialog(page, 'Delete')
 				await pollDb(
 					() => sql<{ count: number }[]>`select count(*)::int as count from skills where id = ${seed.id}`,
 					(rows) => rows[0]?.count === 0,

@@ -10,6 +10,7 @@
 	 * `bypassPermissions` without `confirmed: true` server-side as well.
 	 */
 	import { setConversationPermissionMode } from '$lib/chat/chat.remote';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import {
 		describePermissionMode,
 		normalizePermissionMode,
@@ -44,11 +45,16 @@
 
 		let confirmed = false;
 		if (requiresExplicitConfirm(next)) {
-			confirmed =
-				typeof window !== 'undefined' &&
-				window.confirm(
-					`Switch this conversation to "${PERMISSION_MODE_LABELS[next]}"?\n\n${describePermissionMode(next)}\n\nPushes, pull requests and plan handoffs will still ask.`
-				);
+			// The select has already moved to `next` by the time this handler runs, so a
+			// declined confirm has to put it back. That was true of `window.confirm()` too;
+			// what is new is that the await gives the operator a moment where the select
+			// shows a mode the conversation is not in, which the disabled state below covers.
+			confirmed = await confirmDialog({
+				title: `Switch this conversation to "${PERMISSION_MODE_LABELS[next]}"?`,
+				message: `${describePermissionMode(next)}\n\nPushes, pull requests and plan handoffs will still ask.`,
+				confirmLabel: 'Switch',
+				variant: 'warning'
+			});
 			if (!confirmed) {
 				select.value = current;
 				return;
