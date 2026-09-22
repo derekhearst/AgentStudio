@@ -11,7 +11,16 @@
 		relativeTimeBase(date, { style: 'capitalized' })
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number]
-	type StreamEntry = { conversationId: string; agentId: string; delta: string }
+	/*
+	 * `lastDelta`, not `delta`, and nullable.
+	 *
+	 * /api/agents/monitor streams whatever `listActiveAgentRunsForUser` selects, which
+	 * names the column `lastDelta`. This type claimed `delta: string`, so the live preview
+	 * below read `undefined.length` and threw the moment any agent actually streamed —
+	 * taking the whole page down with it. The column is also null until the first token
+	 * arrives, so a run that has started but not spoken is the normal case, not an edge one.
+	 */
+	type StreamEntry = { conversationId: string; agentId: string; lastDelta: string | null }
 
 	let agents = $state<AgentRow[]>([])
 	let loading = $state(true)
@@ -214,7 +223,9 @@
 										<span class="text-[10px] font-semibold uppercase tracking-widest text-primary/70">Streaming live</span>
 									</div>
 									<p class="line-clamp-3 break-all text-[11px] leading-relaxed text-base-content/70">
-										{streaming.delta.length > 400 ? '…' + streaming.delta.slice(-400) : streaming.delta}
+										{(streaming.lastDelta ?? '').length > 400
+											? '…' + (streaming.lastDelta ?? '').slice(-400)
+											: (streaming.lastDelta ?? '')}
 									</p>
 									<span class="cursor-blink mt-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 								</div>

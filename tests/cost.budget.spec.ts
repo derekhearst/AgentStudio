@@ -1,5 +1,22 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Budget limits and the usage ledger belong to the one user this instance has, so they
+ * cannot be partitioned by prefix the way most fixtures are. This file and its sibling
+ * (the other of automations.budget-gate / cost.budget) each clear and re-seed those rows,
+ * and running them side by side put one file's cleanup between the other's setup and its
+ * assertion. Both passed alone and failed together, which is most of why both were
+ * quarantined. The lock is shared by name, so it serializes across workers and projects.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 const BASE_URL = 'http://127.0.0.1:4173'
 

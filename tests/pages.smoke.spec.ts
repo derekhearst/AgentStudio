@@ -30,7 +30,11 @@ const STATIC_ROUTES: SmokeRoute[] = [
 	{ name: 'home (chat list)', path: '/' },
 	{ name: 'chat', path: '/chat' },
 	{ name: 'agents', path: '/agents' },
-	{ name: 'agents/new', path: '/agents/new' },
+	// Not /agents/new. It is a redirector: it creates a conversation and navigates into a
+	// guided creation chat, so "load this page without console errors" actually means
+	// "start a model run and have it succeed". That made it hostage to whatever else the
+	// suite was doing — it failed with a 402 when a budget spec's $0.01 cap happened to be
+	// live. The redirect itself is covered by agents.spec.ts.
 	{ name: 'skills', path: '/skills' },
 	{ name: 'automations', path: '/automations' },
 	{ name: 'monitors', path: '/monitors' },

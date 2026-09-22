@@ -27,10 +27,15 @@ export const LIVE_SPECS: readonly string[] = [
 	'tests/cost.tool-usage-live.spec.ts',
 	'tests/runs.live.spec.ts',
 	'tests/workspace.live.spec.ts',
+	// Reclassified from KNOWN_FAILING: it triggers a cron tick and then asserts the
+	// automation produced a chat_run, an assistant message and an llm_usage row. That
+	// only happens if a model actually answers, so it belongs with the other specs that
+	// need credentials rather than on a list of things to repair.
+	'tests/automations.runtime.spec.ts',
 ]
 
 /**
- * Meant to get shorter. 42 → 38 → 31 → 28 → 23.
+ * Meant to get shorter. 42 → 38 → 31 → 28 → 23 → 17.
  *
  * A warning for whoever works on the rest. Run these as a subset and nearly all pass; run
  * the whole suite and most of them fail. They are not simply stale — they interfere, and
@@ -43,19 +48,13 @@ export const LIVE_SPECS: readonly string[] = [
  * settings re-reading cached remote queries after every mutation, and a missing VAPID
  * config failing a notification that had already been written.
  *
- * Count on 2026-09-21: 23.
+ * Count on 2026-09-21: 17.
  */
 export const KNOWN_FAILING: readonly string[] = [
-	'tests/automations.budget-gate.spec.ts',
-	'tests/automations.mode.spec.ts',
-	'tests/automations.runtime.spec.ts',
 	'tests/chat.agent-selector.spec.ts',
 	'tests/chat.agent-stream-integration.spec.ts',
 	'tests/chat.agent-tool-policy.spec.ts',
 	'tests/chat.askuser-resume.spec.ts',
-	'tests/cost.budget.spec.ts',
-	'tests/cost.linkage.spec.ts',
-	'tests/cost.tool-usage.spec.ts',
 	'tests/crud/agents.crud.spec.ts',
 	'tests/crud/automations.crud.spec.ts',
 	'tests/crud/chat/agent-switch.spec.ts',

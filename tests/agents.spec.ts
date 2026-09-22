@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, seedAgent, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, authenticateContext, cleanupPrefixedRecords, seedAgent, uniquePrefix } from './helpers'
+
+/**
+ * Takes the same lock the budget specs use. Anything that runs the model has to: a
+ * budget spec installing a $0.01 cap while this streams turns it into a 402 that looks
+ * like a product failure. See `acquireGlobalStateLock` in helpers.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 /**
  * What this file used to assert, and why it no longer can.

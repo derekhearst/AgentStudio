@@ -1,6 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Serialized against the other specs that write this user's budget limits and cost
+ * ledger — see `acquireGlobalStateLock` in helpers for why prefix isolation cannot work
+ * for these rows.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 type LlmUsageRow = {
 	id: string
@@ -11,7 +25,6 @@ type LlmUsageRow = {
 	cost: string
 	user_id: string | null
 	run_id: string | null
-	task_id: string | null
 	agent_id: string | null
 	metadata: Record<string, unknown>
 }
@@ -44,26 +57,25 @@ async function seedRun(prefix: string, userId: string, agentId: string | null) {
 async function listUsageForUser(userId: string) {
 	const sql = getSql()
 	return sql<LlmUsageRow[]>`
-		select id, source, model, tokens_in, tokens_out, cost, user_id, run_id, task_id, agent_id, metadata
+		select id, source, model, tokens_in, tokens_out, cost, user_id, run_id, agent_id, metadata
 		from llm_usage
 		where user_id = ${userId}
 		order by created_at desc
 	`
 }
 
-test.describe('cost/linkage — llm_usage carries run/agent/user/task linkage', () => {
-	test('schema accepts and round-trips all four foreign-key columns', async () => {
+test.describe('cost/linkage — llm_usage carries run/agent/user linkage', () => {
+	test('schema accepts and round-trips all three foreign-key columns', async () => {
 		const prefix = uniquePrefix('cost-linkage-roundtrip')
 		await cleanupPrefixedRecords(prefix)
 		const userId = await getActiveUserId()
 		const agentId = await seedAgent(prefix)
 		const { runId } = await seedRun(prefix, userId, agentId)
-		const taskId = randomUUID()
 		const sql = getSql()
 		try {
 			await sql`
-				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id, run_id, agent_id, task_id, metadata)
-				values ('chat', 'anthropic/claude-sonnet-4', 100, 50, '0.0042', ${userId}, ${runId}, ${agentId}, ${taskId}, '{}'::jsonb)
+				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id, run_id, agent_id, metadata)
+				values ('chat', 'anthropic/claude-sonnet-4', 100, 50, '0.0042', ${userId}, ${runId}, ${agentId}, '{}'::jsonb)
 			`
 
 			const rows = await listUsageForUser(userId)
@@ -72,7 +84,6 @@ test.describe('cost/linkage — llm_usage carries run/agent/user/task linkage', 
 			expect(ours).toBeDefined()
 			expect(ours!.user_id).toBe(userId)
 			expect(ours!.agent_id).toBe(agentId)
-			expect(ours!.task_id).toBe(taskId)
 			expect(ours!.tokens_in).toBe(100)
 			expect(ours!.tokens_out).toBe(50)
 		} finally {
@@ -113,20 +124,19 @@ test.describe('cost/linkage — llm_usage carries run/agent/user/task linkage', 
 		}
 	})
 
-	test('per-run, per-agent, and per-task SUM(cost) queries match seeded ledger entries', async () => {
+	test('per-run and per-agent SUM(cost) queries match seeded ledger entries', async () => {
 		const prefix = uniquePrefix('cost-linkage-summary')
 		await cleanupPrefixedRecords(prefix)
 		const userId = await getActiveUserId()
 		const agentId = await seedAgent(prefix)
 		const { runId } = await seedRun(prefix, userId, agentId)
-		const taskId = randomUUID()
 		const sql = getSql()
 		try {
 			await sql`
-				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id, run_id, agent_id, task_id, metadata)
+				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id, run_id, agent_id, metadata)
 				values
-					('chat', 'anthropic/claude-sonnet-4', 200, 80, '0.05', ${userId}, ${runId}, ${agentId}, ${taskId}, '{}'::jsonb),
-					('subagent', 'anthropic/claude-sonnet-4', 50, 20, '0.01', ${userId}, ${runId}, ${agentId}, ${taskId}, '{}'::jsonb)
+					('chat', 'anthropic/claude-sonnet-4', 200, 80, '0.05', ${userId}, ${runId}, ${agentId}, '{}'::jsonb),
+					('subagent', 'anthropic/claude-sonnet-4', 50, 20, '0.01', ${userId}, ${runId}, ${agentId}, '{}'::jsonb)
 			`
 
 			const [byRunRow] = await sql<{ cost: string; tokens_in: number; tokens_out: number; count: number }[]>`
@@ -148,12 +158,6 @@ test.describe('cost/linkage — llm_usage carries run/agent/user/task linkage', 
 			expect(parseFloat(byAgentRow.cost)).toBeCloseTo(0.06, 5)
 			expect(byAgentRow.count).toBe(2)
 
-			const [byTaskRow] = await sql<{ cost: string; count: number }[]>`
-				select coalesce(sum(cost::numeric), 0)::text as cost, count(*)::int as count
-				from llm_usage where task_id = ${taskId}
-			`
-			expect(parseFloat(byTaskRow.cost)).toBeCloseTo(0.06, 5)
-			expect(byTaskRow.count).toBe(2)
 		} finally {
 			await sql`delete from llm_usage where user_id = ${userId} and run_id = ${runId}`
 			await sql`delete from agents where id = ${agentId}`

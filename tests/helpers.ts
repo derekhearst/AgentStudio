@@ -676,3 +676,74 @@ export async function getActiveUserId(): Promise<string> {
 	// locally, where a user always exists, and failed eight specs on CI's empty database.
 	return ensureSeededUser()
 }
+
+/**
+ * Serialize a block of test work across every worker and project.
+ *
+ * Some state is global to the instance and cannot be partitioned by prefix: a single
+ * user's budget limits and usage ledger, for example. Spec files that each clear and
+ * re-seed those rows pass alone and fail together, because one's cleanup lands between
+ * another's setup and assertion. Seven files share that state — the cost.* and
+ * automations.* specs that clear or seed `budget_limits`, `llm_usage` or `tool_usage`
+ * for the singleton user — and several sat in the quarantine mostly for this reason. Note that the other two were
+ * already un-quarantined: an interfering spec breaks its neighbours whether or not
+ * anyone has noticed it is interfering.
+ *
+ * A Postgres advisory lock is the right tool: it is visible to every worker, every
+ * project and every process, and it costs nothing when uncontended. The lock is session
+ * scoped, so the connection has to be reserved for the duration rather than borrowed
+ * from the pool per statement.
+ *
+ * Only wrap the part that touches the shared rows. Wrapping a whole file would serialize
+ * work that has no reason to wait.
+ */
+let lockClient: ReturnType<typeof postgres> | null = null
+
+/**
+ * One connection per worker process, not one per test.
+ *
+ * The first version opened a dedicated client in every `beforeEach` and closed it in
+ * `afterEach`. With eight workers across two projects that was enough extra churn to
+ * push a database already sitting at 84 of its 100 connections over the edge, and
+ * unrelated specs started failing with "sorry, too many clients already". Playwright
+ * runs one test at a time per worker, so a single long-lived connection per process can
+ * hold the lock for whichever test currently needs it. It is never closed; the process
+ * exiting releases both the connection and any lock still held on it.
+ */
+function getLockClient() {
+	if (!lockClient) {
+		const { DATABASE_URL } = parseEnvFile()
+		lockClient = postgres(DATABASE_URL, { max: 1 })
+	}
+	return lockClient
+}
+
+export async function acquireGlobalStateLock(name: string): Promise<() => Promise<void>> {
+	// A stable 32-bit key per name. A collision between two different names would only
+	// cost unnecessary serialization, never correctness.
+	let key = 0
+	for (const char of name) key = (key * 31 + char.charCodeAt(0)) | 0
+
+	// Not a connection reserved from `getSql()`: an advisory lock is session scoped, so
+	// it has to be held for the whole test, and that client is `max: 1` — holding its one
+	// connection would deadlock the test's own queries against its own lock.
+	const sql = getLockClient()
+	await sql`select pg_advisory_lock(${key})`
+
+	let released = false
+	return async () => {
+		if (released) return
+		released = true
+		await sql`select pg_advisory_unlock(${key})`
+	}
+}
+
+/** Convenience wrapper for a single block. */
+export async function withGlobalStateLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+	const release = await acquireGlobalStateLock(name)
+	try {
+		return await fn()
+	} finally {
+		await release()
+	}
+}

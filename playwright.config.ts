@@ -10,6 +10,20 @@ import { TEST_SERVER_HEALTH_URL, TEST_SERVER_ORIGIN, TEST_SERVER_PORT, testServe
  *
  * To run a single project: `--project=desktop` or `--project=mobile`.
  */
+/*
+ * Keep each Playwright worker's database pool small.
+ *
+ * This file is loaded by the runner and by every worker, so setting it here reaches all
+ * of them. Specs import server modules to call them directly, which opens an app pool
+ * per worker; at postgres.js's default of ten that is ~80 connections for eight workers,
+ * against a `max_connections` of 100. The suite then failed with "sorry, too many
+ * clients already" in whichever spec happened to ask for a connection next.
+ *
+ * A worker runs one test at a time, so it needs very few. The dev server is given its
+ * own, larger value in tests/server-env.ts — it serves all eight workers at once.
+ */
+process.env.DATABASE_POOL_MAX ??= '3'
+
 export default defineConfig({
 	/**
 	 * CI skips the live-model specs and the #55 quarantine; a local run does not, so the

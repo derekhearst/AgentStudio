@@ -29,6 +29,15 @@ export function testServerEnv(base: NodeJS.ProcessEnv = process.env): Record<str
 	// can override via .env or the shell env to point at a real secret.
 	env.GITHUB_WEBHOOK_SECRET = base.GITHUB_WEBHOOK_SECRET ?? 'e2e-test-webhook-secret-do-not-use-in-prod'
 
+	// The dev server gets a normal pool, explicitly.
+	//
+	// playwright.config.ts sets `DATABASE_POOL_MAX` on the runner process so each of the
+	// eight workers opens a small pool, and this function copies `process.env` — so
+	// without this line the server inherited the *worker* value and served the entire
+	// suite through two connections. That throttled everything and looked like 171
+	// unrelated test failures.
+	env.DATABASE_POOL_MAX = base.DATABASE_SERVER_POOL_MAX ?? '10'
+
 	// A throwaway VAPID keypair, generated for this file and used nowhere else. Without
 	// one the push-subscription UI cannot work at all — `getPushPublicKey()` throws — so
 	// the settings push controls were untestable. Nothing is ever delivered: the specs
