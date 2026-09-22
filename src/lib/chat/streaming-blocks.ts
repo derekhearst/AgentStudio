@@ -10,6 +10,7 @@
  */
 
 import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
+import type { ToolResultDetails } from '../engine/tool-result-details'
 
 export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
 
@@ -29,6 +30,12 @@ export type ToolBlock = {
 	executionMs?: number | null
 	expanded: boolean
 	token?: string | null
+	/**
+	 * Typed output for the built-ins worth rendering specially — diff, terminal, todo list.
+	 * Rides the `tool_result` frame; absent for every other tool, which is what keeps the
+	 * generic card the default rather than a fallback.
+	 */
+	details?: ToolResultDetails
 }
 
 export type ThinkingBlock = {
@@ -117,6 +124,9 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				result: block.result ?? '',
 				success: block.status === 'completed',
 				executionMs: block.executionMs ?? 0,
+				// Persisted so a reloaded conversation renders the same diff / terminal / todo
+				// card as the live stream did, rather than degrading to the generic one.
+				...(block.details ? { details: block.details } : {}),
 			})
 		}
 	}
@@ -625,6 +635,7 @@ export function applyToolResult(
 		success?: boolean
 		executionMs?: number | null
 		result?: string
+		details?: ToolResultDetails
 	},
 ): { blocks: StreamingBlock[]; missing: boolean; unexpectedStatus: ToolStatus | null } {
 	const finalStatus = payload.success ? ('completed' as const) : ('failed' as const)
@@ -648,6 +659,7 @@ export function applyToolResult(
 					token: null,
 					executionMs: payload.executionMs ?? null,
 					result: resultText,
+					...(payload.details ? { details: payload.details } : {}),
 				},
 			],
 		}
@@ -667,6 +679,7 @@ export function applyToolResult(
 						status: finalStatus,
 						executionMs: payload.executionMs ?? null,
 						result: resultText,
+						...(payload.details ? { details: payload.details } : {}),
 					}
 				: b,
 		),

@@ -8,18 +8,25 @@
  *   reasoning     { content }
  *   tool_pending  { id, name, arguments, token? }
  *   tool_call     { id, name, arguments }
- *   tool_result   { id, name, success, executionMs, result }
+ *   tool_result   { id, name, success, executionMs, result, details? }
  *   tool_denied   { id }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
  * a sequence number, exactly as before.
+ *
+ * `details` is the one addition since: the SDK's typed tool output, distilled by
+ * `./tool-result-details` for the built-ins whose result is worth rendering as something
+ * other than a JSON blob — a diff, a terminal, a todo list (#16, #26, #21). It is optional
+ * on purpose, so a consumer that does not know about it, or a block persisted before it
+ * existed, still has the `result` string it always had.
  */
 
 import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
+import { toolResultDetails } from './tool-result-details'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
@@ -342,6 +349,20 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		}
 
 		if (msg.type === 'user') {
+			/**
+			 * `tool_use_result` carries the tool's full typed Output object — the diff behind an
+			 * `Edit`, the streams behind a `Bash`, the list behind a `TodoWrite` — while
+			 * `message.content` carries only the text the model reads. It sits on the message
+			 * rather than on the block, so it is only attributable when the message answers
+			 * exactly one call; with two we would be guessing which one it describes, and a
+			 * diff rendered against the wrong file is worse than no diff.
+			 */
+			// `content` is a MessageParam's, so it is a string as legitimately as it is an array
+			// of blocks — `.filter` on the string form would throw and take the turn with it.
+			const content = Array.isArray(msg.message?.content) ? msg.message.content : []
+			const resultBlocks = content.filter((b: { type?: string }) => b?.type === 'tool_result')
+			const structured = resultBlocks.length === 1 ? msg.tool_use_result : undefined
+
 			for (const block of msg.message?.content ?? []) {
 				if (block.type !== 'tool_result') continue
 				const id = String(block.tool_use_id)
@@ -352,13 +373,16 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						? raw
 						: JSON.stringify(raw ?? null)
 				const toolName = toolNames.get(id) ?? 'unknown'
+				const toolArguments = toolInputs.get(id) ?? null
+				const details = toolResultDetails(toolName, structured, toolArguments)
 				blocks.push({
 					kind: 'tool',
 					name: toolName,
-					arguments: toolInputs.get(id) ?? null,
+					arguments: toolArguments,
 					result: text,
 					success: block.is_error !== true,
 					executionMs: 0,
+					...(details ? { details } : {}),
 				})
 				await emit('tool_result', {
 					id,
@@ -366,6 +390,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					success: block.is_error !== true,
 					executionMs: null,
 					result: text,
+					...(details ? { details } : {}),
 				})
 			}
 			continue

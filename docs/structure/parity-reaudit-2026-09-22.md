@@ -393,6 +393,12 @@ unless one of those is the actual goal.
 
 1. **The adapter** (finding 1) — typed blocks from `tool_use_result`. Unblocks #16, #26, #21
    and half of #35, and fixes #38's ledger gap. Nothing else in wave 3 should start first.
+   **Landed**: `src/lib/engine/tool-result-details.ts` distils `Edit` / `Write` / `Bash` /
+   `TodoWrite` output onto an optional `details` field on the tool block, and the chat
+   renders a diff, a terminal and a checklist from it. What is left of those three issues is
+   placement rather than data — the pinned todo list above the composer (#21), live output
+   while a command runs (#26, which is the background path in #35). The ledger gap is
+   untouched and still wants the same field.
 2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
    of #35, and real context accounting.
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool

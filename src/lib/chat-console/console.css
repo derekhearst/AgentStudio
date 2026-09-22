@@ -2226,3 +2226,194 @@ a.console-crumbs__seg:hover {
 .console-composer-wrap.is-large .console-composer__ta {
 	min-height: 120px;
 }
+
+/* ── Typed tool-result cards (#16 / #26 / #21) ─────────────────
+ * Diff, terminal and todo renderings for the built-ins whose structured output the engine
+ * now keeps (see $lib/engine/tool-result-details). They share the .tool-call-card shell so
+ * they sit in the transcript at the same weight as a generic tool card. */
+
+.console-diff__path {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11.5px;
+	color: var(--color-base-content);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.console-diff__dir { color: color-mix(in oklab, var(--color-base-content) 45%, transparent); }
+
+.console-diff__verb {
+	flex: 0 0 auto;
+	font-size: 10.5px;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.console-diff__stat {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11px;
+}
+
+.console-diff__stat.is-add { color: var(--color-success); }
+.console-diff__stat.is-del { color: var(--color-error); }
+
+.console-diff__body {
+	border: 1px solid var(--color-base-300);
+	border-radius: 5px;
+	background: var(--color-base-100);
+	overflow-x: auto;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11.5px;
+	line-height: 1.55;
+}
+
+.console-diff__line { display: flex; white-space: pre; }
+
+.console-diff__line.is-add { background: color-mix(in oklab, var(--color-success) 14%, transparent); }
+.console-diff__line.is-del { background: color-mix(in oklab, var(--color-error) 14%, transparent); }
+
+.console-diff__no {
+	flex: 0 0 auto;
+	width: 42px;
+	padding-right: 10px;
+	text-align: right;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	user-select: none;
+}
+
+.console-diff__text { flex: 1 1 auto; padding-right: 10px; }
+
+.console-diff__gap {
+	padding: 1px 0 1px 12px;
+	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	border-top: 1px solid var(--color-base-300);
+	border-bottom: 1px solid var(--color-base-300);
+}
+
+.console-diff__note,
+.console-term__note,
+.console-todo__note {
+	margin: 0;
+	font-size: 11px;
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+.console-term__cmd {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11.5px;
+	color: var(--color-base-content);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.console-term__prompt { color: var(--color-primary); margin-right: 4px; }
+
+.console-term__desc {
+	margin: 0;
+	font-size: 11.5px;
+	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.console-term__badge {
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 10px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	border: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.console-term__badge.is-bg { border-color: var(--color-warning); color: var(--color-warning); }
+.console-term__badge.is-warn { border-color: var(--color-warning); color: var(--color-warning); }
+.console-term__badge.is-err { border-color: var(--color-error); color: var(--color-error); }
+
+.console-term__body {
+	border: 1px solid var(--color-base-300);
+	border-radius: 5px;
+	background: var(--color-base-100);
+	max-height: 22rem;
+	overflow: auto;
+}
+
+.console-term__out {
+	margin: 0;
+	padding: 8px 10px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11.5px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: color-mix(in oklab, var(--color-base-content) 85%, transparent);
+}
+
+.console-term__out.is-err { color: color-mix(in oklab, var(--color-error) 85%, var(--color-base-content)); }
+
+.console-term__body .console-term__note {
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--color-base-300);
+}
+
+/* Self-contained shell: .tool-call-card's `> div` rule forces a padded column layout on
+ * every direct child, which would break the head row. */
+.console-todo {
+	margin: 6px 0;
+	padding: 8px 10px;
+	border-radius: 6px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-left: 2px solid var(--color-warning);
+	font-size: 12px;
+}
+
+.console-todo.is-done { border-left-color: var(--color-primary); }
+
+.console-todo__head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.console-todo__title {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: 12px;
+	color: var(--color-base-content);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.console-todo__count {
+	flex: 0 0 auto;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11px;
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+.console-todo__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+
+.console-todo__item { display: flex; gap: 8px; font-size: 12px; line-height: 1.45; }
+
+.console-todo__mark {
+	flex: 0 0 auto;
+	width: 12px;
+	text-align: center;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.console-todo__item.is-completed .console-todo__mark { color: var(--color-success); }
+.console-todo__item.is-completed .console-todo__text {
+	text-decoration: line-through;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.console-todo__item.is-in_progress .console-todo__mark { color: var(--color-warning); }
+.console-todo__item.is-in_progress .console-todo__text { color: var(--color-base-content); }
+
+.console-todo__item.is-pending .console-todo__text {
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}

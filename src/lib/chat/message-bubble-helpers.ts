@@ -10,6 +10,10 @@
  * and returns a value. No closure over component state.
  */
 
+// Relative rather than `$lib/...`: `chat.model-tag.spec.ts` imports this module directly in
+// the plain Playwright loader, where the SvelteKit alias is not guaranteed to resolve.
+import type { ToolResultDetails } from '../engine/tool-result-details'
+
 export type SavedBlock =
 	| { kind: 'text'; content: string }
 	| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
@@ -20,6 +24,8 @@ export type SavedBlock =
 			result: unknown
 			success: boolean
 			executionMs: number
+			/** Typed output for the built-ins worth rendering specially. Absent for everything else. */
+			details?: ToolResultDetails
 	  }
 	| {
 			kind: 'subagent'

@@ -25,6 +25,9 @@
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
+	import FileEditCard from '$lib/chat/FileEditCard.svelte';
+	import ShellOutputCard from '$lib/chat/ShellOutputCard.svelte';
+	import TodoListCard from '$lib/chat/TodoListCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
@@ -1378,6 +1381,18 @@
 									onSubmit={resolveAskUser}
 								/>
 							{/if}
+						<!--
+							#16 / #26 / #21 — once the result carries a shape we know, the block graduates
+							from the generic card to the one that renders it. `details` only ever arrives
+							with the result, so a still-pending call keeps ToolCallCard and its
+							Allow/Deny controls.
+						-->
+						{:else if block.kind === 'tool' && block.details?.kind === 'file_edit'}
+							<FileEditCard details={block.details} success={block.status !== 'failed'} />
+						{:else if block.kind === 'tool' && block.details?.kind === 'shell'}
+							<ShellOutputCard details={block.details} success={block.status !== 'failed'} />
+						{:else if block.kind === 'tool' && block.details?.kind === 'todo'}
+							<TodoListCard details={block.details} />
 						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<ToolCallCard
 								name={block.name}

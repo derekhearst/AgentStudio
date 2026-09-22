@@ -2,6 +2,7 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid 
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
+import type { ToolResultDetails } from '$lib/engine/tool-result-details'
 
 export const chatRunStateEnum = pgEnum('chat_run_state', [
 	'queued',
@@ -52,6 +53,14 @@ export type StreamBlock =
 			result: unknown
 			success: boolean
 			executionMs: number
+			/**
+			 * Typed payload distilled from the SDK's `tool_use_result` for the built-ins whose
+			 * output has a shape worth rendering — a diff, a terminal, a todo list. Absent for
+			 * every other tool and for blocks persisted before this existed, which is what keeps
+			 * it additive: a consumer that does not know about it renders the generic card, and
+			 * the raw `result` string is still there either way. See `$lib/engine/tool-result-details`.
+			 */
+			details?: ToolResultDetails
 	  }
 
 export type RunEventPayload = unknown
