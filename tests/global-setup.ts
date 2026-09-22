@@ -89,4 +89,46 @@ export default async function globalSetup(_config: FullConfig) {
 	}
 
 	await ensureSandboxWritable(sandboxWorkspace)
+	await purgeAbandonedFixtures(databaseUrl)
+}
+
+/**
+ * Delete rows left behind by runs that died.
+ *
+ * Every spec cleans up in a `finally`, which covers a failing assertion but not a killed
+ * process or a timeout that takes the worker with it. The debris accumulates, and
+ * because fixture names carry a long `E2E:<spec>:<timestamp>:<rand>` prefix it eventually
+ * breaks tests that have nothing to do with it: 78 abandoned automations were enough to
+ * push the /automations list past a 412px viewport and fail the mobile overflow check,
+ * which reads as a layout regression rather than as leftovers.
+ *
+ * Only rows whose own name carries the prefix are touched, and only at the start of a
+ * run, so this cannot interfere with a spec in flight.
+ */
+async function purgeAbandonedFixtures(databaseUrl: string) {
+	const sql = postgres(databaseUrl, { max: 1 })
+	// The column that holds the prefixed name differs per table.
+	const tables: Array<[table: string, column: string]> = [
+		['automations', 'description'],
+		['projects', 'name'],
+		['agents', 'name'],
+		['repositories', 'owner'],
+		['review_items', 'summary'],
+		['conversations', 'title'],
+		['research', 'query'],
+	]
+	try {
+		let purged = 0
+		for (const [table, column] of tables) {
+			const deleted = await sql.unsafe(`delete from "${table}" where "${column}" like 'E2E:%' returning 1`)
+			purged += deleted.length
+		}
+		if (purged > 0) console.log(`[global-setup] purged ${purged} abandoned test fixture row(s)`)
+	} catch (err) {
+		// Never fail a run over cleanup — a missing table on a partially migrated database
+		// should not stop the suite that is about to migrate it.
+		console.warn('[global-setup] fixture purge skipped:', err instanceof Error ? err.message : err)
+	} finally {
+		await sql.end({ timeout: 5 })
+	}
 }

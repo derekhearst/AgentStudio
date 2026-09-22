@@ -540,6 +540,22 @@
 					questions: conversationResult.pendingAskUser.questions,
 				}
 				: null;
+
+			/*
+			 * Open the modal on a cold load, because nothing else can.
+			 *
+			 * The inline AskUserCard lives in `streamingBlocks`, which only exist for the
+			 * tab that watched the stream. After a refresh those are gone and the question
+			 * survives only in `chat_runs.pending_questions`, reconstructed just above.
+			 * The modal was the documented escape hatch — "the user can open it via the
+			 * HUD's Answer button" — but RunHud.svelte is no longer rendered anywhere, so
+			 * `askUserModalOpen` had no remaining path to `true` and a paused question was
+			 * simply unanswerable: the run waits forever and the operator has no control
+			 * that resolves it.
+			 */
+			if (pendingAskUser && streamingBlocks.length === 0) {
+				askUserModalOpen = true;
+			}
 		}
 
 	}

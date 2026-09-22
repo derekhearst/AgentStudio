@@ -61,7 +61,14 @@
 	{/if}
 </div>
 
-<!-- Mobile/tablet header -->
+<!--
+	Mobile/tablet header.
+
+	Note that the page title exists twice in the DOM — once above, once here — with CSS
+	hiding whichever does not belong at the current width. Both are <h1>, so only one is
+	ever in the accessibility tree; a test that wants the live one should ask by role
+	rather than taking the first text match.
+-->
 <div
 	class="relative z-20 flex shrink-0 items-center gap-2 border-b border-base-300/50 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 desktop:hidden tablet:px-4 tablet:pt-2"
 >

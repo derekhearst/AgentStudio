@@ -38,10 +38,13 @@ export const LIVE_SPECS: readonly string[] = [
 	// so CI failed it with `UnauthorizedResponseError` from the OpenRouter SDK. Passing
 	// locally is not evidence a spec can run in CI.
 	'tests/automations.output-routing.spec.ts',
+	// Named "(real LLM)" in the spec itself: it starts a research run from the form and
+	// waits for the pipeline to produce rows.
+	'tests/crud/research.crud.spec.ts',
 ]
 
 /**
- * Meant to get shorter. 42 → 38 → 31 → 28 → 23 → 17 → 11.
+ * Meant to get shorter. 42 → 38 → 31 → 28 → 23 → 17 → 11 → 1.
  *
  * A warning for whoever works on the rest. Run these as a subset and nearly all pass; run
  * the whole suite and most of them fail. They are not simply stale — they interfere, and
@@ -54,19 +57,9 @@ export const LIVE_SPECS: readonly string[] = [
  * settings re-reading cached remote queries after every mutation, and a missing VAPID
  * config failing a notification that had already been written.
  *
- * Count on 2026-09-21: 11.
+ * Count on 2026-09-21: 1.
  */
 export const KNOWN_FAILING: readonly string[] = [
-	'tests/chat.agent-selector.spec.ts',
-	'tests/chat.agent-stream-integration.spec.ts',
-	'tests/chat.agent-tool-policy.spec.ts',
-	'tests/chat.askuser-resume.spec.ts',
-	'tests/crud/agents.crud.spec.ts',
-	'tests/crud/automations.crud.spec.ts',
-	'tests/crud/chat/agent-switch.spec.ts',
-	'tests/crud/mobile/navigation.crud.spec.ts',
-	'tests/crud/projects.crud.spec.ts',
-	'tests/crud/research.crud.spec.ts',
 	// Screenshot baselines are platform-specific (`-win32.png`), so this can never pass on
 	// a Linux runner. It needs Linux baselines generated in CI before it can come off.
 	'tests/visual.spec.ts',

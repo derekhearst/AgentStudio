@@ -101,13 +101,15 @@ test.describe('chat/ask-user — cold-load resume after hard refresh', () => {
 			// The seeded user prompt confirms the page rendered the conversation.
 			await page.getByText('Pick a color', { exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
 
-			// RunHud "Answer" button is the only path to the modal on cold load — its presence
-			// proves pendingAskUser was reconstructed from chat_runs.pending_questions.
-			const answerButton = page.getByRole('button', { name: /^Answer$/i }).first()
-			await expect(answerButton).toBeVisible({ timeout: 10_000 })
-			await answerButton.click()
-
-			// Modal opens with the seeded question.
+			// The modal opens by itself on a cold load, and its appearance is what proves
+			// pendingAskUser was reconstructed from chat_runs.pending_questions.
+			//
+			// This used to click a RunHud "Answer" button, described in the page as the way
+			// to reach the modal. RunHud.svelte is no longer rendered anywhere, which left
+			// `askUserModalOpen` with no path to `true` at all — so a question paused across
+			// a refresh could not be answered by any means. The page now opens the modal
+			// when it reconstructs a pending question and there is no live stream showing
+			// it inline.
 			await expect(page.getByText('What is your favorite color', { exact: false }).first()).toBeVisible({
 				timeout: 10_000,
 			})

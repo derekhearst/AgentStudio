@@ -67,8 +67,6 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	// Automations: read-only.
 	'list_automations',
 	// Memory: read-only retrieval.
-	'recall_memory',
-	'list_memory',
 ]
 
 /**

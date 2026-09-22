@@ -1,13 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-	authenticateContext,
-	cleanupExtendedPrefix,
-	expectNoHorizontalOverflow,
-	getSql,
-	pollDb,
-	uniquePrefix,
-	withErrorCapture,
-} from '../helpers'
+import { authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, uniquePrefix, waitForHydration, withErrorCapture } from '../helpers'
 
 /**
  * /automations — CRUD lifecycle for cron-driven automations.
@@ -34,7 +26,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 			await withErrorCapture(page, async () => {
 				// ── Read
 				await page.goto('/automations')
-				await page.waitForLoadState('domcontentloaded')
+				await waitForHydration(page)
 				await expect(page.getByRole('heading', { name: /Automations/ }).first()).toBeVisible()
 
 				// ── Create: fill the form + click Create
@@ -56,7 +48,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 
 				// Card appears in the list (page reloads its data after create; reload to be safe)
 				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
+				await waitForHydration(page)
 				const card = page.locator('article').filter({ hasText: description })
 				await expect(card.first()).toBeVisible({ timeout: 10_000 })
 
@@ -72,7 +64,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 
 				// ── Update (toggle enabled): click Enable
 				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
+				await waitForHydration(page)
 				const cardAfterDisable = page.locator('article').filter({ hasText: description })
 				await cardAfterDisable.first().getByRole('button', { name: 'Enable', exact: true }).click()
 				await pollDb(
@@ -84,7 +76,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 				// ── Delete
 				page.on('dialog', (d) => void d.accept())
 				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
+				await waitForHydration(page)
 				const cardAfterEnable = page.locator('article').filter({ hasText: description })
 				await cardAfterEnable.first().getByRole('button', { name: 'Delete', exact: true }).click()
 				await pollDb(
@@ -95,7 +87,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 
 				// Card disappears from the list (reload to pick up the post-delete state)
 				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
+				await waitForHydration(page)
 				const stillThere = page.locator('article').filter({ hasText: description })
 				await expect(stillThere).toHaveCount(0, { timeout: 5_000 })
 

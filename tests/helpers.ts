@@ -552,11 +552,35 @@ export async function expectNoHorizontalOverflow(
 		({ ignore, tol }) => {
 			const viewportWidth = window.innerWidth
 			const matches = (el: Element) => ignore.some((sel) => el.matches(sel))
+
+			/*
+			 * Skip anything inside a horizontally scrollable container.
+			 *
+			 * A strip that scrolls sideways on purpose — the mobile chip row, the quick
+			 * actions above the composer, the page-header actions — has children whose
+			 * bounding boxes extend past the viewport while the container clips them. The
+			 * page itself does not scroll sideways, which is what this check is for.
+			 *
+			 * The ignore list has `.overflow-x-auto *` for this, but that only catches the
+			 * Tailwind utility; a container styled with plain CSS slipped through and
+			 * reported /audit's header actions as a layout bug. Asking the computed style
+			 * catches both, and any future one.
+			 */
+			const insideScroller = (el: Element) => {
+				let node: Element | null = el.parentElement
+				while (node && node !== document.body) {
+					const overflowX = getComputedStyle(node).overflowX
+					if (overflowX === 'auto' || overflowX === 'scroll') return true
+					node = node.parentElement
+				}
+				return false
+			}
 			const out: Array<{ selector: string; right: number; over: number; tag: string; text: string }> = []
 			const all = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
 			for (const el of all) {
 				if (el.offsetParent === null && el.tagName !== 'BODY') continue
 				if (matches(el)) continue
+				if (insideScroller(el)) continue
 				const rect = el.getBoundingClientRect()
 				if (rect.width === 0 || rect.height === 0) continue
 				if (rect.right > viewportWidth + tol) {
@@ -746,4 +770,26 @@ export async function withGlobalStateLock<T>(name: string, fn: () => Promise<T>)
 	} finally {
 		await release()
 	}
+}
+
+/**
+ * Wait until the page's client code has actually taken over.
+ *
+ * `waitForLoadState('domcontentloaded')` only says the SSR HTML arrived. Every control on
+ * it is already present and clickable at that point, and clicking one does nothing —
+ * there is no handler attached yet, and typing into an input whose value is `bind:`-ed
+ * reaches the DOM but not the component's state. Several CRUD specs failed exactly this
+ * way: the form was filled, Create was clicked, and nothing was written.
+ *
+ * Two signals, because neither is sufficient alone. Pages here load their data through
+ * remote queries fired on mount, so a settled network means the client ran; and most of
+ * them show a spinner until that first query resolves.
+ */
+export async function waitForHydration(page: import('@playwright/test').Page) {
+	await page.waitForLoadState('networkidle')
+	await page
+		.locator('.loading-spinner')
+		.first()
+		.waitFor({ state: 'detached', timeout: 15_000 })
+		.catch(() => null)
 }
