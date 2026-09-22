@@ -136,6 +136,12 @@ export type ToolCapability =
 	| 'mandatory-approval'
 	/** Part of the write-a-plan → hand-off loop, so plan mode has to leave a door open. */
 	| 'plan-authoring'
+	/**
+	 * Served by an MCP server that is not ours (#17). Carries no assumption about what the
+	 * tool does, because nothing here can know: the server chose both its own namespace and
+	 * its tool names.
+	 */
+	| 'external'
 
 export type ToolCapabilityRule = {
 	/** Matched against the bare tool name, case-insensitively. */
@@ -207,13 +213,43 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 	},
 ]
 
-/** Strip an MCP namespace (`mcp__agentstudio__file_write` → `file_write`) if one is present. */
+/**
+ * Our own in-process MCP server's name. Must match `ENGINE_MCP_SERVER` in
+ * `./tools.server`, and is duplicated rather than imported because that module reaches the
+ * database and this one is imported by specs that run without one.
+ */
+export const OWN_MCP_SERVER = 'agentstudio'
+
+/**
+ * Split an MCP-qualified tool name into the server that serves it and the bare name.
+ *
+ * `server` is null for an unqualified name (an SDK built-in such as `Write`).
+ */
+export function parseToolNamespace(name: string): { server: string | null; bare: string } {
+	const match = /^mcp__(.+?)__(.+)$/.exec(String(name ?? ''))
+	if (match) return { server: match[1], bare: match[2] }
+	return { server: null, bare: String(name ?? '') }
+}
+
+/** True when the name belongs to an MCP server that is not ours — see `'external'`. */
+export function isExternalToolName(name: string): boolean {
+	const { server } = parseToolNamespace(name)
+	return server !== null && server !== OWN_MCP_SERVER
+}
+
+/**
+ * Strip our own MCP namespace (`mcp__agentstudio__file_write` → `file_write`).
+ *
+ * Deliberately only ours. It used to strip *any* `mcp__*__` namespace, which meant a tool
+ * from someone else's server could be renamed into one of our classifications: a server
+ * publishing `mcp__whatever__file_read` had its name reduced to `file_read`, matched the
+ * in-house read rule, and was classified read-only — in plan mode, allowed. A server picks
+ * its own namespace and its own tool names, so a name is not evidence about behaviour, and
+ * the capability rules below describe tools we wrote. See #17.
+ */
 export function stripToolNamespace(name: string): string {
-	const match = /^mcp__[^_]+(?:_[^_]+)*?__(.+)$/.exec(name)
-	if (match?.[1]) return match[1]
-	// Fall back to the simple two-underscore split used by $lib/engine/tools.server.
-	const parts = name.split('__')
-	return parts.length >= 3 ? parts.slice(2).join('__') : name
+	const { server, bare } = parseToolNamespace(name)
+	return server === OWN_MCP_SERVER ? bare : String(name ?? '')
 }
 
 /**
@@ -221,6 +257,11 @@ export function stripToolNamespace(name: string): string {
  * plan mode and never auto-approved by acceptEdits.
  */
 export function toolCapabilities(toolName: string): ReadonlySet<ToolCapability> {
+	// Checked before the rules, not after: the rules match on shape, and a name from another
+	// server is chosen by that server. `mutate` rides along so every mode that fails closed
+	// on an unclassified tool keeps doing so.
+	if (isExternalToolName(toolName)) return new Set<ToolCapability>(['external', 'mutate'])
+
 	const bare = stripToolNamespace(String(toolName ?? '')).trim()
 	for (const rule of TOOL_CAPABILITY_RULES) {
 		if (rule.match.test(bare)) return new Set(rule.capabilities)
@@ -267,6 +308,9 @@ export type ToolGateInput = {
 const MANDATORY_REASON =
 	'This tool always requires operator approval, in every permission mode — its blast radius reaches outside AgentStudio.'
 
+const EXTERNAL_REASON =
+	'This tool comes from an MCP server you connected, not from AgentStudio. Nothing here can tell what it does from its name, so it asks every time.'
+
 /**
  * The single decision point. Every caller — `canUseTool`, the pending-block predicate, the
  * HUD — derives its behaviour from this so there is one place to read and one place to test.
@@ -277,6 +321,31 @@ export function resolveToolGate(input: ToolGateInput): ToolGateDecision {
 	// ── The invariant. Nothing below may run before this. ──
 	if (capabilities.has('mandatory-approval')) {
 		return { gate: 'ask', reason: MANDATORY_REASON }
+	}
+
+	/*
+	 * A tool from someone else's MCP server is always asked about (#17).
+	 *
+	 * Without this it fell to `settingsGate`, which allows unless the operator listed the
+	 * tool in `approvalRequiredTools` — and they cannot list what they have never seen, as
+	 * the settings UI enumerates our registry. So the default for a third-party tool would
+	 * have been "run it". Asking is the only honest default for code we did not write and
+	 * cannot classify.
+	 *
+	 * Two modes are excluded because they have a deliberate answer of their own, and both
+	 * are stated here rather than left to fall out of the ordering:
+	 *
+	 *   plan               denies it below. An external tool carries `mutate` and not
+	 *                      `read`, and plan mode refusing a possible write outright is
+	 *                      stronger than asking about it.
+	 *   bypassPermissions  allows it. That is what the mode is for, and it is already
+	 *                      refused outside an interactive chat run.
+	 *
+	 * Written as an exclusion list rather than an inclusion list on purpose: a mode added
+	 * later lands on `ask` rather than inheriting the settings gate's `allow`.
+	 */
+	if (capabilities.has('external') && input.mode !== 'plan' && input.mode !== 'bypassPermissions') {
+		return { gate: 'ask', reason: EXTERNAL_REASON }
 	}
 
 	const settingsGate: ToolGateDecision = input.settingsRequiresApproval
