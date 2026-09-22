@@ -44,7 +44,7 @@ export const LIVE_SPECS: readonly string[] = [
 ]
 
 /**
- * Meant to get shorter. 42 → 38 → 31 → 28 → 23 → 17 → 11 → 1.
+ * Meant to get shorter, and now it is empty: 42 → 38 → 31 → 28 → 23 → 17 → 11 → 1 → 0.
  *
  * A warning for whoever works on the rest. Run these as a subset and nearly all pass; run
  * the whole suite and most of them fail. They are not simply stale — they interfere, and
@@ -57,12 +57,10 @@ export const LIVE_SPECS: readonly string[] = [
  * settings re-reading cached remote queries after every mutation, and a missing VAPID
  * config failing a notification that had already been written.
  *
- * Count on 2026-09-21: 1.
+ * Count on 2026-09-21: 0. Keep it that way — a spec that fails is either fixed
+ * or moved to LIVE_SPECS with a reason, not parked here.
  */
 export const KNOWN_FAILING: readonly string[] = [
-	// Screenshot baselines are platform-specific (`-win32.png`), so this can never pass on
-	// a Linux runner. It needs Linux baselines generated in CI before it can come off.
-	'tests/visual.spec.ts',
 ]
 
 export const QUARANTINE: readonly string[] = [...LIVE_SPECS, ...KNOWN_FAILING]

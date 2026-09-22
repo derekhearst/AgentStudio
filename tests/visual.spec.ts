@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, uniquePrefix, waitForHydration } from './helpers'
 
 /**
  * Screenshot comparison, and nothing else.
@@ -25,6 +25,23 @@ test('visual regression: settings page', async ({ page }) => {
 	try {
 		await page.goto('/settings')
 		await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible()
+
+		/*
+		 * Wait for hydration, or this photographs a half-built page.
+		 *
+		 * The heading above is in the SSR HTML, so it is visible immediately — and at that
+		 * point six of the eight panels do not exist yet, because they are behind
+		 * `{#if settings}` and `settings` is loaded by the client on mount. The first
+		 * Linux baseline generated without this showed App & Push and Developer Tools
+		 * alone, with the left nav listing six sections that were not on the page.
+		 *
+		 * Worth saying plainly: that baseline would also have *passed*, consistently,
+		 * because the comparison run raced in exactly the same way. A screenshot test can
+		 * be green and photograph nothing worth checking.
+		 */
+		await waitForHydration(page)
+		await expect(page.getByRole('heading', { name: 'Budget' })).toBeVisible()
+
 		await expect(page.locator('main')).toHaveScreenshot('settings-main.png', {
 			animations: 'disabled',
 			maxDiffPixelRatio: 0.05,
