@@ -49,7 +49,28 @@ export default defineConfig({
 			// is a test-only constant so the webhook endpoint tests always run end-to-end.
 			GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET ?? 'e2e-test-webhook-secret-do-not-use-in-prod',
 		},
-		port: 4173,
+		/**
+		 * Wait for a real response, not just an open socket.
+		 *
+		 * `port` is satisfied the moment Vite binds, which happens about 22 seconds before
+		 * the dev server can actually serve a page — Vite compiles on demand. Playwright
+		 * would start running while the app was still cold, and the first specs to touch a
+		 * page burned their 30s timeout waiting for a first compile that had not finished.
+		 * That produced timeout-shaped failures scattered across UI specs, moving between
+		 * runs depending on which file got there first.
+		 *
+		 * `/api/health` is unauthenticated (PUBLIC_PATH_PREFIXES) and touches the database,
+		 * so a 200 from it means the whole stack is genuinely up.
+		 */
+		url: 'http://127.0.0.1:4173/api/health',
+		timeout: 180_000,
+		/**
+		 * Reuse is convenient locally but it is a footgun worth naming: a dev server you
+		 * started yourself does not carry the env below, so the suite silently tests a
+		 * differently-configured app. A stray `bun run dev` on 4173 without
+		 * GITHUB_WEBHOOK_SECRET turns 12 webhook specs into 503s that look like real
+		 * failures. If results look wrong, kill whatever is on 4173 and re-run.
+		 */
 		reuseExistingServer: true,
 	},
 })
