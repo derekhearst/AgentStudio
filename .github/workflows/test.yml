@@ -1,0 +1,100 @@
+name: Tests
+
+# Nothing ran this suite, which is why it rotted: 52 spec files queried columns a
+# migration had dropped months earlier and every DB-backed spec failed silently (#55).
+# A green suite with no CI job will simply rot again.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A PR that gets three pushes in a minute does not need three full runs; keep the newest.
+# `main` is not cancelled — a push there is a merge someone will read the result of.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  e2e:
+    name: Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        # pgvector, not plain postgres: the memory domain declares `vector(1536)` columns
+        # and the migration chain fails at 0010 without the extension available.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: agentstudio
+          POSTGRES_PASSWORD: agentstudio
+          POSTGRES_DB: agentstudio_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentstudio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://agentstudio:agentstudio@127.0.0.1:5432/agentstudio_ci
+      # The app boots, migrates and seeds itself on first request, and `ensureSeededUser`
+      # in the test helpers hashes this into the singleton user.
+      AUTH_PASSWORD: ci-test-password-not-a-secret
+      APP_ENCRYPTION_KEY: ci-test-encryption-key-32-bytes-min
+      # Required by global-setup. No live-model spec runs here (see tests/quarantine.ts),
+      # so this is never used to call anything.
+      OPENROUTER_API_KEY: ci-placeholder-unused
+      # Unreachable on a hosted runner; the reachability check is skipped below.
+      SEARXNG_URL: http://127.0.0.1:8070
+      SANDBOX_WORKSPACE: /tmp/agentstudio-sandbox
+      GITHUB_WEBHOOK_SECRET: e2e-test-webhook-secret-do-not-use-in-prod
+      E2E_SKIP_EXTERNAL_CHECKS: '1'
+      E2E_QUARANTINE: '1'
+      # The suite asserts the login redirect and the unauthenticated posture of public
+      # routes. With the bypass on, those specs cannot fail honestly.
+      AUTH_DEV_BYPASS: '0'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Type check
+        # Cheap, and it fails in seconds rather than after a 4-minute suite.
+        run: bun run check
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
+      - name: Install Playwright browser
+        # Chromium only: both projects in playwright.config.ts are Chromium-based
+        # (desktop and a Pixel 7 emulation), so webkit and firefox are dead weight.
+        run: bunx playwright install --with-deps chromium
+
+      - name: Create sandbox workspace
+        run: mkdir -p "$SANDBOX_WORKSPACE"
+
+      - name: Run tests
+        run: bunx playwright test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
