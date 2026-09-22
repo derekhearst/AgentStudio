@@ -418,6 +418,25 @@ export const setConversationPermissionMode = command(
 	},
 )
 
+/**
+ * Clear the conversation's pinned checklist (#21).
+ *
+ * The panel has a dismiss because a finished list is clutter and an abandoned one is
+ * misleading, and neither clears itself: `TodoWrite` only ever replaces a list, so without
+ * this the last one a conversation ever wrote stays pinned forever. The next `TodoWrite`
+ * writes a new one regardless — dismissing is about the panel, not about the agent's plan.
+ */
+export const clearConversationTodoList = command(conversationIdSchema, async (conversationId) => {
+	const user = requireAuthenticatedRequestUser()
+	const updated = await db
+		.update(conversations)
+		.set({ todoList: null })
+		.where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+		.returning({ id: conversations.id })
+	if (updated.length === 0) throw new Error('Conversation not found')
+	return { success: true as const }
+})
+
 export const setConversationAgent = command(setConversationAgentSchema, async ({ conversationId, agentId }) => {
 	const user = requireAuthenticatedRequestUser()
 	const result = await writeConversationAgent(conversationId, agentId, { userId: user.id })

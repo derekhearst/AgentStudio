@@ -9,6 +9,7 @@
 		deleteMessagesAfter,
 		editMessage,
 		getConversation,
+		clearConversationTodoList,
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
@@ -21,6 +22,8 @@
 	import { consoleState } from '$lib/chat-console/console-state.svelte';
 	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
+	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
+	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
@@ -114,6 +117,12 @@
 	let backgroundTasks = $state<Array<{ id: string; type: string; description: string }>>([]);
 	/** Monotonic, because the transcript's `{#each}` is keyed and duplicate keys throw. */
 	let noticeSeq = 0;
+	/**
+	 * #21 — the pinned checklist. Seeded from the conversation on load and replaced by the
+	 * `todo_list` frame while a run streams, so the panel is right on a cold open and right
+	 * mid-turn without the two paths disagreeing. `null` means dismissed or never written.
+	 */
+	let todoList = $state<{ items: TodoItem[]; updatedAt: string } | null>(null);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 	type LiveContextStats = {
@@ -545,6 +554,11 @@
 		]);
 		conversationData = conversationResult;
 		stats = statsResult;
+		// #21 — re-seed the pinned checklist from the row. The stream owns it while a run is
+		// live; this is the cold-open and post-run value, and it is authoritative because a
+		// dismissal cleared the column too.
+		const storedTodos = conversationResult?.conversation.todoList ?? null;
+		todoList = storedTodos ? { items: storedTodos.items, updatedAt: storedTodos.updatedAt } : null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
 		// Reconcile pendingAskUser with the server's view: if mid-stream there's a live token
 		// the SSE stream owns it and we don't touch it; otherwise (cold-load OR after a
@@ -587,6 +601,24 @@
 		finalizeCurrentTextBlock();
 		stoppedByUser = true;
 		streamAbortController.abort();
+	}
+
+	/**
+	 * #21 — dismiss the pinned checklist.
+	 *
+	 * Cleared locally first so the panel goes away on click rather than on a round trip, and
+	 * the column is cleared too: without that, the next cold open would pin it right back.
+	 * A failed clear leaves the panel hidden for this view and the row untouched, which
+	 * reappears on reload — the honest outcome, and not worth an error toast over.
+	 */
+	async function dismissTodoList() {
+		todoList = null;
+		try {
+			await clearConversationTodoList(conversationId);
+			await getConversation(conversationId).refresh();
+		} catch (error) {
+			console.warn('[chat] failed to clear the checklist', error);
+		}
 	}
 
 	async function approveToolCall(token: string) {
@@ -899,6 +931,21 @@
 							id: payload.id,
 							elapsedSeconds: payload.elapsedSeconds ?? 0,
 						});
+					}
+
+					if (eventName === 'todo_list') {
+						// #21 — the agent rewrote its plan. Replace, never merge: `TodoWrite`
+						// sends the whole list every time, and a merge would resurrect an item
+						// the model deliberately dropped.
+						todoList = Array.isArray(payload?.items)
+							? {
+									items: payload.items as TodoItem[],
+									updatedAt:
+										typeof payload.updatedAt === 'string'
+											? payload.updatedAt
+											: new Date().toISOString()
+								}
+							: null;
 					}
 
 					if (eventName === 'background_tasks') {
@@ -1499,6 +1546,14 @@
 					onDismiss={clearRecoverableError}
 				/>
 			{/if}
+		{/if}
+
+		{#if todoList}
+			<PinnedTodoPanel
+				items={todoList.items}
+				updatedAt={todoList.updatedAt}
+				onDismiss={dismissTodoList}
+			/>
 		{/if}
 
 		<!-- Mobile quick chips above composer -->

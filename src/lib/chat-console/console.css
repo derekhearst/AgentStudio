@@ -2476,3 +2476,124 @@ a.console-crumbs__seg:hover {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+
+/* ── #21 — the pinned checklist above the composer ────────────────────────────
+   Sits in the composer's space, so it stays one line until asked to expand: a
+   ten-item plan rendered open would push the input off a phone screen. */
+.pinned-todo {
+	margin: 0 0 6px;
+	border: 1px solid var(--console-border, rgba(255, 255, 255, 0.1));
+	border-radius: 10px;
+	background: var(--console-surface-2, rgba(255, 255, 255, 0.03));
+	overflow: hidden;
+}
+
+.pinned-todo__bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 8px 6px 6px;
+}
+
+.pinned-todo__toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex: 1 1 auto;
+	min-width: 0;
+	background: none;
+	border: 0;
+	padding: 2px 4px;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.pinned-todo__caret {
+	display: inline-flex;
+	flex: 0 0 auto;
+	opacity: 0.7;
+	transition: transform 160ms;
+}
+
+.pinned-todo__toggle[aria-expanded='true'] .pinned-todo__caret { transform: rotate(90deg); }
+
+.pinned-todo__headline {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.78rem;
+	font-weight: 600;
+}
+
+.pinned-todo__count {
+	flex: 0 0 auto;
+	font-size: 0.7rem;
+	font-variant-numeric: tabular-nums;
+	opacity: 0.65;
+}
+
+.pinned-todo__dismiss {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	background: none;
+	border: 0;
+	padding: 2px;
+	border-radius: 4px;
+	color: inherit;
+	opacity: 0.45;
+	cursor: pointer;
+}
+
+.pinned-todo__dismiss:hover { opacity: 0.9; }
+
+.pinned-todo__progress {
+	height: 2px;
+	background: var(--console-border, rgba(255, 255, 255, 0.08));
+}
+
+.pinned-todo__progress > span {
+	display: block;
+	height: 100%;
+	background: currentColor;
+	opacity: 0.55;
+	transition: width 200ms;
+}
+
+.pinned-todo.is-done .pinned-todo__progress > span { opacity: 0.35; }
+
+.pinned-todo__list {
+	list-style: none;
+	margin: 0;
+	padding: 6px 10px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	max-height: 168px;
+	overflow-y: auto;
+}
+
+.pinned-todo__item {
+	display: flex;
+	gap: 7px;
+	font-size: 0.76rem;
+	line-height: 1.45;
+}
+
+.pinned-todo__mark {
+	flex: 0 0 auto;
+	width: 0.9em;
+	opacity: 0.6;
+}
+
+.pinned-todo__item.is-completed .pinned-todo__text {
+	opacity: 0.5;
+	text-decoration: line-through;
+}
+
+.pinned-todo__item.is-in_progress { font-weight: 600; }

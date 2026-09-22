@@ -485,6 +485,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						 * cannot move a limit.
 						 */
 						onToolResult: ({ name, success, details }) => {
+							/*
+							 * #21 — keep the agent's checklist where it can be seen. The tool block
+							 * carries it into the transcript, but a list scrolls away the moment the
+							 * model says anything after it. Last write wins, which is what
+							 * `TodoWrite` means; on the conversation, because a plan routinely
+							 * outlives the run that wrote it.
+							 */
+							if (details?.kind === 'todo') {
+								const todoList = {
+									items: details.items,
+									updatedAt: new Date().toISOString(),
+									runId: run.id,
+								}
+								void db
+									.update(conversations)
+									.set({ todoList })
+									.where(eq(conversations.id, body.conversationId))
+									.catch((error) =>
+										logger.warn('[chat/stream] todo list persist failed', {
+											runId: run.id,
+											error: String(error),
+										}),
+									)
+								void emitFrame?.('todo_list', todoList)
+							}
+
 							const entry = toolCallLedgerEntry({ name, success, details })
 							if (!entry) return
 							void logToolUsage({

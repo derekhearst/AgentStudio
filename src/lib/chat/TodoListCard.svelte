@@ -5,10 +5,9 @@
 	 * #21 — renders a `TodoWrite` as the checklist it is, rather than a JSON array printed
 	 * once per update.
 	 *
-	 * This is the inline form: it shows the list where the update happened. Keeping the
-	 * *latest* list pinned above the composer, so a long run stays legible without scrolling
-	 * back, is the other half of #21 and a placement decision rather than a rendering one —
-	 * the data it needs is already on the block by the time this renders.
+	 * This is the inline form: it shows the list where the update happened. The other half
+	 * of #21 — the *latest* list pinned above the composer, so a long run stays legible
+	 * without scrolling back — is `PinnedTodoPanel`, fed from `conversations.todo_list`.
 	 */
 
 	let { details }: { details: TodoDetails } = $props();
