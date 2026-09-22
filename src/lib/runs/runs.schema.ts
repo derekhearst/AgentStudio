@@ -65,6 +65,21 @@ export type StreamBlock =
 	  }
 	| {
 			/**
+			 * Work done by a subagent, kept out of the parent's blocks so a delegated agent's
+			 * output is never read as the parent's own (#5, and the same concern as #34).
+			 * `agentId` is the `Task` call's `tool_use` id — SDK subagents have no child
+			 * conversation row, which is why `conversationId` is nullable.
+			 */
+			kind: 'subagent'
+			agentId: string
+			agentName: string
+			conversationId: string | null
+			task: string
+			content: string
+			success: boolean
+	  }
+	| {
+			/**
 			 * A run-level event the SDK reported that is worth a line in the transcript — a
 			 * compaction boundary, a model fallback, a tool a permission rule refused. Only the
 			 * notices that still mean something after the turn are persisted; see

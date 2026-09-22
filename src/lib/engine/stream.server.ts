@@ -204,6 +204,68 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	 * here. Without this the pending block and the call block get different ids
 	 * and the UI renders the same tool twice.
 	 */
+	/*
+	 * ── Subagent routing (#5) ───────────────────────────────────────────────────────────
+	 *
+	 * The SDK runs a subagent inside the same message stream and marks everything it
+	 * produces with `parent_tool_use_id` — the id of the `Task` call that started it. That
+	 * holds for tool_use and tool_result blocks even at the default
+	 * `forwardSubagentText: false`, and for `stream_event` deltas when text forwarding is on.
+	 *
+	 * The loop used to ignore the field entirely, so a child's tool calls landed in the
+	 * parent's blocks and a child's prose streamed into the parent's answer — a delegated
+	 * agent's output read as the parent's own, which is the thing #34 exists to prevent.
+	 *
+	 * Child activity now accumulates on its own `subagent` block and goes out on the
+	 * `subagent_*` frames the chat page has always known how to render and has never been
+	 * sent. Note what deliberately does NOT change: `canUseTool` still sees every child call,
+	 * so containment and the approval gate apply to a subagent exactly as to the parent. A
+	 * mode says how much the operator trusts the agent; delegation is not a way around it.
+	 *
+	 * Known gap, stated rather than left to be found: a child call that needs approval gets
+	 * no inline Allow/Deny card, because that card is driven by the `tool_pending` frame and
+	 * emitting one here would leave a block in the parent's transcript that never resolves —
+	 * the child's result goes to the child. The approval itself is not lost: it is written to
+	 * `chat_runs.pendingApprovals` and flips the run to `waiting_tool_approval`, which is the
+	 * surface the dock and the HUD read. Giving it a card of its own belongs with #32's
+	 * per-child rendering.
+	 */
+	/** `Task` tool_use id → the agent key the parent asked for, read off the call's input. */
+	const subagentNames = new Map<string, string>()
+	/** `Task` tool_use id → the task the parent handed it, for the child card's header. */
+	const subagentTasks = new Map<string, string>()
+	/** tool_use ids belonging to a subagent, so `canUseTool` emits the child frame for them. */
+	const childCallIds = new Set<string>()
+	/** `Task` tool_use id → its block, so repeated child messages append to one place. */
+	const subagentBlocks = new Map<string, Extract<StreamBlock, { kind: 'subagent' }>>()
+
+	/** Fetch or open the block for a subagent, emitting `subagent_start` the first time. */
+	const subagentBlockFor = async (taskId: string) => {
+		const existing = subagentBlocks.get(taskId)
+		if (existing) return existing
+		const agentName = subagentNames.get(taskId) ?? 'subagent'
+		const task = subagentTasks.get(taskId) ?? ''
+		const block: Extract<StreamBlock, { kind: 'subagent' }> = {
+			kind: 'subagent',
+			agentId: taskId,
+			agentName,
+			// SDK subagents have no child conversation row to link to.
+			conversationId: null,
+			task,
+			content: '',
+			success: true,
+		}
+		subagentBlocks.set(taskId, block)
+		blocks.push(block)
+		await emit('subagent_start', {
+			agentId: taskId,
+			agentName,
+			conversationId: null,
+			task,
+		})
+		return block
+	}
+
 	const idByCall = new Map<string, string[]>()
 	const callKey = (name: string, args: unknown) => `${name}:${JSON.stringify(args ?? {})}`
 	const takeToolUseId = (name: string, args: unknown): string | null => {
@@ -279,7 +341,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						const allow = async (): Promise<PermissionResult> => {
 							if (!callEmitted.has(id)) {
 								callEmitted.add(id)
-								await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+								// A child's call was already announced as `subagent_tool_call` when its
+								// tool_use block arrived; a `tool_call` here would put it in the parent's
+								// transcript as well.
+								if (!childCallIds.has(id)) {
+									await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+								}
 							}
 							return { behavior: 'allow' }
 						}
@@ -351,6 +418,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	try {
 		for await (const message of session as AsyncIterable<SDKMessage>) {
 			const msg = message as Record<string, any>
+			/** Non-null when this message was produced inside a subagent — see the note above. */
+			const parentToolUseId =
+				typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id.length > 0
+					? msg.parent_tool_use_id
+					: null
 
 			if (typeof msg.session_id === 'string' && !sessionId) {
 				sessionId = msg.session_id
@@ -393,6 +465,23 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				const ev = msg.event as Record<string, any> | undefined
 				if (ev?.type === 'content_block_delta') {
 					const delta = ev.delta as Record<string, any>
+					if (parentToolUseId) {
+						// Child text goes to the child's block. Not to `finalText`, which becomes the
+						// assistant message: a subagent's prose is an observation the parent reads,
+						// never the reply the user is shown.
+						if (delta?.type === 'text_delta' && delta.text) {
+							const child = await subagentBlockFor(parentToolUseId)
+							child.content += delta.text
+							await emit('subagent_delta', {
+								agentId: parentToolUseId,
+								conversationId: null,
+								content: delta.text,
+							})
+						}
+						// Child thinking is dropped rather than rendered: it is the child's reasoning
+						// about its own task, and interleaving it with the parent's would be noise.
+						continue
+					}
 					if (delta?.type === 'text_delta' && delta.text) {
 						finalText += delta.text
 						appendContent('text', delta.text)
@@ -412,6 +501,44 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					const name = bareToolName(String(block.name))
 					const id = String(block.id)
 					toolNames.set(id, name)
+
+					/*
+					 * A `Task` call names the agent it is delegating to. Recorded here, on the
+					 * PARENT's message, because the child's own messages carry only the id — this
+					 * is the one place the two are seen together.
+					 */
+					if (!parentToolUseId) {
+						const taskInput = block.input as Record<string, unknown> | null
+						const subagentType = taskInput?.subagent_type
+						if (typeof subagentType === 'string' && subagentType.length > 0) {
+							subagentNames.set(id, subagentType)
+						}
+						// `description` is the short label; `prompt` is the full instruction. The card
+						// wants the label.
+						const taskLabel = taskInput?.description ?? taskInput?.prompt
+						if (typeof taskLabel === 'string' && taskLabel.length > 0) {
+							subagentTasks.set(id, taskLabel.slice(0, 200))
+						}
+					}
+
+					if (parentToolUseId) {
+						// A child's call. Still parked for `canUseTool`, so containment and the
+						// approval gate run on it exactly as they would on the parent's — only the
+						// frame it produces differs.
+						childCallIds.add(id)
+						toolInputs.set(id, block.input ?? null)
+						idByCall.set(callKey(name, block.input), [
+							...(idByCall.get(callKey(name, block.input)) ?? []),
+							id,
+						])
+						await subagentBlockFor(parentToolUseId)
+						await emit('subagent_tool_call', {
+							agentId: parentToolUseId,
+							conversationId: null,
+							name,
+						})
+						continue
+					}
 					toolInputs.set(id, block.input ?? null)
 
 					if (name === 'ask_user') {
@@ -468,6 +595,33 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					const toolName = toolNames.get(id) ?? 'unknown'
 					const toolArguments = toolInputs.get(id) ?? null
 					const details = toolResultDetails(toolName, structured, toolArguments)
+
+					if (parentToolUseId) {
+						// The child's result belongs to the child's block. The ledger still counts it:
+						// a subagent's tool call is work this run did, and `onToolResult` records
+						// calls rather than attributing them to a transcript position.
+						const child = await subagentBlockFor(parentToolUseId)
+						if (block.is_error === true) child.success = false
+						await emit('subagent_tool_result', {
+							agentId: parentToolUseId,
+							conversationId: null,
+							name: toolName,
+							success: block.is_error !== true,
+						})
+						input.onToolResult?.({
+							name: toolName,
+							success: block.is_error !== true,
+							...(details ? { details } : {}),
+						})
+						continue
+					}
+
+					// A `Task` result closes the child it started.
+					if (subagentBlocks.has(id)) {
+						const child = subagentBlocks.get(id)!
+						if (block.is_error === true) child.success = false
+						await emit('subagent_done', { agentId: id, conversationId: null })
+					}
 					blocks.push({
 						kind: 'tool',
 						name: toolName,
