@@ -54,3 +54,17 @@ test.describe('home — chat submit redirect', () => {
 		}
 	})
 })
+
+test.describe('/chat — legacy index route', () => {
+	test('/chat redirects to the chat console at /', async ({ page, context }) => {
+		await authenticateContext(context)
+
+		// `/chat` used to be a list page. It is a redirector now, and the only assertion
+		// worth making about it is that it redirects. This lived in visual.spec.ts, where
+		// it took no screenshot and checked for a "Chats" heading belonging to
+		// RecentChats.svelte — a component nothing imports.
+		await page.goto('/chat')
+		await page.waitForURL(/\/$/, { timeout: 15_000 })
+		await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible()
+	})
+})
