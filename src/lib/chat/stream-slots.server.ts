@@ -168,10 +168,23 @@ export async function buildProjectContextSlot(input: {
 		const project = await getProjectById(input.projectId)
 		if (!project || project.userId !== input.userId) return null
 		const description = project.description ? `\nDescription: ${project.description}` : ''
+		/*
+		 * #23 — the operator's standing instructions for this project.
+		 *
+		 * Injected here rather than written out as a `CLAUDE.md`, which was the earlier
+		 * plan. `CLAUDE.md` only loads when `settingSources` includes `'project'`, which is
+		 * gated on `projects.settings_trusted` — so the operator's own words would silently
+		 * stop loading for any project whose *repo* config they had not accepted. Those are
+		 * two different questions, and this is the one that is never gated. Headed and
+		 * fenced so a long instruction block cannot be read as the end of the slot.
+		 */
+		const instructions = project.instructions?.trim()
+			? `\n\n### Project instructions\n\nStanding instructions from the operator for this project. They are directions, not content to summarise.\n\n${project.instructions.trim()}`
+			: ''
 		return {
 			name: 'project_context',
 			priority: 80,
-			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.`,
+			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.${instructions}`,
 		}
 	} catch (err) {
 		logger.warn('[chat] project context slot lookup failed', { err })
