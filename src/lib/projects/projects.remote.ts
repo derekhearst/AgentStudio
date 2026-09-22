@@ -14,6 +14,7 @@ import {
 	listProjects,
 	updateProject,
 } from './projects.server'
+import { listKnowledgeFiles } from './project-knowledge.server'
 import {
 	commitProject,
 	createProjectBranch,
@@ -149,6 +150,16 @@ export const updateProjectCommand = command(updateProjectSchema, async (input) =
 		settingsTrusted: input.settingsTrusted,
 		instructions: input.instructions,
 	})
+})
+
+/**
+ * A project's knowledge files (#23) — the listing only; the bytes move over
+ * `/projects/[id]/knowledge`, because remote functions carry JSON.
+ */
+export const listProjectKnowledgeQuery = query(z.string().uuid(), async (projectId) => {
+	const user = requireAuthenticatedRequestUser()
+	await ensureProjectOwned(projectId, user.id)
+	return listKnowledgeFiles(user.id, projectId)
 })
 
 export const deleteProjectCommand = command(z.string().uuid(), async (projectId) => {

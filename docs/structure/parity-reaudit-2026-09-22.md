@@ -231,7 +231,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
 | #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
 | #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
-| #23 | Per-project instructions | **rebuild** — instructions shipped | `settingSources` was 90% of it; the knowledge directory is what's left |
+| #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
@@ -348,7 +348,16 @@ What remains after that is genuinely small:
   `CLAUDE.md` inside the project's sandbox path instead of injecting it through a slot, so
   there is exactly one mechanism rather than two~~ **Reversed, and shipped the other way.**
   See below.
-- the knowledge directory is a directory plus a listing on the project page; no RAG, as filed
+- ~~the knowledge directory is a directory plus a listing on the project page; no RAG, as
+  filed~~ **Shipped**, as filed. `.agentstudio/knowledge/` inside the project's working
+  directory, uploaded and removed from the project page, named (not read) in the project
+  context slot. Three things the issue left open resolved on the way: repo-less projects
+  need no special case, because `resolveWorkspaceRoot` already gives every project a
+  directory whether or not it holds a checkout; the directory is hidden from git through
+  `.git/info/exclude` rather than `.gitignore`, because in an imported project that file is
+  somebody else's tracked file; and uploads are filtered by a denylist of executable
+  extensions rather than an allowlist, since "knowledge" is open-ended and the only case
+  worth refusing is a file that is interesting to run rather than to read.
 
 **Instructions: shipped, and the "one mechanism" idea above was wrong.** `projects.instructions`
 (migration `0073`) is edited on the project page and injected through the project-context

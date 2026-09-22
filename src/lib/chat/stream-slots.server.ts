@@ -151,6 +151,34 @@ export async function buildIdentitySlot(agent: AgentRow): Promise<ContextSlot> {
 	return { name: 'identity', priority: 100, content: identityContent }
 }
 
+/** How many knowledge filenames the slot lists before it stops and says how many remain. */
+const KNOWLEDGE_NAMES_IN_SLOT = 25
+
+/**
+ * The knowledge-directory paragraph, or '' when the project has no knowledge files.
+ *
+ * Never throws: a project-context slot is a convenience, and an unreadable sandbox
+ * directory must not be the reason a turn fails to start.
+ */
+async function listKnowledgeFilesForSlot(userId: string, projectId: string): Promise<string> {
+	try {
+		const { KNOWLEDGE_DIR, listKnowledgeFiles } = await import('$lib/projects/project-knowledge.server')
+		const files = await listKnowledgeFiles(userId, projectId)
+		if (files.length === 0) return ''
+
+		const shown = files.slice(0, KNOWLEDGE_NAMES_IN_SLOT)
+		const names = shown.map((file) => `- ${file.name}`).join('\n')
+		const remaining =
+			files.length > shown.length
+				? `\n- …and ${files.length - shown.length} more; list the directory to see them.`
+				: ''
+		return `\n\n### Project knowledge\n\nReference material the operator attached to this project, in \`${KNOWLEDGE_DIR}/\` inside the working directory. Read one when it is relevant; do not edit or delete them.\n\n${names}${remaining}`
+	} catch (err) {
+		logger.warn('[chat] could not list project knowledge for the context slot', { err })
+		return ''
+	}
+}
+
 /**
  * Resolve the project-context slot for a conversation. When the conversation
  * is bound to a project (via set_project_context), the agent gets a high-
@@ -181,10 +209,22 @@ export async function buildProjectContextSlot(input: {
 		const instructions = project.instructions?.trim()
 			? `\n\n### Project instructions\n\nStanding instructions from the operator for this project. They are directions, not content to summarise.\n\n${project.instructions.trim()}`
 			: ''
+		/*
+		 * #23 — the project's knowledge files, named but not read.
+		 *
+		 * Naming them is the whole job: they sit in the working directory the agent is
+		 * already in, so `Read` and `Grep` reach them with no retrieval layer at all — but
+		 * an agent that does not know a directory exists never looks in it, and `.agentstudio`
+		 * is hidden, so a `Glob` would not surface it either. Names and nothing else: the
+		 * contents are what the tools are for, and a PDF pasted into a system prompt would
+		 * cost a context window to say what one `Read` says on demand.
+		 */
+		const knowledge = await listKnowledgeFilesForSlot(input.userId, project.id)
+
 		return {
 			name: 'project_context',
 			priority: 80,
-			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.${instructions}`,
+			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.${knowledge}${instructions}`,
 		}
 	} catch (err) {
 		logger.warn('[chat] project context slot lookup failed', { err })

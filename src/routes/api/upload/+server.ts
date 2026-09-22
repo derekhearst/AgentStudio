@@ -4,6 +4,26 @@ import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { getUploadDir } from '$lib/server/config'
 
+/**
+ * Chat attachment uploads.
+ *
+ * The `locals.user` check below is defence in depth, not a hole being closed. These two
+ * handlers read no `locals.user` at all, which looks alarming and is not: `hooks.server.ts`
+ * redirects every unauthenticated request whose path is not in `PUBLIC_PATH_PREFIXES`, and
+ * `/api/upload` is not in it. Verified rather than reasoned about — an anonymous POST here
+ * answers `303 → /login`, and nothing reaches the filesystem.
+ *
+ * What the check buys is that the guarantee stops depending on a list in another file. A
+ * `/api` entry added to `PUBLIC_PATH_PREFIXES` for some future public endpoint would open
+ * this one silently, and an endpoint that writes 20MB (100MB for video) to disk per call
+ * should not be one edit away from anonymous. The companion `GET /api/upload/[filename]`
+ * carries the same check for the same reason: a filename is a bearer capability and nothing
+ * records who uploaded what, so a name that leaks is the whole file.
+ *
+ * Session checks, not per-file ownership — nothing in the schema says who owns an upload,
+ * and inventing that is a migration rather than a fix.
+ */
+
 const UPLOAD_DIR = getUploadDir()
 const MAX_FILE_SIZE_DEFAULT = 20 * 1024 * 1024 // 20 MB
 const MAX_FILE_SIZE_VIDEO = 100 * 1024 * 1024 // 100 MB for video
@@ -23,7 +43,9 @@ const ALLOWED_TYPES = new Set([
 	'video/quicktime',
 ])
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 })
+
 	const formData = await request.formData()
 	const file = formData.get('file') as File | null
 	if (!file) {
