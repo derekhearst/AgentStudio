@@ -201,7 +201,8 @@ test.describe('source-control/pull-requests — PR records + checks', () => {
 		}
 	})
 
-	test('cross-domain pointers (task_id, run_id) survive without enforced FK', async () => {
+	test('the run_id pointer survives without an enforced FK', async () => {
+		// `task_id` went with `agent_tasks` in migration 0004; the column no longer exists.
 		const prefix = uniquePrefix('pr-pointers')
 		const userId = await getActiveUserId()
 		const sql = getSql()
@@ -211,14 +212,12 @@ test.describe('source-control/pull-requests — PR records + checks', () => {
 				values (${userId}, ${`${prefix}-org`}, ${`${prefix}-repo`}, 'https://x/y')
 				returning id
 			`
-			const fakeTaskId = randomUUID()
 			const fakeRunId = randomUUID()
-			const [pr] = await sql<{ task_id: string | null; run_id: string | null }[]>`
-				insert into pull_requests (repository_id, provider_pr_number, title, head_branch, base_branch, task_id, run_id)
-				values (${repo.id}, 99, ${`${prefix} pointer-pr`}, 'h', 'main', ${fakeTaskId}, ${fakeRunId})
-				returning task_id, run_id
+			const [pr] = await sql<{ run_id: string | null }[]>`
+				insert into pull_requests (repository_id, provider_pr_number, title, head_branch, base_branch, run_id)
+				values (${repo.id}, 99, ${`${prefix} pointer-pr`}, 'h', 'main', ${fakeRunId})
+				returning run_id
 			`
-			expect(pr.task_id).toBe(fakeTaskId)
 			expect(pr.run_id).toBe(fakeRunId)
 		} finally {
 			await cleanupRepoPrefix(prefix)

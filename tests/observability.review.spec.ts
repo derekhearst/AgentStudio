@@ -91,27 +91,26 @@ test.describe('observability/review — review_items invariants', () => {
 		}
 	})
 
-	test('cross-domain pointers (run_id, task_id, job_id) survive deletes (no enforced FK)', async () => {
+	test('cross-domain pointers (run_id, job_id) survive deletes (no enforced FK)', async () => {
+		// `task_id` went with `agent_tasks` in migration 0004; the column no longer exists.
 		const prefix = uniquePrefix('review-survive')
 		const sql = getSql()
 		try {
 			const fakeRunId = randomUUID()
-			const fakeTaskId = randomUUID()
 			const fakeJobId = randomUUID()
 			const [item] = await sql<{ id: string }[]>`
-				insert into review_items (type, summary, payload, run_id, task_id, job_id)
+				insert into review_items (type, summary, payload, run_id, job_id)
 				values (
 					'job_failure', ${`${prefix} survive`},
 					${sql.json({ tag: prefix })},
-					${fakeRunId}, ${fakeTaskId}, ${fakeJobId}
+					${fakeRunId}, ${fakeJobId}
 				)
 				returning id
 			`
-			const [check] = await sql<{ run_id: string | null; task_id: string | null; job_id: string | null }[]>`
-				select run_id, task_id, job_id from review_items where id = ${item.id}
+			const [check] = await sql<{ run_id: string | null; job_id: string | null }[]>`
+				select run_id, job_id from review_items where id = ${item.id}
 			`
 			expect(check.run_id).toBe(fakeRunId)
-			expect(check.task_id).toBe(fakeTaskId)
 			expect(check.job_id).toBe(fakeJobId)
 		} finally {
 			await cleanupReviewPrefix(prefix)

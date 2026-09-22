@@ -44,27 +44,36 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 		}
 	})
 
-	test('per-user isolation: tools cannot read another user\'s projects', async () => {
+	test('per-user isolation: a project is invisible to any other owner id', async () => {
 		const prefix = uniquePrefix('project-isolation')
 		const userId = await getActiveUserId()
 		const sql = getSql()
 		try {
-			// A foreign owner id. The instance is single-user (users_singleton refuses a
-			// second row), and the property under test is ownership filtering, not the
-			// existence of another account — so this is deliberately an id with no user row.
-			const otherUser = { id: randomUUID() }
-			const [otherProject] = await sql<{ id: string }[]>`
+			// Inverted from how this was written. It used to insert a project owned by a
+			// made-up user id, which `projects.user_id` rejects with a foreign key
+			// violation — there is no second account to own anything, because a unique
+			// index on `(true)` makes `users` single-row.
+			//
+			// The project belongs to the real account and the *stranger* is the caller.
+			// That needs no user row: the id only ever appears in a WHERE clause, which is
+			// exactly the ownership filter under test.
+			await sql`
 				insert into projects (user_id, name, slug)
-				values (${otherUser.id}, ${`${prefix} other-owned`}, ${`${prefix}-other`})
-				returning id
+				values (${userId}, ${`${prefix} owned`}, ${`${prefix}-owned`})
 			`
-			// listProjects(userId) should NOT return the other user's project.
-			const rows = await sql<{ id: string }[]>`
-				select id from projects where user_id = ${userId} and slug = ${`${prefix}-other`}
-			`
-			expect(rows).toHaveLength(0)
 
-			await sql`delete from projects where id = ${otherProject.id}`
+			const stranger = randomUUID()
+			const strangerRows = await sql<{ id: string }[]>`
+				select id from projects where user_id = ${stranger} and slug = ${`${prefix}-owned`}
+			`
+			expect(strangerRows, 'another owner id must not see this project').toHaveLength(0)
+
+			// Positive control. Without it this test would pass just as happily if the
+			// insert had silently done nothing.
+			const ownRows = await sql<{ id: string }[]>`
+				select id from projects where user_id = ${userId} and slug = ${`${prefix}-owned`}
+			`
+			expect(ownRows, 'the real owner must see it').toHaveLength(1)
 		} finally {
 			await cleanupProjectsToolsPrefix(prefix)
 		}
