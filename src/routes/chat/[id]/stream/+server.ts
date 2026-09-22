@@ -62,6 +62,7 @@ import {
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
 import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
 import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
@@ -344,9 +345,24 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
+	/*
+	 * Whether this project's committed `.claude/` config may load. Read per run rather than
+	 * cached: revoking trust has to take effect on the next turn, not on the next restart.
+	 */
+	const projectSettingsTrusted = conversation.projectId
+		? ((
+				await db
+					.select({ trusted: projects.settingsTrusted })
+					.from(projects)
+					.where(eq(projects.id, conversation.projectId))
+					.limit(1)
+			)[0]?.trusted ?? false)
+		: false
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
+			projectSettingsTrusted,
 			model: routedModel,
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,

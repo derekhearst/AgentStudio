@@ -64,6 +64,14 @@ export const projects = pgTable(
 		repoKind: text('repo_kind').notNull().default('none').$type<RepoKind>(),
 		repoLocalPath: text('repo_local_path'),
 		defaultBranch: text('default_branch'),
+		/**
+		 * Whether the operator has looked at this project's committed `.claude/` config and
+		 * accepted it. Gates whether the run loads the repo's `CLAUDE.md`, commands and
+		 * skills — and, inseparably, its `.claude/settings.json`, which can carry hooks and
+		 * permission allow-rules. Default false: a cloned repo is not trusted because it was
+		 * cloned. See `$lib/engine/setting-sources`.
+		 */
+		settingsTrusted: boolean('settings_trusted').notNull().default(false),
 		lastPulledAt: timestamp('last_pulled_at', { withTimezone: true }),
 		lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

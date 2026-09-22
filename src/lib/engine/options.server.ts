@@ -18,6 +18,7 @@
 
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
 import { BUILTIN_TOOL_SET, DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
+import { resolveSettingSources } from './setting-sources'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
@@ -103,6 +104,15 @@ export type EngineOptionsInput = {
 	cwd?: string
 	/** Resume a prior SDK session instead of starting a new one. */
 	resumeSessionId?: string
+	/**
+	 * Whether this run's project has its committed settings marked trusted
+	 * (`projects.settings_trusted`). Decides whether the repo's `CLAUDE.md`, commands and
+	 * skills load — and, inseparably, its `.claude/settings.json`. See `./setting-sources`.
+	 *
+	 * Omitted means untrusted, which is the posture every run had before this option
+	 * existed in name, though not the one it had in fact.
+	 */
+	projectSettingsTrusted?: boolean | null
 }
 
 /**
@@ -207,6 +217,17 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 				}
 			: {}),
 		disallowedTools: [...DISALLOWED_BUILTIN_TOOLS],
+		/*
+		 * Always set, never omitted. The SDK reads an omitted `settingSources` as "load
+		 * everything", so leaving it off silently merged any repo-committed
+		 * `.claude/settings.json` — `permissions.allow` and `env` included — into every run
+		 * with a working directory. `./setting-sources` explains what each tier means here
+		 * and why `local` and `user` are never among them.
+		 */
+		settingSources: resolveSettingSources({
+			settingsTrusted: input.projectSettingsTrusted,
+			hasWorkspace: Boolean(input.cwd),
+		}),
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 		permissionMode: sdkPermissionModeFor(effectiveMode.mode),
 		/**

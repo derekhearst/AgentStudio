@@ -248,12 +248,18 @@ export async function getProjectBySlug(userId: string, slug: string): Promise<Pr
 
 export async function updateProject(
 	projectId: string,
-	patch: { name?: string; description?: string | null; kind?: ProjectKind },
+	patch: {
+		name?: string
+		description?: string | null
+		kind?: ProjectKind
+		settingsTrusted?: boolean
+	},
 ): Promise<ProjectRow | null> {
 	const updates: Partial<typeof projects.$inferInsert> = { updatedAt: new Date() }
 	if (patch.name !== undefined) updates.name = patch.name
 	if (patch.description !== undefined) updates.description = patch.description
 	if (patch.kind !== undefined) updates.kind = patch.kind
+	if (patch.settingsTrusted !== undefined) updates.settingsTrusted = patch.settingsTrusted
 	const [row] = await db.update(projects).set(updates).where(eq(projects.id, projectId)).returning()
 	return row ?? null
 }

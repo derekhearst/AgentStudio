@@ -125,6 +125,12 @@ const updateProjectSchema = z.object({
 	name: z.string().trim().min(1).max(120).optional(),
 	description: z.string().trim().max(1000).nullable().optional(),
 	kind: z.enum(PROJECT_KIND_VALUES).optional(),
+	/**
+	 * Trust this project's committed `.claude/` configuration. Gates whether a run loads the
+	 * repo's CLAUDE.md, commands and skills — and its `.claude/settings.json`, which can
+	 * carry hooks and permission allow-rules. See `$lib/engine/setting-sources`.
+	 */
+	settingsTrusted: z.boolean().optional(),
 })
 
 export const updateProjectCommand = command(updateProjectSchema, async (input) => {
@@ -134,6 +140,7 @@ export const updateProjectCommand = command(updateProjectSchema, async (input) =
 		name: input.name,
 		description: input.description,
 		kind: input.kind,
+		settingsTrusted: input.settingsTrusted,
 	})
 })
 
