@@ -19,6 +19,9 @@
  */
 
 export const LIVE_SPECS: readonly string[] = [
+	// Generates real embeddings, so it needs a real OPENROUTER_API_KEY; on CI it fails
+	// with 401 from the embeddings endpoint.
+	'tests/context.skill-relevance.spec.ts',
 	'tests/chat.live.spec.ts',
 	'tests/chat.stream-live-features.spec.ts',
 	'tests/cost.tool-usage-live.spec.ts',

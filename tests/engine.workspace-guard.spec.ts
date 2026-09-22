@@ -23,7 +23,11 @@ test('built-in filesystem calls are confined to the run workspace', () => {
 	const check = (label: string, got: string, want: string) => expect(got, label).toBe(want)
 
 	check('Read absolute outside', g('Read', { file_path: '/etc/passwd' }).verdict, 'deny')
-	check('Read windows system', g('Read', { file_path: 'C:/Windows/win.ini' }).verdict, 'deny')
+	// Only meaningful on Windows: elsewhere `C:/Windows/win.ini` has no leading slash, so
+	// it is a relative path that correctly resolves inside the workspace.
+	if (process.platform === 'win32') {
+		check('Read windows system', g('Read', { file_path: 'C:/Windows/win.ini' }).verdict, 'deny')
+	}
 	check('Read ../ traversal', g('Read', { file_path: '../../../etc/passwd' }).verdict, 'deny')
 	check('Read sibling user', g('Read', { file_path: `${SIB}/secrets.txt` }).verdict, 'deny')
 	check('Write outside', g('Write', { file_path: '/tmp/evil.sh', content: 'x' }).verdict, 'deny')
