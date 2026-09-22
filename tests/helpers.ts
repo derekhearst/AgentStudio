@@ -663,12 +663,9 @@ export async function cleanupExtendedPrefix(prefix: string): Promise<void> {
  * user is there.
  */
 export async function getActiveUserId(): Promise<string> {
-	const sql = getSql()
-	const [user] = await sql<{ id: string }[]>`select id from users order by created_at asc limit 1`
-	if (!user) {
-		throw new Error(
-			'No user found. The instance is not provisioned — run the setup flow, or seed one the way global-setup does.',
-		)
-	}
-	return user.id
+	// Seeds on a fresh database rather than throwing. `ensureSeededUser` is the same path
+	// `authenticateContext` uses, so a spec that only needs an id no longer depends on
+	// some earlier spec having logged in first — an ordering dependency that was invisible
+	// locally, where a user always exists, and failed eight specs on CI's empty database.
+	return ensureSeededUser()
 }
