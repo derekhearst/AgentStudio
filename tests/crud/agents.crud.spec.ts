@@ -1,14 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-	authenticateContext,
-	cleanupExtendedPrefix,
-	expectNoHorizontalOverflow,
-	getSql,
-	pollDb,
-	seedAgent,
-	uniquePrefix,
-	withErrorCapture,
-} from '../helpers'
+import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expectNoHorizontalOverflow, getSql, pollDb, seedAgent, uniquePrefix, withErrorCapture } from '../helpers'
 
 /**
  * Agents CRUD lifecycle covering /agents, /agents/[id], /agents/[id]/identity.
@@ -92,8 +83,8 @@ test.describe('/agents — CRUD lifecycle (excluding LLM-driven create)', () => 
 				)
 
 				// ── Unlink identity (button asks confirm)
-				page.on('dialog', (d) => void d.accept())
 				await page.getByRole('button', { name: 'Unlink skill' }).click()
+				await answerConfirmDialog(page, 'Unlink')
 				await pollDb(
 					() => sql<{ identity_skill_id: string | null }[]>`
 						select identity_skill_id from agents where id = ${seed.id}

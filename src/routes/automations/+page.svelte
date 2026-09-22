@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import {
 		deleteAutomationCommand,
 		listAutomationsQuery,
@@ -146,7 +147,12 @@
 	}
 
 	async function deleteAutomation(automation: AutomationRow) {
-		const confirmed = window.confirm(`Delete automation "${automation.description}"?`);
+		const confirmed = await confirmDialog({
+			title: `Delete automation "${automation.description}"?`,
+			message: 'This cannot be undone.',
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
 		if (!confirmed) return;
 
 		deletingAutomationId = automation.id;

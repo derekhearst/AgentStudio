@@ -2,6 +2,7 @@
 
 <script lang="ts">
 	import { page } from '$app/state';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import { onMount } from 'svelte';
 	import {
 		ensureAgentIdentityCommand,
@@ -72,7 +73,14 @@
 	}
 
 	async function unlink() {
-		if (!confirm('Unlink this identity skill? The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills.')) return;
+		const ok = await confirmDialog({
+			title: 'Unlink this identity skill?',
+			message:
+				'The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills.',
+			confirmLabel: 'Unlink',
+			variant: 'warning'
+		});
+		if (!ok) return;
 		saving = true;
 		try {
 			await unlinkAgentIdentityCommand({ agentId });
@@ -84,9 +92,17 @@
 		}
 	}
 
-	function discard() {
+	async function discard() {
 		if (!identity?.skill) return;
-		if (dirty && !confirm('Discard unsaved changes?')) return;
+		if (dirty) {
+			const ok = await confirmDialog({
+				title: 'Discard unsaved changes?',
+				message: 'The editor will be reset to the saved content.',
+				confirmLabel: 'Discard',
+				variant: 'warning'
+			});
+			if (!ok) return;
+		}
 		draft = identity.skill.content;
 	}
 

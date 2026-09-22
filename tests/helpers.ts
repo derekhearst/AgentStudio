@@ -793,3 +793,29 @@ export async function waitForHydration(page: import('@playwright/test').Page) {
 		.waitFor({ state: 'detached', timeout: 15_000 })
 		.catch(() => null)
 }
+
+/**
+ * Answer the app's confirm dialog.
+ *
+ * These used to be `window.confirm()`, which Playwright surfaces as a native dialog event
+ * and the specs auto-accepted with `page.on('dialog', d => d.accept())`. That handler is a
+ * blunt instrument: it accepts *every* dialog for the rest of the test, including ones a
+ * later step did not mean to trigger. Clicking the button is both closer to what an
+ * operator does and scoped to the one decision.
+ *
+ * `alertdialog` rather than `dialog`, because the memory panel and the mobile nav drawer
+ * are also dialogs; only the confirm is an alert.
+ */
+export async function answerConfirmDialog(
+	page: Page,
+	confirmLabel: string | RegExp,
+	options?: { decline?: boolean },
+): Promise<void> {
+	const dialog = page.getByRole('alertdialog')
+	await dialog.waitFor({ state: 'visible', timeout: 10_000 })
+	// `exact`, because Playwright matches accessible names as substrings by default and
+	// the backdrop's own label used to contain the confirm label — "Delete" found both.
+	const name = options?.decline ? /^(Cancel|Keep|Keep running|Keep it|Discard)$/ : confirmLabel
+	await dialog.getByRole('button', { name, exact: typeof name === 'string' }).click()
+	await dialog.waitFor({ state: 'detached', timeout: 10_000 })
+}

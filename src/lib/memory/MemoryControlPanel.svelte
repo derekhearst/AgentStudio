@@ -19,6 +19,7 @@
 		type MemoryMinedConversationRow,
 	} from '$lib/memory/memory.remote';
 	import { relativeTime } from '$lib/util/relative-time';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 
 	let {
 		open = $bindable(false),
@@ -128,7 +129,13 @@
 	}
 
 	async function remove(rule: MemoryExclusionRuleRow) {
-		if (!confirm(`Delete the exclusion rule "${rule.name}"?`)) return;
+		const ok = await confirmDialog({
+			title: `Delete the exclusion rule "${rule.name}"?`,
+			message: 'The miner will stop skipping what this rule matched.',
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		const result = await deleteMemoryExclusionRuleCommand({ id: rule.id });
 		if (!result.ok) {
 			formError = result.error;
@@ -154,12 +161,13 @@
 
 	async function forget(row: MemoryMinedConversationRow) {
 		const label = row.title ?? 'this conversation';
-		if (
-			!confirm(
-				`Forget everything mined from "${label}"?\n\n${row.drawerCount} drawer${row.drawerCount === 1 ? '' : 's'} across ${row.roomCount} room${row.roomCount === 1 ? '' : 's'} will be deleted. The chat itself is not touched. This cannot be undone.`,
-			)
-		)
-			return;
+		const ok = await confirmDialog({
+			title: `Forget everything mined from "${label}"?`,
+			message: `${row.drawerCount} drawer${row.drawerCount === 1 ? '' : 's'} across ${row.roomCount} room${row.roomCount === 1 ? '' : 's'} will be deleted. The chat itself is not touched. This cannot be undone.`,
+			confirmLabel: 'Forget',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		busyConversationId = row.conversationId;
 		try {
 			await forgetConversationMemoriesCommand({ conversationId: row.conversationId });

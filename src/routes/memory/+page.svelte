@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { confirmDialog } from '$lib/ui/confirm-dialog.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import {
 		listMemoryWingsQuery,
@@ -88,7 +89,13 @@
 	}
 
 	async function removeDrawer(id: string) {
-		if (!confirm('Delete this memory drawer? This cannot be undone.')) return;
+		const ok = await confirmDialog({
+			title: 'Delete this memory drawer?',
+			message: 'This cannot be undone.',
+			confirmLabel: 'Delete',
+			variant: 'danger'
+		});
+		if (!ok) return;
 		await deleteMemoryDrawerCommand({ id });
 		closeDrawerDetail();
 		// Refresh counts.

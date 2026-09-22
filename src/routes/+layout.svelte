@@ -4,6 +4,7 @@
 	import './layout.css';
 	import '$lib/chat-console/console.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import ConfirmDialog from '$lib/ui/ConfirmDialog.svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import ChatConsoleShell from '$lib/chat-console/ChatConsoleShell.svelte';
@@ -101,3 +102,9 @@
 		{@render children()}
 	</ChatConsoleShell>
 {/if}
+
+<!--
+	Outside the chromeless branch on purpose: `confirmDialog()` has to work on /login and
+	/setup too, and there is only ever one of these on screen.
+-->
+<ConfirmDialog />

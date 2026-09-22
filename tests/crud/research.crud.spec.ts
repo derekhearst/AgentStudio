@@ -1,13 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-	authenticateContext,
-	expectNoHorizontalOverflow,
-	getActiveAdminUserId,
-	getSql,
-	pollDb,
-	uniquePrefix,
-	withErrorCapture,
-} from '../helpers'
+import { answerConfirmDialog, authenticateContext, expectNoHorizontalOverflow, getActiveAdminUserId, getSql, pollDb, uniquePrefix, withErrorCapture } from '../helpers'
 
 /**
  * /research + /research/[id] CRUD lifecycle (real LLM).
@@ -53,8 +45,8 @@ test.describe('/research — CRUD lifecycle (real LLM)', () => {
 				const researchId = researchRow[0].id
 
 				// ── Cancel via the detail page
-				page.on('dialog', (d) => void d.accept())
 				await page.getByRole('button', { name: /Cancel/ }).first().click()
+				await answerConfirmDialog(page, 'Cancel run')
 				await pollDb(
 					() => sql<{ status: string }[]>`select status::text as status from research where id = ${researchId}`,
 					(rs) => rs[0]?.status === 'canceled',
