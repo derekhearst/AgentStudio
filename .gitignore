@@ -52,3 +52,7 @@ generation_logs/
 
 # Agent worktrees (git worktrees checked out under the repo; ~700MB, never committed)
 .claude/worktrees/
+
+# Runtime attachment uploads (UPLOAD_DIR, default ./uploads). Written by the app and by
+# the upload specs; never part of the source tree.
+uploads/
