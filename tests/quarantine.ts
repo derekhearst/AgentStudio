@@ -16,6 +16,25 @@
  * length as a debt figure rather than configuration.
  *
  * Measured baseline when this was written: 105 failed / 1606 passed.
+ *
+ * Re-measured 2026-09-22 on `claude/feature-parity-audit-tpsggt`, against a live Postgres
+ * 16 + pgvector 0.6.0, with this quarantine applied and CI's environment
+ * (`E2E_QUARANTINE=1 E2E_NO_MODEL_CREDENTIALS=1 AUTH_DEV_BYPASS=0 E2E_SKIP_EXTERNAL_CHECKS=1`):
+ *
+ *     1801 passed, 0 failed, 5 skipped — 2.7m
+ *
+ * That run is what #55 asked for, and it found two production bugs CI structurally cannot
+ * see, because CI's configuration is luckier than a real deployment's:
+ *
+ *   - `getAvailableModels` 500'd every page when OpenRouter was unreachable. CI always
+ *     reaches it, and the catalogue answers unauthenticated, so a placeholder key still
+ *     gets a 200 and the failure path never runs.
+ *   - `ensurePushConfigured` threw on a plain-http `ORIGIN`, 500ing every push send. CI
+ *     sets no `ORIGIN` at all and takes the mailto fallback.
+ *
+ * Both are worth remembering when reading a green CI badge: it is evidence about CI's
+ * configuration as much as about the code. Reproducing the numbers above needs a `.env`
+ * written the way the README says to write one, which is how the second bug surfaced.
  */
 
 export const LIVE_SPECS: readonly string[] = [
