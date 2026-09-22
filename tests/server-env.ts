@@ -1,3 +1,67 @@
+import { mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+/**
+ * Set this to `1` to run as CI does: with no model credential anywhere.
+ *
+ * A developer machine has a working Claude session and a real OPENROUTER_API_KEY; CI has
+ * a placeholder and nothing else. That difference is invisible until it isn't — a spec
+ * that quietly depends on a model answering passes here and fails there, which is how
+ * `automations.output-routing` came off the quarantine on a green local run and then
+ * failed CI with `UnauthorizedResponseError`.
+ *
+ * Honoured in two places, because both need it:
+ *   - here, for the dev server (`bun run dev:test:nocreds`)
+ *   - in playwright.config.ts, for the worker processes — several specs import
+ *     `automations/engine` and run the model in-process, so stripping only the server
+ *     would leave exactly the spec that prompted this still passing.
+ */
+export const NO_MODEL_CREDENTIALS_FLAG = 'E2E_NO_MODEL_CREDENTIALS'
+
+export function noModelCredentialsRequested(base: NodeJS.ProcessEnv = process.env): boolean {
+	return base[NO_MODEL_CREDENTIALS_FLAG] === '1'
+}
+
+/**
+ * Remove every way the process could reach a model, in place.
+ *
+ * `OPENROUTER_API_KEY` gets CI's placeholder rather than being deleted, because
+ * `global-setup` requires it to be *set* — an unset key fails the run for the wrong
+ * reason, and a placeholder reproduces CI's 401 exactly.
+ *
+ * Everything `ANTHROPIC_*` and `CLAUDE_*` is dropped, and `CLAUDE_CONFIG_DIR` is pointed
+ * at an empty directory. That last one matters most and is the least obvious: the Agent
+ * SDK inherits `process.env` and otherwise authenticates the way Claude Code does, by
+ * reading the logged-in session from the config directory. Clearing the variables alone
+ * leaves that file, and the run stays authenticated.
+ *
+ * Dropping by prefix rather than by name on purpose. The SDK bundle reads
+ * ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL and CLAUDE_CONFIG_DIR
+ * today, and a list of four names is a list that goes stale.
+ */
+export function stripModelCredentials(env: Record<string, string>): Record<string, string> {
+	for (const key of Object.keys(env)) {
+		if (key.startsWith('ANTHROPIC_') || key.startsWith('CLAUDE_')) delete env[key]
+	}
+
+	// Matches `OPENROUTER_API_KEY` in .github/workflows/test.yml.
+	env.OPENROUTER_API_KEY = 'ci-placeholder-unused'
+
+	// An empty directory, so the SDK finds no stored session to fall back on.
+	const configDir = join(tmpdir(), 'agentstudio-e2e-no-credentials')
+	mkdirSync(configDir, { recursive: true })
+	env.CLAUDE_CONFIG_DIR = configDir
+
+	// CI sets neither, so the gateway path must be unconfigured here too — otherwise a
+	// non-Claude model would still have a route out.
+	delete env.LLM_GATEWAY_URL
+	delete env.LLM_GATEWAY_TOKEN
+
+	env[NO_MODEL_CREDENTIALS_FLAG] = '1'
+	return env
+}
+
 /**
  * The environment the test dev server must run with.
  *
@@ -45,6 +109,8 @@ export function testServerEnv(base: NodeJS.ProcessEnv = process.env): Record<str
 	env.VAPID_PUBLIC_KEY =
 		base.VAPID_PUBLIC_KEY ?? 'BA_iSNjg3ABABHdURp9GyGzD147naGotsGt_5CxFF1DB18GQj2CdVmxxnqSi3Uh8wFDGzltLDofEGABpe27ishM'
 	env.VAPID_PRIVATE_KEY = base.VAPID_PRIVATE_KEY ?? 'LxwuKonRPEoB7nvtm1w4m0DlZc2gxd8bk_nIAEu-n8I'
+
+	if (noModelCredentialsRequested(base)) stripModelCredentials(env)
 
 	return env
 }

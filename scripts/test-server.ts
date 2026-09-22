@@ -9,7 +9,18 @@
  * Press Ctrl-C to stop it. Kill it before a run you want to be pristine.
  */
 import { spawn } from 'node:child_process'
-import { TEST_SERVER_HEALTH_URL, TEST_SERVER_PORT, testServerEnv } from '../tests/server-env'
+import {
+	NO_MODEL_CREDENTIALS_FLAG,
+	TEST_SERVER_HEALTH_URL,
+	TEST_SERVER_PORT,
+	noModelCredentialsRequested,
+	testServerEnv,
+} from '../tests/server-env'
+
+// `--no-credentials` and the env var are the same switch, for whichever is convenient.
+// Set before `testServerEnv()` reads it.
+if (process.argv.includes('--no-credentials')) process.env[NO_MODEL_CREDENTIALS_FLAG] = '1'
+const stripped = noModelCredentialsRequested()
 
 const child = spawn('bun', ['run', 'dev', '--host', '127.0.0.1', '--port', String(TEST_SERVER_PORT)], {
 	env: testServerEnv(),
@@ -34,7 +45,12 @@ const waitForHealth = async () => {
 			const response = await fetch(TEST_SERVER_HEALTH_URL)
 			if (response.ok) {
 				console.log(`\n[test-server] ready in ${((Date.now() - startedAt) / 1000).toFixed(1)}s — ${TEST_SERVER_HEALTH_URL}`)
-				console.log('[test-server] leave this running; playwright will reuse it\n')
+				console.log('[test-server] leave this running; playwright will reuse it')
+				if (stripped) {
+					console.log(`[test-server] no model credential — run the suite with ${NO_MODEL_CREDENTIALS_FLAG}=1 too,`)
+					console.log('[test-server] or specs that call the model in-process will still pass')
+				}
+				console.log('')
 				return
 			}
 		} catch {

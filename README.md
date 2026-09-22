@@ -105,6 +105,45 @@ Playwright E2E policy:
 - Required env vars for E2E: `DATABASE_URL`, `AUTH_PASSWORD`, `OPENROUTER_API_KEY`, `SEARXNG_URL`, `SANDBOX_WORKSPACE`.
 - The suite fails fast during global setup if any required dependency is missing or unreachable.
 
+### Running the suite quickly
+
+Playwright boots its own dev server, and ~45s of every run is Vite compiling from cold.
+Start one and leave it up instead:
+
+```bash
+bun run dev:test          # terminal 1 — leave running
+bunx playwright test      # terminal 2 — reuses it, ~12s instead of ~55s
+```
+
+Use `bun run dev:test` rather than `bun run dev`. Playwright reuses whatever is already on
+port 4173, and a plain dev server does not carry the env the config injects
+(`AUTH_DEV_BYPASS=0`, `GITHUB_WEBHOOK_SECRET`, test VAPID keys), so the suite would
+quietly test a differently-configured app. Both read the same `tests/server-env.ts`.
+
+### Reproducing CI's credentials locally
+
+A developer machine has a working Claude session and a real `OPENROUTER_API_KEY`; CI has
+neither. A spec that quietly depends on a model answering therefore passes locally and
+fails in CI — which is how `automations.output-routing` was taken off the quarantine on a
+green local run and then failed CI with `UnauthorizedResponseError`.
+
+To run as CI does:
+
+```bash
+bun run dev:test:nocreds                              # terminal 1
+E2E_NO_MODEL_CREDENTIALS=1 bunx playwright test       # terminal 2
+```
+
+The flag is needed in **both** places. It strips every `ANTHROPIC_*` / `CLAUDE_*`
+variable, points `CLAUDE_CONFIG_DIR` at an empty directory so the Agent SDK cannot fall
+back to the logged-in session, replaces `OPENROUTER_API_KEY` with CI's placeholder, and
+unsets the LLM gateway. Several specs import `src/lib/automations/engine` and run the
+model inside the Playwright worker rather than through the dev server, so stripping only
+the server leaves exactly those specs still passing.
+
+A spec that genuinely needs a model belongs in `LIVE_SPECS` in `tests/quarantine.ts`,
+not in `KNOWN_FAILING`.
+
 ## Native Release Builds
 
 - GitHub Releases now trigger a workflow that builds native artifacts and attaches them to the release.

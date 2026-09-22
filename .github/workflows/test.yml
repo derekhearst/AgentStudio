@@ -53,6 +53,12 @@ jobs:
       GITHUB_WEBHOOK_SECRET: e2e-test-webhook-secret-do-not-use-in-prod
       E2E_SKIP_EXTERNAL_CHECKS: '1'
       E2E_QUARANTINE: '1'
+      # Make the absence of a model credential deliberate rather than incidental.
+      # A hosted runner has no Claude session and only the placeholder key above, so this
+      # is a no-op today — but it pins the posture, and it is the same switch a developer
+      # uses locally (`bun run dev:test:nocreds`) to reproduce this job's behaviour on a
+      # machine that *is* logged in. See tests/server-env.ts.
+      E2E_NO_MODEL_CREDENTIALS: '1'
       # The suite asserts the login redirect and the unauthenticated posture of public
       # routes. With the bypass on, those specs cannot fail honestly.
       AUTH_DEV_BYPASS: '0'
