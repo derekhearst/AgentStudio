@@ -228,8 +228,8 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | --- | --- | --- | --- |
 | #16 | Render diffs for file edits | **rebuild** | the diff is already in `tool_use_result`; no handler changes needed |
 | #26 | Shell output as a terminal | **rebuild** | same adapter; "stream it live" means background + poll, not a new transport |
-| #21 | Render the todo list | **rebuild** | same adapter; render above the composer, not in the rail |
-| #35 | Background work in a turn | **rebuild** | the SDK already does all of it; we render none of it |
+| #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
+| #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
 | #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
 | #23 | Per-project instructions | **rebuild** | `settingSources: ['project']` is 90% of it |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
@@ -277,6 +277,15 @@ decisions I would make differently from the issue: render it pinned above the co
 rather than in the rail (the rail is for preview now — see #14), and store the latest list on
 the conversation rather than the run, so a task that spans several runs keeps one list.
 
+**Shipped.** Both decisions stand. `conversations.todo_list` (migration `0072`) holds the
+latest list, written from the stream's `onToolResult` where the distilled `TodoDetails`
+already arrives, and emitted as a `todo_list` frame so a live run updates the panel without
+a refetch — a persisted run event, so a reconnecting client replays it. `PinnedTodoPanel`
+renders it collapsed to one line (the active item's `activeForm` plus a count) because it
+sits in the composer's space and an open ten-item plan would push the input off a phone
+screen. Dismissing clears the column and not just the view: `TodoWrite` only ever *replaces*
+a list, so a dismissal that left the row alone would pin the same list back on every open.
+
 ### #35 — background work
 
 The issue proposes growing our `shell` tool a `background: true` mode. Our `shell` tool is
@@ -292,6 +301,18 @@ What is actually missing:
 - wire `query.stopTask(id)` to a kill button, and to conversation delete for cleanup
 
 All four need finding 2 (keeping the handle). None need a tool change.
+
+**Partly shipped.** The handle is kept, `background_tasks_changed` and `task_notification`
+are interpreted by `$lib/engine/sdk-notices` and the live set renders as chips in both
+headers, and `POST /chat/[id]/stop-task` wires `Query.stopTask(id)` to a stop control on
+each chip. Ownership is checked against `chat_runs` before the registry is touched — the
+registry is keyed by run id alone and knows nothing about who owns a run, so the endpoint is
+the only thing between a run id and a stranger's session.
+
+What is left is the first bullet: reading `backgroundTaskId` off `BashOutput` and rendering a
+*live* card rather than a finished one. `ShellDetails` already carries the id; what it needs
+is a card that keeps polling `BashOutput`, which is the same piece of work as #26's live
+output and should be done once, for both.
 
 ### #24 — checkpoints
 
