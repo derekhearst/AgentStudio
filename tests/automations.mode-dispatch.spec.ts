@@ -81,16 +81,34 @@ test.describe('automations/mode-dispatch — research mode', () => {
 				select id, query, status::text as status, job_id from research where id = ${result.researchId!}
 			`
 			expect(research.query).toContain(prefix)
-			expect(research.status).toBe('planning')
 			expect(research.job_id).toBe(result.jobId)
+			// `research.status` is not asserted, for the same reason as `job.status` below.
+			expect(research.status, 'the row exists and carries a status').toBeTruthy()
 
 			// Job enqueued with research_run type.
 			const [job] = await sql<{ type: string; status: string; payload: { researchId?: string } }[]>`
 				select type::text as type, status::text as status, payload from jobs where id = ${result.jobId!}
 			`
 			expect(job.type).toBe('research_run')
-			expect(['pending', 'enqueued', 'running']).toContain(job.status)
 			expect(job.payload.researchId).toBe(result.researchId)
+			// Neither status is asserted, and that is deliberate.
+			//
+			// The app runs an in-process job worker. Between the dispatch returning and these
+			// SELECTs, the worker can claim the research_run job, attempt it, fail for want of
+			// a model credential, and move the job to `retry_wait` and the research row to
+			// `failed`. Both happened under full-suite load, alternating between the desktop
+			// and mobile projects — `job.status` first, then `research.status` once that one
+			// was relaxed.
+			//
+			// What this test is for is dispatch: research mode must create a research row and
+			// enqueue a research_run job carrying its id, rather than synthesising an
+			// assistant message. Every one of those claims is asserted here and none of them
+			// is transient. What the worker subsequently does with the job is the worker's
+			// business and has its own specs.
+			//
+			// `JOBS_WORKER_ENABLED=0` would remove the race at the source, but only by turning
+			// the worker off for the whole test server, which the job specs need running.
+			expect(job.status, 'the row exists and carries a status').toBeTruthy()
 
 			// No assistant messages should have been inserted into the automation's conversation.
 			const conversationId = result.conversationId!
