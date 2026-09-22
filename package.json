@@ -10,6 +10,7 @@
     "android:run:local": "bun run android:build:local && bun run android:install:local",
     "dev": "vite dev",
     "dev:test": "bun run scripts/test-server.ts",
+    "dev:test:nocreds": "bun run scripts/test-server.ts --no-credentials",
     "worker": "bun scripts/worker.ts",
     "build": "BUILD_PHASE=1 vite build",
     "preview": "vite preview",

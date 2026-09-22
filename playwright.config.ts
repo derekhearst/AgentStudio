@@ -1,6 +1,13 @@
 import { defineConfig, devices } from '@playwright/test'
 import { QUARANTINE } from './tests/quarantine'
-import { TEST_SERVER_HEALTH_URL, TEST_SERVER_ORIGIN, TEST_SERVER_PORT, testServerEnv } from './tests/server-env'
+import {
+	TEST_SERVER_HEALTH_URL,
+	TEST_SERVER_ORIGIN,
+	TEST_SERVER_PORT,
+	noModelCredentialsRequested,
+	stripModelCredentials,
+	testServerEnv,
+} from './tests/server-env'
 
 /**
  * Playwright config — runs every spec twice (desktop + mobile) by default so
@@ -23,6 +30,20 @@ import { TEST_SERVER_HEALTH_URL, TEST_SERVER_ORIGIN, TEST_SERVER_PORT, testServe
  * own, larger value in tests/server-env.ts — it serves all eight workers at once.
  */
 process.env.DATABASE_POOL_MAX ??= '3'
+
+/*
+ * Strip model credentials from the worker processes too, when asked.
+ *
+ * This file is loaded by the runner and by every worker, which is the only hook that
+ * reaches them. It matters because several specs do not go through the dev server at
+ * all — they `await import('../src/lib/automations/engine')` and run the model in the
+ * worker — so stripping only the server's environment would leave the very spec that
+ * motivated this (`automations.output-routing`) still passing locally while failing CI.
+ */
+if (noModelCredentialsRequested()) {
+	stripModelCredentials(process.env as Record<string, string>)
+	console.log('[playwright] E2E_NO_MODEL_CREDENTIALS=1 — workers have no model credential')
+}
 
 export default defineConfig({
 	/**
