@@ -119,7 +119,11 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 	// Notify the inbox on terminal transitions so the operator sees PR outcomes without
 	// monitoring chat. Best-effort; dedupeKey covers re-deliveries from GitHub.
 	if (newStatus === 'merged' || newStatus === 'closed') {
-		void openReviewItem({
+		// Awaited, not fire-and-forget. This used to be `void openReviewItem(...)`, so a
+		// merged PR could be acknowledged to GitHub before its inbox row existed — and if
+		// the write failed or the process died in between, the outcome silently never
+		// reached /review. A single insert is cheap against GitHub's delivery timeout.
+		await openReviewItem({
 			type: 'pull_request_ready',
 			severity: newStatus === 'merged' ? 'info' : 'warning',
 			summary: `PR ${newStatus}: ${fields.owner}/${fields.repo}#${fields.prNumber} — ${fields.title.slice(0, 120)}`,

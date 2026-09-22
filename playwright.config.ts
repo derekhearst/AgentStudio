@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { QUARANTINE } from './tests/quarantine'
 
 /**
  * Playwright config — runs every spec twice (desktop + mobile) by default so
@@ -9,6 +10,18 @@ import { defineConfig, devices } from '@playwright/test'
  * To run a single project: `--project=desktop` or `--project=mobile`.
  */
 export default defineConfig({
+	/**
+	 * CI skips the live-model specs and the #55 quarantine; a local run does not, so the
+	 * quarantine stays visible to whoever is working through it. Opt-in rather than
+	 * opt-out on purpose — a list that silently hides specs everywhere is how the suite
+	 * rotted in the first place.
+	 */
+	// One retry in CI. A test that passes on retry is reported as flaky rather than
+	// failing the build, which keeps a real regression legible instead of drowning it in
+	// order-dependent noise. Locally there are no retries, so flakes stay annoying enough
+	// to get fixed.
+	retries: process.env.CI ? 1 : 0,
+	testIgnore: process.env.E2E_QUARANTINE === '1' ? [...QUARANTINE] : [],
 	testDir: './tests',
 	testMatch: '**/*.spec.ts',
 	globalSetup: './tests/global-setup.ts',

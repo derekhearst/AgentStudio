@@ -76,6 +76,17 @@ export default async function globalSetup(_config: FullConfig) {
 	const sandboxWorkspace = requiredEnv('SANDBOX_WORKSPACE')
 
 	await ensureDbReachable(databaseUrl)
-	await ensureUrlReachable(searxngUrl, 'SEARXNG_URL')
+
+	/**
+	 * CI has no SearXNG. The database is genuinely required — almost every spec talks to
+	 * it — but web search is used by a handful, and those are quarantined there anyway.
+	 * Failing the whole run over an unreachable LAN service would mean no CI at all.
+	 */
+	if (process.env.E2E_SKIP_EXTERNAL_CHECKS === '1') {
+		console.log('[global-setup] E2E_SKIP_EXTERNAL_CHECKS=1 — not checking SEARXNG_URL')
+	} else {
+		await ensureUrlReachable(searxngUrl, 'SEARXNG_URL')
+	}
+
 	await ensureSandboxWritable(sandboxWorkspace)
 }
