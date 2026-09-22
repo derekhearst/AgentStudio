@@ -234,7 +234,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #23 | Per-project instructions | **rebuild** | `settingSources: ['project']` is 90% of it |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
-| #5 | Port subagents to SDK subagents | **as filed** | keystone; do it first in its wave |
+| #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
 | #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
@@ -384,6 +384,27 @@ Also worth checking during #5: unscoped runs pass no `allowedTools` at all
 (`options.server.ts`), which means any built-in the CLI exposes is callable — `Task`
 included, with no agent definitions and no ledger. Either define the agents or disallow the
 tool; silently having it is the worst of the three.
+
+**Shipped (#5).** Steps 1 and 2 are done. `Options.agents` is built per run by
+`$lib/engine/agent-definitions{,.server}`, `run_subagent` is off the engine surface, and
+`inline-subagent.ts` is deleted. `forwardSubagentText` is on, so a child's prose arrives
+and `stream.server.ts` routes it by `parent_tool_use_id` into `subagent_*` frames rather
+than into the parent's reply — the defect #34 describes, closed structurally rather than by
+a wrapper. Two things the work decided that the plan above did not anticipate:
+
+- **`Task` is classified as a mutation**, so plan mode refuses to delegate. A `Task` call
+  changes nothing by itself, but what it costs is decided by the child, and
+  `sdkPermissionModeFor` hands the SDK `'default'` in plan mode — our `canUseTool` gate is
+  the only thing enforcing read-only, and nothing here has established that a child's own
+  calls reach it. Allowing delegation would be an unobserved channel out of a read-only
+  mode. This is the cheapest thing on the list to revisit: observe one child tool call
+  arriving at the gate and it becomes `read`.
+- **A scoped agent's `allowedTools` has to be MCP-qualified.** The SDK reads a `tools` entry
+  matching nothing as "this agent has no such tool", so bare in-house names would have left
+  a scoped agent with a shorter surface than its config asked for, with no error anywhere.
+
+Steps 3–5 (the concurrency cap, per-child budget, tree rendering from `tool_use_result`,
+`stopTask` cancellation) are still open and belong with #32.
 
 ### #4 — AskUserQuestion
 
