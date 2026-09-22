@@ -17,9 +17,15 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = join(import.meta.dir, '..', 'tests', 'crud')
+// `import.meta.url`, not Bun's `import.meta.dir`. Identical at runtime, but the latter is
+// a Bun extension that TypeScript only knows about with `@types/bun` installed — and this
+// was the single Bun-specific API in the whole codebase, so the dependency would exist to
+// type one property. It was also the only thing standing between scripts/ and the type
+// checker, which had never looked at this directory.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'tests', 'crud')
 
 const BANNED_PATTERNS: Array<{ name: string; needle: string }> = [
 	{ name: 'MOCK_RESPONSE marker', needle: 'MOCK_RESPONSE' },

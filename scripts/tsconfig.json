@@ -1,0 +1,23 @@
+{
+	// Type-check the operational scripts, which SvelteKit's generated tsconfig does not
+	// cover: its `include` is src/, test/, tests/ and the vite config. Nothing checked
+	// scripts/, so a broken edit to scripts/test-server.ts left it referencing an
+	// undefined variable and `bun run check` still passed clean.
+	//
+	// A separate project rather than an `include` in the root tsconfig, because an
+	// extending config *replaces* the parent's `include` entirely — the root would have to
+	// restate SvelteKit's list and then go stale the moment SvelteKit changes it.
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	// The ambient declarations come from the generated config's own `include`, which is
+	// replaced below; scripts reach $lib and therefore $env through them.
+	"include": ["../.svelte-kit/ambient.d.ts", "../.svelte-kit/non-ambient.d.ts", "**/*.ts"],
+	// bench/ is left out, and not silently: its own tsconfig still sets `baseUrl`, which
+	// TypeScript 6 removed, so `tsc -p scripts/bench/tsconfig.json` fails before it reads a
+	// line of source. Fixing that config is a small edit, but the bench scripts can only be
+	// verified against a downloaded longmemeval dataset, so it is not a change to make
+	// blind. The benchmark harness does not ship.
+	"exclude": ["bench/**"]
+}
