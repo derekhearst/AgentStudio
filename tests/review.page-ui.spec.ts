@@ -113,7 +113,11 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 		await page.goto('/', { waitUntil: 'domcontentloaded' })
 		await page.goto('/review', { waitUntil: 'domcontentloaded' })
 
-		// The filter dropdown is a <select> with options for each type.
+		// The filter dropdown is a <select> with options for each type. Wait for it: the
+		// inbox renders client-side, so querying straight after `domcontentloaded` finds
+		// no options at all and reports every expected label as missing.
+		const typeFilter = page.locator('select').first()
+		await typeFilter.waitFor({ state: 'visible', timeout: 30_000 })
 		const selectOptions = await page.locator('select option').allTextContents()
 		const allOptions = selectOptions.join('|')
 		expect(allOptions).toContain('Pull request ready')

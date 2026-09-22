@@ -16,20 +16,23 @@ test.describe('home — chat submit redirect', () => {
 				const message = `${prefix} hello world`
 				const textarea = page.locator('#chat-composer-textarea')
 				await textarea.waitFor({ state: 'visible', timeout: 5_000 })
-				// Wait for hydration
-				await page.waitForTimeout(2000)
+
 				await textarea.click()
 				await textarea.fill(message)
-				await page.waitForTimeout(500)
-				const sendBtnBefore = await page.getByRole('button', { name: 'Send message' }).isDisabled()
-				console.log(`Send disabled after fill+wait: ${sendBtnBefore}`)
-				await textarea.press('Enter')
-				await page.waitForTimeout(2000)
-				console.log(`URL after Enter: ${page.url()}`)
-				expect(page.url()).toMatch(/\/chat\/[a-f0-9-]+/)
 
-				// Should navigate to /chat/[uuid] within a few seconds
-				await page.waitForURL(/\/chat\/[a-f0-9-]+/, { timeout: 10_000 })
+				// Wait on state, not on the clock. This used to sleep 2s for hydration, 500ms
+				// after filling and 2s after Enter, then assert the URL had already changed —
+				// which held up when the spec ran alone and failed under eight workers. The
+				// Send button is disabled until the client has hydrated *and* seen the draft,
+				// so it becoming enabled is the real signal that Enter will do anything.
+				const send = page.getByRole('button', { name: 'Send message' })
+				await expect(send).toBeEnabled({ timeout: 10_000 })
+
+				await textarea.press('Enter')
+
+				// Creating the conversation is a round trip; wait for the navigation rather
+				// than asserting the URL has already changed.
+				await page.waitForURL(/\/chat\/[a-f0-9-]+/, { timeout: 15_000 })
 				expect(page.url()).toMatch(/\/chat\/[a-f0-9-]+/)
 			})
 		} finally {

@@ -1183,15 +1183,25 @@
 		consoleState.lastTtftMs = ttftCandidate?.ttftMs ?? null;
 	});
 
+	/*
+	 * Deliberately not `$state`: this is read only by the effect below, which also writes
+	 * it. The previous version kept the run's start time on `consoleState.runStatus` and
+	 * read it back to decide whether to keep or reset it — so the effect depended on the
+	 * object it assigned, and since it assigns a fresh object every time it re-triggered
+	 * itself until Svelte gave up with `effect_update_depth_exceeded` and tore down
+	 * reactivity for the subtree. Any page that reached a chat hit it; /agents/new, which
+	 * redirects straight into one, raised it eighteen times on a single load.
+	 */
+	let runStartedAt: number | null = null;
+
 	$effect(() => {
-		const isStreaming = streaming || (pendingMessageId !== null);
+		const isStreaming = streaming || pendingMessageId !== null;
+		if (!isStreaming) runStartedAt = null;
+		else runStartedAt ??= Date.now();
+
 		consoleState.runStatus = {
 			state: isStreaming ? 'streaming' : 'idle',
-			startedAt: isStreaming && consoleState.runStatus.startedAt === null
-				? Date.now()
-				: !isStreaming
-					? null
-					: consoleState.runStatus.startedAt,
+			startedAt: runStartedAt,
 			pendingApprovals: pendingAskUser ? 1 : 0,
 		};
 	});
