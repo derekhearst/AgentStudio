@@ -42,6 +42,30 @@ import type { Options } from '@anthropic-ai/claude-agent-sdk'
 export type ApprovalDecision = { allow: true } | { allow: false; reason: string }
 
 /**
+ * The slice of the SDK's `Query` this loop actually uses.
+ *
+ * Exists so the message source can be substituted. Everything the engine learns about a run
+ * arrives as `SDKMessage`s — the typed tool results behind `./tool-result-details`, the
+ * notices behind `./sdk-notices`, and the `parent_tool_use_id` routing below — and none of
+ * it could be tested while `runEngineStream` constructed its own `query()`. A spec can now
+ * hand it a scripted stream and assert on the frames and blocks that come out.
+ *
+ * The control methods are optional because a test double has nothing to control. The real
+ * `Query` implements all of them, so the production path is unchanged.
+ */
+export type EngineQuerySource = AsyncIterable<SDKMessage> & {
+	interrupt?: () => Promise<unknown>
+	stopTask?: (taskId: string) => Promise<unknown>
+	getContextUsage?: () => Promise<unknown>
+	close?: () => void
+}
+
+export type CreateEngineQuery = (params: {
+	prompt: string | AsyncIterable<SDKUserMessage>
+	options: Options
+}) => EngineQuerySource
+
+/**
  * Tools the host renders itself, so the engine must not emit tool frames for them.
  * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
  */
@@ -121,6 +145,12 @@ export type EngineRunInput = {
 	 * why the registry entry is released in the caller's `finally`.
 	 */
 	onHandle?: (handle: EngineQueryHandle) => void
+	/**
+	 * Where the message stream comes from. Defaults to the SDK's `query()`.
+	 *
+	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
+	 */
+	createQuery?: CreateEngineQuery
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -396,18 +426,20 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	 * The handle deliberately exposes no way to pull messages. A second consumer calling
 	 * `next()` on this iterator would steal frames from the loop below.
 	 */
-	const session = query({ prompt: input.prompt, options })
+	const createQuery: CreateEngineQuery =
+		input.createQuery ?? ((params) => query(params) as EngineQuerySource)
+	const session = createQuery({ prompt: input.prompt, options })
 
 	input.onHandle?.({
 		interrupt: async () => {
-			await session.interrupt()
+			await session.interrupt?.()
 		},
 		stopTask: async (taskId: string) => {
-			await session.stopTask(taskId)
+			await session.stopTask?.(taskId)
 		},
 		getContextUsage: async () => {
 			try {
-				return await session.getContextUsage()
+				return (await session.getContextUsage?.()) ?? null
 			} catch {
 				// Reading the context is never worth failing a turn over.
 				return null
@@ -416,7 +448,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	})
 
 	try {
-		for await (const message of session as AsyncIterable<SDKMessage>) {
+		for await (const message of session) {
 			const msg = message as Record<string, any>
 			/** Non-null when this message was produced inside a subagent — see the note above. */
 			const parentToolUseId =
@@ -701,7 +733,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		 * holding the workspace.
 		 */
 		try {
-			session.close()
+			session.close?.()
 		} catch {
 			// Already gone. Nothing to do and nothing worth logging.
 		}
