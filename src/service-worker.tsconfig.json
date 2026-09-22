@@ -1,0 +1,19 @@
+{
+	// The service worker needs its own project: SvelteKit's generated tsconfig explicitly
+	// *excludes* it, because it runs in a worker rather than a window and needs the
+	// `webworker` lib instead of `dom`. Excluded meant unchecked — this file is production
+	// code that handles push delivery and nothing had ever type-checked it.
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"lib": ["esnext", "webworker"],
+		"types": []
+	},
+	"include": ["../.svelte-kit/ambient.d.ts", "service-worker.ts"],
+	// `exclude: []` is load-bearing. The generated config lists `../src/service-worker.ts`
+	// in its own `exclude`, that is inherited through `extends`, and `exclude` filters
+	// `include` — so without this the project resolves to zero source files and passes
+	// while checking nothing. Verified by planting an undefined identifier and watching it
+	// go green.
+	"exclude": []
+}
