@@ -236,7 +236,7 @@
 	<div class="w-full max-w-2xl space-y-4 text-center tablet:space-y-8">
 		<!-- Greeting -->
 		<div>
-			<h1 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}, Derek</h1>
+			<h2 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}, Derek</h2>
 			<p class="mt-1 text-sm text-base-content/50 tablet:mt-2 tablet:text-lg">How can I help you today?</p>
 		</div>
 

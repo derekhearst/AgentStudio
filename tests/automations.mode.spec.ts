@@ -61,7 +61,7 @@ test.describe('automations/mode — schema invariants', () => {
 		const sql = getSql()
 		try {
 			const userId = await getActiveUserId()
-			for (const target of ['chat_session', 'task', 'artifact', 'review_inbox']) {
+			for (const target of ['chat_session', 'artifact', 'review_inbox']) {
 				await sql`
 					insert into automations (user_id, description, cron_expression, prompt, output_target)
 					values (${userId}, ${`${prefix} ${target}`}, '0 0 * * *', 'p', ${target}::automation_output_target)
@@ -73,7 +73,7 @@ test.describe('automations/mode — schema invariants', () => {
 				where description like ${`${prefix}%`}
 				order by target
 			`
-			expect(rows.map((r) => r.target)).toEqual(['artifact', 'chat_session', 'review_inbox', 'task'])
+			expect(rows.map((r) => r.target)).toEqual(['artifact', 'chat_session', 'review_inbox'])
 		} finally {
 			await sql`delete from automations where description like ${`${prefix}%`}`
 		}
@@ -120,13 +120,13 @@ test.describe('automations/mode — lifecycle metric shape', () => {
 				insert into operational_metrics (metric, dimension, value)
 				values (
 					${`${prefix}.automations.duration_ms`},
-					${sql.json({ mode: 'research', outputTarget: 'task', status: 'completed' })},
+					${sql.json({ mode: 'research', outputTarget: 'artifact', status: 'completed' })},
 					'8500'
 				)
 				returning metric, dimension, value::text as value
 			`
 			expect(row.metric).toBe(`${prefix}.automations.duration_ms`)
-			expect(row.dimension).toEqual({ mode: 'research', outputTarget: 'task', status: 'completed' })
+			expect(row.dimension).toEqual({ mode: 'research', outputTarget: 'artifact', status: 'completed' })
 			expect(row.value).toBe('8500.000000')
 		} finally {
 			await sql`delete from operational_metrics where metric like ${`${prefix}%`}`
@@ -141,7 +141,7 @@ test.describe('automations/mode — lifecycle metric shape', () => {
 				insert into operational_metrics (metric, dimension, value, measured_at) values
 				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'chat_followup', outputTarget: 'chat_session' })}, '1', now() - interval '20 minutes'),
 				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'chat_followup', outputTarget: 'chat_session' })}, '1', now() - interval '15 minutes'),
-				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'research', outputTarget: 'task' })}, '1', now() - interval '10 minutes'),
+				(${`${prefix}.automations.lifecycle.completed`}, ${sql.json({ mode: 'research', outputTarget: 'artifact' })}, '1', now() - interval '10 minutes'),
 				(${`${prefix}.automations.lifecycle.failed`}, ${sql.json({ mode: 'maintenance', outputTarget: 'review_inbox' })}, '1', now() - interval '5 minutes')
 			`
 			const completed = await sql<{ count: number; mode: string }[]>`

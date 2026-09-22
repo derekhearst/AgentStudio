@@ -123,7 +123,23 @@
 		activeSection = id;
 	}
 
-	async function refresh() {
+	/**
+	 * `refresh({ force: true })` after any mutation.
+	 *
+	 * These are remote `query()`s, so calling them again returns the value cached when the
+	 * page first loaded. Every post-mutation call site here was therefore a no-op: enabling
+	 * push left the button reading "Enable", a test notification never appeared in the feed,
+	 * and marking one read did not restyle it — all of it correct in the database and stale
+	 * on screen until a full reload.
+	 */
+	async function refresh(options?: { force?: boolean }) {
+		if (options?.force) {
+			await Promise.all([
+				listNotificationFeed().refresh(),
+				listSubscriptions().refresh(),
+				getSettings().refresh()
+			]);
+		}
 		const [feed, subs, appSettings] = await Promise.all([
 			listNotificationFeed(),
 			listSubscriptions(),
@@ -233,7 +249,7 @@
 			});
 
 			statusMessage = 'Push notifications enabled.';
-			await refresh();
+			await refresh({ force: true });
 		} catch (err) {
 			statusMessage = `Push enable failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
@@ -254,7 +270,7 @@
 				await unsubscribePush({ endpoint });
 			}
 			statusMessage = 'Push notifications disabled.';
-			await refresh();
+			await refresh({ force: true });
 		} catch (err) {
 			statusMessage = `Push disable failed: ${err instanceof Error ? err.message : String(err)}`;
 		} finally {
@@ -271,7 +287,7 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
-	<PageHeader title="Settings" subtitle={statusMessage ?? 'Configure models, prompts, notifications, and system behavior'}>
+	<PageHeader title="Settings" subtitle={statusMessage || 'Configure models, prompts, notifications, and system behavior'}>
 		{#snippet chips()}
 			{#if statusMessage}
 				<span class="console-chip is-run">{statusMessage}</span>
@@ -397,7 +413,7 @@
 							{notifications}
 							{busy}
 							onStatusMessage={(msg) => (statusMessage = msg)}
-							onRefresh={refresh}
+							onRefresh={() => refresh({ force: true })}
 						/>
 					</div>
 				{/if}

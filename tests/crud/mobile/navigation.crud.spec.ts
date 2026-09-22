@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
-import { authenticateContext, expectNoHorizontalOverflow, withErrorCapture } from '../../helpers'
+import { expect, test, type Page } from '@playwright/test'
+import { authenticateContext, expectNoHorizontalOverflow, waitForHydration, withErrorCapture } from '../../helpers'
 
 /**
  * Mobile-only navigation + composer + scroll checks.
@@ -18,37 +18,58 @@ test.describe('mobile — navigation + layout', () => {
 		}
 	})
 
-	test('bottom nav: Chat + Agents tap navigates correctly', async ({ page, context }) => {
+	/** The system section is a collapsed disclosure unless you are already inside it. */
+	async function openManage(drawer: ReturnType<Page['getByRole']>) {
+		const toggle = drawer.getByRole('button', { name: /Manage/ })
+		if ((await toggle.getAttribute('aria-expanded')) === 'true') return
+		await toggle.click()
+	}
+
+	/*
+	 * These two used to drive a `nav.z-20` bottom bar with Chat / Agents / More. That bar
+	 * no longer exists: the console redesign moved mobile navigation into a left drawer
+	 * behind the header's hamburger. Same coverage, current surface — that navigation is
+	 * reachable on a phone, and that the secondary destinations are in it.
+	 */
+	test('the nav drawer opens from the header and navigates', async ({ page, context }) => {
 		await authenticateContext(context)
 		await withErrorCapture(page, async () => {
 			await page.goto('/')
-			await page.waitForLoadState('domcontentloaded')
+			await waitForHydration(page)
 
-			// Mobile bottom nav has Chat + Agents + More
-			await page.locator('nav.z-20').getByRole('link', { name: 'Agents' }).click()
+			const drawer = page.getByRole('dialog', { name: 'Navigation drawer' })
+
+			await page.getByRole('button', { name: 'Open navigation' }).click()
+			await expect(drawer).toBeVisible()
+			// Agents sits under the "Manage" disclosure, which is collapsed unless the
+			// current route is already inside it.
+			await openManage(drawer)
+			await drawer.getByRole('link', { name: 'Agents' }).click()
 			await expect(page).toHaveURL(/\/agents$/)
 
-			await page.locator('nav.z-20').getByRole('link', { name: 'Chat' }).click()
+			await page.getByRole('button', { name: 'Open navigation' }).click()
+			await expect(drawer).toBeVisible()
+			await drawer.getByRole('link', { name: 'Chats' }).click()
 			await expect(page).toHaveURL(/\/$/)
 		})
 	})
 
-	test('More dropdown: secondary nav links reachable', async ({ page, context }) => {
+	test('the nav drawer carries the secondary destinations', async ({ page, context }) => {
 		await authenticateContext(context)
 		await withErrorCapture(page, async () => {
 			await page.goto('/')
-			await page.waitForLoadState('domcontentloaded')
+			await waitForHydration(page)
 
-			// Open the More dropdown
-			await page.locator('nav.z-20').getByRole('button', { name: /More/ }).click()
+			await page.getByRole('button', { name: 'Open navigation' }).click()
+			const drawer = page.getByRole('dialog', { name: 'Navigation drawer' })
+			await expect(drawer).toBeVisible()
 
-			// Each link in the DaisyUI dropdown content should be visible
-			const dropdown = page.locator('nav.z-20 .dropdown-content')
-			await expect(dropdown).toBeVisible({ timeout: 3_000 })
-			await expect(dropdown.getByRole('link', { name: 'Activity' })).toBeVisible()
-			await expect(dropdown.getByRole('link', { name: 'Skills' })).toBeVisible()
-			await expect(dropdown.getByRole('link', { name: 'Review' })).toBeVisible()
-			await expect(dropdown.getByRole('link', { name: 'Settings' })).toBeVisible()
+			await expect(drawer.getByRole('link', { name: 'Projects' })).toBeVisible()
+
+			await openManage(drawer)
+			for (const label of ['Agents', 'Skills', 'Automations', 'Memory', 'Review', 'Settings']) {
+				await expect(drawer.getByRole('link', { name: label }), `${label} is reachable`).toBeVisible()
+			}
 		})
 	})
 

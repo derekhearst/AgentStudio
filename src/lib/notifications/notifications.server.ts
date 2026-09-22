@@ -22,10 +22,11 @@ type PushPayload = {
 
 let configured = false
 
+/** True once web-push has usable VAPID details; false when the deployment has none. */
 function ensurePushConfigured() {
-	if (configured) return
+	if (configured) return true
 	if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-		throw new Error('VAPID keys are not configured')
+		return false
 	}
 
 	webpush.setVapidDetails(
@@ -34,6 +35,7 @@ function ensurePushConfigured() {
 		process.env.VAPID_PRIVATE_KEY,
 	)
 	configured = true
+	return true
 }
 
 export async function getVapidPublicKey() {
@@ -132,8 +134,20 @@ export async function markNotificationRead(notificationId: string, read = true, 
 	return updated
 }
 
+/**
+ * Best-effort fan-out. Delivery failures for an individual subscription are already
+ * counted rather than thrown, and a deployment with no VAPID keys is treated the same
+ * way: nothing to deliver to, not an error.
+ *
+ * This used to throw, which made the whole `sendTestNotification` command reject *after*
+ * it had already written the notification row — the notification existed in the feed
+ * while the operator was told "VAPID keys are not configured". Push is a side channel;
+ * whether it is set up has no bearing on whether the notification was recorded.
+ */
 export async function sendPushToAll(payload: PushPayload, userId?: string) {
-	ensurePushConfigured()
+	if (!ensurePushConfigured()) {
+		return { delivered: 0, failed: 0, total: 0, skipped: 'push-not-configured' as const }
+	}
 	const subscriptions = await listPushSubscriptions(userId)
 	let delivered = 0
 	let failed = 0
@@ -157,5 +171,6 @@ export async function sendPushToAll(payload: PushPayload, userId?: string) {
 		delivered,
 		failed,
 		total: subscriptions.length,
+		skipped: null,
 	}
 }

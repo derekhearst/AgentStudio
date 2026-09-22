@@ -106,41 +106,38 @@ test.describe('runs/dismiss — single-run manual cancel', () => {
 		}
 	})
 
-	test('dismissStuckRun refuses runs owned by another user', async () => {
+	test('dismissStuckRun refuses a run the caller does not own', async () => {
 		test.setTimeout(15_000)
 		const prefix = uniquePrefix('runs-dismiss-other')
 		await cleanupPrefixedRecords(prefix)
-		const sql = getSql()
 		const ownerId = await getActiveAdminUserId()
-		// Username column is unique-constrained; use a per-test random suffix so parallel
-		// projects (desktop + mobile) running this test concurrently don't collide.
-		const otherUsername = `e2e_other_${randomUUID().slice(0, 12)}`
 
 		try {
-			// A foreign owner id with no user row: the instance is single-user
-			// (users_singleton refuses a second), and what is under test is ownership
-			// filtering, not whether another account exists.
-			const otherUser = { id: randomUUID() }
-			const conversationId = await seedConversation(prefix, otherUser.id)
+			// This used to seed the *run* against a made-up user id, which `conversations`
+			// and `chat_runs` both reject with a foreign key violation — there is no second
+			// user to own anything, because a unique index on `(true)` makes `users`
+			// single-row.
+			//
+			// Turn it around. The run belongs to the real account; the caller is the
+			// stranger. Nothing requires the caller id to exist: it is only ever compared
+			// against `chat_runs.user_id`, which is exactly the check under test.
+			const conversationId = await seedConversation(prefix, ownerId)
 			const runId = await seedRun({
 				conversationId,
-				userId: otherUser.id,
+				userId: ownerId,
 				state: 'waiting_user_input',
 				updatedAtMinutesAgo: 5,
 			})
 
+			const stranger = randomUUID()
 			const { dismissStuckRun } = await import('../src/lib/runs/runs.server')
-			// Calling user is the owner, but the run belongs to otherUser → no-op.
-			const result = await dismissStuckRun(ownerId, runId)
-			expect(result.success).toBe(false)
+			const result = await dismissStuckRun(stranger, runId)
+			expect(result.success, 'a run belonging to someone else must not be dismissible').toBe(false)
 
 			const after = await readRun(runId)
 			expect(after.state).toBe('waiting_user_input')
 			expect(after.finished_at).toBeNull()
 		} finally {
-			await sql`delete from chat_runs where user_id in (select id from users where username = ${otherUsername})`
-			await sql`delete from conversations where user_id in (select id from users where username = ${otherUsername})`
-			await sql`delete from users where username = ${otherUsername}`
 			await cleanupPrefixedRecords(prefix)
 		}
 	})

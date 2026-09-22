@@ -164,7 +164,7 @@
 				<!-- Name / role / badges -->
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-start gap-2">
-						<h1 class="text-2xl font-bold leading-tight">{data.agent.name}</h1>
+						<h2 class="text-2xl font-bold leading-tight">{data.agent.name}</h2>
 						<span
 							class="badge badge-sm mt-1 {data.agent.status === 'active' ? 'badge-success' : data.agent.status === 'paused' ? 'badge-warning' : 'badge-ghost'}"
 						>{data.agent.status}</span>

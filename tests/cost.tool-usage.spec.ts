@@ -1,6 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Serialized against the other specs that write this user's budget limits and cost
+ * ledger — see `acquireGlobalStateLock` in helpers for why prefix isolation cannot work
+ * for these rows.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 async function seedRun(prefix: string, userId: string) {
 	const sql = getSql()
@@ -23,30 +37,27 @@ test.describe('cost/tool-usage — non-LLM tool spend ledger', () => {
 		await cleanupPrefixedRecords(prefix)
 		const userId = await getActiveUserId()
 		const { runId } = await seedRun(prefix, userId)
-		const taskId = randomUUID()
 		const sql = getSql()
 		try {
 			await sql`
-				insert into tool_usage (user_id, run_id, agent_id, task_id, tool_name, provider, unit_type, units, cost, metadata)
-				values (${userId}, ${runId}, null, ${taskId}, 'web_search', 'serper', 'credit', '5', '0.005', '{}'::jsonb)
+				insert into tool_usage (user_id, run_id, agent_id, tool_name, provider, unit_type, units, cost, metadata)
+				values (${userId}, ${runId}, null, 'web_search', 'serper', 'credit', '5', '0.005', '{}'::jsonb)
 			`
 			const [row] = await sql<{
 				user_id: string
 				run_id: string
 				agent_id: string | null
-				task_id: string
 				tool_name: string
 				provider: string | null
 				unit_type: string
 				units: string
 				cost: string
 			}[]>`
-				select user_id, run_id, agent_id, task_id, tool_name, provider, unit_type, units, cost
+				select user_id, run_id, agent_id, tool_name, provider, unit_type, units, cost
 				from tool_usage where run_id = ${runId}
 			`
 			expect(row.user_id).toBe(userId)
 			expect(row.run_id).toBe(runId)
-			expect(row.task_id).toBe(taskId)
 			expect(row.tool_name).toBe('web_search')
 			expect(row.provider).toBe('serper')
 			expect(row.unit_type).toBe('credit')

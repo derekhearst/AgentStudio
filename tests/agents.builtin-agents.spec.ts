@@ -23,6 +23,23 @@ async function ensureBootstrap(page: { goto: (url: string) => Promise<unknown> }
 	await page.goto('/')
 }
 
+/**
+ * Re-run the seeder directly.
+ *
+ * The two re-seed tests below used to do this by hitting `/` a second time, on the theory
+ * that it "re-triggers the seed". It does not: seeding happens once when the server
+ * process evaluates `db.server.ts`, so a second request is a no-op and both tests only
+ * ever passed when Playwright had just cold-booted a server and this file happened to be
+ * the first to touch it. Against a warm server they always failed.
+ */
+async function reseedBuiltinAgents() {
+	const [{ seedBuiltinAgents }, { db }] = await Promise.all([
+		import('../src/lib/agents/builtin-agents.server'),
+		import('../src/lib/db.server'),
+	])
+	await seedBuiltinAgents(db)
+}
+
 test.describe('agents/builtin — four built-in agents are seeded with stable IDs', () => {
 	test('all four built-in agents exist with builtin_key and identity_skill_id NULL', async ({ page, context }) => {
 		test.setTimeout(60_000)
@@ -122,15 +139,19 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		}
 	})
 
-	test('placeholder system_prompt gets healed on re-seed', async ({ page, context }) => {
+	// Desktop only: both of these mutate one shared row and assert on it, so running them
+	// concurrently in two projects makes each one's restore race the other's assertion.
+	// They exercise server-side seeding, not layout, so a second viewport proves nothing.
+	test('placeholder system_prompt gets healed on re-seed', async ({ page, context }, testInfo) => {
+		test.skip(testInfo.project.name !== 'desktop', 'database behaviour; one project is enough')
 		test.setTimeout(60_000)
 		await authenticateContext(context)
 		await ensureBootstrap(page)
 
 		const sql = getSql()
-		// Force the placeholder back into the chat agent and re-trigger the seed by hitting /.
+		// Force the placeholder back into the chat agent, then re-run the seeder.
 		await sql`update agents set system_prompt = 'Seeded at boot.' where id::text = ${BUILTIN_AGENT_IDS.chat}`
-		await ensureBootstrap(page)
+		await reseedBuiltinAgents()
 
 		const [row] = await sql<{ system_prompt: string }[]>`
 			select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.chat}
@@ -139,31 +160,31 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(row.system_prompt).toContain('# Agent: Chat')
 	})
 
-	test('user-edited system_prompt survives re-seed', async ({ page, context }) => {
+	test('user-edited system_prompt survives re-seed', async ({ page, context }, testInfo) => {
+		test.skip(testInfo.project.name !== 'desktop', 'database behaviour; one project is enough')
 		test.setTimeout(60_000)
 		await authenticateContext(context)
 		await ensureBootstrap(page)
 
 		const sql = getSql()
 		const customContent = `# Custom edit — should not be overwritten`
-		const [original] = await sql<{ system_prompt: string }[]>`
-			select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.plan}
-		`
 		try {
 			await sql`update agents set system_prompt = ${customContent} where id::text = ${BUILTIN_AGENT_IDS.plan}`
 
-			// Re-trigger the seed.
-			await ensureBootstrap(page)
+			await reseedBuiltinAgents()
 
 			const [row] = await sql<{ system_prompt: string }[]>`
 				select system_prompt from agents where id::text = ${BUILTIN_AGENT_IDS.plan}
 			`
 			expect(row.system_prompt, 'user edit must survive re-seed').toBe(customContent)
 		} finally {
-			// Restore the canonical content so subsequent tests see it. The healing path only
-			// triggers when the value is the placeholder; an explicit restore avoids leaking
-			// the custom content into other tests in this file.
-			await sql`update agents set system_prompt = ${original.system_prompt} where id::text = ${BUILTIN_AGENT_IDS.plan}`
+			// Restore by healing rather than by writing `original` back. If a previous run
+			// died between the update and the restore, `original` is itself the custom
+			// string and writing it back would keep the database poisoned forever — which
+			// is exactly what happened: a later assertion failed on a 41-character prompt.
+			// Setting the placeholder and re-seeding always lands on the canonical text.
+			await sql`update agents set system_prompt = 'Seeded at boot.' where id::text = ${BUILTIN_AGENT_IDS.plan}`
+			await reseedBuiltinAgents()
 		}
 	})
 })

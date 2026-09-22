@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 
@@ -64,7 +65,10 @@ test.describe('observability/review_items — pull_request_ready source', () => 
 		const prefix = uniquePrefix('pr-dedupe')
 		const sql = getSql()
 		try {
-			const dedupeKey = `pull_request:owner/repo:99`
+			// Scoped to the prefix. A fixed literal meant the desktop and mobile projects
+			// each inserted a row under the same key, so the "only one open row" assertion
+			// counted two and read as a dedupe failure.
+			const dedupeKey = `pull_request:${prefix}:99`
 			// Open one item.
 			await sql`
 				insert into review_items (type, severity, summary, payload)
@@ -103,39 +107,46 @@ test.describe('observability/review_items — pull_request_ready source', () => 
 })
 
 test.describe('list_pull_requests / get_pull_request — visibility scoping', () => {
-	test('get_pull_request rejects rows the user does not own', async () => {
-		// Construct a fake PR row attached to a fake repo owned by a NON-existent userId so
-		// the active user can't list it. The tool should refuse instead of leaking the row.
+	test('a repository owned by someone else is not visible to the active user', async () => {
 		const prefix = uniquePrefix('pr-visibility')
 		const sql = getSql()
 		const ownerId = await getActiveUserId()
 
 		try {
-			// Create a repo owned by a synthetic UUID — the active user never owns it.
-			const otherUserId = '00000000-0000-4000-8000-000000aaaaaa'
-			// No user row is created: repositories.user_id has no enforced FK, and the
-			// instance is single-user, so a foreign id is all the ownership check needs.
+			// This used to attach the repo to a synthetic user id on the theory that
+			// `repositories.user_id` has no enforced FK. It does — the insert failed with
+			// `repositories_user_id_users_id_fk`, and a second user cannot be created
+			// either, because a unique index on `(true)` makes `users` single-row.
+			//
+			// So seed the repo against the real account and ask as a stranger. The
+			// ownership predicate is `listRepositories(caller)`, and a caller id needs no
+			// user row to be filtered on.
 			const [repo] = await sql<{ id: string }[]>`
 				insert into repositories (user_id, provider, owner, name, clone_url, default_branch, metadata)
-				values (${otherUserId}, 'github', ${`${prefix}-owner`}, ${`${prefix}-repo`}, 'https://example.com/repo.git', 'main', '{}'::jsonb)
+				values (${ownerId}, 'github', ${`${prefix}-owner`}, ${`${prefix}-repo`}, 'https://example.com/repo.git', 'main', '{}'::jsonb)
 				returning id
 			`
-			const [pr] = await sql<{ id: string }[]>`
+			await sql`
 				insert into pull_requests (repository_id, provider_pr_number, title, head_branch, base_branch, status)
 				values (${repo.id}, 1, ${`${prefix} fixture`}, 'feature', 'main', 'draft')
-				returning id
 			`
-			expect(typeof pr.id).toBe('string')
 
-			// The other user's PR is NOT visible: listRepositories(activeUser) doesn't
-			// return this repo, so the get_pull_request authorization predicate fails.
 			const { listRepositories } = await import('../src/lib/source-control/source-control.server')
+
+			const stranger = randomUUID()
+			const strangerRepos = await listRepositories(stranger)
+			expect(
+				strangerRepos.some((r) => r.id === repo.id),
+				'another user must not see this repository',
+			).toBe(false)
+
+			// Positive control: the real owner does see it, so a `listRepositories` that
+			// returned nothing at all could not pass this test.
 			const ownedRepos = await listRepositories(ownerId)
-			expect(ownedRepos.some((r) => r.id === repo.id)).toBe(false)
+			expect(ownedRepos.some((r) => r.id === repo.id), 'the owner must see it').toBe(true)
 		} finally {
 			await sql`delete from pull_requests where title like ${`${prefix}%`}`
 			await sql`delete from repositories where owner like ${`${prefix}%`}`
-			await sql`delete from users where username like ${`${prefix}%`}`
 		}
 	})
 })

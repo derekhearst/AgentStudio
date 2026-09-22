@@ -46,8 +46,21 @@ import { schema } from '$lib/db/schema.server'
 const databaseUrl = process.env.DATABASE_URL
 const skipDatabaseInitialization = process.env.BUILD_PHASE === '1'
 
+/**
+ * `DATABASE_POOL_MAX` exists because this module is imported by more processes than the
+ * web server. Playwright spawns eight workers, each of which imports server modules to
+ * call them directly, so each worker was opening postgres.js's default pool of ten —
+ * roughly eighty connections against a `max_connections` of 100 before the suite did any
+ * work. The suite ran a few connections short of the limit and blamed whatever asked for
+ * one next: "sorry, too many clients already", surfacing as unrelated specs failing.
+ *
+ * It is also a useful knob for a small self-hosted deployment, where ten connections per
+ * process is more than a single-user app will ever need.
+ */
 function createDatabaseClient(url: string) {
-	return postgres(url, { onnotice: handleDatabaseNotice })
+	const configured = Number(process.env.DATABASE_POOL_MAX)
+	const max = Number.isFinite(configured) && configured > 0 ? configured : 10
+	return postgres(url, { max, onnotice: handleDatabaseNotice })
 }
 
 function createDatabase(connection: ReturnType<typeof createDatabaseClient>) {

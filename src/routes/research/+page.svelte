@@ -76,7 +76,7 @@
 					class="btn btn-xs gap-1.5 {filter === f.value ? 'btn-primary' : 'btn-ghost'}"
 					onclick={() => setFilter(f.value)}
 				>
-					<i class="mdi {f.icon} text-sm opacity-80"></i>
+					<i class="mdi {f.icon} text-sm opacity-80" aria-hidden="true"></i>
 					{f.label}
 				</button>
 			{/each}
@@ -106,7 +106,7 @@
 							>
 								<div class="flex items-start justify-between gap-2">
 									<div class="flex items-center gap-1.5 text-xs uppercase tracking-wide text-base-content/50">
-										<i class="mdi mdi-magnify text-sm"></i>
+										<i class="mdi mdi-magnify text-sm" aria-hidden="true"></i>
 										Research
 									</div>
 									{#if isInFlight(item.status) || item.status === 'failed'}
@@ -134,7 +134,7 @@
 								class="flex h-full flex-col gap-1.5 rounded-xl border border-base-300/60 bg-base-100 p-3 transition-colors hover:bg-base-200/40"
 							>
 								<div class="flex items-center gap-1.5 text-xs uppercase tracking-wide text-base-content/50">
-									<i class="mdi mdi-image-outline text-sm"></i>
+									<i class="mdi mdi-image-outline text-sm" aria-hidden="true"></i>
 									Image
 								</div>
 								<div class="aspect-video w-full overflow-hidden rounded-md bg-base-200/40">

@@ -1,5 +1,19 @@
 import { expect, test } from '@playwright/test'
-import { getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Serialized against the other specs that write this user's budget limits and cost
+ * ledger — see `acquireGlobalStateLock` in helpers for why prefix isolation cannot work
+ * for these rows.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 /**
  * Wave 5 #21 phase 4 — per-mode dispatch in `runAutomationById`.

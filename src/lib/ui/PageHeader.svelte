@@ -40,7 +40,14 @@
 			{/if}
 			<span class="console-crumbs__sep">/</span>
 		{/each}
-		<span class="console-crumbs__cur">{title}</span>
+		<!--
+			An <h1>, not a <span>: the mobile header below carries the only other copy of the
+			page title and is display:none at desktop width, so before this every desktop page
+			had no heading at all — nothing for a screen reader to navigate by, and nothing for
+			a test to assert on. Tailwind preflight resets heading type and margin, so this
+			renders exactly as the span did.
+		-->
+		<h1 class="console-crumbs__cur">{title}</h1>
 	</div>
 	{#if chips}
 		<div class="console-topbar__chips">{@render chips()}</div>
@@ -54,7 +61,14 @@
 	{/if}
 </div>
 
-<!-- Mobile/tablet header -->
+<!--
+	Mobile/tablet header.
+
+	Note that the page title exists twice in the DOM — once above, once here — with CSS
+	hiding whichever does not belong at the current width. Both are <h1>, so only one is
+	ever in the accessibility tree; a test that wants the live one should ask by role
+	rather than taking the first text match.
+-->
 <div
 	class="relative z-20 flex shrink-0 items-center gap-2 border-b border-base-300/50 px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 desktop:hidden tablet:px-4 tablet:pt-2"
 >
@@ -112,6 +126,19 @@
 		{@render mobileActions()}
 	{/if}
 </div>
+
+<!--
+	Fall back to `actions` when a page has not written a separate `mobileActions`. No page
+	ever did — the snippet was dead — so all 17 pages with header actions had them silently
+	dropped on a phone. On /settings that meant Save and Reset simply did not exist below
+	80rem.
+
+	They go on their own scrollable row rather than beside the title: /memory has four of
+	them, and inline they squeeze the `min-w-0 flex-1` title to zero width.
+-->
+{#if !mobileActions && actions}
+	<div class="console-mobile-actions">{@render actions()}</div>
+{/if}
 
 {#if chips}
 	<div class="console-mobile-chips">{@render chips()}</div>

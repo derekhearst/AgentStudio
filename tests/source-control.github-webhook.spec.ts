@@ -160,6 +160,10 @@ test.describe('source-control/github-webhook — extractCheckRunEventFields', ()
 				pull_requests: [{ number: 42 }, { number: 43 }],
 			},
 		})
+		// `check` is the normalized row the caller persists. It was added after this test
+		// was written, and because this is `toEqual` rather than `toMatchObject` the extra
+		// key failed the whole assertion. Spelling it out keeps the strict comparison,
+		// which is the point: a field silently vanishing should fail here.
 		expect(out).toEqual({
 			action: 'completed',
 			owner: 'acme',
@@ -170,6 +174,19 @@ test.describe('source-control/github-webhook — extractCheckRunEventFields', ()
 			startedAt: '2026-05-04T12:00:00Z',
 			finishedAt: '2026-05-04T12:05:00Z',
 			prNumbers: [42, 43],
+			check: {
+				source: 'check_run',
+				checkName: 'CI / build',
+				status: 'failure',
+				conclusion: 'failure',
+				detailsUrl: 'https://github.com/acme/widgets/actions/runs/1',
+				startedAt: '2026-05-04T12:00:00Z',
+				finishedAt: '2026-05-04T12:05:00Z',
+				externalId: null,
+				headSha: null,
+				outputTitle: null,
+				outputSummary: null,
+			},
 		})
 	})
 

@@ -84,8 +84,15 @@ test.describe('chat/empty-message — render suppression', () => {
 
 			// The user prompt + the real assistant reply should be the only two articles in the
 			// scrollable message list. The 3 empty assistants must not render an <article>.
+			// MessageBubble renders `article.console-msg`; AskUserCard is the only other
+			// <article> under main, and this conversation seeds none, so the class is here to
+			// document intent rather than to exclude anything.
 			const main = page.getByRole('main')
-			const articleCount = await main.locator('article.chat-message').count()
+			const articles = main.locator('article.console-msg')
+			// Fail loudly on a selector that matches nothing at all, rather than reading it as
+			// "every message was suppressed" — that misdiagnosis is what quarantined this spec.
+			await articles.first().waitFor({ state: 'visible', timeout: 10_000 })
+			const articleCount = await articles.count()
 			expect(articleCount, 'only the user prompt + the one real assistant article should render').toBe(2)
 		} finally {
 			await cleanupPrefixedRecords(prefix)

@@ -100,10 +100,21 @@ test.describe('chat/agent-stream-integration — Research toolPolicy audit', () 
 		const policy = row?.config?.toolPolicy
 		expect(policy?.kind).toBe('readOnly')
 		const allow = new Set(policy?.allow ?? [])
-		const writeTools = ['push_branch', 'create_pull_request', 'clone_repository', 'Bash', 'Write']
+		const writeTools = ['push_branch', 'create_pull_request', 'clone_repository', 'Bash']
 		for (const tool of writeTools) {
 			expect(allow.has(tool), `${tool} must NOT be in the Research allow-list`).toBe(false)
 		}
+
+		// `Write` is deliberately present, and this test used to deny it.
+		//
+		// READ_ONLY_TOOL_NAMES is one list shared by Research and Plan, and it includes
+		// Write with a stated reason: the planner writes its plan to a markdown file and
+		// hands off via request_plan_approval. Research inherits it because it shares the
+		// list, not because anyone decided Research should write files.
+		//
+		// Asserted rather than dropped, so the grant stays visible: if the lists are ever
+		// split so Research is read-only in the strict sense, this line fails and says so.
+		expect(allow.has('Write'), 'Research shares the Plan allow-list, which includes Write').toBe(true)
 		// Read-only source-control tools must remain available.
 		const readOnlySC = ['list_my_repos', 'prepare_commit', 'list_pull_requests', 'get_pull_request']
 		for (const tool of readOnlySC) {

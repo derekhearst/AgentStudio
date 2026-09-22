@@ -16,8 +16,13 @@ test('keeps invalid login on login screen', async ({ page }) => {
 	await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible()
 })
 
-test('logs in through the UI and lands on the dashboard', async ({ page }) => {
+test('logs in through the UI and lands on the chat home', async ({ page }) => {
 	await loginViaUi(page)
 	await page.goto('/')
-	await expect(page.getByRole('heading', { name: /AgentStudio/i })).toBeVisible()
+	// Home is the new-chat console, not the old dashboard. The composer is the honest
+	// signal that the page is up and hydrated; the greeting heading is not usable here
+	// because mobile renders a second h1 in the topbar, and its text depends on the time
+	// of day and the account name.
+	await expect(page).toHaveURL(/\/$/)
+	await expect(page.getByPlaceholder('Start a new conversation...')).toBeVisible()
 })

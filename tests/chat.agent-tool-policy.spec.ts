@@ -13,35 +13,20 @@ import { expect, test } from '@playwright/test'
 
 const MOCK_TOOL = (name: string) => ({ type: 'function' as const, function: { name } })
 
-const READ_ONLY_ALLOW = [
-	'ask_user',
-	'search_tools',
-	'web_search',
-	// Plan authoring + handoff — the planner writes the plan to a file, then hands off.
-	'Write',
-	'request_plan_approval',
-	'Read',
-	'Glob',
-	'Grep',
-	'file_info',
-	'browser_screenshot',
-	'web_fetch',
-	'pdf_read',
-	'git_status',
-	'git_log',
-	'git_diff',
-	'list_skills',
-	'read_skill',
-	'read_skill_file',
-	'list_my_repos',
-	'list_pull_requests',
-	'get_pull_request',
-	'prepare_commit',
-	'list_projects',
-	'list_automations',
-	'recall_memory',
-	'list_memory',
-]
+/**
+ * The real allow-list, loaded from the source.
+ *
+ * This file used to keep a hand-written copy of it. A test that builds a policy from its
+ * own copy of the list is not testing the policy — it is testing that a Set behaves like
+ * a Set, and it would stay green if someone added `Bash` to the real
+ * `READ_ONLY_TOOL_NAMES`. For an allow-list whose whole job is to keep destructive tools
+ * away from read-only agents, that is the one failure mode worth catching.
+ */
+async function readOnlyPolicy() {
+	const { READ_ONLY_TOOL_NAMES } = await import('../src/lib/agents/builtin-agents.server')
+	return { kind: 'readOnly' as const, allow: new Set(READ_ONLY_TOOL_NAMES) }
+}
+
 
 test.describe('agent-tool-policy — unrestricted policy', () => {
 	test('unrestricted passes every tool through', async () => {
@@ -61,11 +46,13 @@ test.describe('agent-tool-policy — unrestricted policy', () => {
 
 test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)', () => {
 	test('readOnly strips destructive tools (Bash, Edit, push_branch)', async () => {
+		// Note the absence of `Write`. It is allow-listed deliberately — the planner writes
+		// its plan to a markdown file and hands off — and the next test asserts it survives.
+		// Listing it here too was a straight contradiction between two neighbouring tests.
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
+		const policy = await readOnlyPolicy()
 		const tools = [
 			MOCK_TOOL('Bash'),
-			MOCK_TOOL('Write'),
 			MOCK_TOOL('Edit'),
 			MOCK_TOOL('delete_file'),
 			MOCK_TOOL('push_branch'),
@@ -80,7 +67,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 
 	test('readOnly keeps allow-listed tools (web_search, Read, Write, request_plan_approval)', async () => {
 		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
+		const policy = await readOnlyPolicy()
 		const tools = [
 			MOCK_TOOL('web_search'),
 			MOCK_TOOL('web_fetch'),
@@ -123,7 +110,7 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 
 	test('readOnly fails closed for unknown tool names (allow-list semantics)', async () => {
 		const { filterToolsByAgentPolicy, isToolAllowedByPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const policy = { kind: 'readOnly' as const, allow: new Set(READ_ONLY_ALLOW) }
+		const policy = await readOnlyPolicy()
 		const tools = [MOCK_TOOL('hypothetical_new_tool_added_later')]
 		expect(filterToolsByAgentPolicy(tools, policy)).toEqual([])
 		expect(isToolAllowedByPolicy('hypothetical_new_tool_added_later', policy)).toBe(false)
@@ -144,5 +131,73 @@ test.describe('agent-tool-policy — resolver round-trips JSON config', () => {
 			'Read',
 			'web_search',
 		])
+	})
+})
+
+test.describe('agent-tool-policy — the real allow-list is not quietly widened', () => {
+	test('READ_ONLY_TOOL_NAMES contains nothing that can change the world', async () => {
+		const { READ_ONLY_TOOL_NAMES } = await import('../src/lib/agents/builtin-agents.server')
+
+		// Named individually rather than pattern-matched: a regex over the list would drift
+		// with naming conventions and quietly stop matching. These are the tools that edit
+		// the filesystem, run commands, or change remote state.
+		//
+		// `Write` is deliberately absent from this list. It is the one write tool these
+		// agents get, so the planner can put its plan on disk before handing off.
+		const MUST_NOT_BE_ALLOWED = [
+			'Bash',
+			'Edit',
+			'MultiEdit',
+			'NotebookEdit',
+			'delete_file',
+			'move_file',
+			'run_code',
+			'push_branch',
+			'create_pull_request',
+			'clone_repository',
+			'create_skill',
+			'update_skill',
+			'delete_skill',
+			'create_agent',
+			'update_agent',
+			'delete_agent',
+			'create_automation',
+			'update_automation',
+			'delete_automation',
+			'create_project',
+			'remember',
+			'forget',
+		]
+
+		const leaked = MUST_NOT_BE_ALLOWED.filter((name) => READ_ONLY_TOOL_NAMES.includes(name))
+		expect(leaked, 'a read-only agent must not be able to call these').toEqual([])
+	})
+
+	test('every allow-listed name is a tool that exists', async () => {
+		// An allow-list entry that matches no real tool is dead weight, and usually a sign
+		// the tool was renamed while the policy was not — which silently *removes* a
+		// capability from Research and Plan rather than adding one. It found two on the
+		// first run: `recall_memory` and `list_memory`, left behind from when memory recall
+		// was a tool rather than context the engine injects.
+		//
+		// Two surfaces have to be checked, not one. `allToolNames` is the app's own
+		// registry; the SDK's built-ins (Read, Write, Glob, Grep, Bash…) are allow-listed
+		// by the same names but live in `engine/builtin-tools`. Those constants were moved
+		// out of `options.server.ts` for this: importing that module from the Playwright
+		// runtime fails on `$env`, and a test that cannot read the real list would have to
+		// keep its own copy — the exact problem this file already had.
+		const [{ READ_ONLY_TOOL_NAMES }, { allToolNames }, builtins] = await Promise.all([
+			import('../src/lib/agents/builtin-agents.server'),
+			import('../src/lib/tools/tool-schemas'),
+			import('../src/lib/engine/builtin-tools'),
+		])
+
+		const known = new Set<string>([
+			...allToolNames,
+			...builtins.BUILTIN_FILE_TOOLS,
+			...builtins.BUILTIN_SHELL_TOOLS,
+		])
+		const unknown = READ_ONLY_TOOL_NAMES.filter((name) => !known.has(name))
+		expect(unknown, 'allow-listed tools that no longer exist').toEqual([])
 	})
 })

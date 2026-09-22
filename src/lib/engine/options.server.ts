@@ -17,6 +17,7 @@
  */
 
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
+import { BUILTIN_TOOL_SET, DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
@@ -143,33 +144,15 @@ export function resolveRunPermissionMode(input: {
 	return resolveEffectivePermissionMode(input)
 }
 
-/**
- * Built-in SDK tools that replaced the in-house filesystem and shell registry entries (#15).
- *
- * Kept as data rather than inferred, because two layers have to agree with it: the
- * containment guard in `./workspace-guard`, which knows how each one names its path
- * argument, and the read-only agent allowlist.
- */
-export const BUILTIN_FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep'] as const
-export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell'] as const
-
-/**
- * Built-ins we deliberately refuse, because an in-house tool does the same job *and* more.
- *
- * `WebSearch` / `WebFetch`: ours route through the self-hosted SearXNG at `SEARXNG_URL`
- * and write a `logToolUsage` row per call with an operator-tunable per-call cost. The SDK's
- * are billed server-side and invisible to the ledger, so letting both exist would silently
- * move spend off the books depending on which one the model happened to pick.
- */
-export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch'] as const
-
-/** Membership test so the allowlist can carry both surfaces without qualifying built-ins. */
-const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
-	...BUILTIN_FILE_TOOLS,
-	...BUILTIN_SHELL_TOOLS,
-	'NotebookEdit',
-	'TodoWrite',
-])
+// Built-in tool names live in `./builtin-tools` so they can be imported without `$env`.
+// Imported *and* re-exported: this module uses BUILTIN_TOOL_SET itself, and has always
+// been where callers look for the others.
+export {
+	BUILTIN_FILE_TOOLS,
+	BUILTIN_SHELL_TOOLS,
+	BUILTIN_TOOL_SET,
+	DISALLOWED_BUILTIN_TOOLS,
+} from './builtin-tools'
 
 /**
  * Whether the SDK's OS sandbox can run here. Linux only: it is built on bubblewrap, which

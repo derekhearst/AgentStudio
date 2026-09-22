@@ -132,29 +132,32 @@ test.describe('chat/ask_user — rendered as alternating user/assistant bubbles 
 				"that's great",
 			])
 
-			// Role styling check: prompt and answer should sit inside user-styled containers
-			// (border-primary/25 bg-base-100/72), question and continuation inside assistant-styled
-			// containers (.assistant-message). MessageBubble wraps the whole assistant article in
-			// a non-chat-end <article>, so we identify user-side bubbles by their primary border class.
-			const promptBubble = askPrompt.locator(
-				'xpath=ancestor::div[contains(@class, "border-primary/25")][1]',
-			)
-			await expect(promptBubble).toBeVisible()
-			const answerBubble = userAnswer.locator(
-				'xpath=ancestor::div[contains(@class, "border-primary/25")][1]',
-			)
-			await expect(answerBubble).toBeVisible()
+			// Role styling check. The console shell replaced the DaisyUI chat-bubble markup this
+			// spec was written against: the message-level role now lives on the <article>
+			// (console-msg--user / --assist), while inside an assistant turn the ask_user
+			// transcript still uses .assistant-message for the question and a *-user-bubble for
+			// the recorded answer.
+			//
+			// Note the asymmetry, which is the point of this test: only the original prompt is a
+			// user *message*. The answer is replayed inside the assistant's ask_user card, so it
+			// is user-styled without being a user turn.
+			const article = (text: typeof askPrompt) => text.locator('xpath=ancestor::article[1]')
+			const userBubble = (text: typeof askPrompt) =>
+				text.locator("xpath=ancestor::div[contains(@class, 'user-bubble')][1]")
+			const assistantBody = (text: typeof askPrompt) =>
+				text.locator("xpath=ancestor::div[contains(@class, 'assistant-message')][1]")
 
-			const questionBubble = askQuestion.locator('xpath=ancestor::div[contains(@class, "assistant-message")][1]')
-			await expect(questionBubble).toBeVisible()
-			const continuationBubble = assistantContinuation.locator(
-				'xpath=ancestor::div[contains(@class, "assistant-message")][1]',
+			await expect(article(askPrompt), 'the prompt is a user turn').toHaveClass(/console-msg--user/)
+			await expect(article(askQuestion), 'the question is an assistant turn').toHaveClass(
+				/console-msg--assist/,
 			)
-			await expect(continuationBubble).toBeVisible()
+			await expect(article(assistantContinuation), 'the continuation is an assistant turn').toHaveClass(
+				/console-msg--assist/,
+			)
 
-			// Original user message must remain inside an article rendered with chat-end (right-aligned).
-			const userArticle = askPrompt.locator('xpath=ancestor::article[1]')
-			await expect(userArticle).toHaveClass(/chat-end/)
+			await expect(assistantBody(askQuestion), 'question rendered as assistant text').toBeVisible()
+			await expect(assistantBody(assistantContinuation), 'continuation rendered as assistant text').toBeVisible()
+			await expect(userBubble(userAnswer), 'the answer is user-styled inside the card').toBeVisible()
 
 			// Nothing got deleted: both DB rows persist after page render.
 			const sql = getSql()

@@ -10,37 +10,25 @@ test('saves, persists, resets, and updates notification feed from settings', asy
 		await seedNotification(prefix, { title: `${prefix} Feed Notification`, body: `${prefix} feed body` })
 		await page.goto('/settings')
 		await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible()
-		const preferencesSection = page
-			.locator('section')
-			.filter({ hasText: /general preferences/i })
-			.first()
 
-		await preferencesSection.getByLabel('Default Model').fill('openai/gpt-4o-mini')
-		await preferencesSection.locator('select.select.select-bordered').first().selectOption('AgentStudio-night')
-		await preferencesSection.getByLabel('Task completed alerts').uncheck()
-		await page.getByRole('button', { name: /save settings/i }).click()
-		await expect(page.getByText(/settings saved\./i)).toBeVisible()
+		// The page was rebuilt from one "General preferences" <section> into per-topic panels.
+		// Two of the old assertions have no equivalent and are gone rather than faked: the
+		// theme picker (there is one theme now, applied unconditionally) and filling Default
+		// Model as text (it is a ModelSelector combobox — its own concern, not this test's).
+		// Do not assert the incoming value: settings are a single shared row, so whatever a
+		// previous run left behind is what this one starts from. Drive it to a known state.
+		const taskCompleted = page.getByLabel('Task completed', { exact: true })
+		await taskCompleted.uncheck()
+		await page.getByRole('button', { name: 'Save', exact: true }).click()
+		await expect(page.getByText('Settings saved.').filter({ visible: true }).first()).toBeVisible()
 
 		await page.reload()
-		const reloadedPreferencesSection = page
-			.locator('section')
-			.filter({ hasText: /general preferences/i })
-			.first()
-		await expect(reloadedPreferencesSection.getByLabel('Default Model')).toHaveValue('openai/gpt-4o-mini')
-		await expect(reloadedPreferencesSection.locator('select.select.select-bordered').first()).toHaveValue(
-			'AgentStudio-night',
-		)
-		await expect(reloadedPreferencesSection.getByLabel('Task completed alerts')).not.toBeChecked()
+		await expect(page.getByLabel('Task completed', { exact: true })).not.toBeChecked()
 
 		await page.getByPlaceholder('Title').fill(`${prefix} Notification`)
 		await page.getByPlaceholder('Body').fill(`${prefix} Body`)
-		await page.getByPlaceholder('URL').fill('/chat')
-		await page
-			.locator('section')
-			.filter({ hasText: /send test notification/i })
-			.getByRole('button', { name: /^send$/i })
-			.click()
-		await expect(page.getByText(/test notification sent\./i)).toBeVisible()
+		await page.getByRole('button', { name: /^send$/i }).click()
+		await expect(page.getByText(/test notification sent\./i).filter({ visible: true }).first()).toBeVisible()
 		const sql = getSql()
 		await expect
 			.poll(async () => {
@@ -50,7 +38,15 @@ test('saves, persists, resets, and updates notification feed from settings', asy
 				return Number(rows[0]?.count ?? 0)
 			})
 			.toBe(1)
-		const notificationCard = page.locator('article').filter({ hasText: `${prefix} Feed Notification` })
+
+		// Feed rows are plain divs now. Match the innermost div that holds both the title and
+		// the row's own button — `.last()` on the title alone lands on the text wrapper,
+		// which does not contain the button.
+		const notificationCard = page
+			.locator('div')
+			.filter({ hasText: `${prefix} Feed Notification` })
+			.filter({ has: page.getByRole('button', { name: /^(read|unread)$/i }) })
+			.last()
 		await expect(notificationCard).toBeVisible()
 		await notificationCard.getByRole('button', { name: /^read$/i }).click()
 		await expect
@@ -62,9 +58,9 @@ test('saves, persists, resets, and updates notification feed from settings', asy
 			})
 			.toBe(true)
 
-		await page.getByRole('button', { name: /reset defaults/i }).click()
-		await expect(page.getByText(/settings reset to defaults\./i)).toBeVisible()
-		await expect(reloadedPreferencesSection.getByLabel('Default Model')).toHaveValue('anthropic/claude-sonnet-4')
+		await page.getByRole('button', { name: 'Reset', exact: true }).click()
+		await expect(page.getByText('Settings reset to defaults.').filter({ visible: true }).first()).toBeVisible()
+		await expect(page.getByLabel('Task completed', { exact: true })).toBeChecked()
 	} finally {
 		await cleanupPrefixedRecords(prefix)
 	}
@@ -108,6 +104,9 @@ test('responds to install prompt and mocked push subscription controls', async (
 			configurable: true,
 			value: {
 				register: async () => ({}),
+				// The app enumerates registrations on load to clear stale workers; without this
+				// the mock throws "getRegistrations is not a function" during hydration.
+				getRegistrations: async () => [],
 				ready: Promise.resolve({
 					pushManager: {
 						getSubscription: async () => currentSubscription,
@@ -122,9 +121,28 @@ test('responds to install prompt and mocked push subscription controls', async (
 	})
 	await authenticateContext(page.context())
 
+	// The mocked endpoint is a fixed string, not prefixed, so `cleanupPrefixedRecords`
+	// cannot see it. Left behind, it makes the next run start with push already enabled
+	// and the Enable button absent.
+	const sql = getSql()
+	const clearTestSubscription = () =>
+		sql`delete from push_subscriptions where endpoint = ${'https://push.example.test/subscription-e2e'}`
+	await clearTestSubscription()
+
 	try {
 		await page.goto('/settings')
-		await expect(page.getByRole('button', { name: /install app/i })).toBeVisible()
+		// The button keeps one accessible name and expresses availability through `disabled`;
+		// only its visible text flips between "Install" and "Installed".
+		const installBtn = page.getByRole('button', { name: 'Install app' })
+		await expect(installBtn).toBeVisible()
+		await expect(installBtn).toBeDisabled()
+
+		// Wait for hydration before dispatching `beforeinstallprompt`. The button is in the
+		// SSR HTML, so it is visible well before onMount attaches the listener — dispatching
+		// on visibility alone races the handler and the event is simply lost. The panels
+		// below only render once the client has loaded settings, so they are the honest
+		// signal that the page is live.
+		await expect(page.getByRole('heading', { name: 'Notifications' })).toBeVisible()
 		await page.evaluate(() => {
 			const installEvent = new CustomEvent('beforeinstallprompt') as unknown as Event & {
 				prompt: () => Promise<void>
@@ -138,17 +156,18 @@ test('responds to install prompt and mocked push subscription controls', async (
 		})
 		await page.waitForTimeout(100)
 
-		const installButton = page.getByRole('button', { name: /install app/i })
+		const installButton = installBtn
 		await expect(installButton).toBeEnabled()
 		await installButton.click()
 		await expect(installButton).toBeDisabled()
 
 		await page.getByRole('button', { name: /enable push/i }).click()
-		await expect(page.getByText(/push notifications enabled\./i)).toBeVisible()
+		await expect(page.getByText(/push notifications enabled\./i).filter({ visible: true }).first()).toBeVisible()
 
 		await page.getByRole('button', { name: /disable push/i }).click()
-		await expect(page.getByText(/push notifications disabled\./i)).toBeVisible()
+		await expect(page.getByText(/push notifications disabled\./i).filter({ visible: true }).first()).toBeVisible()
 	} finally {
+		await clearTestSubscription()
 		await cleanupPrefixedRecords(prefix)
 	}
 })

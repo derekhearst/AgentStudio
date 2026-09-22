@@ -1,5 +1,22 @@
 import { expect, test } from '@playwright/test'
-import { getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Budget limits and the usage ledger belong to the one user this instance has, so they
+ * cannot be partitioned by prefix the way most fixtures are. This file and its sibling
+ * (the other of automations.budget-gate / cost.budget) each clear and re-seed those rows,
+ * and running them side by side put one file's cleanup between the other's setup and its
+ * assertion. Both passed alone and failed together, which is most of why both were
+ * quarantined. The lock is shared by name, so it serializes across workers and projects.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 /**
  * Wave 5 #21 phase 5 — automation budget gate via the review inbox.
@@ -82,19 +99,25 @@ test.describe('automations/budget-gate — pre-check skip', () => {
 			`
 			expect(messageRows[0].count).toBe(0)
 
-			await settleMicrotasks()
-
 			// Review item opened exactly once with the right dedupeKey + payload shape.
-			const items = await sql<{
+			//
+			// Poll rather than `settleMicrotasks()`. The item is written by a fire-and-forget
+			// path, so draining the microtask queue only happens to be enough when the
+			// machine is idle; under a full parallel run it is not, and the test failed
+			// having found nothing.
+			type ReviewItem = {
 				type: string
 				severity: string
 				summary: string
 				payload: { dedupeKey?: string; kind?: string; source?: string; automationId?: string }
-			}[]>`
+			}
+			const readItems = () => sql<ReviewItem[]>`
 				select type::text as type, severity::text as severity, summary, payload
 				from review_items
 				where summary like ${`%${prefix}%`}
 			`
+			await expect.poll(async () => (await readItems()).length, { timeout: 10_000 }).toBe(1)
+			const items = await readItems()
 			expect(items).toHaveLength(1)
 			expect(items[0].type).toBe('policy_override_request')
 			expect(items[0].severity).toBe('warning')

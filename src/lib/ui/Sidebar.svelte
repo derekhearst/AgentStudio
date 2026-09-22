@@ -41,7 +41,7 @@
 					class="font-semibold"
 					onclick={onNavigate}
 				>
-					<i class="mdi mdi-message-text-outline text-base shrink-0"></i>
+					<i class="mdi mdi-message-text-outline text-base shrink-0" aria-hidden="true"></i>
 					Chat
 				</a>
 			</li>
@@ -52,31 +52,31 @@
 			<li class="menu-title">Work</li>
 			<li>
 				<a href="/agents" class:menu-active={isActive('/agents')} onclick={onNavigate}>
-					<i class="mdi mdi-chip text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-chip text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Agents
 				</a>
 			</li>
 			<li>
 				<a href="/skills" class:menu-active={isActive('/skills')} onclick={onNavigate}>
-					<i class="mdi mdi-school-outline text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-school-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Skills
 				</a>
 			</li>
 			<li>
 				<a href="/automations" class:menu-active={isActive('/automations')} onclick={onNavigate}>
-					<i class="mdi mdi-sync text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-sync text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Automations
 				</a>
 			</li>
 			<li>
 				<a href="/monitors" class:menu-active={isActive('/monitors')} onclick={onNavigate}>
-					<i class="mdi mdi-radar text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-radar text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Monitors
 				</a>
 			</li>
 			<li>
 				<a href="/projects" class:menu-active={isActive('/projects')} onclick={onNavigate}>
-					<i class="mdi mdi-folder-outline text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-folder-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Projects
 				</a>
 			</li>
@@ -87,25 +87,25 @@
 			<li class="menu-title">Insights</li>
 			<li>
 				<a href="/review" class:menu-active={isActive('/review')} onclick={onNavigate}>
-					<i class="mdi mdi-view-dashboard-outline text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-view-dashboard-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Review
 				</a>
 			</li>
 			<li>
 				<a href="/activity" class:menu-active={isActive('/activity')} onclick={onNavigate}>
-					<i class="mdi mdi-lightning-bolt-outline text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-lightning-bolt-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Activity
 				</a>
 			</li>
 			<li>
 				<a href="/memory" class:menu-active={isActive('/memory')} onclick={onNavigate}>
-					<i class="mdi mdi-database-outline text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-database-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Memory
 				</a>
 			</li>
 			<li>
 				<a href="/research" class:menu-active={isActive('/research')} onclick={onNavigate}>
-					<i class="mdi mdi-magnify text-base shrink-0 opacity-60"></i>
+					<i class="mdi mdi-magnify text-base shrink-0 opacity-60" aria-hidden="true"></i>
 					Research
 				</a>
 			</li>
@@ -117,25 +117,25 @@
 			<ul class="menu menu-sm w-full p-0">
 				<li>
 					<a href="/audit" class:menu-active={isActive('/audit')} onclick={onNavigate}>
-						<i class="mdi mdi-shield-check-outline text-base shrink-0 opacity-60"></i>
+						<i class="mdi mdi-shield-check-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 						Audit
 					</a>
 				</li>
 				<li>
 					<a href="/settings/hooks" class:menu-active={isActive('/settings/hooks')} onclick={onNavigate}>
-						<i class="mdi mdi-hook text-base shrink-0 opacity-60"></i>
+						<i class="mdi mdi-hook text-base shrink-0 opacity-60" aria-hidden="true"></i>
 						Hooks
 					</a>
 				</li>
 				<li>
 					<a href="/settings/jobs" class:menu-active={isActive('/settings/jobs')} onclick={onNavigate}>
-						<i class="mdi mdi-format-list-bulleted text-base shrink-0 opacity-60"></i>
+						<i class="mdi mdi-format-list-bulleted text-base shrink-0 opacity-60" aria-hidden="true"></i>
 						Jobs
 					</a>
 				</li>
 				<li>
 					<a href="/settings" class:menu-active={activePath === '/settings'} onclick={onNavigate}>
-						<i class="mdi mdi-cog-outline text-base shrink-0 opacity-60"></i>
+						<i class="mdi mdi-cog-outline text-base shrink-0 opacity-60" aria-hidden="true"></i>
 						Settings
 					</a>
 				</li>

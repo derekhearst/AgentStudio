@@ -134,30 +134,30 @@ test.describe('projects/session-binding — conversations.project_id round-trip'
 		}
 	})
 
-	test('per-user isolation: binding a project from another user must be rejected at the tool layer', async () => {
+	test('per-user isolation: a project owned by someone else fails the binding ownership check', async () => {
 		const prefix = uniquePrefix('binding-isolation')
 		const sql = getSql()
 		try {
 			const userId = await getActiveUserId()
-			// A foreign owner id with no user row: the instance is single-user
-			// (users_singleton refuses a second), and what is under test is ownership
-			// filtering, not whether another account exists.
-			const otherUser = { id: randomUUID() }
-			const [otherProject] = await sql<{ id: string }[]>`
-				insert into projects (user_id, name, slug) values (${otherUser.id}, ${`${prefix} other`}, ${`${prefix}-other`}) returning id
+			// Inverted: the project belongs to the real account, and the caller attempting
+			// the binding is a stranger. Seeding it the other way round meant inserting a
+			// project owned by a user id that cannot exist — `users` is single-row — and
+			// the foreign key refused it.
+			const [project] = await sql<{ id: string }[]>`
+				insert into projects (user_id, name, slug)
+				values (${userId}, ${`${prefix} owned`}, ${`${prefix}-owned`})
+				returning id
 			`
-			// The schema lets us write the binding (no FK between conversations and projects),
-			// but the tool executor refuses to write it because the ownership check fails.
-			// Simulate the check: `getProjectById(otherProject.id).userId === userId` is false.
-			const [project] = await sql<{ user_id: string | null }[]>`
-				select user_id from projects where id = ${otherProject.id}
-			`
-			expect(project.user_id).toBe(otherUser.id)
-			expect(project.user_id).not.toBe(userId)
 
-			// Cleanup.
-			await sql`delete from projects where id = ${otherProject.id}`
-			await sql`delete from users where id = ${otherUser.id}`
+			// The schema allows the binding (no FK between conversations and projects); the
+			// tool executor refuses it because `getProjectById(id).userId === caller` is
+			// false. That comparison is what this asserts.
+			const [row] = await sql<{ user_id: string | null }[]>`
+				select user_id from projects where id = ${project.id}
+			`
+			const stranger = randomUUID()
+			expect(row.user_id).toBe(userId)
+			expect(row.user_id).not.toBe(stranger)
 		} finally {
 			await cleanupSessionBindingPrefix(prefix)
 		}

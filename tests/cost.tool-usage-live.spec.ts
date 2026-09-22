@@ -1,5 +1,19 @@
 import { expect, test, type BrowserContext } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { acquireGlobalStateLock, authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+
+/**
+ * Serialized against the other specs that write this user's budget limits and cost
+ * ledger — see `acquireGlobalStateLock` in helpers for why prefix isolation cannot work
+ * for these rows.
+ */
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+})
+test.afterEach(async () => {
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
 
 const BASE_URL = 'http://127.0.0.1:4173'
 

@@ -27,60 +27,42 @@ export const LIVE_SPECS: readonly string[] = [
 	'tests/cost.tool-usage-live.spec.ts',
 	'tests/runs.live.spec.ts',
 	'tests/workspace.live.spec.ts',
-]
-
-/** Meant to get shorter. Count on 2026-09-21: 34. */
-export const KNOWN_FAILING: readonly string[] = [
-	'tests/agents.builtin-agents.spec.ts',
-	'tests/agents.spec.ts',
-	'tests/auth.spec.ts',
-	'tests/automations.budget-gate.spec.ts',
-	'tests/automations.mode-dispatch.spec.ts',
-	'tests/automations.mode.spec.ts',
-	'tests/automations.output-routing.spec.ts',
+	// Reclassified from KNOWN_FAILING: it triggers a cron tick and then asserts the
+	// automation produced a chat_run, an assistant message and an llm_usage row. That
+	// only happens if a model actually answers, so it belongs with the other specs that
+	// need credentials rather than on a list of things to repair.
 	'tests/automations.runtime.spec.ts',
-	'tests/chat.agent-selector.spec.ts',
-	'tests/chat.agent-stream-integration.spec.ts',
-	'tests/chat.agent-tool-policy.spec.ts',
-	'tests/chat.askuser-render.spec.ts',
-	'tests/chat.askuser-resume.spec.ts',
-	'tests/chat.empty-message.spec.ts',
-	'tests/chat.tool-call-render.spec.ts',
-	'tests/cost.budget.spec.ts',
-	'tests/cost.linkage.spec.ts',
-	'tests/cost.tool-usage.spec.ts',
-	'tests/governance.audit.spec.ts',
-	'tests/hooks.page-load.spec.ts',
-	'tests/memory.spec.ts',
-	'tests/observability.review.spec.ts',
-	'tests/pages.smoke.spec.ts',
-	'tests/projects.session-binding.spec.ts',
-	'tests/projects.tools.spec.ts',
-	'tests/pwa.spec.ts',
-	'tests/research.composer.spec.ts',
-	'tests/review.page-ui.spec.ts',
-	'tests/runs.reaper.spec.ts',
-	'tests/settings.spec.ts',
-	'tests/source-control.github-webhook.spec.ts',
-	'tests/source-control.read-tools.spec.ts',
-	'tests/source-control.spec.ts',
-	'tests/visual.spec.ts',
+	// Both of its tests run a maintenance automation end to end and assert on what the
+	// model wrote. It was taken *off* the quarantine on the strength of a green local
+	// run — and a developer machine has a working credential where CI has a placeholder,
+	// so CI failed it with `UnauthorizedResponseError` from the OpenRouter SDK. Passing
+	// locally is not evidence a spec can run in CI.
+	'tests/automations.output-routing.spec.ts',
+	// Named "(real LLM)" in the spec itself: it starts a research run from the form and
+	// waits for the pipeline to produce rows.
+	'tests/crud/research.crud.spec.ts',
 ]
 
 /**
- * The same #55 backlog, in subdirectories. These were missed when the list was first
- * derived: the failure log writes nested paths with backslashes and the extraction
- * only matched forward slashes, so they were silently absent.
+ * Meant to get shorter. 42 → 38 → 31 → 28 → 23 → 17 → 11 → 1.
+ *
+ * A warning for whoever works on the rest. Run these as a subset and nearly all pass; run
+ * the whole suite and most of them fail. They are not simply stale — they interfere, and
+ * measuring them in isolation will tell you they are fixed when they are not. Always
+ * confirm against a full run, and against *both* projects: several of the seven removed
+ * on 2026-09-21 passed on desktop and failed on mobile.
+ *
+ * Those seven were stale rather than interfering, and four product bugs fell out of
+ * fixing them: no <h1> on any desktop page, header actions dropped entirely on mobile,
+ * settings re-reading cached remote queries after every mutation, and a missing VAPID
+ * config failing a notification that had already been written.
+ *
+ * Count on 2026-09-21: 1.
  */
-export const KNOWN_FAILING_NESTED: readonly string[] = [
-	'tests/crud/agents.crud.spec.ts',
-	'tests/crud/automations.crud.spec.ts',
-	'tests/crud/chat/home-redirect.spec.ts',
-	'tests/crud/chat/agent-switch.spec.ts',
-	'tests/crud/mobile/navigation.crud.spec.ts',
-	'tests/crud/projects.crud.spec.ts',
-	'tests/crud/research.crud.spec.ts',
-	'tests/crud/settings.crud.spec.ts',
+export const KNOWN_FAILING: readonly string[] = [
+	// Screenshot baselines are platform-specific (`-win32.png`), so this can never pass on
+	// a Linux runner. It needs Linux baselines generated in CI before it can come off.
+	'tests/visual.spec.ts',
 ]
 
-export const QUARANTINE: readonly string[] = [...LIVE_SPECS, ...KNOWN_FAILING, ...KNOWN_FAILING_NESTED]
+export const QUARANTINE: readonly string[] = [...LIVE_SPECS, ...KNOWN_FAILING]
