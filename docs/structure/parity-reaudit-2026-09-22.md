@@ -231,7 +231,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
 | #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
 | #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
-| #23 | Per-project instructions | **rebuild** | `settingSources: ['project']` is 90% of it |
+| #23 | Per-project instructions | **rebuild** — instructions shipped | `settingSources` was 90% of it; the knowledge directory is what's left |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
@@ -344,10 +344,25 @@ side is the isolation the rest of the app always assumed. `projects.settings_tru
 the answer; the project page explains what trusting costs and asks twice before granting it.
 
 What remains after that is genuinely small:
-- for `repo_kind = 'none'` projects there is no repo to read from — write the DB field to a
+- ~~for `repo_kind = 'none'` projects there is no repo to read from — write the DB field to a
   `CLAUDE.md` inside the project's sandbox path instead of injecting it through a slot, so
-  there is exactly one mechanism rather than two
+  there is exactly one mechanism rather than two~~ **Reversed, and shipped the other way.**
+  See below.
 - the knowledge directory is a directory plus a listing on the project page; no RAG, as filed
+
+**Instructions: shipped, and the "one mechanism" idea above was wrong.** `projects.instructions`
+(migration `0073`) is edited on the project page and injected through the project-context
+slot. Writing it out as a `CLAUDE.md` would have made it *depend on the trust flag*, because
+`CLAUDE.md` only loads when `settingSources` includes `'project'` — so an operator's own
+standing instructions would have silently stopped loading for any project whose repo config
+they had not accepted. That is the one thing that must not be gated: "do I trust what this
+repo committed" and "here is what I want the agent to know" are different questions, and
+collapsing them into one mechanism collapses the answer too. Two mechanisms is correct here;
+a repo's own `CLAUDE.md` still loads on the trusted path, and when both exist they compose.
+
+Empty means none — a cleared textarea writes NULL rather than an empty heading into every
+system prompt — and the field is capped at 8000 characters, because a project that wants to
+carry more than that wants the knowledge directory, not a longer slot.
 
 The security consequence is why it is a gate rather than a default: loading project settings
 means a cloned repo can ship hooks and permission allow-rules, and `settingSources` offers
