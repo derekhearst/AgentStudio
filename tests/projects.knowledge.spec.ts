@@ -6,7 +6,6 @@ import {
 	cleanupPrefixedRecords,
 	getActiveUserId,
 	getSql,
-	readEnvVar,
 	seedProject,
 	uniquePrefix,
 } from './helpers'
@@ -19,6 +18,7 @@ import {
 	sanitizeKnowledgeFilename,
 	saveKnowledgeFile,
 } from '../src/lib/projects/project-knowledge.server'
+import { getProjectPath } from '../src/lib/projects/project-fs.server'
 import { buildProjectContextSlot } from '../src/lib/chat/stream-slots.server'
 
 /**
@@ -168,8 +168,10 @@ test.describe('projects/knowledge — the directory', () => {
 		try {
 			const project = await seedProject(prefix)
 			projectId = project.id
-			const sandbox = readEnvVar('SANDBOX_WORKSPACE')
-			const projectPath = join(sandbox, userId, 'projects', projectId)
+			// Resolved the same way the module under test resolves it, rather than rebuilt
+			// from SANDBOX_WORKSPACE — otherwise the test can agree with itself and disagree
+			// with the code.
+			const projectPath = getProjectPath(userId, projectId)
 			await mkdir(join(projectPath, '.git', 'info'), { recursive: true })
 
 			await ensureKnowledgeDir(userId, projectId)
@@ -184,10 +186,7 @@ test.describe('projects/knowledge — the directory', () => {
 			expect(again.split('/.agentstudio/').length - 1).toBe(1)
 		} finally {
 			if (projectId) {
-				await rm(join(readEnvVar('SANDBOX_WORKSPACE'), userId, 'projects', projectId), {
-					recursive: true,
-					force: true,
-				}).catch(() => {})
+				await rm(getProjectPath(userId, projectId), { recursive: true, force: true }).catch(() => {})
 			}
 			await cleanupPrefixedRecords(prefix)
 		}
