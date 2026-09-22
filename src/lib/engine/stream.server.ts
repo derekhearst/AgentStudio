@@ -8,22 +8,62 @@
  *   reasoning     { content }
  *   tool_pending  { id, name, arguments, token? }
  *   tool_call     { id, name, arguments }
- *   tool_result   { id, name, success, executionMs, result }
+ *   tool_result   { id, name, success, executionMs, result, details? }
  *   tool_denied   { id }
+ *   tool_progress { id, elapsedSeconds }
+ *   notice        { kind, level, title, detail, persist }
+ *   background_tasks { tasks: [{ id, type, description }] }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
  * a sequence number, exactly as before.
+ *
+ * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
+ * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
+ * always has.
+ *
+ * `details` is the SDK's typed tool output, distilled by
+ * `./tool-result-details` for the built-ins whose result is worth rendering as something
+ * other than a JSON blob — a diff, a terminal, a todo list (#16, #26, #21). It is optional
+ * on purpose, so a consumer that does not know about it, or a block persisted before it
+ * existed, still has the `result` string it always had.
  */
 
 import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
+import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
+import { interpretSdkMessage } from './sdk-notices'
+import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
 export type ApprovalDecision = { allow: true } | { allow: false; reason: string }
+
+/**
+ * The slice of the SDK's `Query` this loop actually uses.
+ *
+ * Exists so the message source can be substituted. Everything the engine learns about a run
+ * arrives as `SDKMessage`s — the typed tool results behind `./tool-result-details`, the
+ * notices behind `./sdk-notices`, and the `parent_tool_use_id` routing below — and none of
+ * it could be tested while `runEngineStream` constructed its own `query()`. A spec can now
+ * hand it a scripted stream and assert on the frames and blocks that come out.
+ *
+ * The control methods are optional because a test double has nothing to control. The real
+ * `Query` implements all of them, so the production path is unchanged.
+ */
+export type EngineQuerySource = AsyncIterable<SDKMessage> & {
+	interrupt?: () => Promise<unknown>
+	stopTask?: (taskId: string) => Promise<unknown>
+	getContextUsage?: () => Promise<unknown>
+	close?: () => void
+}
+
+export type CreateEngineQuery = (params: {
+	prompt: string | AsyncIterable<SDKUserMessage>
+	options: Options
+}) => EngineQuerySource
 
 /**
  * Tools the host renders itself, so the engine must not emit tool frames for them.
@@ -80,6 +120,37 @@ export type EngineRunInput = {
 	bashPolicy?: BashPolicy
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
+	/**
+	 * Called for every tool call that completes, successfully or not.
+	 *
+	 * Exists so the caller can write the usage ledger. The engine cannot do it itself: it
+	 * has no `userId` or `agentId`, deliberately — it translates a run, it does not own who
+	 * the run belongs to.
+	 *
+	 * Fire-and-forget. A failed ledger write must never fail a turn.
+	 */
+	onToolResult?: (result: {
+		name: string
+		success: boolean
+		/** The typed result, when the tool has a shape we distil. Lets the ledger record a path or a command. */
+		details?: ToolResultDetails
+	}) => void
+	/**
+	 * Called once, synchronously, with a handle on the live SDK session.
+	 *
+	 * The `Query` returned by `query()` is a control channel as well as an iterable —
+	 * `interrupt()` and friends are control requests written to the CLI's stdin while the
+	 * turn runs. Handing it to the caller is what lets a *different* request stop this one;
+	 * see `./run-registry.server`. The handle stops working once the turn ends, which is
+	 * why the registry entry is released in the caller's `finally`.
+	 */
+	onHandle?: (handle: EngineQueryHandle) => void
+	/**
+	 * Where the message stream comes from. Defaults to the SDK's `query()`.
+	 *
+	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
+	 */
+	createQuery?: CreateEngineQuery
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -163,6 +234,68 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	 * here. Without this the pending block and the call block get different ids
 	 * and the UI renders the same tool twice.
 	 */
+	/*
+	 * ── Subagent routing (#5) ───────────────────────────────────────────────────────────
+	 *
+	 * The SDK runs a subagent inside the same message stream and marks everything it
+	 * produces with `parent_tool_use_id` — the id of the `Task` call that started it. That
+	 * holds for tool_use and tool_result blocks even at the default
+	 * `forwardSubagentText: false`, and for `stream_event` deltas when text forwarding is on.
+	 *
+	 * The loop used to ignore the field entirely, so a child's tool calls landed in the
+	 * parent's blocks and a child's prose streamed into the parent's answer — a delegated
+	 * agent's output read as the parent's own, which is the thing #34 exists to prevent.
+	 *
+	 * Child activity now accumulates on its own `subagent` block and goes out on the
+	 * `subagent_*` frames the chat page has always known how to render and has never been
+	 * sent. Note what deliberately does NOT change: `canUseTool` still sees every child call,
+	 * so containment and the approval gate apply to a subagent exactly as to the parent. A
+	 * mode says how much the operator trusts the agent; delegation is not a way around it.
+	 *
+	 * Known gap, stated rather than left to be found: a child call that needs approval gets
+	 * no inline Allow/Deny card, because that card is driven by the `tool_pending` frame and
+	 * emitting one here would leave a block in the parent's transcript that never resolves —
+	 * the child's result goes to the child. The approval itself is not lost: it is written to
+	 * `chat_runs.pendingApprovals` and flips the run to `waiting_tool_approval`, which is the
+	 * surface the dock and the HUD read. Giving it a card of its own belongs with #32's
+	 * per-child rendering.
+	 */
+	/** `Task` tool_use id → the agent key the parent asked for, read off the call's input. */
+	const subagentNames = new Map<string, string>()
+	/** `Task` tool_use id → the task the parent handed it, for the child card's header. */
+	const subagentTasks = new Map<string, string>()
+	/** tool_use ids belonging to a subagent, so `canUseTool` emits the child frame for them. */
+	const childCallIds = new Set<string>()
+	/** `Task` tool_use id → its block, so repeated child messages append to one place. */
+	const subagentBlocks = new Map<string, Extract<StreamBlock, { kind: 'subagent' }>>()
+
+	/** Fetch or open the block for a subagent, emitting `subagent_start` the first time. */
+	const subagentBlockFor = async (taskId: string) => {
+		const existing = subagentBlocks.get(taskId)
+		if (existing) return existing
+		const agentName = subagentNames.get(taskId) ?? 'subagent'
+		const task = subagentTasks.get(taskId) ?? ''
+		const block: Extract<StreamBlock, { kind: 'subagent' }> = {
+			kind: 'subagent',
+			agentId: taskId,
+			agentName,
+			// SDK subagents have no child conversation row to link to.
+			conversationId: null,
+			task,
+			content: '',
+			success: true,
+		}
+		subagentBlocks.set(taskId, block)
+		blocks.push(block)
+		await emit('subagent_start', {
+			agentId: taskId,
+			agentName,
+			conversationId: null,
+			task,
+		})
+		return block
+	}
+
 	const idByCall = new Map<string, string[]>()
 	const callKey = (name: string, args: unknown) => `${name}:${JSON.stringify(args ?? {})}`
 	const takeToolUseId = (name: string, args: unknown): string | null => {
@@ -238,7 +371,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						const allow = async (): Promise<PermissionResult> => {
 							if (!callEmitted.has(id)) {
 								callEmitted.add(id)
-								await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+								// A child's call was already announced as `subagent_tool_call` when its
+								// tool_use block arrived; a `tool_call` here would put it in the parent's
+								// transcript as well.
+								if (!childCallIds.has(id)) {
+									await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+								}
 							}
 							return { behavior: 'allow' }
 						}
@@ -275,142 +413,329 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			: {}),
 	}
 
-	for await (const message of query({ prompt: input.prompt, options }) as AsyncIterable<SDKMessage>) {
-		const msg = message as Record<string, any>
+	/*
+	 * Keep the object `query()` returns, rather than casting it straight to an iterable.
+	 *
+	 * It is both the message stream and the session's control channel: `interrupt()`,
+	 * `stopTask()` and `getContextUsage()` are control requests written to the CLI's stdin
+	 * while the turn is in flight. The SDK always spawns the CLI with
+	 * `--input-format stream-json` and only closes stdin once the *first result* of a
+	 * string-prompt turn arrives, so these work for the whole run and stop working the
+	 * moment it ends — which is exactly the window a stop button cares about.
+	 *
+	 * The handle deliberately exposes no way to pull messages. A second consumer calling
+	 * `next()` on this iterator would steal frames from the loop below.
+	 */
+	const createQuery: CreateEngineQuery =
+		input.createQuery ?? ((params) => query(params) as EngineQuerySource)
+	const session = createQuery({ prompt: input.prompt, options })
 
-		if (typeof msg.session_id === 'string' && !sessionId) {
-			sessionId = msg.session_id
-			input.onSessionId?.(sessionId)
-		}
-
-		if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
-			reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
-			continue
-		}
-
-		// Token-level text and thinking, from includePartialMessages.
-		if (msg.type === 'stream_event') {
-			const ev = msg.event as Record<string, any> | undefined
-			if (ev?.type === 'content_block_delta') {
-				const delta = ev.delta as Record<string, any>
-				if (delta?.type === 'text_delta' && delta.text) {
-					finalText += delta.text
-					appendContent('text', delta.text)
-					await emit('delta', { content: delta.text })
-				}
-				if (delta?.type === 'thinking_delta' && delta.thinking) {
-					appendContent('thinking', delta.thinking)
-					await emit('reasoning', { content: delta.thinking })
-				}
+	input.onHandle?.({
+		interrupt: async () => {
+			await session.interrupt?.()
+		},
+		stopTask: async (taskId: string) => {
+			await session.stopTask?.(taskId)
+		},
+		getContextUsage: async () => {
+			try {
+				return (await session.getContextUsage?.()) ?? null
+			} catch {
+				// Reading the context is never worth failing a turn over.
+				return null
 			}
-			continue
-		}
+		},
+	})
 
-		if (msg.type === 'assistant') {
-			for (const block of msg.message?.content ?? []) {
-				if (block.type !== 'tool_use') continue
-				const name = bareToolName(String(block.name))
-				const id = String(block.id)
-				toolNames.set(id, name)
-				toolInputs.set(id, block.input ?? null)
+	try {
+		for await (const message of session) {
+			const msg = message as Record<string, any>
+			/** Non-null when this message was produced inside a subagent — see the note above. */
+			const parentToolUseId =
+				typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id.length > 0
+					? msg.parent_tool_use_id
+					: null
 
-				if (name === 'ask_user') {
-					// The host's onAskUser owns this one: it mints the answer token,
-					// emits the `ask_user` frame and blocks until the user replies.
-					// Emitting a tool_call here would render it as an ordinary
-					// collapsed tool block alongside the card.
-					continue
-				}
+			if (typeof msg.session_id === 'string' && !sessionId) {
+				sessionId = msg.session_id
+				input.onSessionId?.(sessionId)
+			}
 
-				// Park the id for canUseTool unconditionally. The SDK calls canUseTool for MCP
-				// tools whether or not we want to gate them, and an unparked call would mint a
-				// synthetic `pending-*` id there — emitting a second tool_call frame the UI
-				// renders as a duplicate, and a tool_denied the UI cannot match to a block.
-				const key = callKey(name, block.input)
-				idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
+				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
+				continue
+			}
 
-				if (needsApproval(name)) {
-					// Show the block as awaiting approval; the tool_call frame is emitted from
-					// canUseTool once approved (or a tool_denied if it is refused).
-					await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+			/*
+			 * Everything the loop used to drop on the floor: compaction boundaries, API
+			 * retries, model fallbacks, permission refusals, rate limits, background-task
+			 * activity and per-call progress. `interpretSdkMessage` returns null for every
+			 * message handled below, so this is safe here and keeps the branches that follow
+			 * unchanged.
+			 */
+			const interpreted = interpretSdkMessage(msg)
+			if (interpreted) {
+				if (interpreted.kind === 'notice') {
+					// Persisted notices become blocks so a reloaded transcript still explains
+					// itself; the transient ones are live-only. See `./sdk-notices`.
+					if (interpreted.notice.persist) blocks.push({ kind: 'notice', notice: interpreted.notice })
+					await emit('notice', interpreted.notice)
+				} else if (interpreted.kind === 'background_tasks') {
+					// REPLACE semantics — the payload is the whole live set.
+					await emit('background_tasks', { tasks: interpreted.tasks })
 				} else {
-					callEmitted.add(id)
-					await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					await emit('tool_progress', {
+						id: interpreted.toolUseId,
+						elapsedSeconds: interpreted.elapsedSeconds,
+					})
+				}
+				continue
+			}
+
+			// Token-level text and thinking, from includePartialMessages.
+			if (msg.type === 'stream_event') {
+				const ev = msg.event as Record<string, any> | undefined
+				if (ev?.type === 'content_block_delta') {
+					const delta = ev.delta as Record<string, any>
+					if (parentToolUseId) {
+						// Child text goes to the child's block. Not to `finalText`, which becomes the
+						// assistant message: a subagent's prose is an observation the parent reads,
+						// never the reply the user is shown.
+						if (delta?.type === 'text_delta' && delta.text) {
+							const child = await subagentBlockFor(parentToolUseId)
+							child.content += delta.text
+							await emit('subagent_delta', {
+								agentId: parentToolUseId,
+								conversationId: null,
+								content: delta.text,
+							})
+						}
+						// Child thinking is dropped rather than rendered: it is the child's reasoning
+						// about its own task, and interleaving it with the parent's would be noise.
+						continue
+					}
+					if (delta?.type === 'text_delta' && delta.text) {
+						finalText += delta.text
+						appendContent('text', delta.text)
+						await emit('delta', { content: delta.text })
+					}
+					if (delta?.type === 'thinking_delta' && delta.thinking) {
+						appendContent('thinking', delta.thinking)
+						await emit('reasoning', { content: delta.thinking })
+					}
+				}
+				continue
+			}
+
+			if (msg.type === 'assistant') {
+				for (const block of msg.message?.content ?? []) {
+					if (block.type !== 'tool_use') continue
+					const name = bareToolName(String(block.name))
+					const id = String(block.id)
+					toolNames.set(id, name)
+
+					/*
+					 * A `Task` call names the agent it is delegating to. Recorded here, on the
+					 * PARENT's message, because the child's own messages carry only the id — this
+					 * is the one place the two are seen together.
+					 */
+					if (!parentToolUseId) {
+						const taskInput = block.input as Record<string, unknown> | null
+						const subagentType = taskInput?.subagent_type
+						if (typeof subagentType === 'string' && subagentType.length > 0) {
+							subagentNames.set(id, subagentType)
+						}
+						// `description` is the short label; `prompt` is the full instruction. The card
+						// wants the label.
+						const taskLabel = taskInput?.description ?? taskInput?.prompt
+						if (typeof taskLabel === 'string' && taskLabel.length > 0) {
+							subagentTasks.set(id, taskLabel.slice(0, 200))
+						}
+					}
+
+					if (parentToolUseId) {
+						// A child's call. Still parked for `canUseTool`, so containment and the
+						// approval gate run on it exactly as they would on the parent's — only the
+						// frame it produces differs.
+						childCallIds.add(id)
+						toolInputs.set(id, block.input ?? null)
+						idByCall.set(callKey(name, block.input), [
+							...(idByCall.get(callKey(name, block.input)) ?? []),
+							id,
+						])
+						await subagentBlockFor(parentToolUseId)
+						await emit('subagent_tool_call', {
+							agentId: parentToolUseId,
+							conversationId: null,
+							name,
+						})
+						continue
+					}
+					toolInputs.set(id, block.input ?? null)
+
+					if (name === 'ask_user') {
+						// The host's onAskUser owns this one: it mints the answer token,
+						// emits the `ask_user` frame and blocks until the user replies.
+						// Emitting a tool_call here would render it as an ordinary
+						// collapsed tool block alongside the card.
+						continue
+					}
+
+					// Park the id for canUseTool unconditionally. The SDK calls canUseTool for MCP
+					// tools whether or not we want to gate them, and an unparked call would mint a
+					// synthetic `pending-*` id there — emitting a second tool_call frame the UI
+					// renders as a duplicate, and a tool_denied the UI cannot match to a block.
+					const key = callKey(name, block.input)
+					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+
+					if (needsApproval(name)) {
+						// Show the block as awaiting approval; the tool_call frame is emitted from
+						// canUseTool once approved (or a tool_denied if it is refused).
+						await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					} else {
+						callEmitted.add(id)
+						await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					}
+				}
+				continue
+			}
+
+			if (msg.type === 'user') {
+				/**
+				 * `tool_use_result` carries the tool's full typed Output object — the diff behind an
+				 * `Edit`, the streams behind a `Bash`, the list behind a `TodoWrite` — while
+				 * `message.content` carries only the text the model reads. It sits on the message
+				 * rather than on the block, so it is only attributable when the message answers
+				 * exactly one call; with two we would be guessing which one it describes, and a
+				 * diff rendered against the wrong file is worse than no diff.
+				 */
+				// `content` is a MessageParam's, so it is a string as legitimately as it is an array
+				// of blocks — `.filter` on the string form would throw and take the turn with it.
+				const content = Array.isArray(msg.message?.content) ? msg.message.content : []
+				const resultBlocks = content.filter((b: { type?: string }) => b?.type === 'tool_result')
+				const structured = resultBlocks.length === 1 ? msg.tool_use_result : undefined
+
+				for (const block of msg.message?.content ?? []) {
+					if (block.type !== 'tool_result') continue
+					const id = String(block.tool_use_id)
+					const raw = block.content
+					const text = Array.isArray(raw)
+						? raw.map((c: { text?: string }) => c.text ?? '').join('')
+						: typeof raw === 'string'
+							? raw
+							: JSON.stringify(raw ?? null)
+					const toolName = toolNames.get(id) ?? 'unknown'
+					const toolArguments = toolInputs.get(id) ?? null
+					const details = toolResultDetails(toolName, structured, toolArguments)
+
+					if (parentToolUseId) {
+						// The child's result belongs to the child's block. The ledger still counts it:
+						// a subagent's tool call is work this run did, and `onToolResult` records
+						// calls rather than attributing them to a transcript position.
+						const child = await subagentBlockFor(parentToolUseId)
+						if (block.is_error === true) child.success = false
+						await emit('subagent_tool_result', {
+							agentId: parentToolUseId,
+							conversationId: null,
+							name: toolName,
+							success: block.is_error !== true,
+						})
+						input.onToolResult?.({
+							name: toolName,
+							success: block.is_error !== true,
+							...(details ? { details } : {}),
+						})
+						continue
+					}
+
+					// A `Task` result closes the child it started.
+					if (subagentBlocks.has(id)) {
+						const child = subagentBlocks.get(id)!
+						if (block.is_error === true) child.success = false
+						await emit('subagent_done', { agentId: id, conversationId: null })
+					}
+					blocks.push({
+						kind: 'tool',
+						name: toolName,
+						arguments: toolArguments,
+						result: text,
+						success: block.is_error !== true,
+						executionMs: 0,
+						...(details ? { details } : {}),
+					})
+					await emit('tool_result', {
+						id,
+						name: toolName,
+						success: block.is_error !== true,
+						executionMs: null,
+						result: text,
+						...(details ? { details } : {}),
+					})
+
+					// After the frame, so a slow ledger write cannot delay what the user sees.
+					input.onToolResult?.({
+						name: toolName,
+						success: block.is_error !== true,
+						...(details ? { details } : {}),
+					})
+				}
+				continue
+			}
+
+			if (msg.type === 'result') {
+				const u = (msg.usage ?? {}) as Record<string, number>
+				for (let i = blocks.length - 1; i >= 0; i--) {
+					const b = blocks[i]
+					if (b.kind === 'thinking') {
+						b.reasoningTokens = reasoningTokens
+						break
+					}
+				}
+				return {
+					text: finalText,
+					sessionId,
+					usage: {
+						inputTokens: u.input_tokens ?? 0,
+						outputTokens: u.output_tokens ?? 0,
+						cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
+						cacheReadTokens: u.cache_read_input_tokens ?? 0,
+						costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
+					},
+					durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
+					numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
+					error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+					blocks,
+					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
+					reasoningTokens,
 				}
 			}
-			continue
 		}
 
-		if (msg.type === 'user') {
-			for (const block of msg.message?.content ?? []) {
-				if (block.type !== 'tool_result') continue
-				const id = String(block.tool_use_id)
-				const raw = block.content
-				const text = Array.isArray(raw)
-					? raw.map((c: { text?: string }) => c.text ?? '').join('')
-					: typeof raw === 'string'
-						? raw
-						: JSON.stringify(raw ?? null)
-				const toolName = toolNames.get(id) ?? 'unknown'
-				blocks.push({
-					kind: 'tool',
-					name: toolName,
-					arguments: toolInputs.get(id) ?? null,
-					result: text,
-					success: block.is_error !== true,
-					executionMs: 0,
-				})
-				await emit('tool_result', {
-					id,
-					name: toolName,
-					success: block.is_error !== true,
-					executionMs: null,
-					result: text,
-				})
-			}
-			continue
+		// The iterator ended without a `result` message — treat as a completed run
+		// with no usage rather than inventing numbers.
+		return {
+			text: finalText,
+			sessionId,
+			usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+			durationMs: 0,
+			numTurns: 0,
+			error: null,
+			blocks,
+			ttftMs: null,
+			reasoningTokens,
 		}
-
-		if (msg.type === 'result') {
-			const u = (msg.usage ?? {}) as Record<string, number>
-			for (let i = blocks.length - 1; i >= 0; i--) {
-				const b = blocks[i]
-				if (b.kind === 'thinking') {
-					b.reasoningTokens = reasoningTokens
-					break
-				}
-			}
-			return {
-				text: finalText,
-				sessionId,
-				usage: {
-					inputTokens: u.input_tokens ?? 0,
-					outputTokens: u.output_tokens ?? 0,
-					cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
-					cacheReadTokens: u.cache_read_input_tokens ?? 0,
-					costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
-				},
-				durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
-				numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
-				error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
-				blocks,
-				ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
-				reasoningTokens,
-			}
+	} finally {
+		/*
+		 * Tear the CLI down on every exit path, including the `return` from inside the loop
+		 * and an interrupt that ends the turn early. Returning from a `for await` already
+		 * calls the iterator's `return()`, and the SDK's cleanup is idempotent, so this is
+		 * belt-and-braces against an exception path that skips it and leaves a child process
+		 * holding the workspace.
+		 */
+		try {
+			session.close?.()
+		} catch {
+			// Already gone. Nothing to do and nothing worth logging.
 		}
-	}
-
-	// The iterator ended without a `result` message — treat as a completed run
-	// with no usage rather than inventing numbers.
-	return {
-		text: finalText,
-		sessionId,
-		usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
-		durationMs: 0,
-		numTurns: 0,
-		error: null,
-		blocks,
-		ttftMs: null,
-		reasoningTokens,
 	}
 }

@@ -20,6 +20,7 @@
 		status = 'completed',
 		failed = false,
 		executionMs = null,
+		elapsedSeconds = null,
 		expanded,
 		token = null,
 		onApprove,
@@ -31,6 +32,12 @@
 		status?: 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied';
 		failed?: boolean;
 		executionMs?: number | null;
+		/**
+		 * How long this call has been running, from the SDK's `tool_progress` heartbeats.
+		 * They carry no partial output, so this is all a still-running call can honestly
+		 * show — but "40s" answers the question a bare spinner leaves open.
+		 */
+		elapsedSeconds?: number | null;
 		expanded?: boolean;
 		token?: string | null;
 		onApprove?: ((token: string) => void) | undefined;
@@ -144,6 +151,9 @@
 			{#if executionMs !== null}
 				<span class="text-[11px] text-base-content/40">{executionMs}ms</span>
 			{:else if isExecuting}
+				{#if elapsedSeconds !== null && elapsedSeconds > 0}
+					<span class="text-[11px] text-base-content/40">{elapsedSeconds}s</span>
+				{/if}
 				<span>
 					<svg class="h-3 w-7 text-base-content/40" viewBox="0 0 40 12">
 						<circle cx="6" cy="6" r="2" fill="currentColor">

@@ -22,6 +22,31 @@ type PushPayload = {
 
 let configured = false
 
+/** Fallback subject. Valid, inert, and identifies the sender well enough for a push service. */
+const DEFAULT_VAPID_SUBJECT = 'mailto:AgentStudio@localhost'
+
+/**
+ * The VAPID subject for this deployment.
+ *
+ * `web-push` accepts only an `https:` or `mailto:` subject and throws on anything else. We
+ * used to hand it `ORIGIN` verbatim, which is a trap: the README tells operators to set
+ * `ORIGIN`, and the deployment target is a NAS on a LAN — so the documented configuration is
+ * routinely `http://host:port`. That made `setVapidDetails` throw, `ensurePushConfigured`
+ * propagate, and every push send answer `500`, including the "send test notification" button
+ * whose entire job is to tell the operator whether push works.
+ *
+ * An unusable ORIGIN now falls back instead of throwing. The subject is only an identifier
+ * the push service may contact about your traffic — it is not an address anything is
+ * delivered to — so falling back costs nothing, while throwing costs the whole feature.
+ */
+export function vapidSubject(origin: string | undefined): string {
+	const trimmed = origin?.trim()
+	if (!trimmed) return DEFAULT_VAPID_SUBJECT
+	return trimmed.startsWith('https:') || trimmed.startsWith('mailto:')
+		? trimmed
+		: DEFAULT_VAPID_SUBJECT
+}
+
 /** True once web-push has usable VAPID details; false when the deployment has none. */
 function ensurePushConfigured() {
 	if (configured) return true
@@ -30,7 +55,7 @@ function ensurePushConfigured() {
 	}
 
 	webpush.setVapidDetails(
-		process.env.ORIGIN ? `${process.env.ORIGIN}` : 'mailto:AgentStudio@localhost',
+		vapidSubject(process.env.ORIGIN),
 		process.env.VAPID_PUBLIC_KEY,
 		process.env.VAPID_PRIVATE_KEY,
 	)

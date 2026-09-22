@@ -2,6 +2,8 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid 
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
+import type { ToolResultDetails } from '$lib/engine/tool-result-details'
+import type { RunNotice } from '$lib/engine/sdk-notices'
 
 export const chatRunStateEnum = pgEnum('chat_run_state', [
 	'queued',
@@ -52,6 +54,39 @@ export type StreamBlock =
 			result: unknown
 			success: boolean
 			executionMs: number
+			/**
+			 * Typed payload distilled from the SDK's `tool_use_result` for the built-ins whose
+			 * output has a shape worth rendering — a diff, a terminal, a todo list. Absent for
+			 * every other tool and for blocks persisted before this existed, which is what keeps
+			 * it additive: a consumer that does not know about it renders the generic card, and
+			 * the raw `result` string is still there either way. See `$lib/engine/tool-result-details`.
+			 */
+			details?: ToolResultDetails
+	  }
+	| {
+			/**
+			 * Work done by a subagent, kept out of the parent's blocks so a delegated agent's
+			 * output is never read as the parent's own (#5, and the same concern as #34).
+			 * `agentId` is the `Task` call's `tool_use` id — SDK subagents have no child
+			 * conversation row, which is why `conversationId` is nullable.
+			 */
+			kind: 'subagent'
+			agentId: string
+			agentName: string
+			conversationId: string | null
+			task: string
+			content: string
+			success: boolean
+	  }
+	| {
+			/**
+			 * A run-level event the SDK reported that is worth a line in the transcript — a
+			 * compaction boundary, a model fallback, a tool a permission rule refused. Only the
+			 * notices that still mean something after the turn are persisted; see
+			 * `$lib/engine/sdk-notices`.
+			 */
+			kind: 'notice'
+			notice: RunNotice
 	  }
 
 export type RunEventPayload = unknown

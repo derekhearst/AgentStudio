@@ -2,6 +2,10 @@
 
 Snapshot: 2026-09-21, AgentStudio at `a459c99`.
 
+> **Re-audited 2026-09-22** — see [`parity-reaudit-2026-09-22.md`](parity-reaudit-2026-09-22.md).
+> Several rows below were scored before #15/#19/#29 landed, and several of the open issues
+> describe work the Agent SDK already does. Read the re-audit before picking one up.
+
 Claude Desktop is now three products in one window: **chat** (claude.ai), **Code** (Claude Code sessions), and **Cowork** — the agentic workspace for non-coding work, which is the one that competes most directly with what AgentStudio is for. AgentStudio is a custom UI over the same Claude Agent SDK that powers Code, with a chat workbench, a tool registry, a memory system and a cron scheduler on top.
 
 This is a head-to-head: every row says who is actually better, not just who has the feature.
@@ -65,7 +69,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | --- | --- | --- | --- |
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
-| Code execution | **even** | `run_code` in Bun, sandboxed, and every tool is callable from inside the script — better for fan-out, no chart output | analysis tool / sandboxed Python, renders charts |
+| Code execution | **broken** | `run_code` throws on the engine path — it needs a runtime context only the old loop supplies, so every call since the engine migration has returned "can only be invoked from inside the chat loop". Unregistered from the engine surface rather than left advertised; see the re-audit | analysis tool / sandboxed Python, renders charts |
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |

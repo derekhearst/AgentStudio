@@ -9,6 +9,7 @@
 		deleteMessagesAfter,
 		editMessage,
 		getConversation,
+		clearConversationTodoList,
 		getMessageStats,
 	} from '$lib/chat';
 	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
@@ -21,10 +22,16 @@
 	import { consoleState } from '$lib/chat-console/console-state.svelte';
 	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
+	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
+	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
+	import RunNoticeCard from '$lib/chat/RunNoticeCard.svelte';
+	import FileEditCard from '$lib/chat/FileEditCard.svelte';
+	import ShellOutputCard from '$lib/chat/ShellOutputCard.svelte';
+	import TodoListCard from '$lib/chat/TodoListCard.svelte';
 	import ThinkingBlockCard from '$lib/chat/ThinkingBlockCard.svelte';
 	import AskUserModal from '$lib/chat/AskUserModal.svelte';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
@@ -47,9 +54,11 @@
 		applySubagentStart,
 		applySubagentToolCall,
 		applySubagentToolResult,
+		applyNotice,
 		applyToolCall,
 		applyToolDenied,
 		applyToolPending,
+		applyToolProgress,
 		applyToolResult,
 		buildDisplayedMessages,
 		estimateTokens,
@@ -99,6 +108,21 @@
 	let waitingForFirstToken = $state(false);
 	let streamAbortController = $state<AbortController | null>(null);
 	let stoppedByUser = $state(false);
+	/**
+	 * Live background tasks, from the SDK's `background_tasks_changed` frame.
+	 *
+	 * REPLACE semantics — each frame carries the whole live set, so this is assigned, never
+	 * merged. Cleared when a turn starts, because the set belongs to the run.
+	 */
+	let backgroundTasks = $state<Array<{ id: string; type: string; description: string }>>([]);
+	/** Monotonic, because the transcript's `{#each}` is keyed and duplicate keys throw. */
+	let noticeSeq = 0;
+	/**
+	 * #21 — the pinned checklist. Seeded from the conversation on load and replaced by the
+	 * `todo_list` frame while a run streams, so the panel is right on a cold open and right
+	 * mid-turn without the two paths disagreeing. `null` means dismissed or never written.
+	 */
+	let todoList = $state<{ items: TodoItem[]; updatedAt: string } | null>(null);
 	let conversationData = $state<Awaited<ReturnType<typeof getConversation>> | null>(null);
 	let stats = $state<Awaited<ReturnType<typeof getMessageStats>>>([]);
 	type LiveContextStats = {
@@ -348,7 +372,9 @@
 				? `${b.id}:${b.status}:${b.expanded}:${b.result?.length ?? 0}`
 				: b.kind === 'thinking'
 					? `${b.id}:${b.content.length}:${b.reasoningTokens ?? 0}`
-					: `${b.id}:${b.content.length}`
+					: b.kind === 'notice'
+						? `${b.id}:${b.notice.kind}`
+						: `${b.id}:${b.content.length}`
 		).join('|');
 		scrollToBottom();
 	});
@@ -528,6 +554,11 @@
 		]);
 		conversationData = conversationResult;
 		stats = statsResult;
+		// #21 — re-seed the pinned checklist from the row. The stream owns it while a run is
+		// live; this is the cold-open and post-run value, and it is authoritative because a
+		// dismissal cleared the column too.
+		const storedTodos = conversationResult?.conversation.todoList ?? null;
+		todoList = storedTodos ? { items: storedTodos.items, updatedAt: storedTodos.updatedAt } : null;
 		reconcilePendingWithRemote(conversationResult?.messages ?? []);
 		// Reconcile pendingAskUser with the server's view: if mid-stream there's a live token
 		// the SSE stream owns it and we don't touch it; otherwise (cold-load OR after a
@@ -570,6 +601,53 @@
 		finalizeCurrentTextBlock();
 		stoppedByUser = true;
 		streamAbortController.abort();
+	}
+
+	/**
+	 * #21 — dismiss the pinned checklist.
+	 *
+	 * Cleared locally first so the panel goes away on click rather than on a round trip, and
+	 * the column is cleared too: without that, the next cold open would pin it right back.
+	 * A failed clear leaves the panel hidden for this view and the row untouched, which
+	 * reappears on reload — the honest outcome, and not worth an error toast over.
+	 */
+	async function dismissTodoList() {
+		todoList = null;
+		try {
+			await clearConversationTodoList(conversationId);
+			await getConversation(conversationId).refresh();
+		} catch (error) {
+			console.warn('[chat] failed to clear the checklist', error);
+		}
+	}
+
+	/** Task ids a stop has been sent for, so the button cannot be double-fired. */
+	let stoppingTasks = $state<string[]>([]);
+
+	/**
+	 * #35 — stop one background task.
+	 *
+	 * The model can already background a command; until now nothing could stop one. The run
+	 * id comes from `context_stats`, which the stream emits before any task can exist, so a
+	 * visible task always has one. The chip is left in place on failure rather than removed
+	 * optimistically: `background_tasks_changed` is the authority on what is live, and it
+	 * arrives on its own the moment the task actually goes away.
+	 */
+	async function stopBackgroundTask(taskId: string) {
+		const runId = liveContextStats?.runId;
+		if (!runId || stoppingTasks.includes(taskId)) return;
+		stoppingTasks = [...stoppingTasks, taskId];
+		try {
+			await fetch(`/chat/${conversationId}/stop-task`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ runId, taskId })
+			});
+		} catch (error) {
+			console.warn('[chat] failed to stop a background task', error);
+		} finally {
+			stoppingTasks = stoppingTasks.filter((id) => id !== taskId);
+		}
 	}
 
 	async function approveToolCall(token: string) {
@@ -738,6 +816,7 @@
 		waitingForFirstToken = true;
 		streamAbortController = abortController;
 		stoppedByUser = false;
+		backgroundTasks = [];
 		liveContextStats = null;
 		let streamHandshakeSucceeded = false;
 		try {
@@ -863,6 +942,43 @@
 
 					if (eventName === 'tool_denied') {
 						streamingBlocks = applyToolDenied(streamingBlocks, payload.id);
+					}
+
+					if (eventName === 'notice' && payload?.title) {
+						waitingForFirstToken = false;
+						finalizeCurrentThinkingBlock();
+						finalizeCurrentTextBlock();
+						streamingBlocks = applyNotice(
+							streamingBlocks,
+							payload as Parameters<typeof applyNotice>[1],
+							`notice-${++noticeSeq}`
+						);
+					}
+
+					if (eventName === 'tool_progress') {
+						streamingBlocks = applyToolProgress(streamingBlocks, {
+							id: payload.id,
+							elapsedSeconds: payload.elapsedSeconds ?? 0,
+						});
+					}
+
+					if (eventName === 'todo_list') {
+						// #21 — the agent rewrote its plan. Replace, never merge: `TodoWrite`
+						// sends the whole list every time, and a merge would resurrect an item
+						// the model deliberately dropped.
+						todoList = Array.isArray(payload?.items)
+							? {
+									items: payload.items as TodoItem[],
+									updatedAt:
+										typeof payload.updatedAt === 'string'
+											? payload.updatedAt
+											: new Date().toISOString()
+								}
+							: null;
+					}
+
+					if (eventName === 'background_tasks') {
+						backgroundTasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
 					}
 
 					if (eventName === 'subagent_start') {
@@ -1140,7 +1256,9 @@
 	});
 
 	$effect(() => {
-		consoleState.streamingBlocks = streamingBlocks.map((b) => {
+		consoleState.streamingBlocks = streamingBlocks.flatMap((b) => {
+			// Notices are run-level events, not activity — the rail lists what the agent did.
+			if (b.kind === 'notice') return [];
 			if (b.kind === 'tool') {
 				return {
 					kind: 'tool',
@@ -1258,6 +1376,22 @@
 					{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 						<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
 					{/if}
+					{#each backgroundTasks as task (task.id)}
+						<span class="console-bgtask" title={`${task.description} (${task.type})`}>
+							<span class="pulse-dot"></span>
+							<span>{task.description}</span>
+							<button
+								type="button"
+								class="console-bgtask__stop"
+								title="Stop this background task"
+								aria-label={`Stop background task: ${task.description}`}
+								disabled={stoppingTasks.includes(task.id)}
+								onclick={() => stopBackgroundTask(task.id)}
+							>
+								<Icon name="x" size={10} />
+							</button>
+						</span>
+					{/each}
 				</div>
 			</div>
 
@@ -1314,6 +1448,22 @@
 				{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 					<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
 				{/if}
+				{#each backgroundTasks as task (task.id)}
+					<span class="console-bgtask" title={`${task.description} (${task.type})`}>
+						<span class="pulse-dot"></span>
+						<span>{task.description}</span>
+						<button
+							type="button"
+							class="console-bgtask__stop"
+							title="Stop this background task"
+							aria-label={`Stop background task: ${task.description}`}
+							disabled={stoppingTasks.includes(task.id)}
+							onclick={() => stopBackgroundTask(task.id)}
+						>
+							<Icon name="x" size={10} />
+						</button>
+					</span>
+				{/each}
 				{#if contextMetrics.total > 0}
 					<span class="console-chip">{(contextMetrics.used / 1000).toFixed(1)}K / {(contextMetrics.total / 1000).toFixed(0)}K</span>
 				{/if}
@@ -1378,6 +1528,20 @@
 									onSubmit={resolveAskUser}
 								/>
 							{/if}
+						<!--
+							#16 / #26 / #21 — once the result carries a shape we know, the block graduates
+							from the generic card to the one that renders it. `details` only ever arrives
+							with the result, so a still-pending call keeps ToolCallCard and its
+							Allow/Deny controls.
+						-->
+						{:else if block.kind === 'tool' && block.details?.kind === 'file_edit'}
+							<FileEditCard details={block.details} success={block.status !== 'failed'} />
+						{:else if block.kind === 'tool' && block.details?.kind === 'shell'}
+							<ShellOutputCard details={block.details} success={block.status !== 'failed'} />
+						{:else if block.kind === 'tool' && block.details?.kind === 'todo'}
+							<TodoListCard details={block.details} />
+						{:else if block.kind === 'notice'}
+							<RunNoticeCard notice={block.notice} />
 						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
 							<ToolCallCard
 								name={block.name}
@@ -1385,6 +1549,7 @@
 								result={block.result ?? ''}
 								status={block.status}
 								executionMs={block.executionMs ?? null}
+								elapsedSeconds={block.elapsedSeconds ?? null}
 								expanded={block.expanded}
 								token={block.token ?? null}
 								onApprove={approveToolCall}
@@ -1430,6 +1595,14 @@
 					onDismiss={clearRecoverableError}
 				/>
 			{/if}
+		{/if}
+
+		{#if todoList}
+			<PinnedTodoPanel
+				items={todoList.items}
+				updatedAt={todoList.updatedAt}
+				onDismiss={dismissTodoList}
+			/>
 		{/if}
 
 		<!-- Mobile quick chips above composer -->

@@ -10,6 +10,11 @@
  * and returns a value. No closure over component state.
  */
 
+// Relative rather than `$lib/...`: `chat.model-tag.spec.ts` imports this module directly in
+// the plain Playwright loader, where the SvelteKit alias is not guaranteed to resolve.
+import type { ToolResultDetails } from '../engine/tool-result-details'
+import type { RunNotice } from '../engine/sdk-notices'
+
 export type SavedBlock =
 	| { kind: 'text'; content: string }
 	| { kind: 'thinking'; content: string; reasoningTokens?: number | null }
@@ -20,6 +25,13 @@ export type SavedBlock =
 			result: unknown
 			success: boolean
 			executionMs: number
+			/** Typed output for the built-ins worth rendering specially. Absent for everything else. */
+			details?: ToolResultDetails
+	  }
+	| {
+			/** A run-level event worth keeping — see `$lib/engine/sdk-notices`. */
+			kind: 'notice'
+			notice: RunNotice
 	  }
 	| {
 			kind: 'subagent'
@@ -61,6 +73,7 @@ export function asArray(value: unknown): unknown[] {
 export function blockHasRenderableOutput(block: SavedBlock): boolean {
 	if (block.kind === 'text' || block.kind === 'thinking') return !!block.content?.trim()
 	if (block.kind === 'tool') return !!block.name
+	if (block.kind === 'notice') return !!block.notice?.title?.trim()
 	if (block.kind === 'subagent')
 		return !!(block.agentName?.trim() || block.task?.trim() || block.content?.trim())
 	return false

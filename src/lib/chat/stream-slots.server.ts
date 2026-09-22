@@ -168,10 +168,23 @@ export async function buildProjectContextSlot(input: {
 		const project = await getProjectById(input.projectId)
 		if (!project || project.userId !== input.userId) return null
 		const description = project.description ? `\nDescription: ${project.description}` : ''
+		/*
+		 * #23 — the operator's standing instructions for this project.
+		 *
+		 * Injected here rather than written out as a `CLAUDE.md`, which was the earlier
+		 * plan. `CLAUDE.md` only loads when `settingSources` includes `'project'`, which is
+		 * gated on `projects.settings_trusted` — so the operator's own words would silently
+		 * stop loading for any project whose *repo* config they had not accepted. Those are
+		 * two different questions, and this is the one that is never gated. Headed and
+		 * fenced so a long instruction block cannot be read as the end of the slot.
+		 */
+		const instructions = project.instructions?.trim()
+			? `\n\n### Project instructions\n\nStanding instructions from the operator for this project. They are directions, not content to summarise.\n\n${project.instructions.trim()}`
+			: ''
 		return {
 			name: 'project_context',
 			priority: 80,
-			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.`,
+			content: `## Active project\n\nThe current conversation is bound to project "${project.name}" (kind=${project.kind}, slug=${project.slug}, id=${project.id}).${description}\n\nWrite files into this project's working directory rather than anywhere else, and read a file before editing it.${instructions}`,
 		}
 	} catch (err) {
 		logger.warn('[chat] project context slot lookup failed', { err })
@@ -186,12 +199,6 @@ const ORCHESTRATOR_TOOL_POLICY = [
 	'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
 	'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
 	'',
-	'Tool surface (deferred loading):',
-	'- A small core (web_search, ask_user, run_code, search_tools) is always available. The rest of the registry is gated behind `search_tools`.',
-	'- When a task needs a capability you don\'t have loaded (file edits, image generation, source control, sub-agent delegation, etc.), call `search_tools(query)` once — it loads the matched tools so they appear in your tools array on the NEXT round.',
-	"- Don't search speculatively. Match what the user actually asked for.",
-	'- Loaded tools persist for the rest of the conversation, so a single search per capability is enough.',
-	'',
 	...SUBAGENT_RESULT_POLICY_LINES,
 ].join('\n')
 
@@ -199,9 +206,6 @@ const AGENT_TOOL_POLICY = [
 	'Tool usage policy:',
 	'- You cannot call ask_user directly in agent conversations.',
 	'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
-	'',
-	'Tool surface (deferred loading):',
-	'- A small core (web_search, run_code, search_tools) is always available. Use `search_tools(query)` to load additional tools by free-text query — matched tools become callable on the NEXT round and stay loaded for the rest of the conversation.',
 ].join('\n')
 
 /**

@@ -64,6 +64,27 @@ export const projects = pgTable(
 		repoKind: text('repo_kind').notNull().default('none').$type<RepoKind>(),
 		repoLocalPath: text('repo_local_path'),
 		defaultBranch: text('default_branch'),
+		/**
+		 * Whether the operator has looked at this project's committed `.claude/` config and
+		 * accepted it. Gates whether the run loads the repo's `CLAUDE.md`, commands and
+		 * skills — and, inseparably, its `.claude/settings.json`, which can carry hooks and
+		 * permission allow-rules. Default false: a cloned repo is not trusted because it was
+		 * cloned. See `$lib/engine/setting-sources`.
+		 */
+		settingsTrusted: boolean('settings_trusted').notNull().default(false),
+		/**
+		 * Standing instructions for this project, written by the operator (#23).
+		 *
+		 * Deliberately *not* written out as a `CLAUDE.md` in the project's directory, which
+		 * was the earlier plan. `CLAUDE.md` only loads when `settingSources` includes
+		 * `'project'`, which is gated on `settingsTrusted` above — so routing the operator's
+		 * own words through that file would make them silently vanish for any project whose
+		 * repo config the operator has not accepted. Those are two different questions:
+		 * "do I trust what this repo committed" and "here is what I want the agent to know".
+		 * A repo's own `CLAUDE.md` still loads on the trusted path; this is the other one,
+		 * and it goes through the project context slot, which is never gated.
+		 */
+		instructions: text('instructions'),
 		lastPulledAt: timestamp('last_pulled_at', { withTimezone: true }),
 		lastImportedAt: timestamp('last_imported_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

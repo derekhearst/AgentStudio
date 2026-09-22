@@ -61,6 +61,11 @@ import {
 } from '$lib/engine/options.server'
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
+import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
+import { projects } from '$lib/projects/projects.schema'
+import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
+import { logToolUsage } from '$lib/costs/usage'
 import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
@@ -69,7 +74,6 @@ import {
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
-import { runInlineSubagent } from '$lib/agents/inline-subagent'
 import { logger } from '$lib/observability/logger'
 
 type StreamPayload = {
@@ -265,31 +269,35 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	/*
-	 * Full agent dispatch. runInlineSubagent builds a forwarded session that
-	 * persists to the sub-agent's own run_events and pushes translated
-	 * `subagent_*` frames into this controller WITHOUT a seq, so they never
-	 * disturb the parent's resume cursor.
+	 * Delegation is the SDK's now (#5): the agents this run may hand work to are described
+	 * in the system prompt by `loadSubagentDefinitions` and reached with the `Task` tool.
+	 * The child's messages come back on the same stream carrying `parent_tool_use_id`, and
+	 * `runEngineStream` routes them into `subagent_*` frames — so nothing here has to build
+	 * a second session, and the child's text can no longer be read as the parent's reply.
 	 */
 	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
 
-	async function fulfilSubagent(req: { task: string; context?: string; agentId?: string }): Promise<string> {
-		if (!req.agentId) return 'run_subagent requires an agentId.'
-		if (!streamController) return 'Subagent dispatch is unavailable outside an active stream.'
-		const task = req.context ? `${req.context}\n\n${req.task}` : req.task
-		try {
-			const outcome = await runInlineSubagent(
-				{ agentId: req.agentId, agentName: req.agentId.slice(0, 8), task },
-				user.id,
-				body.conversationId,
-				streamController,
-			)
-			return outcome.result
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			logger.warn('[chat/stream] subagent failed', { runId: run.id, error: message })
-			return `Subagent failed: ${message}`
-		}
-	}
+	/*
+	 * Set while the SDK session is live, so the stream's `cancel` can stop the run.
+	 *
+	 * Without this, "Stop" only aborted the browser's fetch: the server's loop kept pulling
+	 * from the CLI, which kept spending tokens and kept executing tools until the turn ended
+	 * on its own. The socket was the only thing that stopped.
+	 */
+	let releaseRunHandle: (() => void) | null = null
+	let interruptSession: (() => Promise<void>) | null = null
+
+	/*
+	 * True once the client's connection is gone. `enqueue` on a cancelled controller throws,
+	 * and the run does not stop at the same instant the socket does — the interrupt still
+	 * has to travel to the CLI, produce a final `result`, and come back through persistence.
+	 * Every frame in that window would otherwise throw and turn an ordinary stop into a
+	 * failed run with a `TypeError` where its reply should be.
+	 *
+	 * Run events keep being written either way: they are what `stream/resume` replays, so a
+	 * reconnecting client still sees the turn it walked away from.
+	 */
+	let clientGone = false
 
 	/*
 	 * #36 — attachments used to be declared on the payload and then never read,
@@ -319,9 +327,35 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	}
 
+	/*
+	 * Whether this project's committed `.claude/` config may load. Read per run rather than
+	 * cached: revoking trust has to take effect on the next turn, not on the next restart.
+	 */
+	const projectSettingsTrusted = conversation.projectId
+		? ((
+				await db
+					.select({ trusted: projects.settingsTrusted })
+					.from(projects)
+					.where(eq(projects.id, conversation.projectId))
+					.limit(1)
+			)[0]?.trusted ?? false)
+		: false
+
+	/*
+	 * The agents this run may delegate to (#5). Loaded per run, like the trust flag above:
+	 * an agent created or paused between turns has to take effect on the next one.
+	 */
+	const subagents = await loadSubagentDefinitions({
+		parentAgentId: agent.id,
+		parentIsOrchestrator: isOrchestrator,
+		parentIsClaude: isClaudeModel(routedModel),
+	})
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
+			projectSettingsTrusted,
+			agents: subagents,
 			model: routedModel,
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
@@ -333,7 +367,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				userId: user.id,
 				runId: run.id,
 				onAskUser: (questions) => fulfilAskUser(questions),
-				onRunSubagent: (req) => fulfilSubagent(req),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,
@@ -356,11 +389,42 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 * with no `id:` at all, which the SSE consumer already handles, so they
 			 * never move the resume cursor.
 			 */
-			const NON_PERSISTED = new Set(['delta', 'reasoning'])
+			/*
+			 * `tool_progress` joins delta/reasoning here: it is a heartbeat the SDK sends for
+			 * every in-flight call, so persisting one would mean a row per tick per tool. It
+			 * carries nothing a replay needs either — a resumed client learns the call is still
+			 * running from the block itself.
+			 *
+			 * `notice` and `background_tasks` are NOT in this set on purpose: they are sparse,
+			 * and a client that reconnects mid-turn should still learn that the context was
+			 * compacted or that three commands are running in the background.
+			 */
+			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress'])
+
+			/** Closing a cancelled controller throws as well, and is just as harmless. */
+			const closeStream = (c: ReadableStreamDefaultController<Uint8Array>) => {
+				if (clientGone) return
+				try {
+					c.close()
+				} catch {
+					clientGone = true
+				}
+			}
+
+			/** Enqueue unless the client is gone; a lost frame must never fail the run. */
+			const send = (frame: Uint8Array) => {
+				if (clientGone) return
+				try {
+					controller.enqueue(frame)
+				} catch {
+					// Raced with cancellation between the check and the write.
+					clientGone = true
+				}
+			}
 
 			const emit = async (event: string, payload: unknown) => {
 				if (NON_PERSISTED.has(event)) {
-					controller.enqueue(encodeSseFrame(event, payload))
+					send(encodeSseFrame(event, payload))
 					return
 				}
 				let seq: number | undefined
@@ -375,7 +439,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						error: error instanceof Error ? error.message : String(error),
 					})
 				}
-				controller.enqueue(encodeSseFrame(event, payload, seq))
+				send(encodeSseFrame(event, payload, seq))
 			}
 
 			emitFrame = emit
@@ -410,6 +474,64 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							: preparedPrompt.text,
 						options: engineOptions,
 						emit,
+						/*
+						 * Every completed call gets a ledger row. Before this, only `web_search`
+						 * and the media generators wrote one, so the entire built-in filesystem
+						 * and shell surface — most of a coding session since #15 — was invisible
+						 * to `/activity` and to the per-agent tool counts.
+						 *
+						 * Zero cost, by design: these run locally and their real price is tokens,
+						 * which are accounted per run. Budget limits sum `cost`, so counting
+						 * cannot move a limit.
+						 */
+						onToolResult: ({ name, success, details }) => {
+							/*
+							 * #21 — keep the agent's checklist where it can be seen. The tool block
+							 * carries it into the transcript, but a list scrolls away the moment the
+							 * model says anything after it. Last write wins, which is what
+							 * `TodoWrite` means; on the conversation, because a plan routinely
+							 * outlives the run that wrote it.
+							 */
+							if (details?.kind === 'todo') {
+								const todoList = {
+									items: details.items,
+									updatedAt: new Date().toISOString(),
+									runId: run.id,
+								}
+								void db
+									.update(conversations)
+									.set({ todoList })
+									.where(eq(conversations.id, body.conversationId))
+									.catch((error) =>
+										logger.warn('[chat/stream] todo list persist failed', {
+											runId: run.id,
+											error: String(error),
+										}),
+									)
+								void emitFrame?.('todo_list', todoList)
+							}
+
+							const entry = toolCallLedgerEntry({ name, success, details })
+							if (!entry) return
+							void logToolUsage({
+								...entry,
+								userId: user.id,
+								runId: run.id,
+								agentId: conversation.agentId ?? null,
+							}).catch((error) =>
+								logger.warn('[chat/stream] tool usage log failed', {
+									runId: run.id,
+									tool: name,
+									error: String(error),
+								}),
+							)
+						},
+						onHandle: (handle) => {
+							// Published under the run id so a different request — the dock's
+							// dismiss — can stop this run too, not just this connection.
+							releaseRunHandle = registerRunHandle(run.id, handle)
+							interruptSession = () => handle.interrupt()
+						},
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
 							// next turn to resume rather than silently start a new session.
@@ -577,7 +699,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					subscription: claudeRun,
 				})
 				await emit('done', { messageId: assistantMessage.id, ...(summary.error ? { error: summary.error } : {}) })
-				controller.close()
+				closeStream(controller)
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
 				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
@@ -586,7 +708,41 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
 					.where(eq(chatRuns.id, run.id))
 				await emit('done', { error: errorMessage })
-				controller.close()
+				closeStream(controller)
+			} finally {
+				// The handle is only good while the turn is live; a stale entry would let a
+				// later dismiss write to a CLI that has already exited.
+				releaseRunHandle?.()
+				releaseRunHandle = null
+				interruptSession = null
+			}
+		},
+
+		/**
+		 * The client went away — it hit Stop, navigated, or lost the connection.
+		 *
+		 * `cancel` is the reliable signal for that: the browser aborting its fetch closes
+		 * the response, and the platform cancels this stream. Interrupting here is what
+		 * makes Stop actually stop, rather than merely stop *watching*: the CLI ends the
+		 * turn, the run loop sees an ordinary `result`, and the partial turn is persisted
+		 * and accounted like any other.
+		 *
+		 * Nothing is awaited on the caller's behalf beyond the interrupt itself — the
+		 * `start` body is still running and owns its own teardown.
+		 */
+		async cancel() {
+			clientGone = true
+			const interrupt = interruptSession
+			if (!interrupt) return
+			try {
+				await interrupt()
+				logger.info('[chat/stream] client disconnected, interrupted the run', { runId: run.id })
+			} catch (error) {
+				// Commonest cause is benign: the turn finished as the connection dropped.
+				logger.warn('[chat/stream] interrupt after disconnect failed', {
+					runId: run.id,
+					error: String(error),
+				})
 			}
 		},
 	})

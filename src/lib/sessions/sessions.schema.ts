@@ -1,6 +1,7 @@
 import { integer, jsonb, numeric, pgEnum, pgTable, real, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
+import type { TodoItem } from '$lib/engine/tool-result-details'
 
 export const messageRoleEnum = pgEnum('message_role', ['user', 'assistant', 'system', 'tool'])
 
@@ -15,6 +16,26 @@ export const conversationPermissionModeEnum = pgEnum('conversation_permission_mo
 	'acceptEdits',
 	'bypassPermissions',
 ])
+
+/**
+ * #21 — the agent's checklist, kept on the conversation rather than the run.
+ *
+ * `TodoWrite` output already reaches the transcript as a tool block, but a checklist
+ * scrolls away the moment the model says anything after it, and a task that takes three
+ * turns has three of them buried at three different depths. This is the current one: last
+ * write wins, because that is exactly what `TodoWrite` means.
+ *
+ * On the conversation and not on `chat_runs` because a plan routinely outlives the run that
+ * wrote it — the user answers a question, the next run continues the same list, and a
+ * per-run column would show an empty checklist for the turn that is actually doing the work.
+ */
+export type ConversationTodoList = {
+	items: TodoItem[]
+	/** ISO timestamp of the write, so a stale list can be shown as stale. */
+	updatedAt: string
+	/** The run that wrote it, for tracing a list back to its turn. Null for older rows. */
+	runId: string | null
+}
 
 export const conversations = pgTable('conversations', {
 	id: uuid('id').primaryKey().defaultRandom(),
@@ -44,6 +65,9 @@ export const conversations = pgTable('conversations', {
 	// mid-session; the next turn picks it up. `bypassPermissions` never reaches a detached
 	// or automation run — see `resolveEffectivePermissionMode`.
 	permissionMode: conversationPermissionModeEnum('permission_mode').notNull().default('default'),
+	// #21 — the latest `TodoWrite` list for this conversation. Null until the agent writes
+	// one, and cleared when the user dismisses it. See `ConversationTodoList` above.
+	todoList: jsonb('todo_list').$type<ConversationTodoList | null>(),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })

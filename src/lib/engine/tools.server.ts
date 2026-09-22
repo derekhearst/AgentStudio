@@ -12,8 +12,12 @@
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { toolSchemas, toolDescriptions, allToolNames, type ToolName } from '$lib/tools/tool-schemas'
+import { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
+// Re-exported because this module is where callers look for the engine's tool surface,
+// even though the list itself lives with the other tool-name data so specs can read it
+// without pulling in the server surface.
+export { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
 import { executeTool, type WorkspaceOptions } from '$lib/tools/tools.server'
-import { wrapSubagentResult } from '$lib/agents/subagent-result'
 
 /** MCP namespaces tool names as `mcp__<server>__<tool>`. */
 export const ENGINE_MCP_SERVER = 'agentstudio'
@@ -53,12 +57,6 @@ export type ToolServerContext = {
 	 */
 	onAskUser?: (questions: AskUserQuestion[]) => Promise<string>
 	/**
-	 * Full agent dispatch for `run_subagent`. The registry handler is only a
-	 * stateless one-shot fallback; the old chat loop special-cased this tool to
-	 * spawn a real agent whose events forward into the parent stream.
-	 */
-	onRunSubagent?: (req: { task: string; context?: string; agentId?: string }) => Promise<string>
-	/**
 	 * Fired after every tool finishes. The stream layer uses this to emit
 	 * `tool_result` frames without having to re-derive the outcome.
 	 */
@@ -71,55 +69,48 @@ export type ToolServerContext = {
  * Built per-run rather than at module scope because the handlers close over
  * `userId` / `runId` / workspace, which differ for every chat run.
  */
+
 export function buildToolServer(ctx: ToolServerContext) {
-	const tools = allToolNames.map((name: ToolName) =>
-		tool(
-			name,
-			toolDescriptions[name],
-			// The SDK wants a raw Zod shape, not the ZodObject wrapper.
-			toolSchemas[name].shape,
-			async (args: Record<string, unknown>) => {
-				if (name === 'run_subagent' && ctx.onRunSubagent) {
-					const req = args as { task: string; context?: string; agentId?: string }
-					const result = await ctx.onRunSubagent(req)
-					// #34 — a child's text is an observation, not the parent's own reasoning. Wrap it in
-					// a delimiter the child cannot forge before it enters the parent's transcript.
-					return {
-						content: [{ type: 'text' as const, text: wrapSubagentResult(result, { agentName: req.agentId }) }],
+	const tools = allToolNames
+		.filter((name: ToolName) => !ENGINE_EXCLUDED_TOOLS.has(name))
+		.map((name: ToolName) =>
+			tool(
+				name,
+				toolDescriptions[name],
+				// The SDK wants a raw Zod shape, not the ZodObject wrapper.
+				toolSchemas[name].shape,
+				async (args: Record<string, unknown>) => {
+					if (name === 'ask_user' && ctx.onAskUser) {
+						const questions = (args.questions ?? []) as AskUserQuestion[]
+						const answer = await ctx.onAskUser(questions)
+						return { content: [{ type: 'text' as const, text: answer }] }
 					}
-				}
 
-				if (name === 'ask_user' && ctx.onAskUser) {
-					const questions = (args.questions ?? []) as AskUserQuestion[]
-					const answer = await ctx.onAskUser(questions)
-					return { content: [{ type: 'text' as const, text: answer }] }
-				}
+					const outcome = await executeTool({ name, arguments: args }, ctx.userId, ctx.runId, ctx.workspace)
 
-				const outcome = await executeTool({ name, arguments: args }, ctx.userId, ctx.runId, ctx.workspace)
+					ctx.onExecuted?.({
+						name,
+						success: outcome.success,
+						executionMs: outcome.executionMs,
+						result: outcome.result,
+						error: outcome.error,
+					})
 
-				ctx.onExecuted?.({
-					name,
-					success: outcome.success,
-					executionMs: outcome.executionMs,
-					result: outcome.result,
-					error: outcome.error,
-				})
+					// Failures come back as tool output rather than thrown errors so the
+					// model can read them and recover, which is how the old loop behaved.
+					const text = outcome.success
+						? typeof outcome.result === 'string'
+							? outcome.result
+							: JSON.stringify(outcome.result ?? null)
+						: (outcome.error ?? 'Tool failed with no error message')
 
-				// Failures come back as tool output rather than thrown errors so the
-				// model can read them and recover, which is how the old loop behaved.
-				const text = outcome.success
-					? typeof outcome.result === 'string'
-						? outcome.result
-						: JSON.stringify(outcome.result ?? null)
-					: (outcome.error ?? 'Tool failed with no error message')
-
-				return {
-					content: [{ type: 'text' as const, text }],
-					...(outcome.success ? {} : { isError: true as const }),
-				}
-			},
-		),
-	)
+					return {
+						content: [{ type: 'text' as const, text }],
+						...(outcome.success ? {} : { isError: true as const }),
+					}
+				},
+			),
+		)
 
 	return createSdkMcpServer({
 		name: ENGINE_MCP_SERVER,

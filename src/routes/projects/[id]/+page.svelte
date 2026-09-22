@@ -7,6 +7,8 @@
 	import EmptyState from '$lib/ui/EmptyState.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import RepoTab from '$lib/projects/components/RepoTab.svelte';
+	import ProjectTrustPanel from '$lib/projects/components/ProjectTrustPanel.svelte';
+	import ProjectInstructionsPanel from '$lib/projects/components/ProjectInstructionsPanel.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getProjectByIdQuery>>>;
 
@@ -57,6 +59,24 @@
 		{#if p.description}
 			<p class="text-sm text-base-content/70">{p.description}</p>
 		{/if}
+
+		<ProjectInstructionsPanel
+			{projectId}
+			instructions={p.instructions}
+			trusted={p.settingsTrusted}
+			onChanged={(next) => {
+				if (detail) detail.project.instructions = next;
+			}}
+		/>
+
+		<ProjectTrustPanel
+			{projectId}
+			{repoKind}
+			trusted={p.settingsTrusted}
+			onChanged={(next) => {
+				if (detail) detail.project.settingsTrusted = next;
+			}}
+		/>
 
 		{#if hasRepo}
 			<RepoTab {projectId} {repoKind} />

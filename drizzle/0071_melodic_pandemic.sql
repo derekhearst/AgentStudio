@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "settings_trusted" boolean DEFAULT false NOT NULL;
