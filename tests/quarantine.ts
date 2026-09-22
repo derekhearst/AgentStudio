@@ -29,15 +29,26 @@ export const LIVE_SPECS: readonly string[] = [
 	'tests/workspace.live.spec.ts',
 ]
 
-/** Meant to get shorter. Count on 2026-09-21: 34. */
+/**
+ * Meant to get shorter. 42 → 38.
+ *
+ * Four came off because fixes made elsewhere the same day reached them: `getActiveUserId`
+ * seeding instead of throwing, the login field gaining an accessible name, the test server
+ * no longer running with the auth bypass on, and the webhook awaiting its inbox write.
+ *
+ * A warning for whoever works on the rest. Run these as a subset and 41 of 42 pass; run
+ * the whole suite and 38 of them fail. They are not simply stale — they interfere, and
+ * measuring them in isolation will tell you they are fixed when they are not. Always
+ * confirm against a full run.
+ *
+ * Count on 2026-09-22: 38.
+ */
 export const KNOWN_FAILING: readonly string[] = [
 	'tests/agents.builtin-agents.spec.ts',
 	'tests/agents.spec.ts',
 	'tests/auth.spec.ts',
 	'tests/automations.budget-gate.spec.ts',
-	'tests/automations.mode-dispatch.spec.ts',
 	'tests/automations.mode.spec.ts',
-	'tests/automations.output-routing.spec.ts',
 	'tests/automations.runtime.spec.ts',
 	'tests/chat.agent-selector.spec.ts',
 	'tests/chat.agent-stream-integration.spec.ts',
@@ -49,6 +60,12 @@ export const KNOWN_FAILING: readonly string[] = [
 	'tests/cost.budget.spec.ts',
 	'tests/cost.linkage.spec.ts',
 	'tests/cost.tool-usage.spec.ts',
+	'tests/crud/agents.crud.spec.ts',
+	'tests/crud/automations.crud.spec.ts',
+	'tests/crud/chat/agent-switch.spec.ts',
+	'tests/crud/mobile/navigation.crud.spec.ts',
+	'tests/crud/projects.crud.spec.ts',
+	'tests/crud/research.crud.spec.ts',
 	'tests/governance.audit.spec.ts',
 	'tests/hooks.page-load.spec.ts',
 	'tests/memory.spec.ts',
@@ -67,20 +84,4 @@ export const KNOWN_FAILING: readonly string[] = [
 	'tests/visual.spec.ts',
 ]
 
-/**
- * The same #55 backlog, in subdirectories. These were missed when the list was first
- * derived: the failure log writes nested paths with backslashes and the extraction
- * only matched forward slashes, so they were silently absent.
- */
-export const KNOWN_FAILING_NESTED: readonly string[] = [
-	'tests/crud/agents.crud.spec.ts',
-	'tests/crud/automations.crud.spec.ts',
-	'tests/crud/chat/home-redirect.spec.ts',
-	'tests/crud/chat/agent-switch.spec.ts',
-	'tests/crud/mobile/navigation.crud.spec.ts',
-	'tests/crud/projects.crud.spec.ts',
-	'tests/crud/research.crud.spec.ts',
-	'tests/crud/settings.crud.spec.ts',
-]
-
-export const QUARANTINE: readonly string[] = [...LIVE_SPECS, ...KNOWN_FAILING, ...KNOWN_FAILING_NESTED]
+export const QUARANTINE: readonly string[] = [...LIVE_SPECS, ...KNOWN_FAILING]
