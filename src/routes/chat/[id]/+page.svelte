@@ -621,6 +621,35 @@
 		}
 	}
 
+	/** Task ids a stop has been sent for, so the button cannot be double-fired. */
+	let stoppingTasks = $state<string[]>([]);
+
+	/**
+	 * #35 — stop one background task.
+	 *
+	 * The model can already background a command; until now nothing could stop one. The run
+	 * id comes from `context_stats`, which the stream emits before any task can exist, so a
+	 * visible task always has one. The chip is left in place on failure rather than removed
+	 * optimistically: `background_tasks_changed` is the authority on what is live, and it
+	 * arrives on its own the moment the task actually goes away.
+	 */
+	async function stopBackgroundTask(taskId: string) {
+		const runId = liveContextStats?.runId;
+		if (!runId || stoppingTasks.includes(taskId)) return;
+		stoppingTasks = [...stoppingTasks, taskId];
+		try {
+			await fetch(`/chat/${conversationId}/stop-task`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ runId, taskId })
+			});
+		} catch (error) {
+			console.warn('[chat] failed to stop a background task', error);
+		} finally {
+			stoppingTasks = stoppingTasks.filter((id) => id !== taskId);
+		}
+	}
+
 	async function approveToolCall(token: string) {
 		try {
 			const response = await fetch(`/chat/${conversationId}/tool-approve`, {
@@ -1351,6 +1380,16 @@
 						<span class="console-bgtask" title={`${task.description} (${task.type})`}>
 							<span class="pulse-dot"></span>
 							<span>{task.description}</span>
+							<button
+								type="button"
+								class="console-bgtask__stop"
+								title="Stop this background task"
+								aria-label={`Stop background task: ${task.description}`}
+								disabled={stoppingTasks.includes(task.id)}
+								onclick={() => stopBackgroundTask(task.id)}
+							>
+								<Icon name="x" size={10} />
+							</button>
 						</span>
 					{/each}
 				</div>
@@ -1413,6 +1452,16 @@
 					<span class="console-bgtask" title={`${task.description} (${task.type})`}>
 						<span class="pulse-dot"></span>
 						<span>{task.description}</span>
+						<button
+							type="button"
+							class="console-bgtask__stop"
+							title="Stop this background task"
+							aria-label={`Stop background task: ${task.description}`}
+							disabled={stoppingTasks.includes(task.id)}
+							onclick={() => stopBackgroundTask(task.id)}
+						>
+							<Icon name="x" size={10} />
+						</button>
 					</span>
 				{/each}
 				{#if contextMetrics.total > 0}

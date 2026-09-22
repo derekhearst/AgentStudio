@@ -2597,3 +2597,22 @@ a.console-crumbs__seg:hover {
 }
 
 .pinned-todo__item.is-in_progress { font-weight: 600; }
+
+/* #35 — the stop control on a live background task chip. Small and quiet: the chip is
+   status, and this is the one action it affords. */
+.console-bgtask__stop {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: 2px;
+	padding: 1px;
+	border: 0;
+	border-radius: 3px;
+	background: none;
+	color: inherit;
+	opacity: 0.45;
+	cursor: pointer;
+}
+
+.console-bgtask__stop:hover:not(:disabled) { opacity: 0.95; }
+.console-bgtask__stop:disabled { opacity: 0.2; cursor: default; }
