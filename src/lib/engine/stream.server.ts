@@ -33,7 +33,7 @@ import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } fr
 import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
-import { toolResultDetails } from './tool-result-details'
+import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { interpretSdkMessage } from './sdk-notices'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
@@ -96,6 +96,21 @@ export type EngineRunInput = {
 	bashPolicy?: BashPolicy
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
+	/**
+	 * Called for every tool call that completes, successfully or not.
+	 *
+	 * Exists so the caller can write the usage ledger. The engine cannot do it itself: it
+	 * has no `userId` or `agentId`, deliberately — it translates a run, it does not own who
+	 * the run belongs to.
+	 *
+	 * Fire-and-forget. A failed ledger write must never fail a turn.
+	 */
+	onToolResult?: (result: {
+		name: string
+		success: boolean
+		/** The typed result, when the tool has a shape we distil. Lets the ledger record a path or a command. */
+		details?: ToolResultDetails
+	}) => void
 	/**
 	 * Called once, synchronously, with a handle on the live SDK session.
 	 *
@@ -468,6 +483,13 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						success: block.is_error !== true,
 						executionMs: null,
 						result: text,
+						...(details ? { details } : {}),
+					})
+
+					// After the frame, so a slow ledger write cannot delay what the user sees.
+					input.onToolResult?.({
+						name: toolName,
+						success: block.is_error !== true,
 						...(details ? { details } : {}),
 					})
 				}

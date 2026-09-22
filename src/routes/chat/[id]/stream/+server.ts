@@ -62,6 +62,8 @@ import {
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
 import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
+import { logToolUsage } from '$lib/costs/usage'
 import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
@@ -464,6 +466,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							: preparedPrompt.text,
 						options: engineOptions,
 						emit,
+						/*
+						 * Every completed call gets a ledger row. Before this, only `web_search`
+						 * and the media generators wrote one, so the entire built-in filesystem
+						 * and shell surface — most of a coding session since #15 — was invisible
+						 * to `/activity` and to the per-agent tool counts.
+						 *
+						 * Zero cost, by design: these run locally and their real price is tokens,
+						 * which are accounted per run. Budget limits sum `cost`, so counting
+						 * cannot move a limit.
+						 */
+						onToolResult: ({ name, success, details }) => {
+							const entry = toolCallLedgerEntry({ name, success, details })
+							if (!entry) return
+							void logToolUsage({
+								...entry,
+								userId: user.id,
+								runId: run.id,
+								agentId: conversation.agentId ?? null,
+							}).catch((error) =>
+								logger.warn('[chat/stream] tool usage log failed', {
+									runId: run.id,
+									tool: name,
+									error: String(error),
+								}),
+							)
+						},
 						onHandle: (handle) => {
 							// Published under the run id so a different request — the dock's
 							// dismiss — can stop this run too, not just this connection.
