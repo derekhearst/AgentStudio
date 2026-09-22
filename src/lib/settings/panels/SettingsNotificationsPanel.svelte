@@ -17,18 +17,22 @@
 			Notifications
 		</h2>
 	{/snippet}
+	<!--
+		Each row is a <label>, not a <div>: three identical unlabelled checkboxes, announced as
+		nothing at all before this. Wrapping also makes the whole row a hit target.
+	-->
 	<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-3 sm:divide-y-0">
-		<div class="flex items-center justify-between gap-4 py-3 first:pt-0 sm:py-2">
-			<p class="text-sm font-medium">Task completed</p>
+		<label class="flex cursor-pointer items-center justify-between gap-4 py-3 first:pt-0 sm:py-2">
+			<span class="text-sm font-medium">Task completed</span>
 			<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={notificationPrefs.taskCompleted} />
-		</div>
-		<div class="flex items-center justify-between gap-4 py-3 sm:py-2">
-			<p class="text-sm font-medium">Needs input</p>
+		</label>
+		<label class="flex cursor-pointer items-center justify-between gap-4 py-3 sm:py-2">
+			<span class="text-sm font-medium">Needs input</span>
 			<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={notificationPrefs.needsInput} />
-		</div>
-		<div class="flex items-center justify-between gap-4 py-3 last:pb-0 sm:py-2">
-			<p class="text-sm font-medium">Agent errors</p>
+		</label>
+		<label class="flex cursor-pointer items-center justify-between gap-4 py-3 last:pb-0 sm:py-2">
+			<span class="text-sm font-medium">Agent errors</span>
 			<input type="checkbox" class="toggle toggle-accent toggle-sm" bind:checked={notificationPrefs.agentErrors} />
-		</div>
+		</label>
 	</div>
 </ContentPanel>

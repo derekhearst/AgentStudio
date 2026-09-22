@@ -9,6 +9,7 @@
     "android:install:local": "powershell -ExecutionPolicy Bypass -File scripts/android-install-local.ps1",
     "android:run:local": "bun run android:build:local && bun run android:install:local",
     "dev": "vite dev",
+    "dev:test": "bun run scripts/test-server.ts",
     "worker": "bun scripts/worker.ts",
     "build": "BUILD_PHASE=1 vite build",
     "preview": "vite preview",

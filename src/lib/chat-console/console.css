@@ -1899,6 +1899,23 @@ a.console-crumbs__seg:hover {
 
 .console-mobile-chips::-webkit-scrollbar { display: none; }
 
+/* Header actions on their own row below the mobile header (PageHeader falls back to
+ * `actions` when a page defines no `mobileActions`). Scrolls horizontally rather than
+ * wrapping, so a page with several actions does not eat vertical space on a phone. */
+.console-mobile-actions {
+	display: none;
+	gap: 6px;
+	align-items: center;
+	overflow-x: auto;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--color-base-300);
+	scrollbar-width: none;
+}
+
+.console-mobile-actions::-webkit-scrollbar { display: none; }
+
+.console-mobile-actions > * { flex: 0 0 auto; }
+
 .console-mobile-chips .console-chip {
 	border-radius: 999px;
 	padding: 3px 8px;
@@ -1961,6 +1978,7 @@ a.console-crumbs__seg:hover {
 /* ── Mobile ──────────────────────────────────────────────────── */
 @media (max-width: 47.99rem) {
 	.console-mobile-chips,
+	.console-mobile-actions,
 	.console-quick,
 	.console-mobile-sub {
 		display: flex;

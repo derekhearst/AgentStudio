@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 import { QUARANTINE } from './tests/quarantine'
+import { TEST_SERVER_HEALTH_URL, TEST_SERVER_ORIGIN, TEST_SERVER_PORT, testServerEnv } from './tests/server-env'
 
 /**
  * Playwright config — runs every spec twice (desktop + mobile) by default so
@@ -26,7 +27,7 @@ export default defineConfig({
 	testMatch: '**/*.spec.ts',
 	globalSetup: './tests/global-setup.ts',
 	use: {
-		baseURL: 'http://127.0.0.1:4173',
+		baseURL: TEST_SERVER_ORIGIN,
 		headless: true,
 	},
 	projects: [
@@ -47,21 +48,9 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'bun run dev --host 127.0.0.1 --port 4173',
-		env: {
-			...process.env,
-			E2E_MOCK_EXTERNALS: '0',
-			// The suite exercises the login redirect and the unauthenticated posture of
-			// public routes. `AUTH_DEV_BYPASS=1` in a developer's .env attaches every
-			// request to the singleton user, so those specs can never fail honestly — and
-			// several were failing because of it. Force it off for the test server; a
-			// developer's own dev server is unaffected.
-			AUTH_DEV_BYPASS: '0',
-			// Default values for env vars that gate test coverage. Operators can override
-			// via .env or the shell env to point at real services. The webhook secret here
-			// is a test-only constant so the webhook endpoint tests always run end-to-end.
-			GITHUB_WEBHOOK_SECRET: process.env.GITHUB_WEBHOOK_SECRET ?? 'e2e-test-webhook-secret-do-not-use-in-prod',
-		},
+		command: `bun run dev --host 127.0.0.1 --port ${TEST_SERVER_PORT}`,
+		// Shared with `bun run dev:test` so a reused server is configured identically.
+		env: testServerEnv(),
 		/**
 		 * Wait for a real response, not just an open socket.
 		 *
@@ -71,18 +60,15 @@ export default defineConfig({
 		 * page burned their 30s timeout waiting for a first compile that had not finished.
 		 * That produced timeout-shaped failures scattered across UI specs, moving between
 		 * runs depending on which file got there first.
-		 *
-		 * `/api/health` is unauthenticated (PUBLIC_PATH_PREFIXES) and touches the database,
-		 * so a 200 from it means the whole stack is genuinely up.
 		 */
-		url: 'http://127.0.0.1:4173/api/health',
+		url: TEST_SERVER_HEALTH_URL,
 		timeout: 180_000,
 		/**
-		 * Reuse is convenient locally but it is a footgun worth naming: a dev server you
-		 * started yourself does not carry the env below, so the suite silently tests a
-		 * differently-configured app. A stray `bun run dev` on 4173 without
-		 * GITHUB_WEBHOOK_SECRET turns 12 webhook specs into 503s that look like real
-		 * failures. If results look wrong, kill whatever is on 4173 and re-run.
+		 * Reuse used to be a footgun: a dev server you started yourself did not carry the
+		 * env above, so the suite silently tested a differently-configured app. Start one
+		 * with `bun run dev:test` instead — it uses the same `testServerEnv()` — and every
+		 * run after it skips the ~45s cold boot. If results still look wrong, kill whatever
+		 * is on 4173 and re-run.
 		 */
 		reuseExistingServer: true,
 	},

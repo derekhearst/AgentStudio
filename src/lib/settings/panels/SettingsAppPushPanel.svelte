@@ -34,9 +34,16 @@
 				<p class="text-sm font-medium">Install App</p>
 				<p class="mt-0.5 text-xs text-base-content/55">Standalone desktop & mobile app</p>
 			</div>
+			<!--
+				aria-label, because the visible text is just "Install": the only thing tying it
+				to what gets installed is the adjacent <p>, which a screen reader reaches
+				separately.
+			-->
 			<button
 				class="btn btn-primary btn-sm btn-outline"
 				type="button"
+				aria-label="Install app"
+				aria-disabled={!installAvailable}
 				onclick={onInstall}
 				disabled={!installAvailable}
 			>
@@ -54,9 +61,21 @@
 			</div>
 			<div class="flex gap-1.5">
 				{#if pushEnabled}
-					<button class="btn btn-ghost btn-sm" type="button" onclick={onDisablePush} disabled={busy}>Disable</button>
+					<button
+						class="btn btn-ghost btn-sm"
+						type="button"
+						aria-label="Disable push notifications"
+						onclick={onDisablePush}
+						disabled={busy}>Disable</button
+					>
 				{:else}
-					<button class="btn btn-success btn-sm" type="button" onclick={onEnablePush} disabled={busy}>Enable</button>
+					<button
+						class="btn btn-success btn-sm"
+						type="button"
+						aria-label="Enable push notifications"
+						onclick={onEnablePush}
+						disabled={busy}>Enable</button
+					>
 				{/if}
 			</div>
 		</div>

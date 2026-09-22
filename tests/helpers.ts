@@ -258,14 +258,21 @@ export async function seedConversation(
 	return conversation
 }
 
+/**
+ * The notification feed is scoped to `user_id`; a row seeded without one is invisible in
+ * the UI no matter what the database says. This helper predated that scoping and seeded
+ * orphan rows, which made the settings feed assertions unfixable by looking at the page.
+ */
 export async function seedNotification(prefix: string, overrides?: { title?: string; body?: string; read?: boolean }) {
 	const sql = getSql()
+	const userId = await getActiveUserId()
 	const [row] = await sql<{ id: string; title: string }[]>`
-		insert into notifications (title, body, read)
+		insert into notifications (title, body, read, user_id)
 		values (
 			${overrides?.title ?? `${prefix} Notification`},
 			${overrides?.body ?? `${prefix} notification body`},
-			${overrides?.read ?? false}
+			${overrides?.read ?? false},
+			${userId}
 		)
 		returning id, title
 	`

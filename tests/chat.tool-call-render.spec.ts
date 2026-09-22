@@ -171,9 +171,13 @@ test.describe('chat/tool-call-render — failed tool', () => {
 
 			const card = page.locator('details.tool-call-card, details').filter({ hasText: /clone_repository|clone repository|clone/i }).first()
 			await card.waitFor({ state: 'visible', timeout: 30_000 })
-			// The merged ToolCallCard auto-detects failures from result.error; the
-			// failed-glyph color should be applied as `border-error` on the details element.
-			await expect(card).toHaveClass(/border-error/)
+			// The merged ToolCallCard auto-detects failures from result.error. The console
+			// restyle replaced the DaisyUI `border-error` this was written against with the
+			// `console-tool err` accent.
+			await expect(card).toHaveClass(/console-tool err/)
+			// And the caption this test is named for, which nothing here actually asserted:
+			// getFriendlyToolLabel turns a failed call into "<Tool Name> failed".
+			await expect(card.locator('summary')).toContainText('Clone Repository failed')
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

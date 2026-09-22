@@ -40,7 +40,14 @@
 			{/if}
 			<span class="console-crumbs__sep">/</span>
 		{/each}
-		<span class="console-crumbs__cur">{title}</span>
+		<!--
+			An <h1>, not a <span>: the mobile header below carries the only other copy of the
+			page title and is display:none at desktop width, so before this every desktop page
+			had no heading at all — nothing for a screen reader to navigate by, and nothing for
+			a test to assert on. Tailwind preflight resets heading type and margin, so this
+			renders exactly as the span did.
+		-->
+		<h1 class="console-crumbs__cur">{title}</h1>
 	</div>
 	{#if chips}
 		<div class="console-topbar__chips">{@render chips()}</div>
@@ -112,6 +119,19 @@
 		{@render mobileActions()}
 	{/if}
 </div>
+
+<!--
+	Fall back to `actions` when a page has not written a separate `mobileActions`. No page
+	ever did — the snippet was dead — so all 17 pages with header actions had them silently
+	dropped on a phone. On /settings that meant Save and Reset simply did not exist below
+	80rem.
+
+	They go on their own scrollable row rather than beside the title: /memory has four of
+	them, and inline they squeeze the `min-w-0 flex-1` title to zero width.
+-->
+{#if !mobileActions && actions}
+	<div class="console-mobile-actions">{@render actions()}</div>
+{/if}
 
 {#if chips}
 	<div class="console-mobile-chips">{@render chips()}</div>
