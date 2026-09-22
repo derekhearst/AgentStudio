@@ -9,6 +9,7 @@
 	import RepoTab from '$lib/projects/components/RepoTab.svelte';
 	import ProjectTrustPanel from '$lib/projects/components/ProjectTrustPanel.svelte';
 	import ProjectInstructionsPanel from '$lib/projects/components/ProjectInstructionsPanel.svelte';
+	import ProjectKnowledgePanel from '$lib/projects/components/ProjectKnowledgePanel.svelte';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getProjectByIdQuery>>>;
 
@@ -68,6 +69,8 @@
 				if (detail) detail.project.instructions = next;
 			}}
 		/>
+
+		<ProjectKnowledgePanel {projectId} />
 
 		<ProjectTrustPanel
 			{projectId}
