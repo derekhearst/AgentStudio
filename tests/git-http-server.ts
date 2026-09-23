@@ -29,24 +29,39 @@ export type GitHttpServer = {
 	close(): Promise<void>
 }
 
+const plainGitEnv = () => ({
+	...process.env,
+	GIT_CONFIG_NOSYSTEM: '1',
+	GIT_CONFIG_GLOBAL: '/dev/null',
+	GIT_AUTHOR_NAME: 'Test',
+	GIT_AUTHOR_EMAIL: 'test@example.com',
+	GIT_COMMITTER_NAME: 'Test',
+	GIT_COMMITTER_EMAIL: 'test@example.com',
+	GIT_TERMINAL_PROMPT: '0',
+})
+
 /** Plain git for test setup, isolated from the developer's own config. */
 export function git(args: string[], cwd?: string): string {
-	const res = spawnSync('git', args, {
-		cwd,
-		encoding: 'utf8',
-		env: {
-			...process.env,
-			GIT_CONFIG_NOSYSTEM: '1',
-			GIT_CONFIG_GLOBAL: '/dev/null',
-			GIT_AUTHOR_NAME: 'Test',
-			GIT_AUTHOR_EMAIL: 'test@example.com',
-			GIT_COMMITTER_NAME: 'Test',
-			GIT_COMMITTER_EMAIL: 'test@example.com',
-			GIT_TERMINAL_PROMPT: '0',
-		},
-	})
+	const res = spawnSync('git', args, { cwd, encoding: 'utf8', env: plainGitEnv() })
 	if (res.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${res.stderr}`)
 	return res.stdout.trim()
+}
+
+/**
+ * Plain git, asynchronously, and without throwing — for control runs that talk to this
+ * process's own HTTP server (a synchronous call would block the server it is waiting on)
+ * and are expected to fail once the trap has fired.
+ */
+export function gitAsync(args: string[], cwd?: string): Promise<{ code: number; stdout: string; stderr: string }> {
+	return new Promise((resolve) => {
+		const child = spawn('git', args, { cwd, env: plainGitEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
+		let stdout = ''
+		let stderr = ''
+		child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')))
+		child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')))
+		child.on('error', (err) => resolve({ code: -1, stdout, stderr: `${stderr}${err.message}` }))
+		child.on('close', (code) => resolve({ code: code ?? -1, stdout, stderr }))
+	})
 }
 
 export function makeTempDir(label: string): { path: string; cleanup: () => void } {

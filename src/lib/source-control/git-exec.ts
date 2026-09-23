@@ -29,26 +29,42 @@
  *   - `-c` overrides for the keys that run programs (hooks, fsmonitor, askpass, signing,
  *     alternate refs) and an empty `credential.helper`, which clears every helper that any
  *     config file registered.
- *   - Overrides for every `filter.<driver>` the repository defines. Driver names are chosen
- *     by the repository, so they are read first (`git config --name-only`, which runs
- *     nothing) and neutralised by name.
- *   - `--no-ext-diff --no-textconv` on diff-producing commands, and
- *     `--ignore-submodules=dirty` on `status`/`diff` so git never starts a second git inside
- *     a submodule whose config we have not read.
+ *   - Overrides for every `filter.<driver>` the repository defines — and every checked-out
+ *     submodule inside it, because git starts a second git in each one (`add` checks
+ *     whether it is dirty) and that git reads the submodule's own config. Driver names are
+ *     chosen by the repository, so they are read first (`git config --name-only`, which
+ *     runs nothing) and neutralised by name. The overrides travel in the environment, which
+ *     the second git inherits.
+ *   - `--no-ext-diff --no-textconv --submodule=short` on diff-producing commands, and
+ *     `--ignore-submodules=dirty` on `status`/`diff`, so they never start a git inside a
+ *     submodule to diff or inspect it. The same defaults go in as `-c` keys for the
+ *     commands that print a diff or a status on the side (`commit`, `checkout`).
  *   - `--work-tree` pinned to the directory holding `.git`, so `core.worktree` cannot point
  *     a status or diff at files outside the workspace.
  *   - `GIT_ALLOW_PROTOCOL=https` (plus `http` for a plain-http clone URL), which overrides
  *     every `protocol.*` key — no `ext::` or `file://` transport, however the URL was
  *     rewritten.
  *
+ * ## Failing closed
+ *
+ * The overrides are only as good as the scan that finds the names. If that scan cannot be
+ * completed — the config will not parse, it names more drivers or submodules than the
+ * limits below, it times out — the command is refused (`GitRefusedError`), never run
+ * without them.
+ *
  * ## How the token travels
  *
  * As an `Authorization` header scoped to the exact remote URL, delivered through
  * `GIT_CONFIG_COUNT` so it is in neither argv nor any file. No credential helper, no askpass.
- * A header keyed to one URL is not sent anywhere else: if a repository rewrites the URL,
- * the rewritten URL has no header. The same-URL `http.*` keys that could route the request
- * through someone else (`proxy`, `sslVerify`, `curloptResolve`) are pinned at that URL too,
- * where the later, equally specific entry wins.
+ * A header keyed to one URL is not sent anywhere else. The same-URL `http.*` keys that could
+ * route the request through someone else or write files (`proxy`, `sslVerify`,
+ * `curloptResolve`, `cookieFile`, `saveCookies`) are pinned at that URL too, where the
+ * later, equally specific entry wins.
+ *
+ * A repository that would change which URL git actually contacts — `url.<x>.insteadOf`,
+ * `pushInsteadOf`, a `remote.<that url>.*` section — or that carries URL-scoped `http.*`
+ * settings is refused outright on any call that talks to a remote: once the URL is
+ * rewritten, the pins above no longer apply to the URL git uses.
  *
  * Pure: no `node:` imports, so specs can pin the argv and environment without spawning.
  */
@@ -81,6 +97,12 @@ export const HARDENED_GIT_CONFIG: ReadonlyArray<readonly [string, string]> = [
 	['submodule.recurse', 'false'],
 	['fetch.recurseSubmodules', 'false'],
 	['push.recurseSubmodules', 'no'],
+	// A submodule's change is one summary line, never an inline diff or log produced by a
+	// git started inside the submodule, where its own diff programs would apply.
+	['diff.submodule', 'short'],
+	['status.submoduleSummary', 'false'],
+	// Where commit and checkout report local changes, a dirty submodule is not inspected.
+	['diff.ignoreSubmodules', 'dirty'],
 	// No background gc or maintenance outliving the call with our environment.
 	['gc.auto', '0'],
 	['maintenance.auto', 'false'],
@@ -106,6 +128,8 @@ const ENV_PASSTHROUGH = new Set([
 	'SSL_CERT_FILE',
 	'SSL_CERT_DIR',
 	'CURL_CA_BUNDLE',
+	'GIT_SSL_CAINFO',
+	'GIT_SSL_CAPATH',
 	// Windows needs these to start a process and open a socket at all.
 	'SYSTEMROOT',
 	'WINDIR',
@@ -182,6 +206,98 @@ export type GitRemoteAccess = {
 
 export type GitConfigEntry = readonly [key: string, value: string]
 
+/**
+ * Thrown instead of running git when the pre-run scan could not establish that the call is
+ * safe: the repository's config would not parse or is too large to read in full, or it
+ * redirects the remote this call talks to. Nothing has run when this is thrown.
+ */
+export class GitRefusedError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = 'GitRefusedError'
+	}
+}
+
+/**
+ * How much the pre-run scans will read before refusing. Real repositories sit far below
+ * each: a handful of filter drivers (LFS is one), a few submodules. The driver limit also
+ * keeps the override block well inside Windows' 32 KB environment.
+ */
+export const GIT_SCAN_LIMITS = {
+	/** Matching config entries read from one repository. */
+	configEntries: 1024,
+	/** Distinct filter drivers across the repository and its submodules. */
+	filterDrivers: 32,
+	/** Length of one driver name. */
+	driverNameLength: 128,
+	/** Submodule entries (gitlinks) in one index. */
+	gitlinks: 4096,
+	/** Checked-out submodules, at any depth, whose config is read. */
+	submodules: 32,
+	/** Wall-clock budget for each scan. */
+	timeoutMs: 30_000,
+} as const
+
+/** `section.sub.section.key` → its parts. The subsection is everything between the first and last dot. */
+export function parseConfigName(name: string): { section: string; subsection: string | null; key: string } | null {
+	const first = name.indexOf('.')
+	const last = name.lastIndexOf('.')
+	if (first <= 0 || last === name.length - 1) return null
+	return {
+		section: name.slice(0, first).toLowerCase(),
+		subsection: last > first ? name.slice(first + 1, last) : null,
+		key: name.slice(last + 1).toLowerCase(),
+	}
+}
+
+/** The config sections the pre-run scan reads for a call: filters for tree commands, redirects for remote calls. */
+export function scanSectionsFor(opts: { tree: boolean; remote: boolean }): string[] {
+	return [...(opts.tree ? ['filter'] : []), ...(opts.remote ? ['url', 'remote', 'http'] : [])]
+}
+
+/**
+ * Config entries (from the scan) that would change where a call to `remoteUrl` goes, or
+ * how it is made, beyond what `remoteAccessConfig` pins:
+ *
+ *   - `url.<base>.insteadOf` / `pushInsteadOf` rewrite the URL before anything else applies;
+ *   - `remote.<remoteUrl>.*` makes the URL a named remote with its own `url`, `pushurl`,
+ *     `vcs` helper or `mirror` (which turns a push into a forced mirror);
+ *   - any URL-scoped `http.<url>.*` key — the settings a rewritten URL would pick up, and
+ *     the unpinned ones (`sslCAInfo`, `sslCert`) for this URL.
+ *
+ * Unscoped `http.*` keys are left alone: for this URL the pinned, URL-scoped values win.
+ */
+export function remoteRedirectKeys(configNames: readonly string[], remoteUrl: string): string[] {
+	const target = remoteUrl.toLowerCase()
+	return configNames.filter((raw) => {
+		const parts = parseConfigName(raw)
+		if (!parts || parts.subsection === null) return false
+		if (parts.section === 'url') return parts.key === 'insteadof' || parts.key === 'pushinsteadof'
+		if (parts.section === 'remote') return parts.subsection.toLowerCase() === target
+		return parts.section === 'http'
+	})
+}
+
+/** Distinct filter-driver names in the scan output (`filter.<driver>.<key>`). */
+export function filterDriverNames(configNames: readonly string[]): string[] {
+	const drivers = new Set<string>()
+	for (const raw of configNames) {
+		const parts = parseConfigName(raw)
+		if (parts?.section === 'filter' && parts.subsection !== null) drivers.add(parts.subsection)
+	}
+	return [...drivers]
+}
+
+/**
+ * The path of a submodule entry from one `git ls-files -z --stage` record
+ * (`<mode> <object> <stage>\t<path>`), or null for anything that is not a gitlink.
+ */
+export function gitlinkPathFromStageRecord(record: string): string | null {
+	if (!record.startsWith('160000 ')) return null
+	const tab = record.indexOf('\t')
+	return tab === -1 || tab === record.length - 1 ? null : record.slice(tab + 1)
+}
+
 export function needsTreeProtection(subcommand: string): boolean {
 	return !TREE_FREE_COMMANDS.has(subcommand)
 }
@@ -198,7 +314,9 @@ export function subcommandHardeningFlags(subcommand: string, args: readonly stri
 	const has = (prefix: string) => args.some((a) => a === prefix || a.startsWith(`${prefix}=`))
 	const flags: string[] = []
 	if (subcommand === 'diff' || subcommand === 'log' || subcommand === 'show') {
-		flags.push('--no-ext-diff', '--no-textconv')
+		// `--submodule=short`: `diff` would start a git inside the submodule to diff it, and
+		// that git neither sees `--no-ext-diff` nor stops at the submodule's diff programs.
+		flags.push('--no-ext-diff', '--no-textconv', '--submodule=short')
 	}
 	if ((subcommand === 'diff' || subcommand === 'status') && !has('--ignore-submodules')) {
 		flags.push('--ignore-submodules=dirty')
@@ -224,14 +342,11 @@ export function hardenedConfigArgs(extra: readonly string[] = []): string[] {
  * `required=false` keeps git from treating the disabled driver as a failure.
  */
 export function filterDriverOverrides(configNames: readonly string[]): GitConfigEntry[] {
-	const drivers = new Set<string>()
-	for (const raw of configNames) {
-		const name = raw.trim()
-		if (!name.toLowerCase().startsWith('filter.')) continue
-		const lastDot = name.lastIndexOf('.')
-		if (lastDot <= 'filter.'.length) continue
-		drivers.add(name.slice('filter.'.length, lastDot))
-	}
+	return overridesForFilterDrivers(filterDriverNames(configNames))
+}
+
+/** The overrides that switch off each named filter driver. */
+export function overridesForFilterDrivers(drivers: Iterable<string>): GitConfigEntry[] {
 	const entries: GitConfigEntry[] = []
 	for (const driver of drivers) {
 		entries.push(
@@ -276,6 +391,9 @@ export function remoteAccessConfig(remote: GitRemoteAccess, proxy: string): GitC
 		[`http.${url}.proxy`, proxy],
 		[`http.${url}.curloptResolve`, ''],
 		[`http.${url}.followRedirects`, 'initial'],
+		// A cookie jar is a file curl writes wherever it is told — another tenant's file, say.
+		[`http.${url}.cookieFile`, ''],
+		[`http.${url}.saveCookies`, 'false'],
 		[`http.${url}.extraHeader`, ''],
 		// `remote.<name>.proxy` beats `http.proxy`, and a URL is its own remote name.
 		[`remote.${url}.proxy`, proxy],
