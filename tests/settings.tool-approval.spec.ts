@@ -103,7 +103,10 @@ test.describe('settings/tool-approval — the panel', () => {
 			await expect(chip, name).toBeChecked()
 			await expect(chip, name).toBeDisabled()
 		}
-		await expect(panel.getByText('always asks', { exact: true })).toHaveCount(MANDATORY_APPROVAL_TOOLS.length)
+		// One marker per locked chip, and none on any other; the panel's copy says it once more.
+		await expect(panel.locator('label').getByText('always asks', { exact: true })).toHaveCount(
+			MANDATORY_APPROVAL_TOOLS.length,
+		)
 
 		// The shared row may have the all-tools wildcard on, which locks the whole list.
 		const wildcard = panel.getByRole('checkbox', { name: /Require approval for all tools/ })
