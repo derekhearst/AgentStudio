@@ -262,7 +262,7 @@
 									<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 								</div>
 							{/if}
-							{@const answer = getAskUserAnswer(call.result, q.header)}
+							{@const answer = getAskUserAnswer(call.result, q.header, askQuestions.map((question) => question.header))}
 							{#if answer}
 								<div class="console-msg console-msg--user">
 									<div class="console-msg__user-wrap">
