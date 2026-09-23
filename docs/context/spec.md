@@ -132,6 +132,8 @@ Assembly:
 
 Replace the `chars / 4` heuristic with a proper tokenizer (tiktoken or equivalent) for models where the library is available. Fall back to the heuristic for unknown models. Accurate token counts prevent compaction firing too late and prevent context overflow.
 
+> **Today:** a model-aware estimator (`js-tiktoken`) was built for this, but its only user was AgentStudio's own compaction, and it was deleted with it (#8). The context slots still budget with `chars / 4`; a chat's real token counts come from the Claude Agent SDK.
+
 ### Tool call pair integrity
 
 When deciding what to compact, treat `(assistant tool_call message, tool result message)` pairs as atomic units. Never compact the `tool_call` without compacting its result, and never leave a dangling `tool` result message without its preceding `tool_call`.

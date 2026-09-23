@@ -68,7 +68,7 @@ test.describe('permission-mode — mandatory approval survives every mode', () =
 	})
 
 	test('MANDATORY_APPROVAL_TOOLS in $lib/tools/tools has not drifted from the capability rules', () => {
-		// Read rather than import: `$lib/tools/tools` pulls in js-tiktoken and the logger, which
+		// Read rather than import: `$lib/tools/tools` pulls in the whole tool registry, which
 		// this dependency-free spec deliberately does not load. Drift here is the exact failure
 		// mode that would silently un-gate a push, so it is asserted rather than assumed.
 		const source = readFileSync(

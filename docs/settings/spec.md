@@ -116,7 +116,7 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
-- Surfaces: `/settings` category panels (models, memory, context, budget, tools, notifications, appearance) plus prompt preview panel.
+- Surfaces: `/settings` category panels (models, memory, context, budget, tools, notifications, appearance). A prompt preview panel was planned; its data query (`getFullPromptPreview`) was never called by any page and was deleted (#8).
 - States and badges: clean, unsaved, saving, saved, validation-error, and out-of-policy.
 - Save behavior: edits are section-scoped, optimistic when safe, and show rollback on write failure; unsaved changes warn before navigation.
 - Blocking actions: lowering budget caps below current spend and disabling required safety controls require explicit confirmation.
