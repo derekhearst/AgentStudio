@@ -3,14 +3,17 @@
  *
  * A reply is turned into speakable prose, cut into chunks under the endpoint's cap, and each
  * chunk is fetched from `/api/tts` and played in order on one shared <audio> element. The
- * next chunk is requested as soon as the current one arrives, so it is usually ready by the
- * time the current one ends. Starting another reply, or Stop, aborts the in-flight requests
- * (the server cancels its upstream call too) and silences the element.
+ * next chunk is requested once the current one has started playing, so it is usually ready
+ * by the time the current one ends — and a browser that refuses to play at all has paid for
+ * the short first chunk only. Starting another reply, Stop, or a failure aborts whatever is
+ * still in flight and silences the element. The server skips a synthesis it has not started
+ * yet; one OpenRouter is already working on is paid for, and recorded, either way.
  *
  * One element, reused, because of autoplay rules: a browser lets a page start audio only
  * after the user has interacted with it, and iOS Safari only on an element that was first
  * played from a tap. `play()` primes the element synchronously while it is still inside the
- * click, and turning auto-read on does the same, so a reply that finishes later can speak.
+ * click; turning auto-read on, or the first tap or key press after a reload with it on (see
+ * AutoRead), does the same, so a reply that finishes later can speak.
  */
 
 import {
@@ -88,17 +91,19 @@ class SpeechPlayer {
 		else void this.play(id, markdown, options)
 	}
 
-	/** Allow later playback without a tap. Call from a user gesture; harmless anywhere else. */
-	unlock(): void {
-		if (this.#primed || this.activeId) return
+	/**
+	 * Allow later playback without a tap. Call from a user gesture; harmless anywhere else.
+	 * Resolves true once the element is primed, false when this attempt did not prime it.
+	 */
+	unlock(): Promise<boolean> {
+		if (this.#primed) return Promise.resolve(true)
+		if (this.activeId) return Promise.resolve(false)
 		const audio = this.#element()
-		if (!audio) return
+		if (!audio) return Promise.resolve(false)
 		audio.src = SILENT_WAV
-		audio.play().then(
-			() => {
-				this.#primed = true
-			},
-			() => undefined,
+		return audio.play().then(
+			() => (this.#primed = true),
+			() => false,
 		)
 	}
 
@@ -119,7 +124,7 @@ class SpeechPlayer {
 		})
 		if (chunks.length === 0) return
 		// Still inside the click that called us, if there was one — see the module comment.
-		this.unlock()
+		void this.unlock()
 
 		const controller = new AbortController()
 		this.#controller = controller
@@ -140,17 +145,27 @@ class SpeechPlayer {
 			for (let index = 0; next; index += 1) {
 				const blob: Blob = await next
 				if (controller.signal.aborted) return
-				next = index + 1 < chunks.length ? fetchChunk(index + 1) : null
+				const following = index + 1 < chunks.length ? index + 1 : null
+				let prefetched: Promise<Blob> | null = null
 				this.status = 'playing'
-				await this.#playBlob(blob, controller.signal)
+				// The next chunk is asked for only once this one is audibly playing, never before.
+				await this.#playBlob(blob, controller.signal, () => {
+					if (following !== null) prefetched = fetchChunk(following)
+				})
 				if (controller.signal.aborted) return
+				next = following === null ? null : (prefetched ?? fetchChunk(following))
 			}
 		} catch (err) {
 			if (controller.signal.aborted) return
 			this.error = { id, message: err instanceof Error ? err.message : String(err) }
 		} finally {
-			// A newer play() owns the state now; leave it alone.
+			// Nothing this playback asked for is wanted any more. After a failure that includes a
+			// chunk already requested for later: the server skips it if OpenRouter has not got it yet.
+			controller.abort()
+			// A newer play() owns the state and the element now; leave them alone.
 			if (this.#controller === controller) {
+				// Silent already after the last chunk; after a failure it may not be.
+				this.#audio?.pause()
 				this.#controller = null
 				this.activeId = null
 				this.activePurpose = null
@@ -165,12 +180,15 @@ class SpeechPlayer {
 		return this.#audio
 	}
 
-	#playBlob(blob: Blob, signal: AbortSignal): Promise<void> {
+	/** Play one chunk to its end. `onStarted` runs once the browser has actually begun playing it. */
+	#playBlob(blob: Blob, signal: AbortSignal, onStarted: () => void): Promise<void> {
 		const audio = this.#element()
 		if (!audio) return Promise.reject(new Error('This browser cannot play audio.'))
 		const url = URL.createObjectURL(blob)
 		return new Promise<void>((resolve, reject) => {
+			let settled = false
 			const cleanup = () => {
+				settled = true
 				audio.removeEventListener('ended', onEnded)
 				audio.removeEventListener('error', onError)
 				signal.removeEventListener('abort', onAbort)
@@ -193,11 +211,16 @@ class SpeechPlayer {
 			audio.addEventListener('error', onError)
 			signal.addEventListener('abort', onAbort)
 			audio.src = url
-			audio.play().catch((err: unknown) => {
-				if (signal.aborted) return
-				cleanup()
-				reject(playbackError(err))
-			})
+			audio.play().then(
+				() => {
+					if (!settled && !signal.aborted) onStarted()
+				},
+				(err: unknown) => {
+					if (settled || signal.aborted) return
+					cleanup()
+					reject(playbackError(err))
+				},
+			)
 		})
 	}
 }

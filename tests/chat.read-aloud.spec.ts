@@ -56,6 +56,63 @@ async function scriptSpeech(page: Page, answer: (route: Route) => Promise<void>)
 const wavAnswer = (seconds: number) => (route: Route) =>
 	route.fulfill({ status: 200, headers: { 'content-type': 'audio/wav' }, body: silentWav(seconds) })
 
+type AudioProbe = {
+	/** Every `play()` the page made, by what the element was playing. */
+	plays: string[]
+	/** Each `/api/tts` fetch, and whether it was cancelled before its answer arrived. */
+	tts: Array<{ abortedWhilePending: boolean }>
+}
+
+/**
+ * Watch the page's audio and its `/api/tts` fetches. With `blockReplyAudio`, `play()` of a
+ * reply chunk (a blob: URL) is refused the way an autoplay policy refuses it; priming with the
+ * silent data: WAV still plays.
+ */
+async function probeAudio(page: Page, options: { blockReplyAudio?: boolean } = {}) {
+	await page.addInitScript((blockReplyAudio) => {
+		const probe = { plays: [] as string[], tts: [] as Array<{ abortedWhilePending: boolean }> }
+		const w = window as unknown as { __audioProbe: typeof probe; __speechAudio?: HTMLMediaElement }
+		w.__audioProbe = probe
+		const realPlay = HTMLMediaElement.prototype.play
+		HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+			w.__speechAudio = this
+			probe.plays.push(this.src)
+			if (blockReplyAudio && this.src.startsWith('blob:')) {
+				return Promise.reject(new DOMException('play() is not allowed without a user gesture.', 'NotAllowedError'))
+			}
+			return realPlay.call(this)
+		}
+		const realFetch = window.fetch
+		window.fetch = async function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+			const url = input instanceof Request ? input.url : String(input)
+			if (!url.includes('/api/tts')) return realFetch.call(this, input, init)
+			const entry = { abortedWhilePending: false }
+			let answered = false
+			probe.tts.push(entry)
+			init?.signal?.addEventListener('abort', () => {
+				if (!answered) entry.abortedWhilePending = true
+			})
+			try {
+				return await realFetch.call(this, input, init)
+			} finally {
+				answered = true
+			}
+		}
+	}, options.blockReplyAudio ?? false)
+	return {
+		read: () => page.evaluate(() => (window as unknown as { __audioProbe: AudioProbe }).__audioProbe),
+		/** Make the element fail mid-chunk, as a decode error would. */
+		failPlayback: () =>
+			page.evaluate(() => (window as unknown as { __speechAudio?: HTMLMediaElement }).__speechAudio?.dispatchEvent(new Event('error'))),
+	}
+}
+
+/** A reply several chunks long. */
+function longReply(prefix: string): string {
+	const sentences = Array.from({ length: 60 }, (_, i) => `Sentence number ${i} carries on for a little while.`)
+	return `${prefix} ${sentences.join(' ')}`
+}
+
 test('the speaker pill reads a reply without its code, and stops when pressed again', async ({ page }) => {
 	test.setTimeout(90_000)
 	const prefix = uniquePrefix('chat-read-aloud')
@@ -86,6 +143,96 @@ test('the speaker pill reads a reply without its code, and stops when pressed ag
 
 		await pill.click()
 		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 5_000 })
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('a reply started from its own pill can be stopped from above the composer', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-read-aloud-stop-pill')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId(), assistantMessage: `${prefix} a reply to stop.` })
+	await scriptSpeech(page, wavAnswer(20))
+
+	try {
+		await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const pill = page.getByTestId('speak-button').filter({ visible: true }).first()
+		const stop = page.getByTestId('read-aloud-stop')
+		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
+		await expect(stop).toHaveCount(0)
+
+		await pill.click()
+		await expect(pill).toHaveAttribute('data-state', 'playing', { timeout: 15_000 })
+		// The pill's row fades out once the message loses hover; this button stays.
+		await page.mouse.move(0, 0)
+		await expect(stop).toBeVisible()
+		await stop.click()
+		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 5_000 })
+		await expect(stop).toHaveCount(0)
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('a browser that refuses to play pays for the first chunk only', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-read-aloud-blocked')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId(), assistantMessage: longReply(prefix) })
+	const probe = await probeAudio(page, { blockReplyAudio: true })
+	const requests = await scriptSpeech(page, wavAnswer(0.2))
+
+	try {
+		await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const pill = page.getByTestId('speak-button').filter({ visible: true }).first()
+		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
+		await pill.click()
+		await expect(pill).toHaveAttribute('data-state', 'error', { timeout: 15_000 })
+		await expect(pill).toHaveAttribute('title', /blocked playback/)
+		// The next chunk is asked for only once a chunk is audibly playing, and none ever was.
+		await page.waitForTimeout(1_000)
+		expect(requests).toHaveLength(1)
+		expect((await probe.read()).plays.filter((src) => src.startsWith('blob:'))).toHaveLength(1)
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('a playback failure part-way cancels the chunk already requested for later', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-read-aloud-fail-midway')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId(), assistantMessage: longReply(prefix) })
+	const probe = await probeAudio(page)
+	// The first chunk plays for a while; the next is never answered, so only a cancel ends it.
+	let answered = 0
+	const requests = await scriptSpeech(page, async (route) => {
+		answered += 1
+		if (answered === 1) return wavAnswer(20)(route)
+		await new Promise<void>(() => undefined)
+	})
+
+	try {
+		await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const pill = page.getByTestId('speak-button').filter({ visible: true }).first()
+		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
+		await pill.click()
+		await expect(pill).toHaveAttribute('data-state', 'playing', { timeout: 15_000 })
+		await expect.poll(() => requests.length, { timeout: 15_000 }).toBe(2)
+
+		await probe.failPlayback()
+		await expect(pill).toHaveAttribute('data-state', 'error', { timeout: 5_000 })
+		await expect.poll(async () => (await probe.read()).tts[1]?.abortedWhilePending, { timeout: 5_000 }).toBe(true)
 	} finally {
 		await page.unrouteAll({ behavior: 'ignoreErrors' })
 		await cleanupPrefixedRecords(prefix)
@@ -144,10 +291,7 @@ test('a long reply is fetched in order, a short piece first, and each piece unde
 	await cleanupPrefixedRecords(prefix)
 	await authenticateContext(page.context())
 	const sentences = Array.from({ length: 60 }, (_, i) => `Sentence number ${i} carries on for a little while.`)
-	const conv = await seedConversation(prefix, {
-		userId: await getActiveUserId(),
-		assistantMessage: `${prefix} ${sentences.join(' ')}`,
-	})
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId(), assistantMessage: longReply(prefix) })
 	const requests = await scriptSpeech(page, wavAnswer(0.2))
 
 	try {
@@ -278,6 +422,41 @@ test('auto-read speaks the reply a finished turn produced — only once switched
 		await expect(page.getByTestId('auto-read-toggle')).toHaveAttribute('aria-pressed', 'true', { timeout: 30_000 })
 	} finally {
 		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('with auto-read on, the first tap after a reload primes audio again', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-auto-read-reprime')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId() })
+	const probe = await probeAudio(page)
+	const primes = async () => (await probe.read()).plays.filter((src) => src.startsWith('data:audio/wav')).length
+
+	try {
+		// Off: tapping around the page plays nothing.
+		await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const toggle = page.getByTestId('auto-read-toggle')
+		const composer = page.getByPlaceholder('Message AgentStudio...')
+		await expect(toggle).toHaveAttribute('aria-pressed', 'false', { timeout: 30_000 })
+		await composer.click()
+		expect(await primes()).toBe(0)
+
+		// On, then a reload: the switch is remembered, the primed element is not. The next tap
+		// primes it again, which is what lets the reply to that message be read without one.
+		await toggle.click()
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+		await page.reload({ waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true', { timeout: 30_000 })
+		expect(await primes()).toBe(0)
+		await composer.click()
+		await expect.poll(primes, { timeout: 5_000 }).toBeGreaterThan(0)
+	} finally {
+		await page.evaluate(() => localStorage.removeItem('agentstudio:speech:auto-read')).catch(() => undefined)
 		await cleanupPrefixedRecords(prefix)
 	}
 })

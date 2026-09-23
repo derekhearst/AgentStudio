@@ -10,6 +10,12 @@
 	 *
 	 * The switch is per device (see `autoRead`) and starts off. Turning it on also primes the
 	 * audio element from that tap, which is what lets a reply that arrives later start talking.
+	 * The switch survives a reload and the primed element does not, so while it is on, the
+	 * first tap or key press on the page (sending the next message, typically) primes it again.
+	 *
+	 * It also carries the Stop button for any reply being read, auto-read or not: a reply's own
+	 * speaker button only shows while that message is hovered, and a long reply keeps talking
+	 * after the pointer or the scroll has moved on.
 	 *
 	 * The page is reused across conversations, so this also owns what happens on leaving one:
 	 * a reply still being read stops (its speaker button is no longer on screen to stop it),
@@ -40,7 +46,10 @@
 		mounted = true;
 	});
 	const enabled = $derived(mounted && autoRead.enabled);
+	/** Auto-read started what is playing: turning the switch off stops it. */
 	const reading = $derived(speechPlayer.activePurpose === 'autoplay');
+	/** A reply from this conversation is being read, by auto-read or its speaker button. */
+	const replyPlaying = $derived(speechPlayer.activePurpose === 'autoplay' || speechPlayer.activePurpose === 'message');
 
 	/** The running turn's conversation and the replies it already held; null between turns. */
 	let turn: TurnStart | null = null;
@@ -68,6 +77,23 @@
 		});
 	});
 
+	// Re-prime after a reload (see the header). iOS counts the end of a touch as the tap, not
+	// its start, so every event that may carry the gesture is listened to until one primes it.
+	$effect(() => {
+		if (!enabled) return;
+		const events = ['pointerup', 'touchend', 'keydown'] as const;
+		const stopListening = () => {
+			for (const type of events) window.removeEventListener(type, prime, true);
+		};
+		function prime() {
+			void speechPlayer.unlock().then((primed) => {
+				if (primed) stopListening();
+			});
+		}
+		for (const type of events) window.addEventListener(type, prime, true);
+		return stopListening;
+	});
+
 	// Leaving the conversation, for another one or another page, stops a reply being read
 	// from it, and drops its failure notice. Only replies: the settings preview is not this
 	// page's to stop.
@@ -83,20 +109,20 @@
 
 	function toggle() {
 		autoRead.enabled = !autoRead.enabled;
-		if (autoRead.enabled) speechPlayer.unlock();
+		if (autoRead.enabled) void speechPlayer.unlock();
 		else if (reading) speechPlayer.stop();
 	}
 </script>
 
 <div class="auto-read">
-	{#if failure && !reading}
+	{#if failure && !replyPlaying}
 		<span class="auto-read__error" role="status" title={failure} data-testid="auto-read-error">Couldn't read the reply aloud: {failure}</span>
 	{/if}
-	{#if reading}
+	{#if replyPlaying}
 		<button
 			type="button"
 			class="console-pill"
-			data-testid="auto-read-stop"
+			data-testid="read-aloud-stop"
 			title="Stop reading this reply"
 			aria-label="Stop reading this reply"
 			onclick={() => speechPlayer.stop()}
