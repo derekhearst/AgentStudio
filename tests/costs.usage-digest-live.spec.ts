@@ -39,6 +39,7 @@ test.afterEach(async () => {
 const WINDOW_END = new Date('2001-01-08T00:00:00.000Z')
 const IN_WINDOW = new Date('2001-01-05T12:00:00.000Z')
 const PREVIOUS_WINDOW = new Date('2000-12-29T12:00:00.000Z')
+const AFTER_WINDOW = new Date('2001-01-10T12:00:00.000Z')
 
 async function cleanupLedger(prefix: string) {
 	const sql = getSql()
@@ -107,6 +108,17 @@ test.describe('costs/usage-digest live — aggregation', () => {
 					(${automation.id}, ${userId}, 'failed', 'maintenance', ${IN_WINDOW}, null),
 					(${automation.id}, ${userId}, 'completed', 'maintenance', ${PREVIOUS_WINDOW}, '0')
 			`
+			// One that failed this week but was only switched off after the window ended: as of
+			// the window's end it is newly failing, not yet switched off.
+			const [laterDisabled] = await sql<{ id: string }[]>`
+				insert into automations (user_id, description, cron_expression, prompt, mode, enabled, disabled_reason, updated_at)
+				values (${userId}, ${`${prefix} weekly`}, '0 9 * * 1', ${`${prefix} prompt`}, 'maintenance', false, 'consecutive_failures', ${AFTER_WINDOW})
+				returning id
+			`
+			await sql`
+				insert into automation_runs (automation_id, user_id, status, mode, started_at, cost_usd)
+				values (${laterDisabled.id}, ${userId}, 'failed', 'maintenance', ${IN_WINDOW}, null)
+			`
 
 			// A monitor that ran out of time without ever firing, and one that fired.
 			await sql`
@@ -153,14 +165,20 @@ test.describe('costs/usage-digest live — aggregation', () => {
 
 			expect(digest.runs).toEqual({ total: 5, completed: 3, failed: 1, canceled: 1, inFlight: 0, failureRate: 0.25 })
 
-			expect(digest.automations).toMatchObject({ runs: 3, completed: 1, failed: 2 })
+			expect(digest.automations).toMatchObject({ runs: 4, completed: 1, failed: 3 })
 			expect(digest.automations.items).toEqual([
 				expect.objectContaining({ automationId: automation.id, runs: 3, failed: 2, prevFailed: 0, disabledInWindow: true }),
+				expect.objectContaining({ automationId: laterDisabled.id, runs: 1, failed: 1, prevFailed: 0, disabledInWindow: false }),
 			])
 			expect(digest.automations.costUsd).toBeCloseTo(0.05)
 
 			const anomalies = digest.anomalies.map((a) => [a.kind, a.message])
 			expect(anomalies).toContainEqual(['automation_disabled', `Automation “${prefix} nightly” has been switched off after failing repeatedly.`])
+			expect(anomalies).toContainEqual([
+				'automation_newly_failing',
+				`Automation “${prefix} weekly” failed once, after no failures the previous 7 days.`,
+			])
+			expect(anomalies.filter(([kind]) => kind === 'automation_disabled')).toHaveLength(1)
 			expect(anomalies).toContainEqual(['run_failure_rate', '25% of finished runs failed (1 of 4).'])
 			expect(anomalies).toContainEqual([
 				'monitor_never_fired',

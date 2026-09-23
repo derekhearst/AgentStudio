@@ -153,7 +153,7 @@ async function loadUsageDigestInput(userId: string, window: DigestWindow): Promi
 					description: automations.description,
 					enabled: automations.enabled,
 					disabledReason: automations.disabledReason,
-					disabledInWindow: sql<boolean>`(${automations.disabledReason} is not null and ${afterSince(automations.updatedAt)})`,
+					disabledInWindow: sql<boolean>`(${automations.disabledReason} is not null and ${afterSince(automations.updatedAt)} and ${automations.updatedAt} < ${until}::timestamptz)`,
 					runs: sql<number>`(count(*) filter (where ${afterSince(automationRuns.startedAt)}))::int`,
 					completed: sql<number>`(count(*) filter (where ${automationRuns.status} = 'completed' and ${afterSince(automationRuns.startedAt)}))::int`,
 					failed: sql<number>`(count(*) filter (where ${automationRuns.status} = 'failed' and ${afterSince(automationRuns.startedAt)}))::int`,
