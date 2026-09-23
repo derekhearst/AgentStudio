@@ -250,6 +250,11 @@
 						<option value="chat_session">Chat session — assistant message in the conversation</option>
 						<option value="review_inbox">Review inbox — automation_summary item</option>
 					</select>
+					<!-- #38 — the digest is otherwise only reachable from the /activity opt-in. -->
+					<p class="text-[11px] text-base-content/55">
+						A prompt of just <code>{'{{usage_digest}}'}</code> (or <code>{'{{usage_digest:30}}'}</code> for 30 days) sends
+						the usage numbers from Activity instead, with no model call.
+					</p>
 				</div>
 			{/if}
 		</div>

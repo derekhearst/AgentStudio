@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
 import type { JobRow } from '$lib/jobs/jobs.schema'
 import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
+import { isUsageDigestAutomation } from '$lib/costs/usage-digest'
 import { logger } from '$lib/observability/logger'
 import { computeNextRunAt } from './cron'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
@@ -111,11 +112,15 @@ export async function runAutomationById(
 	// item when an applicable cap is exceeded; the next scheduled tick can try again once the
 	// period rolls or an operator lifts the cap. Mirrors the chat-stream policy_override_request
 	// flow so the same /review surface covers both interactive and scheduled execution paths.
-	const budgetCheck = await checkBudgetLimits({
-		userId: automation.userId,
-		agentId: automation.agentId ?? undefined,
-	})
-	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
+	// #38 — the usage digest spends nothing, so a limit has nothing to protect from it; and
+	// the week a limit is exceeded is the week the digest has to say so.
+	const budgetCheck = isUsageDigestAutomation(automation)
+		? null
+		: await checkBudgetLimits({
+				userId: automation.userId,
+				agentId: automation.agentId ?? undefined,
+			})
+	if (budgetCheck && !budgetCheck.allowed && budgetCheck.blockedBy) {
 		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now, {
 			trigger,
 			attempt,

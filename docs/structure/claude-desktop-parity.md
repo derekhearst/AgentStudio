@@ -61,7 +61,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | CI watch and fix | **even** (#20 landed) | an opened PR's checks are watched (webhook, or polling every few minutes) for up to 14 days; a red check opens a review item and a notification, and **Fix it** hands the failure back to the conversation that wrote the code — a button, not an automatic run | cloud sessions react to CI |
 | Hooks | **even** | `/settings/hooks`, event bus, skill hooks | same idea, dialog-managed |
 | Background tasks | **behind** (#35) | the job queue backgrounds automations and research; inside a chat turn a long command blocks the turn | background bash that survives turns, with a completion notice |
-| Session cost accounting | **win** | per-run rows, `/activity`, `/runs/[id]`, ledger per tool call. Caveat: #15 means built-in tool calls miss the ledger entirely | session cost in a dialog |
+| Session cost accounting | **win** | per-run rows, `/runs/[id]`, a ledger row per tool call, and the `/activity` usage strip (#38). Built-in calls write $0 call-count rows again since the ledger fix; tool calls made through the older loop (agent-attached automations, monitors, PR fix) are still not counted | session cost in a dialog |
 
 ## Chat
 
@@ -89,7 +89,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Search across conversations | **far behind** (#18) | client-side filter over loaded rows | server-side across all history |
 | Export a conversation | **absent** (#18) | — | export |
 | Temporary / incognito chat | **n/a** | delete covers it here | incognito |
-| Usage digest | **absent** (#38) | `/activity` is raw rows | smart reports, monthly recap |
+| Usage digest | **behind** (#38) | `/activity` usage strip over 24h / 7d / 30d: runs and failure rate, tokens first with metered dollars, automations, most-used tools, review inbox, budget headroom, and anomaly flags (spend spike, newly failing automation, monitor that never fired). An opt-in weekly digest sends the same numbers to the inbox or chat, rendered by code with no model call. Numbers only, no written narrative | smart reports, monthly recap |
 | Image generation | **win** | `image_generate` | — |
 | Video generation | **win** | `video_generate` with async job polling | — |
 
