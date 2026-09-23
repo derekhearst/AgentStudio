@@ -316,6 +316,13 @@ async function registerJobHandlers(): Promise<void> {
 	} catch (err) {
 		console.warn('[db] Logs handler registration failed (non-fatal):', err)
 	}
+
+	try {
+		const { registerCostJobHandlers } = await import('$lib/costs/costs-handler.server')
+		registerCostJobHandlers()
+	} catch (err) {
+		console.warn('[db] Costs handler registration failed (non-fatal):', err)
+	}
 }
 
 /**
