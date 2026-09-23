@@ -20,9 +20,10 @@
 	 * speaker button only shows while that message is hovered, and a long reply keeps talking
 	 * after the pointer or the scroll has moved on.
 	 *
-	 * The page is reused across conversations, so this also owns what happens on leaving one:
-	 * a reply still being read stops (its speaker button is no longer on screen to stop it),
-	 * and a turn that ends after the move reads nothing from the conversation now shown.
+	 * It also owns what happens on leaving a conversation: a reply still being read stops (its
+	 * speaker button is no longer on screen to stop it). The chat page is mounted afresh for
+	 * each conversation (#74), so a turn that ends after the move is not seen here at all;
+	 * `repliesToSpeak` still checks the conversation, so nothing from the one now shown is read.
 	 */
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';

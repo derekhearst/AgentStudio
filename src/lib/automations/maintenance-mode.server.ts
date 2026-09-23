@@ -7,6 +7,8 @@ import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
+import { parseUsageDigestPrompt, renderDigestMarkdown } from '$lib/costs/usage-digest'
+import { computeUsageDigest } from '$lib/costs/usage-digest.server'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
 
 /**
@@ -23,6 +25,10 @@ export async function runMaintenanceModeAutomation(
 	automation: typeof automations.$inferSelect,
 	now: Date,
 ) {
+	// #38 — a prompt that is only `{{usage_digest}}` is the usage digest, rendered by code.
+	const digestDays = parseUsageDigestPrompt(automation.prompt)
+	if (digestDays !== null) return runUsageDigest(automation, digestDays, now)
+
 	const settings = await getOrCreateSettings(automation.userId)
 	const model = settings.defaultModel
 
@@ -62,19 +68,58 @@ export async function runMaintenanceModeAutomation(
 }
 
 /**
+ * #38 — the usage digest: the same numbers as the `/activity` strip, as markdown, routed
+ * like any other maintenance output. No model is called, so the run costs nothing and
+ * cannot fail on model credentials.
+ *
+ * Unlike the model path above, a routing failure fails the run. Delivery is the digest's
+ * only output, and re-running it is free, so the failure policy should retry and report it
+ * rather than the ledger recording a completed run that sent nothing. `deliver` is a
+ * parameter only so a spec can make delivery fail.
+ */
+export async function runUsageDigest(
+	automation: typeof automations.$inferSelect,
+	days: number,
+	now: Date,
+	deliver: typeof routeMaintenanceOutput = routeMaintenanceOutput,
+) {
+	const digest = await computeUsageDigest({ userId: automation.userId, days, now })
+	const markdown = renderDigestMarkdown(digest)
+
+	const route = await deliver(automation, markdown, null, now)
+	// `openReviewItem` logs and returns null instead of throwing when the insert fails.
+	if (route.target === 'none' || (route.target === 'review_inbox' && !route.reviewItemId)) {
+		throw new Error(`The usage digest was not delivered to ${automation.outputTarget}`)
+	}
+
+	return {
+		conversationId: route.target === 'chat_session' ? route.conversationId : null,
+		mode: 'maintenance' as const,
+		summary: markdown.slice(0, 500),
+		output: markdown,
+		costUsd: '0',
+		outputTarget: automation.outputTarget,
+		routedTo: route.target,
+		reviewItemId: route.target === 'review_inbox' ? route.reviewItemId : null,
+	}
+}
+
+/**
  * Wave 5 #21 phase 4 (output routing) — maintenance-mode result destination.
  *
  * Each `outputTarget` enum value gets a destination:
  *   - `chat_session` (default): assistant message in the automation's conversation
  *   - `review_inbox`: `automation_summary` review item (deduped per-hour by automation id)
  *
- * Best-effort: failures are caught at the caller so a routing hiccup never invalidates the
- * already-completed maintenance work.
+ * Best-effort for the model path: failures are caught at the caller so a routing hiccup never
+ * invalidates the already-completed (and already-paid-for) maintenance work. The usage
+ * digest lets them fail the run instead; see `runUsageDigest`.
  */
 async function routeMaintenanceOutput(
 	automation: typeof automations.$inferSelect,
 	summary: string,
-	model: string,
+	/** The model that wrote it; null for output rendered by code (the usage digest). */
+	model: string | null,
 	now: Date,
 ): Promise<
 	| { target: 'chat_session'; conversationId: string }

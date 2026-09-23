@@ -179,15 +179,11 @@ export async function resetSettings(userId: string) {
 	const [updated] = await db
 		.update(appSettings)
 		.set({
-			defaultModel: DEFAULT_SETTINGS.defaultModel,
-			ttsModel: DEFAULT_SETTINGS.ttsModel,
-			ttsVoice: DEFAULT_SETTINGS.ttsVoice,
-			theme: DEFAULT_SETTINGS.theme,
-			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
-			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
-			contextConfig: DEFAULT_SETTINGS.contextConfig,
-			toolConfig: DEFAULT_SETTINGS.toolConfig,
-			memoryConfig: DEFAULT_SETTINGS.memoryConfig,
+			// Every default, by spreading the one list of them. This used to name the fields
+			// one by one and missed `transcriptionModel`, so Reset said "Settings reset to
+			// defaults." and left the transcription model as it was. The read-aloud model and
+			// voice (#27) are in the list, so they come back too.
+			...DEFAULT_SETTINGS,
 			updatedAt: new Date(),
 		})
 		.where(eq(appSettings.id, existing.id))

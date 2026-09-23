@@ -6,6 +6,8 @@
 	import { getRunTraceQuery } from '$lib/observability/review.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { isNotFoundError, remoteErrorMessage } from '$lib/ui/remote-error';
 	import { formatDateTime as fmtDate } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof getRunTraceQuery>>;
@@ -23,9 +25,10 @@
 		loading = true;
 		error = null;
 		try {
-			result = await getRunTraceQuery(runId);
+			// Fresh, or Refresh on a running run shows the spans it already had.
+			result = await fetchFresh(getRunTraceQuery(runId));
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load trace';
+			error = isNotFoundError(e) ? 'No run with this id.' : remoteErrorMessage(e, 'Failed to load trace');
 		} finally {
 			loading = false;
 		}
@@ -121,20 +124,29 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
-	{#if !result}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
+	<!--
+		The error is checked before the spinner. It used to sit after `!result`, and a failed
+		load never sets `result` — so the spinner branch always won and a bad id or a lost
+		session spun forever. It sits above the trace rather than in its place, so a Refresh
+		that fails leaves the spans already loaded on screen.
+	-->
+	{#if error}
+		<div role="alert" class="alert alert-error alert-soft border-error/40 p-6 text-sm text-error">
+			{error}
 		</div>
+	{/if}
+	{#if !result}
+		{#if !error}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else if result.adminOnly}
 		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
 			<p class="text-sm font-medium">Admin only</p>
 			<p class="mt-1 text-xs opacity-70">
 				The trace viewer is visible only to users with the <code>admin</code> role.
 			</p>
-		</div>
-	{:else if error}
-		<div class="alert alert-error alert-soft border-error/40 p-6 text-sm text-error">
-			{error}
 		</div>
 	{:else if !result.trace}
 		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">

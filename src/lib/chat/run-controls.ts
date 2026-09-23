@@ -65,3 +65,26 @@ export function approvalAnswerProblem(ok: boolean, status: number, body: unknown
 	if (answer.resolved === true) return null
 	return 'That approval is no longer waiting for an answer. It may have timed out, or been answered in another tab.'
 }
+
+/**
+ * What to tell the user when an `ask_user` answer was not recorded, or null when it was.
+ *
+ * `/ask-user` answers a token it cannot find with a 200 and `resolved: false`, and the page
+ * read only the status: the modal closed as if the answer had been taken, and the answer
+ * went nowhere. Unlike an approval, a question is only shown once it is recorded, so a
+ * `resolved: false` means it is gone — timed out, answered in another tab, or its turn
+ * ended — and `gone` says there is nothing to retry.
+ */
+export function askUserAnswerProblem(
+	ok: boolean,
+	status: number,
+	body: unknown,
+): { message: string; gone: boolean } | null {
+	if (!ok) return { message: `The answer could not be sent (status ${status}). Try again.`, gone: false }
+	const answer = (body && typeof body === 'object' ? body : {}) as { resolved?: unknown }
+	if (answer.resolved === true) return null
+	return {
+		message: 'That question is no longer waiting for an answer. It may have timed out, or been answered in another tab.',
+		gone: true,
+	}
+}

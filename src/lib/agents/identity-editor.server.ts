@@ -95,6 +95,11 @@ export async function getAgentIdentity(agentId: string): Promise<AgentIdentityRe
  *
  * Naming pattern: `agent/<slug>-<shortid>/identity` — the short id keeps it unique
  * across renames + cross-user collisions.
+ *
+ * When a skill by that name already exists it is linked again rather than created. Unlinking
+ * keeps the skill, so the name is taken from then on: the insert used to hit the unique
+ * index every time, and an agent that had ever been unlinked could never be promoted again.
+ * Its content is the operator's last edit, which is what promoting again should bring back.
  */
 export async function ensureAgentIdentitySkill(agentId: string): Promise<AgentIdentityRecord> {
 	const existing = await getAgentIdentity(agentId)
@@ -109,6 +114,14 @@ export async function ensureAgentIdentitySkill(agentId: string): Promise<AgentId
 		? existing.agent.systemPrompt
 		: `You are ${existing.agent.name}.\n\nYour role: ${existing.agent.role}.`
 
+	const identityColumns = {
+		id: skills.id,
+		name: skills.name,
+		content: skills.content,
+		description: skills.description,
+		enabled: skills.enabled,
+		updatedAt: skills.updatedAt,
+	}
 	const [createdSkill] = await db
 		.insert(skills)
 		.values({
@@ -118,23 +131,20 @@ export async function ensureAgentIdentitySkill(agentId: string): Promise<AgentId
 			tags: [IDENTITY_TAG],
 			enabled: true,
 		})
-		.returning({
-			id: skills.id,
-			name: skills.name,
-			content: skills.content,
-			description: skills.description,
-			enabled: skills.enabled,
-			updatedAt: skills.updatedAt,
-		})
-	if (!createdSkill) {
+		.onConflictDoNothing({ target: skills.name })
+		.returning(identityColumns)
+	const [skill] = createdSkill
+		? [createdSkill]
+		: await db.select(identityColumns).from(skills).where(eq(skills.name, skillName)).limit(1)
+	if (!skill) {
 		throw new Error('Failed to create identity skill')
 	}
 
-	await db.update(agents).set({ identitySkillId: createdSkill.id }).where(eq(agents.id, agentId))
+	await db.update(agents).set({ identitySkillId: skill.id }).where(eq(agents.id, agentId))
 
 	return {
-		agent: { ...existing.agent, identitySkillId: createdSkill.id },
-		skill: createdSkill,
+		agent: { ...existing.agent, identitySkillId: skill.id },
+		skill,
 	}
 }
 

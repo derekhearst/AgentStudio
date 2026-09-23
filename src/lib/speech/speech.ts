@@ -386,8 +386,9 @@ export function noteStop(turn: TurnStart): TurnStart {
  * of what they asked for.
  *
  * Otherwise, only replies in the turn's own conversation that were not already there when it
- * started. The chat page is reused from one conversation to the next, so a turn can end after
- * the page has moved on — the other conversation's history is not new, and must not be read.
+ * started. A turn can end after the page has moved on to another conversation, whose history
+ * is not new and must not be read. The chat page is now mounted afresh per conversation (#74),
+ * which already keeps them apart; this check stays as the guard.
  * A reply saved as `partial`, or with no text to read (see `hasReplyText`), is skipped too.
  */
 export function repliesToSpeak<T extends SpeakableMessage>(

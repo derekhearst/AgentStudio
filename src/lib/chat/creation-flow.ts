@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation'
-import { createConversation } from '$lib/chat'
+import { createConversation, getConversations } from '$lib/chat'
 
 export type CreationKind = 'agent' | 'skill'
 
@@ -42,9 +42,21 @@ function buildPrompt({ kind, context = {} }: GuidedCreationInput) {
 	].join(' ')
 }
 
-export async function startGuidedCreationChat(input: GuidedCreationInput) {
+/**
+ * Create the guided-creation conversation and open it; the chat page sends the prompt.
+ *
+ * `replaceState` is for a route that exists only to do this, like /agents/new. With a
+ * normal push, that route stayed in history behind the chat, so Back landed on it again
+ * — and it created another conversation and started another model run, then jumped
+ * forward. Back could never get past it.
+ */
+export async function startGuidedCreationChat(
+	input: GuidedCreationInput,
+	options: { replaceState?: boolean } = {},
+) {
 	const prompt = buildPrompt(input)
 	const title = `Create ${input.kind}`
 	const created = await createConversation({ title, model: input.model })
-	await goto(`/chat/${created.id}?prompt=${encodeURIComponent(prompt)}`)
+	void getConversations().refresh().catch(() => {})
+	await goto(`/chat/${created.id}?prompt=${encodeURIComponent(prompt)}`, { replaceState: options.replaceState })
 }

@@ -281,7 +281,11 @@ export async function deleteProject(projectId: string): Promise<{ deleted: boole
 	await db.delete(repositories).where(eq(repositories.projectId, projectId))
 	const result = await db.delete(projects).where(eq(projects.id, projectId)).returning({ id: projects.id })
 
-	if (result.length > 0 && row.userId && row.repoKind !== 'none') {
+	// Every kind of project has a directory, not only the ones with a repository: knowledge
+	// files land there, and it is the working directory of every chat run in the project.
+	// This used to skip repo-less projects, so deleting one left its uploads on the volume
+	// for good. `deleteProjectFs` is a no-op when there is nothing on disk.
+	if (result.length > 0 && row.userId) {
 		await deleteProjectFs(row.userId, projectId).catch((err) =>
 			logger.warn('[projects] deleteProjectFs failed (non-fatal)', { projectId, err }),
 		)

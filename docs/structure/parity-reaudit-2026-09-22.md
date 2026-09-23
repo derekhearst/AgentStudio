@@ -493,6 +493,16 @@ header strip, then decide whether anyone wants the prose digest. The strip is ~a
 on screen without waiting; the digest is an agent run that costs money every week to tell
 you something you could have glanced at.
 
+**Status (2026-09-23).** Step 1 shipped in e0c6234. The strip shipped on `/activity`
+(`src/lib/costs/usage-digest*.ts`): runs, tokens first with metered dollars, automations,
+most-used tools, the review inbox, budget headroom read from the enforced `budget_limits`,
+and anomaly flags with fixed floors. The digest was built as the cheap version rather than
+the agent run: the same numbers rendered to markdown by code, delivered through the existing
+maintenance output routing, costing nothing, and opt-in from the strip — nothing posts on
+deploy. A written narrative was not built. Still open: tool calls from the older runtime
+loop (automations, monitors, PR fix) write no ledger rows, and the Settings daily/monthly
+budget figures are display-only, so headroom usually reads "No limits set".
+
 ### #14 — the right sidebar
 
 Half-resolved already: #29 made `Preview` the default tab
@@ -548,8 +558,8 @@ unless one of those is the actual goal.
    `TodoWrite` output onto an optional `details` field on the tool block, and the chat
    renders a diff, a terminal and a checklist from it. What is left of those three issues is
    placement rather than data — the pinned todo list above the composer (#21), live output
-   while a command runs (#26, which is the background path in #35). The ledger gap is
-   untouched and still wants the same field.
+   while a command runs (#26, which is the background path in #35). The ledger gap was
+   closed off the same field (e0c6234; see the "Fixed" note under the ledger finding).
 2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
    of #35, and real context accounting.
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool

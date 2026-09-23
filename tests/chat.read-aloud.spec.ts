@@ -257,7 +257,7 @@ test('opening another conversation stops a reply being read', async ({ page }) =
 	// Long enough to still be playing when we come back, had nothing stopped it.
 	await scriptSpeech(page, wavAnswer(20))
 
-	/** In-app navigation: the chat page is reused rather than reloaded, as from the sidebar. */
+	/** In-app navigation, as from the sidebar: a client-side route change, not a reload. */
 	const openInApp = async (id: string) => {
 		await page.evaluate((href) => {
 			const link = document.createElement('a')

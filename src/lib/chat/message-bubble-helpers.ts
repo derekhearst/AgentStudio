@@ -14,6 +14,7 @@
 // the plain Playwright loader, where the SvelteKit alias is not guaranteed to resolve.
 import type { ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
+import { readAskUserAnswers } from './ask-user-answers'
 
 export type SavedBlock =
 	| { kind: 'text'; content: string }
@@ -100,12 +101,15 @@ export function getAskUserQuestions(
 		.filter((q) => q.header.length > 0 || (q.question?.length ?? 0) > 0)
 }
 
-/** Look up the resolved answer for a single ask_user question header. */
-export function getAskUserAnswer(resultValue: unknown, header: string): string | null {
-	const result = asRecord(resultValue)
-	const answers = asRecord(result?.answers)
-	if (!answers) return null
-	const value = answers[header]
+/**
+ * Look up the resolved answer for a single ask_user question header.
+ *
+ * `headers` is every question's header on the call. The host records its answers as
+ * `Header: answer` lines (#81), and an answer can span lines, so telling where one ends
+ * needs the others' headers too. Omitted, the call is read as a single question.
+ */
+export function getAskUserAnswer(resultValue: unknown, header: string, headers: string[] = [header]): string | null {
+	const value = readAskUserAnswers(resultValue, headers.includes(header) ? headers : [...headers, header])?.[header]
 	if (typeof value !== 'string') return null
 	const trimmed = value.trim()
 	return trimmed.length > 0 ? trimmed : null

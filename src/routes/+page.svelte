@@ -3,9 +3,13 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
+	import { handOffAttachments, type HandoffAttachment } from '$lib/chat/new-chat-handoff';
+	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import HomeChatTray from '$lib/chat/HomeChatTray.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
@@ -34,7 +38,12 @@
 		lastHeartbeatAt?: string | Date | null;
 		updatedAt?: string | Date | null;
 	};
-	let recentChats = $state<Conversation[]>([]);
+	/*
+	 * Read reactively, not copied out once (#79): a refresh — after a chat is created here,
+	 * or when the monitor says the list changed — has to reach the list without a reload.
+	 */
+	const conversationsQuery = browser ? getConversations() : null;
+	const recentChats = $derived<Conversation[]>(conversationsQuery?.current ?? []);
 	let agentChoices = $state<AgentChoice[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
 
@@ -60,7 +69,9 @@
 	});
 
 	async function loadDefaultModel() {
-		const settings = await getSettings();
+		// Fresh: a cached read could still hold the default model from before it was changed
+		// in /settings, and the next chat would start on the old one.
+		const settings = await fetchFresh(getSettings());
 		if (settings?.defaultModel) {
 			model = settings.defaultModel;
 		}
@@ -68,7 +79,6 @@
 	}
 
 	async function loadRecent() {
-		recentChats = await getConversations();
 		agentChoices = await listAgentsForPicker();
 		// Pick the user's default agent (or the first built-in) once choices land.
 		if (agentId == null && agentChoices.length > 0) {
@@ -107,6 +117,9 @@
 	onMount(() => {
 		if (!browser) return;
 		const source = new EventSource('/api/chat/monitor');
+		// The recent list follows the conversation list too (#79). With the nav listening as well,
+		// one change still makes one refresh — see `onConversationListChange`.
+		onConversationListChange(source, () => getConversations().refresh());
 		source.onmessage = (event) => {
 			try {
 				const runs = JSON.parse(event.data) as LiveRun[];
@@ -136,6 +149,8 @@
 	}
 
 	const greeting = getGreeting();
+	/** The owner's display name from /setup (#70), rather than a name written into the page. */
+	const displayName = $derived(page.data.user?.name?.trim() ?? '');
 
 	const filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase();
@@ -208,13 +223,17 @@
 		search = '';
 	}
 
-	async function handleNewChat(initialPrompt?: string) {
+	async function handleNewChat(initialPrompt?: string, attachments: HandoffAttachment[] = []) {
 		if (busy) return;
 		busy = true;
 		try {
 			const trimmedPrompt = initialPrompt?.trim() ?? '';
 			const title = trimmedPrompt.slice(0, 80) || 'New conversation';
 			const created = await createConversation({ title, model, agentId: agentId ?? undefined });
+			// The sidebar and the recent list read this query; the new chat belongs in them now.
+			void getConversations().refresh().catch(() => {});
+			// The conversation's page sends them with the prompt (#59); the URL can only carry text.
+			handOffAttachments(created.id, attachments);
 			if (trimmedPrompt) {
 				await goto(`/chat/${created.id}?prompt=${encodeURIComponent(trimmedPrompt)}`);
 			} else {
@@ -225,11 +244,11 @@
 		}
 	}
 
-	async function handleComposerSubmit(content: string) {
+	async function handleComposerSubmit(content: string, attachments: HandoffAttachment[]) {
 		// All agents — including Research — go through handleNewChat. The Research agent
-		// writes a plan file and hands off via request_plan_approval to a research-runner
-		// agent on approval.
-		await handleNewChat(content);
+		// writes a plan file and hands off via request_plan_approval to the agent that
+		// carries it out (usually Chat) on approval.
+		await handleNewChat(content, attachments);
 	}
 </script>
 
@@ -240,7 +259,7 @@
 	<div class="w-full max-w-2xl space-y-4 text-center tablet:space-y-8">
 		<!-- Greeting -->
 		<div>
-			<h2 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}, Derek</h2>
+			<h2 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}{displayName ? `, ${displayName}` : ''}</h2>
 			<p class="mt-1 text-sm text-base-content/50 tablet:mt-2 tablet:text-lg">How can I help you today?</p>
 		</div>
 
@@ -255,7 +274,7 @@
 				{agentChoices}
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
-				onSubmit={(content) => handleComposerSubmit(content)}
+				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				onModelChange={(id) => {
 					model = id;
 				}}

@@ -177,8 +177,10 @@
 				memoryConfig: settings.memoryConfig,
 			});
 			settings = updated;
-			// Other pages read the cached query (the chat page's default model, for one).
-			void getSettings().refresh();
+			// Put the saved row in the query cache too. Other pages read `getSettings()` —
+			// '/' takes its default model from it — and would otherwise be handed the
+			// pre-save value for as long as that cache entry lives.
+			getSettings().set(updated);
 			applyTheme('AgentStudio-night');
 			statusMessage = 'Settings saved.';
 		} catch (err) {
@@ -195,7 +197,7 @@
 		try {
 			const updated = await resetAppSettings();
 			settings = updated;
-			void getSettings().refresh();
+			getSettings().set(updated);
 			applyTheme('AgentStudio-night');
 			statusMessage = 'Settings reset to defaults.';
 		} catch (err) {
