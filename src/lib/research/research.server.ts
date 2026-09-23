@@ -1,5 +1,7 @@
 import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
+import { enqueueJob } from '$lib/jobs/jobs.server'
+import type { JobRow } from '$lib/jobs/jobs.schema'
 import {
 	research,
 	researchSources,
@@ -72,6 +74,41 @@ export async function updateResearch(
 	const [row] = await db.update(research).set(updates).where(eq(research.id, researchId)).returning()
 	return row ?? null
 }
+
+export type EnqueueResearchRunInput = {
+	researchId: string
+	userId: string | null
+	runId?: string | null
+	priority: number
+	dedupeKey?: string
+}
+
+/**
+ * Queue the background run for a research row and link the job back to the row.
+ *
+ * One attempt. The queue's default is three, and a research run is ten minutes of paid model
+ * calls and a few dozen page fetches: a second attempt re-ran all of it on a row that still
+ * carried the first attempt's error, plan and sources, while the open page had already
+ * stopped polling at "failed". A failed run now stays failed, where the user can see it,
+ * and the job lands in the review inbox as a job failure.
+ */
+export async function enqueueResearchRun(input: EnqueueResearchRunInput): Promise<JobRow> {
+	const job = await enqueueJob({
+		type: 'research_run',
+		queue: 'default',
+		priority: input.priority,
+		payload: { researchId: input.researchId },
+		userId: input.userId,
+		runId: input.runId ?? null,
+		dedupeKey: input.dedupeKey,
+		maxAttempts: 1,
+	})
+	await updateResearch(input.researchId, { jobId: job.id })
+	return job
+}
+
+/** Research statuses a run ends in. A row in one of these is never run again. */
+export const TERMINAL_RESEARCH_STATUSES: ReadonlySet<ResearchStatus> = new Set(['complete', 'failed', 'canceled'])
 
 export async function getResearchById(researchId: string): Promise<ResearchRow | null> {
 	const [row] = await db.select().from(research).where(eq(research.id, researchId)).limit(1)
@@ -147,6 +184,26 @@ export async function listSourcesForResearch(
 		.from(researchSources)
 		.where(and(...filters))
 		.orderBy(asc(researchSources.fetchedAt))
+}
+
+/** The URLs already fetched for a run, so a later pass does not fetch and store them again. */
+export async function listSourceUrlsForResearch(researchId: string): Promise<string[]> {
+	const rows = await db
+		.select({ url: researchSources.url })
+		.from(researchSources)
+		.where(eq(researchSources.researchId, researchId))
+	return rows.map((row) => row.url)
+}
+
+export async function countSourcesForResearch(researchId: string): Promise<{ total: number; cited: number }> {
+	const [row] = await db
+		.select({
+			total: drizzleSql<number>`count(*)::int`,
+			cited: drizzleSql<number>`count(*) filter (where ${researchSources.citedInReport})::int`,
+		})
+		.from(researchSources)
+		.where(eq(researchSources.researchId, researchId))
+	return { total: Number(row?.total ?? 0), cited: Number(row?.cited ?? 0) }
 }
 
 export async function markSourcesCited(

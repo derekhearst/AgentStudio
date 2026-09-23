@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lte, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, lte, ne, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { jobLeases, jobPolicies, jobs, type JobRow, type JobStatus } from './jobs.schema'
 import { logger } from '$lib/observability/logger'
@@ -20,6 +20,8 @@ import { logger } from '$lib/observability/logger'
  *   - failJob → if attemptCount < maxAttempts: status='retry_wait' + scheduledAt = now+backoff;
  *               else: status='failed', finishedAt set, error stored
  *   - cancelJob → status='canceled' (cooperative; worker checks at safe boundaries)
+ *   - canceled is final: completeJob and failJob leave a canceled job as it is, because the
+ *     handler of a job canceled mid-run still returns or throws afterwards
  */
 
 // ─────────── Enqueue ───────────
@@ -228,8 +230,11 @@ export async function completeJob(jobId: string, result?: Record<string, unknown
 			leaseExpiresAt: null,
 			updatedAt: new Date(),
 		})
-		.where(eq(jobs.id, jobId))
+		// A job canceled while its handler ran keeps the cancel: the handler winding down and
+		// returning is how a cooperative cancel ends, not a completion.
+		.where(and(eq(jobs.id, jobId), ne(jobs.status, 'canceled')))
 		.returning()
+	if (!row) return getJobById(jobId)
 
 	// Wave 5 #20 phase 4 — emit lifecycle metrics when a job finishes. Best-effort: any
 	// failure to record is swallowed. Duration is `finishedAt - startedAt` (or 0 if startedAt
@@ -253,6 +258,9 @@ export type FailJobOptions = {
 export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobRow | null> {
 	const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1)
 	if (!job) return null
+	// Canceled is final. A handler that stops at a cancel checkpoint throws; retrying that
+	// would put the canceled job back on the queue and run it to the end.
+	if (job.status === 'canceled') return job
 
 	const policy = await getPolicyForType(job.type)
 	const backoffMs = opts.backoffMs ?? policy?.backoffMs ?? DEFAULT_BACKOFF_MS
@@ -267,9 +275,9 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 				error: opts.error,
 				updatedAt: new Date(),
 			})
-			.where(eq(jobs.id, jobId))
+			.where(and(eq(jobs.id, jobId), ne(jobs.status, 'canceled')))
 			.returning()
-		return row ?? null
+		return row ?? getJobById(jobId)
 	}
 
 	const [row] = await db
@@ -281,7 +289,7 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 			leaseExpiresAt: null,
 			updatedAt: new Date(),
 		})
-		.where(eq(jobs.id, jobId))
+		.where(and(eq(jobs.id, jobId), ne(jobs.status, 'canceled')))
 		.returning()
 
 	// Wave 5 #20 — open a review item when a job exhausts retries and lands at terminal
@@ -311,7 +319,7 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 		})()
 		void emitJobLifecycleMetric(row, 'failed')
 	}
-	return row ?? null
+	return row ?? getJobById(jobId)
 }
 
 /**

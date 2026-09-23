@@ -24,6 +24,7 @@ import { logger } from '$lib/observability/logger'
  *   - Async function `(job: JobRow, ctx: HandlerContext) => Promise<JobResult>`
  *   - Throws → failJob (which retries up to maxAttempts then transitions to failed)
  *   - Returns a result → completeJob with the result as metadata
+ *   - Either way, a job that was canceled while it ran stays canceled (see jobs.server)
  *   - Calls `ctx.checkCancellation()` at safe boundaries to honor cancellation
  *
  * The worker is opt-in: callers wire `startJobWorker()` once on boot behind an env flag so
@@ -33,8 +34,30 @@ import { logger } from '$lib/observability/logger'
 export type JobHandlerContext = {
 	job: JobRow
 	workerId: string
-	/** Throws when the job has been canceled — handlers should call at safe boundaries. */
+	/**
+	 * Throws `JobCanceledError` when the job has been canceled — handlers should call at safe
+	 * boundaries. Any other error it throws (a database hiccup) is not a cancellation.
+	 */
 	checkCancellation: () => Promise<void>
+}
+
+/**
+ * What `checkCancellation` throws when the job was canceled or removed.
+ *
+ * Its own type so a handler can tell "stop, the user canceled" from "the heartbeat write
+ * failed". The research runner used to see a plain Error here, record the run as failed
+ * over the user's cancel, and hand the worker a failure to retry — so a canceled run came
+ * back and finished.
+ */
+export class JobCanceledError extends Error {
+	constructor(jobId: string) {
+		super(`Job ${jobId} canceled or removed`)
+		this.name = 'JobCanceledError'
+	}
+}
+
+export function isJobCanceledError(err: unknown): err is JobCanceledError {
+	return err instanceof JobCanceledError || (err instanceof Error && err.name === 'JobCanceledError')
 }
 
 export type JobResult = Record<string, unknown> | undefined | void
@@ -129,7 +152,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 				workerId,
 				checkCancellation: async () => {
 					const fresh = await heartbeatJob(job.id, leaseTtlMs)
-					if (!fresh) throw new Error(`Job ${job.id} canceled or removed`)
+					if (!fresh) throw new JobCanceledError(job.id)
 				},
 			})
 			await completeJob(job.id, normalizeResult(result))

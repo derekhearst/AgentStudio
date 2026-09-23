@@ -312,26 +312,22 @@ async function handleAutomationBudgetBlocked(
  */
 async function runResearchModeAutomation(automation: typeof automations.$inferSelect) {
 	const conversation = await getOrCreateAutomationConversation(automation)
-	const { createResearch, updateResearch } = await import('$lib/research/research.server')
-	const { enqueueJob } = await import('$lib/jobs/jobs.server')
+	const { createResearch, enqueueResearchRun } = await import('$lib/research/research.server')
 
 	const research = await createResearch({
 		userId: automation.userId,
 		query: automation.prompt,
 		conversationId: conversation.id,
 	})
-	const job = await enqueueJob({
-		type: 'research_run',
-		queue: 'default',
+	const job = await enqueueResearchRun({
+		researchId: research.id,
+		userId: automation.userId,
 		// Background-tier — a scheduled research automation shouldn't preempt user-initiated
 		// research runs (which use priority 150). 100 keeps it ahead of chat_followup ticks
 		// (priority 50) without getting in the way of an interactive operator.
 		priority: 100,
-		payload: { researchId: research.id },
-		userId: automation.userId,
 		dedupeKey: `automation_research:${automation.id}:${(automation.nextRunAt ?? new Date()).toISOString().slice(0, 16)}`,
 	})
-	await updateResearch(research.id, { jobId: job.id })
 
 	return {
 		conversationId: conversation.id,

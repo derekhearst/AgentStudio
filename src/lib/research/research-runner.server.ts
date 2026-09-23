@@ -4,11 +4,14 @@ import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import {
 	addResearchStep,
+	countSourcesForResearch,
 	getResearchById,
 	listSourcesForResearch,
 	markSourcesCited,
+	TERMINAL_RESEARCH_STATUSES,
 	updateResearch,
 } from './research.server'
+import { isJobCanceledError } from '$lib/jobs/worker.server'
 import { logger } from '$lib/observability/logger'
 import type { ResearchRow } from './research.schema'
 import { extractCitedSourceIds } from './research-loop-helpers'
@@ -42,8 +45,13 @@ import {
  * resolved config. Used for both planner, reflection, and synthesizer phases.
  *
  * Failure paths transition status='failed' + write the error to research.error so the UI can
- * surface what went wrong. The runner never throws — every failure path is caught and
- * recorded so the calling job handler reports completion successfully.
+ * surface what went wrong. The runner never throws — every failure path is caught, recorded,
+ * and returned as the outcome; the job handler decides what the job's own status becomes.
+ *
+ * A run that already ended — complete, failed or canceled — is never run again. The row is
+ * returned as it stands. Re-running one meant a second pass on the first attempt's plan,
+ * sources and error, and the open page, which stops polling at a terminal status, never
+ * found out.
  */
 
 export type ResearchRunOutcome = {
@@ -54,6 +62,8 @@ export type ResearchRunOutcome = {
 	citedCount: number
 	costUsd: number
 	error?: string | null
+	/** Set when the row had already ended before this call, so nothing ran this time. */
+	alreadyFinished?: boolean
 }
 
 export type RunResearchLoopOptions = {
@@ -62,9 +72,9 @@ export type RunResearchLoopOptions = {
 	 *
 	 * Job handlers pass `ctx.checkCancellation` here so the loop can bail at safe boundaries
 	 * (between planning/searching/synthesizing stages). When the underlying job has been
-	 * canceled, `checkCancellation` throws — the loop catches, transitions research.status
-	 * to `canceled`, and returns the outcome. Direct callers (tests, scripts) omit this and
-	 * the loop runs to completion.
+	 * canceled, `checkCancellation` throws `JobCanceledError` — the loop catches, transitions
+	 * research.status to `canceled`, and returns the outcome. Anything else it throws is a
+	 * real failure. Direct callers (tests, scripts) omit this and the loop runs to completion.
 	 */
 	checkCancellation?: () => Promise<void>
 }
@@ -85,6 +95,9 @@ export async function runResearchLoop(
 			error: `Research ${researchId} not found`,
 		}
 	}
+	if (TERMINAL_RESEARCH_STATUSES.has(r.status)) {
+		return outcomeFromRow(r)
+	}
 
 	let totalCost = 0
 
@@ -92,31 +105,40 @@ export async function runResearchLoop(
 	// conversationId with an attached agent. Falls back to defaults otherwise.
 	const config = await resolveConfigForResearch(r)
 
-	// Wave 4 #17 phase 3 — durable cancellation. Wraps `opts.checkCancellation` so the loop
-	// can detect both the worker-side cancel signal AND a direct flip of research.status to
-	// 'canceled' from the cancelResearchCommand path. Throws CanceledError on either.
+	// Wave 4 #17 phase 3 — durable cancellation. Detects both a direct flip of research.status
+	// to 'canceled' (cancelResearchCommand) and the worker-side cancel signal, and throws
+	// CanceledError on either. The row is read first: the user's cancel is the one that
+	// matters, and it is on the row before the job is canceled.
 	const checkCanceled = async () => {
-		if (opts.checkCancellation) {
-			await opts.checkCancellation()
-		}
 		const fresh = await getResearchById(researchId)
 		if (fresh?.status === 'canceled') {
 			throw new CanceledError(`research ${researchId} canceled`)
+		}
+		if (opts.checkCancellation) {
+			try {
+				await opts.checkCancellation()
+			} catch (err) {
+				// Only the job's cancel signal is a cancel. Recording it as a failure is what
+				// used to overwrite the user's "canceled" and send the job back for a retry.
+				if (isJobCanceledError(err)) throw new CanceledError(err.message)
+				throw err
+			}
 		}
 	}
 
 	try {
 		// ─────────── PHASE 1: PLAN ───────────
-		// Pre-seeded plan path: when the research row already has sub-questions (e.g. the user
-		// approved a plan file via request_plan_approval and the runner agent seeded the
-		// research row), skip the planner LLM call and use the seed directly.
+		// Saved plan path: when the research row already has sub-questions, skip the planner
+		// LLM call and use them. Today that means an earlier attempt's planner saved them — a
+		// run picked up again after a worker restart — so the step says the plan was saved,
+		// not that a user approved it.
 		let subQuestions: string[]
 		if (Array.isArray(r.plan) && r.plan.length > 0) {
 			subQuestions = r.plan
 			await addResearchStep({
 				researchId,
 				kind: 'plan',
-				payload: { phase: 'preapproved', subQuestions, source: 'user_approved' },
+				payload: { phase: 'saved', subQuestions, source: 'saved_plan' },
 				costUsd: 0,
 				finishedAt: new Date(),
 			})
@@ -276,6 +298,21 @@ class CanceledError extends Error {
 	constructor(message: string) {
 		super(message)
 		this.name = 'CanceledError'
+	}
+}
+
+/** The outcome for a row that had already ended, read back rather than recomputed. */
+async function outcomeFromRow(r: ResearchRow): Promise<ResearchRunOutcome> {
+	const counts = await countSourcesForResearch(r.id)
+	return {
+		researchId: r.id,
+		status: r.status as ResearchRunOutcome['status'],
+		report: r.report ?? null,
+		sourceCount: counts.total,
+		citedCount: counts.cited,
+		costUsd: parseFloat(String(r.costUsd ?? '0')) || 0,
+		error: r.error ?? null,
+		alreadyFinished: true,
 	}
 }
 

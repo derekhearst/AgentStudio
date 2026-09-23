@@ -152,3 +152,61 @@ test.describe('jobs/cancel — pure helper imports (best-effort)', () => {
 		}
 	})
 })
+
+test.describe('jobs/cancel — canceled is final', () => {
+	/*
+	 * A handler stopped at a cancel checkpoint still returns or throws, and the worker then
+	 * calls completeJob or failJob. Both used to overwrite the cancel: completeJob with
+	 * `completed`, and failJob with `retry_wait` — which put the job back on the queue, where
+	 * it ran to the end.
+	 */
+	async function insertCanceledJob(prefix: string) {
+		const sql = getSql()
+		const userId = await getActiveUserId()
+		const [job] = await sql<{ id: string }[]>`
+			insert into jobs (type, status, payload, user_id, attempt_count, max_attempts, dedupe_key)
+			values ('research_run', 'canceled'::job_status, ${sql.json({ researchId: randomUUID() })}, ${userId}, 1, 3, ${prefix})
+			returning id
+		`
+		return job.id
+	}
+
+	async function readStatus(jobId: string) {
+		const sql = getSql()
+		const [row] = await sql<{ status: string }[]>`select status::text as status from jobs where id = ${jobId}`
+		return row.status
+	}
+
+	test('failJob does not send a canceled job back for a retry', async () => {
+		const prefix = uniquePrefix('cancel-no-retry')
+		try {
+			const jobId = await insertCanceledJob(prefix)
+			const { failJob } = await import('../src/lib/jobs/jobs.server')
+			const row = await failJob(jobId, { error: { message: 'Job canceled or removed' } })
+			expect(row?.status).toBe('canceled')
+			expect(await readStatus(jobId)).toBe('canceled')
+		} finally {
+			await cleanupCancelPrefix(prefix)
+		}
+	})
+
+	test('completeJob does not turn a canceled job into a completed one', async () => {
+		const prefix = uniquePrefix('cancel-no-complete')
+		try {
+			const jobId = await insertCanceledJob(prefix)
+			const { completeJob } = await import('../src/lib/jobs/jobs.server')
+			const row = await completeJob(jobId, { status: 'canceled' })
+			expect(row?.status).toBe('canceled')
+			expect(await readStatus(jobId)).toBe('canceled')
+		} finally {
+			await cleanupCancelPrefix(prefix)
+		}
+	})
+
+	test('the worker cancel check throws a JobCanceledError, not a plain Error', async () => {
+		const { JobCanceledError, isJobCanceledError } = await import('../src/lib/jobs/worker.server')
+		const err = new JobCanceledError('abc')
+		expect(isJobCanceledError(err)).toBe(true)
+		expect(isJobCanceledError(new Error('Job abc canceled or removed'))).toBe(false)
+	})
+})
