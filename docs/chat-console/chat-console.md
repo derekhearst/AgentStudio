@@ -9,6 +9,20 @@ conversation rather than scrolled away inside it.
 
 Audience: anyone touching the chat screen. Code lives in `src/lib/chat-console/`.
 
+## The sidebar's recent chats
+
+The sidebar stays on screen for the whole visit, so its list of recent chats has to keep
+itself current. It does: a new chat appears when it is created, its generated title
+replaces "New conversation" once it is written, and the order follows the latest activity.
+The sidebar already keeps a live connection open to show which chats are running; that
+connection also reports, at most every couple of seconds, when the list has changed, and
+the list is then reloaded. So a chat started in another tab, on another device or by an
+automation shows up too. The recent list on the new-chat page follows the same signal.
+
+Opening another chat from the sidebar gives that chat a fresh page. Nothing the previous
+chat was doing (a reply streaming in, its tool cards, its Stop button, an error and its
+Retry) carries over. See "Switching conversations mid-turn" in the chat spec.
+
 ## The right rail
 
 The rail has four tabs.
@@ -21,6 +35,8 @@ The rail has four tabs.
 | Activity | Tool calls in the current turn, then recent earlier ones. |
 
 Below the tabs sits a permanent strip with context usage, token count, cost and latency.
+The context usage is the same estimate as the meter above the composer (see "Context
+meter" in the chat spec), so the two never disagree.
 
 Preview is the default because the rail used to open on a tab that said "No research runs
 for this chat yet" nearly every time. Preview's empty state is an input box, so the panel
