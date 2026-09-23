@@ -16,6 +16,8 @@ One row per user. Created with defaults when the user first accesses settings.
 | `userId`             | uuid        | FK → `users` (nullable means global/unowned)      |
 | `defaultModel`       | text        | OpenRouter model ID for chat/agents               |
 | `transcriptionModel` | text        | OpenRouter model ID for audio transcription       |
+| `ttsModel`           | text        | OpenRouter speech model for read-aloud (default `hexgrad/kokoro-82m`) |
+| `ttsVoice`           | text        | Voice for that model (default `af_heart`); empty = the model's default voice |
 | `notificationPrefs`  | jsonb       | See notification prefs shape below                |
 | `budgetConfig`       | jsonb       | Daily / monthly spend limits                      |
 | `contextConfig`      | jsonb       | Compaction thresholds and model                   |
@@ -88,7 +90,7 @@ One row per user. Created with defaults when the user first accesses settings.
 
 The `/settings` route provides a UI for all editable settings grouped by category:
 
-- **Models** — default model, transcription model
+- **Models** — default model, transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits

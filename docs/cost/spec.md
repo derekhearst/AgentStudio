@@ -17,7 +17,7 @@ The current foundation (`llm_usage` table + cost summary query) tracks LLM spend
 | `runId`     | uuid?     | FK to `runs` — which run caused this LLM call                                                               |
 | `taskId`    | uuid?     | FK to `tasks` — which task the run belongs to                                                               |
 | `agentId`   | uuid?     | FK to `agents` — which agent configuration was active                                                       |
-| `source`    | text      | Logical source: `chat`, `agent_planner`, `agent_synthesis`, `subagent`, `titlegen`, `image_gen`, `memory_*` |
+| `source`    | text      | Logical source: `chat`, `agent_planner`, `agent_synthesis`, `subagent`, `titlegen`, `image_gen`, `memory_*`, `tts` |
 | `model`     | text      | Model ID as returned by provider                                                                            |
 | `tokensIn`  | integer   | Prompt tokens                                                                                               |
 | `tokensOut` | integer   | Completion tokens                                                                                           |
@@ -106,6 +106,10 @@ Edge cases:
 | No previous total to subtract (an older conversation's first turn after this change, or a session the agent forked) | Only the main agent's tokens; a gateway turn is priced from the model price table. Delegated work is undercounted once, rather than every earlier turn being counted again |
 | The running total went down (the session's history had no totals saved) | The reported figure, as this turn's own |
 | A turn that failed before its reply was saved | Nothing for that turn; its usage is included in the next turn's figure |
+
+### What read-aloud records
+
+Each chunk of a reply read aloud writes one row with source `tts` (shown as "Read Aloud"). Speech is billed per character and OpenRouter sends no cost with the audio, so the cost is characters × the model's per-character price from OpenRouter's speech catalogue, and `tokensIn` holds the character count. A model the catalogue does not price is recorded at $0 with `metadata.priced = false`. Read-aloud is checked against budget limits before each chunk, like a chat turn. See [../speech/speech.md](../speech/speech.md).
 
 ### Tool-call cost tracking
 

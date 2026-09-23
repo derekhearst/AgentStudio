@@ -137,6 +137,7 @@ API routes handle everything that is not a page: SSE streams, webhook receivers,
 /api/notifications/push     # POST: register push subscription
 /api/cron                   # POST: scheduler tick (session or CRON_SECRET bearer)
 /api/transcribe             # POST: audio transcription
+/api/tts                    # POST: read-aloud — one chunk of text in, MP3 out
 /api/upload                 # POST: file upload
 ```
 

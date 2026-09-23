@@ -8,6 +8,8 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
+
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
 
 ### Agents
@@ -17,7 +19,7 @@ Agent detail pages allow editing the assigned model and system prompt.
 
 ### Settings
 
-Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
+Settings persist default model, transcription and read-aloud (text-to-speech) model and voice, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
 
 Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 
@@ -74,7 +76,7 @@ cp .env.example .env
 
 - `DATABASE_URL`
 - `AUTH_PASSWORD` (creates the owner account the first time the server starts against an empty database; never overwrites an existing password. Optional `AUTH_OWNER_NAME` / `AUTH_OWNER_USERNAME` default to `Owner` / `owner`)
-- `OPENROUTER_API_KEY`
+- `OPENROUTER_API_KEY` (also powers voice transcription and read-aloud)
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`). It must be a directory the app can create folders in: every chat turn creates its workspace there before the agent starts, and a turn fails with "Could not prepare the workspace for this run." when it cannot. On a development machine without a writable `/workspace`, point it at a local folder such as `./.sandbox` (gitignored).
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
@@ -203,6 +205,7 @@ Notes:
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
+- Read aloud (text-to-speech, auto-read): `docs/speech/speech.md`
 
 ## Background Jobs
 
@@ -254,3 +257,4 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration, including the read-only System checklist
+- `POST /api/tts` Read-aloud: one chunk of reply text in, MP3 out ([docs](docs/speech/speech.md))

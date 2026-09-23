@@ -240,7 +240,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
-| #27 | Wire up or delete the TTS endpoint | **delete** | confirmed dead: no UI reference, and the setting the issue mentions does not exist |
+| #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
 | #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
 | #8 | Delete dead engine code | **as filed** | grows once #5 lands; `search_tools` joins the list |
 
@@ -521,6 +521,14 @@ The reason to delete rather than finish: the only case TTS earns its keep is han
 listening, and the reply is already on screen. If that case ever turns up, it comes back as a
 play button, and it comes back in a day.
 
+**Landed** (finished rather than deleted, by the owner's decision): a speaker button on each
+reply, an opt-in per-device auto-read for the hands-free case, and `ttsModel` / `ttsVoice`
+settings picked from OpenRouter's speech catalogue. The hard-coded `openai/gpt-4o-mini-tts`
+turned out not to exist on OpenRouter at all, so the endpoint could never have worked; the
+default is now `hexgrad/kokoro-82m`. `/api/tts` is JSON-only with capped, validated input,
+checks budget limits, and records catalogue-priced spend under `tts`. See
+[`docs/speech/speech.md`](../speech/speech.md).
+
 ### #9 — gateway
 
 No change to the issue, but worth stating the economics plainly before anyone spends a week
@@ -550,7 +558,7 @@ unless one of those is the actual goal.
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
 6. **#17**, HTTP transport first.
-7. The cheap independents whenever: **#27 delete**, **#4**, **#18**, **#14**.
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or

@@ -12,6 +12,7 @@ The implementation is consolidated under `src/lib/llm/`.
 - **Model catalog** — list all available models with context windows, pricing, modalities, and capabilities. Cached with a 1-hour TTL.
 - **Cost calculation** — given model ID + token counts, return USD cost using live catalog pricing.
 - **Model selection UI** — `ModelSelector` component for picking a model across the app.
+- **Text-to-speech** — `tts.server.ts` turns reply text into MP3 through OpenRouter's speech endpoint, prices it from the separate speech-model catalogue (speech models are not in the chat-model list), checks budget limits and records the spend under `tts`. See [../speech/speech.md](../speech/speech.md).
 
 ## Data Model
 
@@ -78,6 +79,8 @@ Options accepted by `streamChat()`:
 | `listModels()`                              | Returns full model catalog from OpenRouter (1h cache)                    |
 | `getModel(id)`                              | Returns a single `ModelInfo` by ID                                       |
 | `calculateCost(model, tokensIn, tokensOut)` | Returns USD cost as a number using live pricing                          |
+| `synthesizeSpeech(input)`                   | One chunk of text → MP3 via OpenRouter; budget-checked, ledgered as `tts` |
+| `listSpeechModels()`                        | OpenRouter's speech models with per-character price and voices (1h cache) |
 
 ## Reasoning Support
 
