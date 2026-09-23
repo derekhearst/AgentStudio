@@ -69,7 +69,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | --- | --- | --- | --- |
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
-| Code execution | **broken** | `run_code` throws on the engine path — it needs a runtime context only the old loop supplies, so every call since the engine migration has returned "can only be invoked from inside the chat loop". Unregistered from the engine surface rather than left advertised; see the re-audit | analysis tool / sandboxed Python, renders charts |
+| Code execution | **n/a** — removed (#69) | `run_code` never ran on the engine path and was deleted rather than rebuilt. The agent writes a script into the run's workspace and runs it with the SDK's `Bash`, sandboxed by bubblewrap in production and approval-gated where bubblewrap is missing. No in-script tool calls, no chart output — a chart is a file shown in the Preview tab | analysis tool / sandboxed Python, renders charts |
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
@@ -101,7 +101,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 **We are even on the core loop.** Same SDK, same models, same thinking, same research shape.
 
-**The evens are thinner than they look.** Three of them hide a real disadvantage: research runs on a fixed pipeline that cannot be steered once approved; `run_code` has no chart output; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
+**The evens are thinner than they look.** Two of them hide a real disadvantage: research runs on a fixed pipeline that cannot be steered once approved; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
 
 **We are far behind on the session surface.** Diffs, checkpoints, terminal output, todo list, permission modes — five things that turn a long run from opaque to legible.
 

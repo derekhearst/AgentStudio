@@ -32,6 +32,8 @@ The **auto-compact threshold** is the point at which conversation history is com
 
 Compaction is the process of replacing older conversation turns with a summary to free up window space. The summary becomes a `system` message injected before the recent turns.
 
+> **Today:** chats run on the Claude Agent SDK, which compacts a conversation itself. AgentStudio's own compaction (`compactMessages`, `shouldCompact`) had no caller after the move to the SDK and was deleted (#8). The rules below describe that earlier design. The auto-compact threshold setting now does one thing: when you switch a chat to a model with a smaller context window and the conversation would fill more than that share of it, the chat first asks the current model to summarize the conversation.
+
 Compaction rules:
 
 - Always keep the last N turns uncompacted (default: 8).

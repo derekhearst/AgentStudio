@@ -358,6 +358,12 @@ editing and to stop and say so if the failure is unrelated to the branch. The fi
 cannot push or re-open the PR itself: `push_branch` and `create_pull_request` refuse to run
 outside an interactive chat run, so the last step stays a human's.
 
+**What a fix run can do today.** A fix run still goes through the older in-house loop, not
+the Claude Agent SDK that runs chats, and there its only tool is `web_search`. `run_code` was
+its one way to touch the checkout, and it was removed (#69). So a fix run can explain the
+failure it is handed but cannot edit anything until it moves onto the chat engine. See
+[../tools/tools.md](../tools/tools.md).
+
 **Job types.** `pr_watch_dispatch` (scheduled tick, one indexed query), `pr_watch` (poll one
 PR), `pr_fix` (run the seeded fix). All three are ordinary durable jobs, so leases,
 heartbeats, retries and forensics in `/settings/jobs` come for free.

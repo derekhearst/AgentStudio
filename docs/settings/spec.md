@@ -65,6 +65,8 @@ One row per user. Created with defaults when the user first accesses settings.
 }
 ```
 
+The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own. Its old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
+
 **`memoryConfig`**
 
 ```ts
@@ -92,7 +94,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits
-- **Tools** — approval-required list
+- **Tools** — approval-required list: one tickable entry per tool, plus a switch that requires approval for every tool
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
 - **System** (read-only) — a checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway, and each integration (OpenRouter, web search, GitHub, webhooks, push, external cron). Each row says whether it is in place and names the environment variable that controls it, never its value. These are deploy-time settings, not stored in `appSettings` — first run collects only the owner account (see [../auth/auth.md](../auth/auth.md)).
