@@ -6,6 +6,7 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
 import type { MonitorRow } from './monitors.schema'
+import { findOwnedAutomation } from './monitors.server'
 import { describeCondition, monitorConditionSchema, type MonitorObservation } from './condition'
 
 /**
@@ -137,21 +138,40 @@ async function firePush(monitor: MonitorRow, observation: MonitorObservation): P
 
 // ─────────── run_automation ───────────
 
+/**
+ * The `automation_run` job a monitor enqueues.
+ *
+ * `trigger: 'manual'` because an event, not the schedule, asked for this run. Without it the
+ * handler defaulted to `schedule`, and a monitor firing an automation moved that
+ * automation's `nextRunAt`, refused to run it if the schedule was switched off, retried it on
+ * the schedule's backoff and counted its failures toward the auto-disable streak. As a manual
+ * run it leaves the schedule alone and runs once — the same contract as "Run now".
+ */
+export function monitorAutomationJob(monitor: Pick<MonitorRow, 'id' | 'userId' | 'fireCount'>, automationId: string) {
+	return {
+		type: 'automation_run',
+		queue: 'default',
+		priority: 60,
+		payload: { automationId, attempt: 1, trigger: 'manual' as const },
+		userId: monitor.userId,
+		dedupeKey: `monitor_fire:${monitor.id}:${monitor.fireCount}`,
+	}
+}
+
 async function fireAutomation(monitor: MonitorRow, observation: MonitorObservation): Promise<MonitorFireResult> {
 	const automationId = monitor.actionConfig.automationId
 	if (!automationId) throw new Error('actionConfig.automationId is missing')
+	// Re-checked at fire time, not only when the monitor was saved: the automation may have
+	// been deleted since. The job handler runs an automation as its own owner, so this is the
+	// last point where "whose automation is this" can be asked.
+	if (!(await findOwnedAutomation(monitor.userId, automationId))) {
+		throw new Error(`automation ${automationId} not found for this monitor's owner`)
+	}
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	// Enqueued by job type rather than by importing the automations engine — the monitor
 	// domain stays decoupled from whatever that engine looks like, and the job queue already
 	// owns retries and forensics for the run.
-	const job = await enqueueJob({
-		type: 'automation_run',
-		queue: 'default',
-		priority: 60,
-		payload: { automationId },
-		userId: monitor.userId,
-		dedupeKey: `monitor_fire:${monitor.id}:${monitor.fireCount}`,
-	})
+	const job = await enqueueJob(monitorAutomationJob(monitor, automationId))
 	return { kind: 'run_automation', ok: true, detail: { automationId, jobId: job.id, observed: observation.hash } }
 }
 

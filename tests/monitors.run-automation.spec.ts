@@ -1,0 +1,116 @@
+import { randomUUID } from 'node:crypto'
+import { expect, test } from '@playwright/test'
+import { getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { createMonitor, findOwnedAutomation, updateMonitorSettings } from '../src/lib/monitors/monitors.server'
+import { monitorAutomationJob } from '../src/lib/monitors/actions.server'
+
+/**
+ * #33 follow-up — a `run_automation` monitor fires only its owner's automation, and does not
+ * disturb that automation's schedule.
+ *
+ * `actionConfig.automationId` was validated as "a UUID" and nothing else, and the job handler
+ * runs an automation by id, as the automation's owner. So a monitor could name any
+ * automation — someone else's, on their budget — and nothing noticed until it fired. The id
+ * is now checked against the monitor owner when the monitor is saved and again when it fires.
+ *
+ * The enqueued job also carried no trigger, so it ran as `schedule`: it moved the
+ * automation's `nextRunAt`, refused to run one whose schedule was switched off, and counted
+ * a failure toward the auto-disable streak. It is a manual run now.
+ *
+ * The monitors created here use a `changed` condition, whose first check only records a
+ * baseline — so the scheduler cannot fire one in the moment before cleanup.
+ */
+
+const CONDITION = { kind: 'tool_result' as const, tool: 'git_status' as const, args: {}, compare: 'changed' as const }
+
+async function seedAutomation(userId: string, prefix: string): Promise<string> {
+	const sql = getSql()
+	// Disabled and due far in the future: nothing should run it for real.
+	const [row] = await sql<{ id: string }[]>`
+		insert into automations (user_id, description, cron_expression, prompt, enabled, next_run_at)
+		values (${userId}, ${`${prefix} target`}, '0 9 * * *', ${`${prefix} prompt`}, false, now() + interval '365 days')
+		returning id
+	`
+	return row.id
+}
+
+async function cleanup(prefix: string) {
+	const sql = getSql()
+	await sql`delete from monitors where name like ${`${prefix}%`}`
+	await sql`delete from automations where description like ${`${prefix}%`}`
+}
+
+test.describe('monitors/run_automation — only the owner’s automation', () => {
+	test('a monitor naming an automation that is not yours is refused when it is created', async () => {
+		const prefix = uniquePrefix('monitor-foreign-automation')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			await expect(
+				createMonitor({
+					userId,
+					name: `${prefix} foreign`,
+					condition: CONDITION,
+					action: 'run_automation',
+					actionConfig: { automationId: randomUUID() },
+				}),
+			).rejects.toThrow(/not found/)
+			expect(await sql`select id from monitors where name like ${`${prefix}%`}`).toHaveLength(0)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
+	test('your own automation is accepted, and cannot be swapped for another afterwards', async () => {
+		const prefix = uniquePrefix('monitor-own-automation')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			const automationId = await seedAutomation(userId, prefix)
+			const monitor = await createMonitor({
+				userId,
+				name: `${prefix} own`,
+				condition: CONDITION,
+				action: 'run_automation',
+				actionConfig: { automationId },
+			})
+			expect(monitor.actionConfig.automationId).toBe(automationId)
+
+			await expect(updateMonitorSettings(userId, monitor.id, { actionConfig: { automationId: randomUUID() } })).rejects.toThrow(
+				/not found/,
+			)
+			const [stored] = await sql<{ action_config: { automationId?: string } }[]>`
+				select action_config from monitors where id = ${monitor.id}
+			`
+			expect(stored.action_config.automationId).toBe(automationId)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
+	test('ownership is by user, so the same id is not found for anyone else', async () => {
+		const prefix = uniquePrefix('monitor-other-user')
+		const userId = await getActiveUserId()
+		try {
+			const automationId = await seedAutomation(userId, prefix)
+			expect(await findOwnedAutomation(userId, automationId)).toEqual({ id: automationId })
+			// The users table holds one owner, so "someone else" is an id that is not theirs.
+			expect(await findOwnedAutomation(randomUUID(), automationId)).toBeNull()
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+})
+
+test.describe('monitors/run_automation — the job it enqueues', () => {
+	test('is a manual run, so the automation’s schedule is left alone', () => {
+		const monitor = { id: randomUUID(), userId: randomUUID(), fireCount: 3 }
+		const automationId = randomUUID()
+		const job = monitorAutomationJob(monitor, automationId)
+		expect(job.type).toBe('automation_run')
+		expect(job.payload).toEqual({ automationId, attempt: 1, trigger: 'manual' })
+		expect(job.userId).toBe(monitor.userId)
+		// One job per firing: a re-delivered check collapses, the next firing does not.
+		expect(job.dedupeKey).toBe(`monitor_fire:${monitor.id}:3`)
+	})
+})

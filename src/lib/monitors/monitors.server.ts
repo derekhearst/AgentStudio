@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, lte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { monitors, type MonitorRow, type MonitorStatus } from './monitors.schema'
+import { automations } from '$lib/automations/automation.schema'
 import {
 	clampDeadline,
 	clampInterval,
@@ -42,12 +43,39 @@ export type CreateMonitorInput = {
 	oneShot?: boolean
 }
 
+/**
+ * The automation a `run_automation` monitor may fire: one that exists and belongs to the
+ * monitor's owner. Null for anything else — a foreign id and a missing one look the same, so
+ * the check cannot be used to learn which ids exist.
+ *
+ * The action config used to be validated as "a UUID" and nothing more, and the job handler
+ * looks an automation up by id alone and runs it as ITS owner — so a monitor could fire
+ * someone else's automation, on their budget. Checked when the monitor is written and again
+ * when it fires, because the automation can change hands or disappear in between.
+ */
+export async function findOwnedAutomation(userId: string, automationId: string): Promise<{ id: string } | null> {
+	const [row] = await db
+		.select({ id: automations.id })
+		.from(automations)
+		.where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
+		.limit(1)
+	return row ?? null
+}
+
+async function assertActionTargetsOwned(userId: string, action: MonitorAction, config: MonitorActionConfig) {
+	if (action !== 'run_automation' || !config.automationId) return
+	if (!(await findOwnedAutomation(userId, config.automationId))) {
+		throw new Error(`automation ${config.automationId} not found — run_automation needs one of your own automations`)
+	}
+}
+
 export async function createMonitor(input: CreateMonitorInput, now = new Date()): Promise<MonitorRow> {
 	const condition = monitorConditionSchema.parse(input.condition)
 	const action = monitorActionSchema.parse(input.action)
 	const actionConfig = monitorActionConfigSchema.parse(input.actionConfig ?? {})
 	const configError = validateActionConfig(action, actionConfig)
 	if (configError) throw new Error(configError)
+	await assertActionTargetsOwned(input.userId, action, actionConfig)
 
 	const name = input.name.trim()
 	if (name.length === 0) throw new Error('monitor name is required')
@@ -316,6 +344,7 @@ export async function updateMonitorSettings(
 		const actionConfig = monitorActionConfigSchema.parse(input.actionConfig)
 		const configError = validateActionConfig(existing.action, actionConfig)
 		if (configError) throw new Error(configError)
+		await assertActionTargetsOwned(userId, existing.action, actionConfig)
 		patch.actionConfig = actionConfig
 	}
 	const [row] = await db
