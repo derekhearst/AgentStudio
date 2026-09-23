@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { loginCommand } from '$lib/auth/auth.remote';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	let password = $state('');
 	let loading = $state(false);
@@ -20,7 +21,7 @@
 			// new session as anonymous (no credit balance, no `page.data.user`) until a reload.
 			await goto('/', { invalidateAll: true });
 		} catch (error) {
-			errorMessage = error instanceof Error ? error.message : 'Sign in failed';
+			errorMessage = remoteErrorMessage(error, 'Sign in failed');
 			password = '';
 		} finally {
 			loading = false;

@@ -9,9 +9,10 @@ import { logger } from '$lib/observability/logger'
  * `/login` calls `loginCommand` and `/setup` calls `setupCommand`, and nothing else on
  * either page calls a remote function (the chromeless layout keeps the console shell, and
  * its authenticated queries, off both). Both commands guard themselves: login verifies the
- * password, setup refuses once an owner exists. `getSession`, `isProvisionedQuery` and
- * `logout` live in the same file but are deliberately NOT here — nothing anonymous calls
- * them, and "allow what the public pages need" means exactly this list.
+ * password, setup refuses once an owner exists (and, on a production server, without the
+ * setup token from the server log). `getSession` and `logout` live in the same file but are
+ * deliberately NOT here — nothing anonymous calls them, and "allow what the public pages
+ * need" means exactly this list.
  *
  * Adding to it makes a function callable by anyone on the internet. Do that only for a
  * function that is safe with `locals.user` null, and say why here.

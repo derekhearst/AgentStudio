@@ -9,27 +9,20 @@
 	import { onMount } from 'svelte';
 	import ChatConsoleShell from '$lib/chat-console/ChatConsoleShell.svelte';
 	import { closeAll as closeMobileDrawers } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { rendersWithoutShell } from '$lib/auth/gate';
 
 	afterNavigate(() => closeMobileDrawers());
 
 	let { children } = $props();
 
 	/**
-	 * Routes that render bare, without the console shell.
-	 *
-	 * These are the paths `PUBLIC_PATH_PREFIXES` in hooks.server.ts lets through without a
-	 * session. The shell's nav fetches the credit balance, which is an authenticated query,
-	 * so rendering it on a public route threw 401 before the page's own content mattered —
-	 * `/demo` returned 401 for exactly this reason, and `/setup` only escaped because the
-	 * setup gate returns before the layout runs. Keep this list in step with that one: a
-	 * visitor with no session has no business seeing a sidebar of chats they cannot open.
+	 * Public pages render bare, without the console shell: the shell's nav fetches the credit
+	 * balance, an authenticated query, and rendering it for a visitor with no session threw
+	 * 401 before the page's own content mattered — which is how a fresh install could not
+	 * reach `/setup` (#1). The list lives beside the gate's own (src/lib/auth/gate.ts), and the
+	 * gate spec checks every page reachable before an owner exists is on it.
 	 */
-	const CHROMELESS_PREFIXES = ['/login', '/setup', '/demo'];
-	const isChromeless = $derived(
-		CHROMELESS_PREFIXES.some(
-			(prefix) => page.url.pathname === prefix || page.url.pathname.startsWith(`${prefix}/`),
-		),
-	);
+	const isChromeless = $derived(rendersWithoutShell(page.url.pathname));
 	const isChatRoute = $derived(page.url.pathname.startsWith('/chat'));
 	const isChatOrHome = $derived(isChatRoute || page.url.pathname === '/');
 

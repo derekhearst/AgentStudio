@@ -34,29 +34,48 @@ function shouldUseSecureCookie() {
 	return process.env.NODE_ENV === 'production'
 }
 
-export function normalizeUsername(input: string) {
-	return input.trim()
+export { normalizeUsername, validateUsername } from '$lib/auth/username'
+
+/**
+ * Once an owner exists it keeps existing, so the answer is cached after the first `true` —
+ * the gate asks on every page request. It is deliberately not cached while `false`: first
+ * run must end the moment setup (or the boot step) creates the owner.
+ *
+ * The one way the cache can go stale is the owner disappearing under a running server
+ * (`bun run db:reset` beside `bun run dev`, or an operator clearing the password to reopen
+ * setup). A sign-in that finds no owner calls `forgetOwnerExists()`, so the next page
+ * load goes to `/setup` instead of `/login` forever; a restart does the same.
+ */
+let ownerKnownToExist = false
+
+/** Whether the instance has its owner: a `users` row with a password. */
+export async function ownerExists(): Promise<boolean> {
+	if (ownerKnownToExist) return true
+	const [row] = await db.select({ id: users.id }).from(users).where(isNotNull(users.passwordHash)).limit(1)
+	ownerKnownToExist = Boolean(row)
+	return ownerKnownToExist
 }
 
-export function validateUsername(input: string) {
-	const normalized = normalizeUsername(input)
-	if (!/^[a-zA-Z0-9_-]{3,32}$/.test(normalized)) {
-		throw new Error('Username must contain only letters, numbers, underscore, or hyphen')
-	}
-	return normalized
+export function forgetOwnerExists() {
+	ownerKnownToExist = false
 }
 
-export async function getProvisionedUser() {
+/**
+ * The owner's identity, for `AUTH_DEV_BYPASS` to attach a request to — or null when there is
+ * no owner with a password.
+ *
+ * Only a provisioned owner. The bypass used to take whatever row it found, so on a
+ * half-set-up instance (a row whose password was never set) it signed requests in as an
+ * account that cannot sign in itself, while the setup gate treated the same instance as
+ * having no owner. Now the bypass does nothing until there is a real owner to be.
+ */
+export async function findOwnerIdentity(): Promise<AuthenticatedUser | null> {
 	const [row] = await db
-		.select({ id: users.id, passwordHash: users.passwordHash })
+		.select({ id: users.id, name: users.name, username: users.username })
 		.from(users)
+		.where(isNotNull(users.passwordHash))
 		.limit(1)
 	return row ?? null
-}
-
-export async function isProvisioned() {
-	const row = await getProvisionedUser()
-	return row !== null && row.passwordHash !== null
 }
 
 export async function findUserForLogin() {

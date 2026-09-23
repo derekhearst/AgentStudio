@@ -25,7 +25,6 @@ const EXEMPT: Record<string, string> = {
 	'src/lib/auth/auth.remote.ts#loginCommand': 'creates the session; verifies the password itself',
 	'src/lib/auth/auth.remote.ts#setupCommand': 'creates the owner; refuses once one exists',
 	'src/lib/auth/auth.remote.ts#getSession': 'reports the session, including its absence',
-	'src/lib/auth/auth.remote.ts#isProvisionedQuery': 'a single boolean about the instance',
 	'src/lib/auth/auth.remote.ts#logout': 'clears the caller’s own cookie',
 }
 
