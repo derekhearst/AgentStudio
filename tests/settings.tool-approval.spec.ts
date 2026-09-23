@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { authenticateContext } from './helpers'
 import { ENGINE_EXCLUDED_TOOLS, HOST_OWNED_TOOLS } from '../src/lib/engine/builtin-tools'
 import { allToolNames } from '../src/lib/tools/tool-schemas'
-import { BUILTIN_TOOLS } from '../src/lib/tools/tools'
+import { BUILTIN_TOOLS, MANDATORY_APPROVAL_TOOLS } from '../src/lib/tools/tools'
 
 /**
  * Settings > Tool Approval lists what a chat run can actually call, and every entry works.
@@ -20,10 +20,11 @@ import { BUILTIN_TOOLS } from '../src/lib/tools/tools'
  *     registers and gates by name, could only be made to ask through the all-tools wildcard.
  *
  * Unlocking the chips must not swap one false promise for another: `ask_user` is handed to
- * the host before any approval gate runs, so a tick on it could never take effect.
+ * the host before any approval gate runs, so a tick on it could never take effect. And the
+ * mandatory-approval tools ask whatever is stored, so an untick on them could not either.
  *
- * The first test is pure. The second opens the page but saves nothing: settings are a single
- * shared row.
+ * The first block is pure. The second opens the page but saves nothing: settings are a
+ * single shared row.
  */
 
 test.describe('settings/tool-approval — the list is the engine surface', () => {
@@ -56,10 +57,15 @@ test.describe('settings/tool-approval — the list is the engine surface', () =>
 		expect(names.has('web_search')).toBe(true)
 	})
 
-	test('entries carry no tier, so none can be rendered locked', () => {
+	test('entries carry no tier, so none can be rendered locked off', () => {
 		for (const tool of BUILTIN_TOOLS) {
 			expect(Object.keys(tool).sort()).toEqual(['description', 'name'])
 		}
+	})
+
+	test('the tools that always ask are on the list, where the panel locks them on', () => {
+		const names = new Set(BUILTIN_TOOLS.map((t) => t.name))
+		for (const name of MANDATORY_APPROVAL_TOOLS) expect(names.has(name), name).toBe(true)
 	})
 })
 
@@ -78,5 +84,36 @@ test.describe('settings/tool-approval — the panel', () => {
 		await expect(page.getByRole('checkbox', { name: 'run_code', exact: true })).toHaveCount(0)
 		await expect(page.getByRole('checkbox', { name: 'search_tools', exact: true })).toHaveCount(0)
 		await expect(page.getByRole('checkbox', { name: 'ask_user', exact: true })).toHaveCount(0)
+	})
+
+	test('the mandatory-approval tools show ticked and locked, and None leaves them', async ({ page }) => {
+		// They ask in every mode whatever is stored, so an untick — one by one or through
+		// None — would be a setting that cannot take effect. Clicks here change the page's
+		// copy of the settings only; nothing is saved.
+		await authenticateContext(page.context())
+		await page.goto('/settings')
+		const panel = page
+			.locator('section')
+			.filter({ has: page.getByRole('heading', { name: 'Tool Approval' }) })
+			.last()
+		await expect(panel).toBeVisible()
+
+		for (const name of MANDATORY_APPROVAL_TOOLS) {
+			const chip = panel.getByRole('checkbox', { name: new RegExp(`^${name}\\b`) })
+			await expect(chip, name).toBeChecked()
+			await expect(chip, name).toBeDisabled()
+		}
+		await expect(panel.getByText('always asks', { exact: true })).toHaveCount(MANDATORY_APPROVAL_TOOLS.length)
+
+		// The shared row may have the all-tools wildcard on, which locks the whole list.
+		const wildcard = panel.getByRole('checkbox', { name: /Require approval for all tools/ })
+		test.skip(await wildcard.isChecked(), 'the stored settings require approval for every tool')
+		await panel.getByRole('button', { name: 'All', exact: true }).click()
+		await expect(panel.getByRole('checkbox', { name: 'web_search', exact: true })).toBeChecked()
+		await panel.getByRole('button', { name: 'None', exact: true }).click()
+		await expect(panel.getByRole('checkbox', { name: 'web_search', exact: true })).not.toBeChecked()
+		for (const name of MANDATORY_APPROVAL_TOOLS) {
+			await expect(panel.getByRole('checkbox', { name: new RegExp(`^${name}\\b`) }), name).toBeChecked()
+		}
 	})
 })

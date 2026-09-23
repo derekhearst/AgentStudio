@@ -49,6 +49,7 @@ The groups of AgentStudio tools:
 
 1. Open **Settings → Tool Approval**.
 2. Tick a tool to make it ask before it runs, or untick it. Every tool in the list can be ticked, including `web_search`. **All** and **None** tick or untick the whole list.
+   The three mandatory-approval tools are the exception: they show ticked, marked "always asks", and cannot be unticked, and **All** and **None** leave them alone, because they ask whatever you choose.
 3. Or turn on **Require approval for all tools**, which covers every tool, Claude's own included, and overrides the ticks.
 4. Press **Save**.
 
