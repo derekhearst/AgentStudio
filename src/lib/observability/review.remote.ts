@@ -9,6 +9,7 @@ import {
 	resolveReviewItem,
 	reviewInboxRollup,
 } from './review.server'
+import { reviewItemListSchema } from './review-filters'
 import { getRunTraceByRunId, listRecentFailures } from './traces.server'
 import { listMetricSnapshotsWithSeries } from './metrics.server'
 
@@ -21,33 +22,7 @@ import { listMetricSnapshotsWithSeries } from './metrics.server'
  * `false`; it is kept only so the response shape stays stable for existing consumers.
  */
 
-const REVIEW_ITEM_TYPES = [
-	'approval_request',
-	'user_question',
-	'evaluation_failure',
-	'job_failure',
-	'job_stuck',
-	'hook_failure',
-	'memory_conflict',
-	'policy_override_request',
-	'pull_request_ready',
-	'automation_summary',
-	'monitor_fired',
-] as const
-
-const REVIEW_ITEM_STATUSES = ['open', 'in_progress', 'resolved', 'dismissed'] as const
-
-const listSchema = z
-	.object({
-		status: z.enum(REVIEW_ITEM_STATUSES).optional(),
-		type: z.enum(REVIEW_ITEM_TYPES).optional(),
-		severity: z.enum(['info', 'warning', 'critical']).optional(),
-		openOnly: z.boolean().optional(),
-		limit: z.number().int().min(1).max(500).optional(),
-	})
-	.default({})
-
-export const listReviewItemsQuery = query(listSchema, async (input) => {
+export const listReviewItemsQuery = query(reviewItemListSchema, async (input) => {
 	requireAuthenticatedRequestUser()
 	const items = input.openOnly
 		? await listOpenReviewItems(input.limit)

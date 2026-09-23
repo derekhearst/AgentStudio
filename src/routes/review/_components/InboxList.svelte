@@ -3,6 +3,7 @@
 		listReviewItemsQuery,
 		resolveReviewItemCommand,
 	} from '$lib/observability/review.remote';
+	import { REVIEW_ITEM_TYPE_LABELS } from '$lib/observability/review-item-labels';
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
@@ -26,20 +27,11 @@
 
 	let expanded = $state<Set<string>>(new Set());
 
+	// One entry per review item type the database knows, so the filter cannot offer a type
+	// the server refuses (it did, for "PR checks failed").
 	const TYPES = [
 		{ value: '', label: 'All types' },
-		{ value: 'approval_request', label: 'Approval request' },
-		{ value: 'user_question', label: 'User question' },
-		{ value: 'evaluation_failure', label: 'Evaluation failure' },
-		{ value: 'job_failure', label: 'Job failure' },
-		{ value: 'job_stuck', label: 'Job stuck' },
-		{ value: 'hook_failure', label: 'Hook failure' },
-		{ value: 'memory_conflict', label: 'Memory conflict' },
-		{ value: 'policy_override_request', label: 'Policy override request' },
-		{ value: 'pull_request_ready', label: 'Pull request ready' },
-		{ value: 'pull_request_checks_failed', label: 'PR checks failed' },
-		{ value: 'automation_summary', label: 'Automation summary' },
-		{ value: 'monitor_fired', label: 'Monitor fired' },
+		...Object.entries(REVIEW_ITEM_TYPE_LABELS).map(([value, label]) => ({ value, label })),
 	];
 
 	async function handleResolve(itemId: string, action: string) {

@@ -15,7 +15,7 @@ import { authenticateContext, getSql, uniquePrefix } from './helpers'
  */
 
 async function seedReviewItem(input: {
-	type: 'pull_request_ready' | 'automation_summary' | 'policy_override_request'
+	type: 'pull_request_ready' | 'pull_request_checks_failed' | 'automation_summary' | 'policy_override_request'
 	severity: 'info' | 'warning' | 'critical'
 	summary: string
 	payload: Record<string, unknown>
@@ -123,5 +123,42 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 		expect(allOptions).toContain('Pull request ready')
 		expect(allOptions).toContain('Automation summary')
 		expect(allOptions).toContain('Policy override request')
+	})
+
+	test('filtering by "PR checks failed" shows the CI failures and nothing else', async ({ page }) => {
+		// The filter used to fail validation, leaving the previous filter's items on screen
+		// under the "PR checks failed" label.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-ci-filter')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'warning',
+				summary: `${prefix} CI failed on #7 — build`,
+				payload: { checkName: 'build', prNumber: 7 },
+			})
+			await seedReviewItem({
+				type: 'automation_summary',
+				severity: 'info',
+				summary: `${prefix} nightly summary`,
+				payload: { kind: 'maintenance_summary' },
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+			await expect(page.locator('body')).toContainText(`${prefix} nightly summary`, { timeout: 30_000 })
+
+			// The inbox's type filter — the logs panel above it has selects of its own.
+			const typeFilter = page.locator('select', { has: page.locator('option[value="pull_request_checks_failed"]') })
+			await typeFilter.selectOption('pull_request_checks_failed')
+
+			await expect(page.locator('body')).not.toContainText(`${prefix} nightly summary`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #7`)
+			await expect(page.getByTestId('inbox-error')).toHaveCount(0)
+		} finally {
+			await clearItems(prefix)
+		}
 	})
 })

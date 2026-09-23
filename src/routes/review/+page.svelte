@@ -10,6 +10,8 @@
 	import { getCostSummary, getBudgetStatus } from '$lib/costs/cost.remote';
 	import { listAppLogsQuery, countLogsBySourceQuery } from '$lib/observability/logs.remote';
 	import { getSettings } from '$lib/settings';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
+	import type { ReviewItemType } from '$lib/observability/observability.schema';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import KpiStrip from './_components/KpiStrip.svelte';
@@ -45,6 +47,9 @@
 	});
 
 	let inbox = $state<Inbox | null>(null);
+	// Why the last inbox reload failed. Shown over the list, which still holds the previous
+	// filter's items — without this they sat there under the new filter's label.
+	let inboxError = $state<string | null>(null);
 	let cost = $state<Cost | null>(null);
 	let budget = $state<Budget | null>(null);
 	let snapshot = $state<Snapshot | null>(null);
@@ -110,7 +115,7 @@
 
 	function buildInboxArgs() {
 		return {
-			type: typeFilter ? (typeFilter as 'approval_request') : undefined,
+			type: typeFilter ? (typeFilter as ReviewItemType) : undefined,
 			status: statusFilter ? (statusFilter as 'open') : undefined,
 			severity: severityFilter ? (severityFilter as 'info' | 'warning' | 'critical') : undefined,
 			openOnly: !statusFilter,
@@ -131,7 +136,12 @@
 	}
 
 	async function reloadInbox() {
-		inbox = await listReviewItemsQuery(buildInboxArgs());
+		try {
+			inbox = await listReviewItemsQuery(buildInboxArgs());
+			inboxError = null;
+		} catch (e) {
+			inboxError = remoteErrorMessage(e, 'Could not load the inbox for this filter');
+		}
 	}
 
 	async function reloadLogs() {
@@ -247,6 +257,11 @@
 					<span class="badge badge-sm badge-ghost">{inbox?.items.length ?? 0}</span>
 				</div>
 			{/snippet}
+			{#if inboxError}
+				<div role="alert" class="alert alert-error mb-3 text-sm" data-testid="inbox-error">
+					<span>{inboxError}. The items below are from the previous filter.</span>
+				</div>
+			{/if}
 			<InboxList
 				inbox={inbox}
 				bind:typeFilter
