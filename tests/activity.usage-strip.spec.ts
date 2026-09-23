@@ -53,6 +53,46 @@ test.describe('activity/usage-strip', () => {
 		await expect(strip.getByRole('heading', { name: 'Last 24 hours' })).toBeVisible({ timeout: 20_000 })
 	})
 
+	test('a window that fails to load says so, keeps the numbers it has, and can be tried again', async ({ page }) => {
+		test.setTimeout(60_000)
+		await authenticateContext(page.context())
+		await page.goto('/activity', { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+
+		const strip = page.getByTestId('usage-strip')
+		await expect(strip.getByRole('heading', { name: 'Last 7 days' })).toBeVisible({ timeout: 20_000 })
+
+		// Fail the digest query (not the opt-in's `getUsageDigestAutomation`) until told otherwise.
+		let failDigest = true
+		await page.route('**/_app/remote/**', async (route) => {
+			if (failDigest && new URL(route.request().url()).pathname.endsWith('/getUsageDigest')) {
+				await route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ type: 'error', status: 500, error: { message: 'Internal Error' } }),
+				})
+				return
+			}
+			await route.fallback()
+		})
+
+		await strip.getByTestId('usage-window-30').click()
+		const error = strip.getByTestId('usage-error')
+		await expect(error).toHaveText('Could not load the last 30 days. Showing the last 7 days.', { timeout: 20_000 })
+		// The numbers on screen are still last week's, and the switch says so too.
+		await expect(strip.getByRole('heading', { name: 'Last 7 days' })).toBeVisible()
+		await expect(strip.getByTestId('usage-runs')).toBeVisible()
+		await expect(strip.getByTestId('usage-window-7')).toHaveAttribute('aria-pressed', 'true')
+		await expect(strip.getByTestId('usage-window-30')).toHaveAttribute('aria-pressed', 'false')
+
+		// Pressing it again asks again, rather than replaying the cached failure.
+		failDigest = false
+		await strip.getByTestId('usage-window-30').click()
+		await expect(strip.getByRole('heading', { name: 'Last 30 days' })).toBeVisible({ timeout: 20_000 })
+		await expect(error).toHaveCount(0)
+		await expect(strip.getByTestId('usage-window-30')).toHaveAttribute('aria-pressed', 'true')
+	})
+
 	test('the window switch is reachable at tablet width', async ({ page }) => {
 		// Page-header actions are not shown between the phone and desktop breakpoints, which
 		// is why the switch lives in the strip rather than the header.

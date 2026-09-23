@@ -64,6 +64,8 @@ The strip covers a rolling window — the last 24 hours, 7 days (the default) or
 
 **Why tokens come first.** Claude models run on the Claude Code subscription and are recorded at $0 per turn. A dollar-first strip would make a busy week look free. Tokens are the real measure; dollars are labelled *metered* — what gateway models, OpenRouter calls and paid tools such as image and video generation actually charged. When any usage in the window came from the subscription, the strip marks the dollar figure and says so.
 
+**When a window cannot be loaded.** The strip keeps the numbers it already has and says so in a short red line, for example "Could not load the last 30 days. Showing the last 7 days." The switch goes back to the window those numbers are for, so pressing the one that failed tries it again. If nothing has loaded yet, the strip says the numbers are unavailable.
+
 **Whose numbers.** Tokens, dollars, runs and tool calls are the whole instance's, the same as the cost panel on `/review`: AgentStudio has one owner, and background work such as embeddings and title generation records usage with no user attached. Automations, monitors and budget limits are the owner's.
 
 ### Needs a look

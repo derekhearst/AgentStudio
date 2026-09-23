@@ -98,7 +98,9 @@
 	</div>
 
 	{#if error && !digest}
-		<p class="rounded-xl border border-base-300/60 bg-base-100 p-3 text-sm text-base-content/70">{error}</p>
+		<p class="rounded-xl border border-base-300/60 bg-base-100 p-3 text-sm text-base-content/70" data-testid="usage-error">
+			{error}
+		</p>
 	{:else if !digest}
 		<div class="grid grid-cols-2 gap-2 tablet:grid-cols-4 tablet:gap-3" aria-hidden="true">
 			{#each [0, 1, 2, 3] as i (i)}
@@ -106,6 +108,11 @@
 			{/each}
 		</div>
 	{:else}
+		{#if error}
+			<!-- A later load failed. The numbers below are still the earlier ones, and this says so. -->
+			<p class="text-[11px] text-error" role="status" data-testid="usage-error">{error}</p>
+		{/if}
+
 		{#if digest.anomalies.length > 0}
 			<ul class="flex flex-wrap gap-1.5" data-testid="usage-anomalies" aria-label="Needs a look">
 				{#each digest.anomalies as anomaly, i (i)}
