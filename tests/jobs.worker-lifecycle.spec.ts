@@ -134,7 +134,11 @@ test.describe('jobs/worker — the type filter', () => {
 		const sql = getSql()
 		const { ensureDatabaseReady } = await import('../src/lib/db.server')
 		await ensureDatabaseReady()
-		const { startJobWorker } = await import('../src/lib/jobs/worker.server')
+		const { registerJobHandler, startJobWorker } = await import('../src/lib/jobs/worker.server')
+		// With no handler registered at all the worker returns before it ever looks at the type
+		// filter, and this spec would pass without testing it. One handler for a type nothing
+		// enqueues guarantees the filter is what keeps the job unclaimed.
+		registerJobHandler(`${prefix}-handled`, async () => ({}))
 		const worker = startJobWorker({ types: [type], pollIntervalMs: 60_000 })
 		try {
 			const [job] = await sql<{ id: string }[]>`insert into jobs (type) values (${type}) returning id`
