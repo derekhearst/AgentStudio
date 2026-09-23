@@ -15,7 +15,10 @@
 		errorMessage = '';
 		try {
 			await loginCommand({ password });
-			await goto('/');
+			// `invalidateAll`: the root layout's `{ user, authenticated }` was rendered for an
+			// anonymous visitor and nothing else re-runs it, so without this the shell treats the
+			// new session as anonymous (no credit balance, no `page.data.user`) until a reload.
+			await goto('/', { invalidateAll: true });
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Sign in failed';
 			password = '';

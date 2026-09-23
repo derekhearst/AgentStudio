@@ -28,7 +28,8 @@
 		errorMessage = '';
 		try {
 			await setupCommand({ name: name.trim(), username: username.trim(), password });
-			await goto('/');
+			// Same as /login: re-run the root layout so the shell sees the session just created.
+			await goto('/', { invalidateAll: true });
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'Setup failed';
 		} finally {
