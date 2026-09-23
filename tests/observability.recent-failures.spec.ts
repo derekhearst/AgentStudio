@@ -75,18 +75,24 @@ test.describe('observability/recent-failures — failed runs are listed', () => 
 		}
 	})
 
-	test('the /review panel shows the failed run and links to its run page', async ({ page }) => {
+	test('the /review panel shows the failed run with its cost and links to its run page', async ({ page }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('recent-failures-ui')
+		const sql = getSql()
 		await authenticateContext(page.context())
 		try {
 			const failed = await seedRun(prefix, 'failed', { error: `${prefix} provider returned 500` })
+			await sql`
+				insert into llm_usage (source, model, tokens_in, tokens_out, cost, run_id)
+				values ('chat', 'anthropic/claude-sonnet-5', 1000, 500, '0.4321', ${failed})
+			`
 
 			await page.goto('/', { waitUntil: 'domcontentloaded' })
 			await page.goto('/review', { waitUntil: 'domcontentloaded' })
 			const row = page.getByTestId('recent-failure').filter({ hasText: `${prefix} provider returned 500` })
 			await expect(row).toBeVisible({ timeout: 30_000 })
 			await expect(row).toHaveAttribute('href', `/runs/${failed}`)
+			await expect(row.getByTestId('recent-failure-cost')).toHaveText('$0.43')
 		} finally {
 			await cleanup(prefix)
 		}

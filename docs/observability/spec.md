@@ -107,7 +107,7 @@ Answering from /review a run that has already stopped waiting is refused with a 
 
 The **Recent failures** panel on /review lists, for the last 24 hours:
 
-- **Every run that ended in failure** — chat turns, subagent runs and automation runs, from the runs table where each run records how it ended (the same source as the failed-runs count above it). Each row shows the first line of the run's error and opens the run's page.
+- **Every run that ended in failure** — chat turns, subagent runs and automation runs, from the runs table where each run records how it ended (the same source as the failed-runs count above it). Each row shows the first line of the run's error and what the run cost (from the usage ledger), and opens the run's page.
 - **Every failed tool call a trace recorded** — these come from run traces, which only the older runtime loop writes, and open the trace.
 
 Before 2026-09-23 failed runs were read from run traces too. The chat engine writes no traces and the one writer never recorded a failure, so the panel said "No failures" beside a count showing them. A trace now also ends as `failed` when its run throws, instead of staying `running`.

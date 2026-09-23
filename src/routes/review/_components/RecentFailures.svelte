@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { listRecentFailuresQuery } from '$lib/observability/review.remote';
+	import { formatCost } from '$lib/agents/agent-format';
 	import { relativeTime } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof listRecentFailuresQuery>>;
@@ -40,6 +41,15 @@
 					<span class="badge badge-xs {kindBadge(failure.kind)}">{kindLabel(failure.kind)}</span>
 					<span class="line-clamp-1 flex-1 text-xs leading-tight">{failure.label}</span>
 					<span class="font-mono text-[10px] text-base-content/40">{failure.runId.slice(0, 8)}</span>
+					{#if failure.costUsd !== null}
+						<span
+							class="font-mono text-[10px] text-base-content/55"
+							data-testid="recent-failure-cost"
+							title="What the run cost, from the usage ledger"
+						>
+							{formatCost(failure.costUsd)}
+						</span>
+					{/if}
 					<span class="font-mono text-[10px] text-base-content/55">{fmtAge(failure.occurredAt)}</span>
 					<span class="text-xs text-base-content/40">→</span>
 				</a>
