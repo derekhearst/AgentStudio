@@ -44,8 +44,9 @@ Pressing either button stops playback straight away and cancels any request stil
 
 A reply is **not** read automatically when:
 
-- the user pressed Stop on the turn, or the turn failed part-way (the half-finished reply is saved, but it is not read);
-- the reply has no text, for example a turn that only ran tools;
+- the user pressed Stop on the turn. Nothing from that turn is read, even when the agent saves a normal-looking reply just after the Stop;
+- the turn failed, which is when the chat shows an error for it. The half-finished reply is saved, but it is not read. An error that was already on screen when the turn began does not count: for example, when a message is refused because a turn from another tab is still running, the page follows that turn and reads its reply;
+- the reply has no text. That includes a turn that only ran tools, and a turn saved as "(no output)", which would otherwise be read out as the words "no output" and paid for. Such a reply has no speaker button either;
 - the reply was already on screen before the turn started. Opening an old conversation never reads it.
 - the user opened another conversation before the turn finished. The reply is saved as usual and can be played from its speaker button later, but nothing from the conversation now on screen is read.
 

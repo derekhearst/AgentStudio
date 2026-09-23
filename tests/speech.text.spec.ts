@@ -11,6 +11,8 @@ import { expect, test } from '@playwright/test'
 import {
 	DEFAULT_TTS_MODEL,
 	DEFAULT_TTS_VOICE,
+	hasReplyText,
+	noteStop,
 	parseSpeechCatalog,
 	repliesToSpeak,
 	SPEECH_CHUNK_CHARACTERS,
@@ -175,6 +177,42 @@ test.describe('speech/repliesToSpeak — what auto-read reads when a turn ends',
 		expect(repliesToSpeak(turn, messages)).toEqual([])
 	})
 
+	/** What the page reloads after a turn that went wrong: the run's own save, not marked partial. */
+	const runSaved = [
+		...before,
+		{ id: 'a2', role: 'assistant', conversationId: 'c1', content: 'half an answer the run saved', metadata: { runId: 'r1' } },
+	]
+
+	test('a turn the user stopped reads nothing, even when the run saved an ordinary reply first', () => {
+		// After Stop the run returns normally and saves what it wrote. That save can land before
+		// the page reloads, and it replaces the page's partial copy, dropping the partial mark.
+		const stopped = noteStop(turn)
+		expect(stopped.stopped).toBe(true)
+		expect(noteStop(stopped)).toBe(stopped)
+		expect(repliesToSpeak(stopped, runSaved)).toEqual([])
+		// The same reply from a turn that was not stopped is read.
+		expect(repliesToSpeak(turn, runSaved).map((m) => m.id)).toEqual(['a2'])
+	})
+
+	test('a turn that ends with an error reads nothing, though the stream route saves the failed reply as ordinary', () => {
+		expect(repliesToSpeak(turn, runSaved, 'Run failed')).toEqual([])
+		// An error on the way that the finished turn cleared — a retried tool approval — is not
+		// a failure: only what is showing as the turn ends counts.
+		expect(repliesToSpeak(turn, runSaved, null).map((m) => m.id)).toEqual(['a2'])
+	})
+
+	test('an error already on screen when the turn began is not this turn failing', () => {
+		// A send refused because a run was already going leaves its message up while the page
+		// follows that run; the run's reply is new, and is read.
+		const refusal = 'A turn is already running in this conversation, so this message was not sent.'
+		const attached = startTurn('c1', before, refusal)
+		expect(attached.errorAtStart).toBe(refusal)
+		expect(repliesToSpeak(attached, runSaved, refusal).map((m) => m.id)).toEqual(['a2'])
+		expect(repliesToSpeak(attached, runSaved, null).map((m) => m.id)).toEqual(['a2'])
+		// A different error is this turn's own.
+		expect(repliesToSpeak(attached, runSaved, 'Stream interrupted')).toEqual([])
+	})
+
 	test('empty replies (tool-only turns) and optimistic drafts are skipped', () => {
 		const messages = [
 			{ id: 'a2', role: 'assistant', conversationId: 'c1', content: '   ' },
@@ -182,6 +220,23 @@ test.describe('speech/repliesToSpeak — what auto-read reads when a turn ends',
 			{ id: 'a4', role: 'assistant', conversationId: 'c1', content: null },
 		]
 		expect(repliesToSpeak(turn, messages)).toEqual([])
+	})
+
+	test("the stream route's (no output) placeholder is not read, with or without an attachment warning", () => {
+		const warning = '> **Attachment warning**\n>\n> - notes.pdf could not be read\n\n'
+		const messages = [
+			{ id: 'a2', role: 'assistant', conversationId: 'c1', content: '(no output)' },
+			{ id: 'a3', role: 'assistant', conversationId: 'c1', content: `${warning}(no output)` },
+			// The model's own words that happen to end the same way are read.
+			{ id: 'a4', role: 'assistant', conversationId: 'c1', content: 'The command printed nothing (no output)' },
+			{ id: 'a5', role: 'assistant', conversationId: 'c1', content: 'It printed:\n\n(no output)' },
+		]
+		expect(repliesToSpeak(turn, messages).map((m) => m.id)).toEqual(['a4', 'a5'])
+		expect(hasReplyText('  (no output)\n')).toBe(false)
+		expect(hasReplyText(`${warning}(no output)`)).toBe(false)
+		expect(hasReplyText(`${warning}Here is what I found.`)).toBe(true)
+		expect(hasReplyText('')).toBe(false)
+		expect(hasReplyText(null)).toBe(false)
 	})
 })
 

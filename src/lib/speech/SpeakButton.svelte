@@ -2,8 +2,10 @@
 	/**
 	 * Read-aloud pill for an assistant reply (#27). Play reads the reply through `/api/tts`;
 	 * while it is loading or playing the same pill stops it. A failure turns the icon red and
-	 * puts the reason in the tooltip; pressing it again retries.
+	 * puts the reason in the tooltip; pressing it again retries. A reply with nothing to read —
+	 * the `(no output)` placeholder of a turn that wrote no text — gets no pill.
 	 */
+	import { hasReplyText } from './speech';
 	import { speechPlayer } from './speech-player.svelte';
 
 	let { messageId, text }: { messageId: string; text: string } = $props();
@@ -21,23 +23,25 @@
 	);
 </script>
 
-<button
-	class="console-pill"
-	type="button"
-	data-testid="speak-button"
-	data-state={failure && status === 'idle' ? 'error' : status}
-	aria-pressed={status !== 'idle'}
-	title={label}
-	aria-label={label}
-	onclick={() => speechPlayer.toggle(messageId, text, { purpose: 'message' })}
->
-	{#if status === 'loading'}
-		<span class="loading loading-spinner" style="width:12px;height:12px;" aria-hidden="true"></span>
-	{:else if status === 'playing'}
-		<i class="mdi mdi-stop" aria-hidden="true"></i>
-	{:else if failure}
-		<i class="mdi mdi-volume-off text-error" aria-hidden="true"></i>
-	{:else}
-		<i class="mdi mdi-volume-high" aria-hidden="true"></i>
-	{/if}
-</button>
+{#if hasReplyText(text)}
+	<button
+		class="console-pill"
+		type="button"
+		data-testid="speak-button"
+		data-state={failure && status === 'idle' ? 'error' : status}
+		aria-pressed={status !== 'idle'}
+		title={label}
+		aria-label={label}
+		onclick={() => speechPlayer.toggle(messageId, text, { purpose: 'message' })}
+	>
+		{#if status === 'loading'}
+			<span class="loading loading-spinner" style="width:12px;height:12px;" aria-hidden="true"></span>
+		{:else if status === 'playing'}
+			<i class="mdi mdi-stop" aria-hidden="true"></i>
+		{:else if failure}
+			<i class="mdi mdi-volume-off text-error" aria-hidden="true"></i>
+		{:else}
+			<i class="mdi mdi-volume-high" aria-hidden="true"></i>
+		{/if}
+	</button>
+{/if}

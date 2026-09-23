@@ -5,8 +5,9 @@
  * table pipes and every character of a URL, so `toSpeakableText` turns it into prose first.
  * `splitForSpeech` then cuts that prose into pieces the synthesis endpoint accepts, on
  * sentence boundaries so the joins are not audible, with a short first piece so playback
- * starts quickly. `startTurn` / `repliesToSpeak` pick which replies a finished turn produced,
- * for auto-read, and `voiceForModel` which voice carries over when Settings changes model.
+ * starts quickly. `startTurn` / `noteStop` / `repliesToSpeak` pick which replies a finished
+ * turn produced, for auto-read, and `voiceForModel` which voice carries over when
+ * Settings changes model.
  *
  * No `$lib` imports and no DOM: specs import this directly in the plain Playwright loader.
  */
@@ -304,31 +305,85 @@ type SpeakableMessage = {
 	metadata?: unknown
 }
 
-/** What was on screen when a turn started: its conversation, and the replies already in it. */
-export type TurnStart = { conversationId: string; known: ReadonlySet<string> }
+/** What the stream route saves as a reply when the turn wrote no text. */
+const NO_OUTPUT_REPLY = '(no output)'
 
-export function startTurn(conversationId: string, messages: readonly SpeakableMessage[]): TurnStart {
+/**
+ * Whether a saved reply has anything to read. Not when it is blank, and not when it is the
+ * stream route's `(no output)` placeholder — alone, or after the attachment warning the route
+ * puts in front of it — which would be read out as the words "no output" and billed.
+ */
+export function hasReplyText(content: string | null | undefined): boolean {
+	const text = (content ?? '').trim()
+	if (!text) return false
+	if (!text.endsWith(NO_OUTPUT_REPLY)) return true
+	const before = text.slice(0, -NO_OUTPUT_REPLY.length)
+	if (!before) return false
+	// The attachment warning is a blockquote followed by a blank line. Anything else in front
+	// is the model's own text that happens to end in those words.
+	return !(before.endsWith('\n\n') && before.trim().split('\n').every((line) => line.startsWith('>')))
+}
+
+/**
+ * A turn as auto-read follows it: its conversation, the replies already in it when it began,
+ * the error the page was showing as it began, and whether the user pressed Stop on it.
+ */
+export type TurnStart = {
+	conversationId: string
+	known: ReadonlySet<string>
+	/**
+	 * A turn that follows a run started elsewhere begins with the refusal that sent it there
+	 * still on screen. That is not this turn failing.
+	 */
+	errorAtStart: string | null
+	stopped: boolean
+}
+
+export function startTurn(conversationId: string, messages: readonly SpeakableMessage[], error: string | null = null): TurnStart {
 	return {
 		conversationId,
 		known: new Set(messages.filter((m) => m.role === 'assistant').map((m) => m.id)),
+		errorAtStart: error,
+		stopped: false,
 	}
 }
 
 /**
- * Which replies a finished turn produced, for auto-read.
- *
- * Only replies in the turn's own conversation that were not already there when it started.
- * The chat page is reused from one conversation to the next, so a turn can end after the
- * page has moved on — the other conversation's history is not new, and must not be read.
- * A reply saved as `partial` is a turn that was stopped or failed part-way: reading half an
- * answer aloud after the user pressed Stop is the opposite of what they asked for.
+ * Note that the user pressed Stop on the turn. It has to be noted while the turn runs: the
+ * chat page clears its Stop flag in the same step that ends the turn.
  */
-export function repliesToSpeak<T extends SpeakableMessage>(turn: TurnStart, messages: readonly T[]): T[] {
+export function noteStop(turn: TurnStart): TurnStart {
+	return turn.stopped ? turn : { ...turn, stopped: true }
+}
+
+/**
+ * Which replies a finished turn produced, for auto-read. `errorAtEnd` is the error the page
+ * shows as the turn ends: a failed turn leaves its error up, and a turn that finishes clears
+ * whatever a hiccup on the way (a tool approval that had to be retried) put there.
+ *
+ * None when the user pressed Stop, or when the turn failed. The saved reply alone cannot say
+ * so: after a failure the stream route still saves what the run wrote, as an ordinary reply,
+ * and after Stop the run's own save can land — replacing the page's partial copy — before
+ * the page reloads. Reading half an answer aloud after the user pressed Stop is the opposite
+ * of what they asked for.
+ *
+ * Otherwise, only replies in the turn's own conversation that were not already there when it
+ * started. The chat page is reused from one conversation to the next, so a turn can end after
+ * the page has moved on — the other conversation's history is not new, and must not be read.
+ * A reply saved as `partial`, or with no text to read (see `hasReplyText`), is skipped too.
+ */
+export function repliesToSpeak<T extends SpeakableMessage>(
+	turn: TurnStart,
+	messages: readonly T[],
+	errorAtEnd: string | null = null,
+): T[] {
+	if (turn.stopped) return []
+	if (errorAtEnd !== null && errorAtEnd !== turn.errorAtStart) return []
 	return messages.filter((message) => {
 		if (message.role !== 'assistant' || message.optimistic) return false
 		if (message.conversationId !== turn.conversationId || turn.known.has(message.id)) return false
 		const metadata = message.metadata && typeof message.metadata === 'object' ? (message.metadata as Record<string, unknown>) : null
 		if (metadata?.partial === true) return false
-		return Boolean(message.content?.trim())
+		return hasReplyText(message.content)
 	})
 }

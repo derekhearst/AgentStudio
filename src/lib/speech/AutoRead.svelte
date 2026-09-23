@@ -3,10 +3,13 @@
 	 * Auto-read (#27): an opt-in switch that speaks each new assistant reply when its turn
 	 * finishes, for hands-free use.
 	 *
-	 * The chat page hands over only its persisted `messages` and whether a turn is `streaming`.
-	 * When a turn starts, the replies already on screen are remembered; when it ends — after
-	 * the page has reloaded the conversation, so the saved reply is in `messages` — whatever is
-	 * new is read. A reply saved as partial (Stop, or a failure) is not.
+	 * The chat page hands over its persisted `messages`, whether a turn is `streaming`, and its
+	 * Stop flag and error banner. When a turn starts, the replies already on screen are
+	 * remembered; when it ends — after the page has reloaded the conversation, so the saved
+	 * reply is in `messages` — whatever is new is read. A turn the user stopped, or one that
+	 * ended with an error, reads nothing: the saved reply cannot be trusted to say so (see
+	 * `repliesToSpeak`). Stop is noted while the turn runs, because the page clears it as the
+	 * turn ends; the error is still up then.
 	 *
 	 * The switch is per device (see `autoRead`) and starts off. Turning it on also primes the
 	 * audio element from that tap, which is what lets a reply that arrives later start talking.
@@ -23,7 +26,7 @@
 	 */
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { repliesToSpeak, startTurn, type TurnStart } from './speech';
+	import { noteStop, repliesToSpeak, startTurn, type TurnStart } from './speech';
 	import { autoRead, speechPlayer } from './speech-player.svelte';
 
 	type Reply = {
@@ -35,7 +38,19 @@
 		metadata?: unknown;
 	};
 
-	let { messages, streaming }: { messages: readonly Reply[]; streaming: boolean } = $props();
+	let {
+		messages,
+		streaming,
+		stopped = false,
+		error = null,
+	}: {
+		messages: readonly Reply[];
+		streaming: boolean;
+		/** The user pressed Stop on the running turn. */
+		stopped?: boolean;
+		/** The error the page is showing, if any: a turn that fails leaves its error up. */
+		error?: string | null;
+	} = $props();
 
 	const conversationId = $derived(page.params.id ?? '');
 
@@ -51,7 +66,7 @@
 	/** A reply from this conversation is being read, by auto-read or its speaker button. */
 	const replyPlaying = $derived(speechPlayer.activePurpose === 'autoplay' || speechPlayer.activePurpose === 'message');
 
-	/** The running turn's conversation and the replies it already held; null between turns. */
+	/** The running turn: its conversation, the replies it already held, Stop. Null between turns. */
 	let turn: TurnStart | null = null;
 	/** The reply auto-read last tried, so a failure to read it can be shown here. */
 	let lastReadId = $state<string | null>(null);
@@ -59,13 +74,16 @@
 
 	$effect(() => {
 		const live = streaming;
+		// Tracked, so Stop is noted while the turn is still running (see the header).
+		const stopPressed = stopped;
 		untrack(() => {
 			if (live) {
-				turn ??= startTurn(conversationId, messages);
+				turn ??= startTurn(conversationId, messages, error);
+				if (stopPressed) turn = noteStop(turn);
 				return;
 			}
 			if (!turn) return;
-			const fresh = repliesToSpeak(turn, messages);
+			const fresh = repliesToSpeak(turn, messages, error);
 			turn = null;
 			if (!autoRead.enabled || fresh.length === 0) return;
 			lastReadId = fresh[fresh.length - 1].id;

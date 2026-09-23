@@ -1707,7 +1707,7 @@
 			{/if}
 
 			<!-- #27 — opt-in: speak each new reply when its turn finishes. -->
-			<AutoRead {messages} {streaming} />
+			<AutoRead {messages} {streaming} stopped={stoppedByUser} error={streamError} />
 
 			<ChatInput
 				busy={streaming && !pendingAskUser}

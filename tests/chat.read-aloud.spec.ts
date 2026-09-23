@@ -426,6 +426,131 @@ test('auto-read speaks the reply a finished turn produced — only once switched
 	}
 })
 
+test('auto-read reads nothing from a turn that failed or was stopped, or a reply with no text', async ({ page }) => {
+	test.setTimeout(150_000)
+	const prefix = uniquePrefix('chat-auto-read-quiet')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const sql = getSql()
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId() })
+	const requests = await scriptSpeech(page, wavAnswer(0.2))
+
+	/** Save a message the way the stream route would, after whatever the conversation holds. */
+	const save = async (role: 'user' | 'assistant', content: string) => {
+		const [{ id }] = await sql<{ id: string }[]>`
+			insert into messages (conversation_id, role, content, sequence)
+			values (
+				${conv.id}, ${role}, ${content},
+				(select coalesce(max(sequence), 0) + 1 from messages where conversation_id = ${conv.id})
+			)
+			returning id
+		`
+		return id
+	}
+	const stream = (route: Route, frames: Parameters<typeof sse>[0]) =>
+		route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: sse(frames) })
+
+	// One scripted turn per send, in order. None of the quiet ones marks its saved reply partial:
+	// what the page reloads looks like any other reply, so only the turn itself can tell.
+	let stopTurnSaved = false
+	const turns: Array<(route: Route, sent: string) => Promise<void>> = [
+		// Fails part-way: the stream route saves what the run wrote, then reports the failure.
+		async (route, sent) => {
+			await save('user', sent)
+			const id = await save('assistant', `${prefix} half an answer.`)
+			await stream(route, [
+				{ id: 1, event: 'delta', data: { content: `${prefix} half an answer.` } },
+				{ id: 2, event: 'done', data: { messageId: id, error: 'Run failed' } },
+			])
+		},
+		// Writes no text, which the stream route saves as a placeholder.
+		async (route, sent) => {
+			await save('user', sent)
+			const id = await save('assistant', '(no output)')
+			await stream(route, [{ id: 1, event: 'done', data: { messageId: id } }])
+		},
+		// Stopped. The run's own save lands before the page reloads the conversation; the stream
+		// ends without `done` and its resume is never answered, so only Stop ends the turn.
+		async (route, sent) => {
+			await save('user', sent)
+			await save('assistant', `${prefix} what the run saved after the stop.`)
+			stopTurnSaved = true
+			await stream(route, [{ id: 1, event: 'delta', data: { content: `${prefix} what the run` } }])
+		},
+		// An ordinary turn.
+		async (route, sent) => {
+			await save('user', sent)
+			const id = await save('assistant', `${prefix} a finished reply.`)
+			await stream(route, [
+				{ id: 1, event: 'delta', data: { content: `${prefix} a finished reply.` } },
+				{ id: 2, event: 'done', data: { messageId: id } },
+			])
+		},
+	]
+	let turn = 0
+	await page.route(
+		(url) => url.pathname === `/chat/${conv.id}/stream`,
+		async (route) => {
+			const sent = (route.request().postDataJSON() as { content?: string } | null)?.content ?? ''
+			await turns[turn++](route, sent)
+		},
+	)
+	await page.route(
+		(url) => url.pathname === `/chat/${conv.id}/stream/resume`,
+		() => new Promise<void>(() => undefined),
+	)
+	await page.route(
+		(url) => url.pathname === `/chat/${conv.id}/stop`,
+		(route) => route.fulfill({ json: { stopped: true } }),
+	)
+
+	const send = async (text: string) => {
+		const composer = page.getByPlaceholder('Message AgentStudio...')
+		await composer.waitFor({ state: 'visible', timeout: 30_000 })
+		await composer.fill(text)
+		await page.getByRole('button', { name: /send message/i }).first().click()
+	}
+	const stopButton = page.getByRole('button', { name: 'Stop generating' })
+	/** The turn has ended — the page has reloaded the conversation — and nothing was read. */
+	const nothingRead = async () => {
+		await expect(stopButton).toHaveCount(0, { timeout: 30_000 })
+		await page.waitForTimeout(1_000)
+		expect(requests).toHaveLength(0)
+	}
+	const toggle = page.getByTestId('auto-read-toggle')
+
+	try {
+		await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		await expect(toggle).toHaveAttribute('aria-pressed', 'false', { timeout: 30_000 })
+		await toggle.click()
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+		await send(`${prefix} one`)
+		await expect(page.getByText('Run failed').first()).toBeVisible({ timeout: 30_000 })
+		await nothingRead()
+
+		await send(`${prefix} two`)
+		await nothingRead()
+
+		await send(`${prefix} three`)
+		await expect.poll(() => stopTurnSaved, { timeout: 30_000 }).toBe(true)
+		await stopButton.click()
+		await expect(page.getByText(`${prefix} what the run saved after the stop.`).first()).toBeVisible({ timeout: 30_000 })
+		await nothingRead()
+
+		// The switch still works: the next ordinary reply is read, and nothing from before it.
+		await send(`${prefix} four`)
+		await expect.poll(() => requests.length, { timeout: 30_000 }).toBe(1)
+		expect(requests[0].purpose).toBe('autoplay')
+		expect(requests[0].text).toContain('a finished reply.')
+		for (const earlier of ['half an answer', 'no output', 'what the run']) expect(requests[0].text).not.toContain(earlier)
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
 test('with auto-read on, the first tap after a reload primes audio again', async ({ page }) => {
 	test.setTimeout(90_000)
 	const prefix = uniquePrefix('chat-auto-read-reprime')

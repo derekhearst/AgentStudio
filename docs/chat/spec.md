@@ -231,7 +231,7 @@ On mobile, the right panel collapses into a bottom sheet or tab drawer. The work
 
 ### Reading replies aloud
 
-Every assistant reply has a speaker button beside Copy. It reads the reply through `POST /api/tts`, skipping code blocks, and the same button stops it. An **Auto-read** switch above the composer (off by default, remembered per device) reads each new reply when its turn finishes. A turn that was stopped or failed part-way is not read. The chat page only hands the switch its saved messages and whether a turn is running; playback lives in `src/lib/speech`. See [../speech/speech.md](../speech/speech.md).
+Every assistant reply has a speaker button beside Copy. It reads the reply through `POST /api/tts`, skipping code blocks, and the same button stops it. An **Auto-read** switch above the composer (off by default, remembered per device) reads each new reply when its turn finishes. A turn that was stopped or failed is not read, and neither is a reply saved as "(no output)". The chat page only hands the switch its saved messages, whether a turn is running, its Stop flag and the error it is showing; playback lives in `src/lib/speech`. See [../speech/speech.md](../speech/speech.md).
 
 ### How replies are displayed safely
 
