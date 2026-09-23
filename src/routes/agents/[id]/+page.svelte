@@ -15,10 +15,14 @@
 		describeSchedule,
 		modelShortName,
 		relativeTime,
+		streamPreview,
+		type AgentStreamEntry,
 	} from '$lib/agents/agent-format'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
-	type StreamEntry = { conversationId: string; agentId: string; delta: string }
+	// Was `{ delta: string }`, which the monitor never sends: the live banner below threw
+	// on `undefined.length` as soon as this agent streamed. See `AgentStreamEntry`.
+	type StreamEntry = AgentStreamEntry
 
 	const agentId = $derived(page.params.id ?? '')
 	let data = $state<AgentData | null>(null)
@@ -198,7 +202,7 @@
 					<a href="/chat/{live.conversationId}" class="btn btn-xs btn-primary">Watch live →</a>
 				</div>
 				<p class="line-clamp-2 break-words text-xs leading-relaxed text-base-content/70">
-					{live.delta.length > 500 ? '…' + live.delta.slice(-500) : live.delta}
+					{streamPreview(live.lastDelta, 500)}
 				</p>
 				<span class="cursor-blink mt-1 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 			</div>

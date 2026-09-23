@@ -3,7 +3,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
-	import { formatCost } from '$lib/agents/agent-format'
+	import { formatCost, streamPreview, type AgentStreamEntry } from '$lib/agents/agent-format'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
@@ -11,16 +11,8 @@
 		relativeTimeBase(date, { style: 'capitalized' })
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number]
-	/*
-	 * `lastDelta`, not `delta`, and nullable.
-	 *
-	 * /api/agents/monitor streams whatever `listActiveAgentRunsForUser` selects, which
-	 * names the column `lastDelta`. This type claimed `delta: string`, so the live preview
-	 * below read `undefined.length` and threw the moment any agent actually streamed —
-	 * taking the whole page down with it. The column is also null until the first token
-	 * arrives, so a run that has started but not spoken is the normal case, not an edge one.
-	 */
-	type StreamEntry = { conversationId: string; agentId: string; lastDelta: string | null }
+	// See `AgentStreamEntry` for why this is `lastDelta` and nullable.
+	type StreamEntry = AgentStreamEntry
 
 	let agents = $state<AgentRow[]>([])
 	let loading = $state(true)
@@ -223,9 +215,7 @@
 										<span class="text-[10px] font-semibold uppercase tracking-widest text-primary/70">Streaming live</span>
 									</div>
 									<p class="line-clamp-3 break-all text-[11px] leading-relaxed text-base-content/70">
-										{(streaming.lastDelta ?? '').length > 400
-											? '…' + (streaming.lastDelta ?? '').slice(-400)
-											: (streaming.lastDelta ?? '')}
+										{streamPreview(streaming.lastDelta, 400)}
 									</p>
 									<span class="cursor-blink mt-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 								</div>
