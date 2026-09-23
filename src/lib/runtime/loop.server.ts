@@ -35,6 +35,16 @@ import {
  */
 
 export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopResult> {
+	try {
+		return await runChatLoopRounds(input)
+	} catch (err) {
+		// The trace ends the way the run did; the caller still records the failure itself.
+		closeRunTrace(input.session.runId, 'failed')
+		throw err
+	}
+}
+
+async function runChatLoopRounds(input: RunChatLoopInput): Promise<RunChatLoopResult> {
 	const { session } = input
 	const startedAt = Date.now()
 

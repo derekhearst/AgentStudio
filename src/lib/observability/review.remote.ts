@@ -141,9 +141,9 @@ export const getOperationalSnapshotQuery = query(async () => {
 })
 
 /**
- * Recent run + tool failures for the consolidated /review dashboard. Backed by `run_traces`:
- * each `success=false` tool-call span surfaces as one row, plus one row per run that ended
- * in `failed` state. Cap small (<=50) — for full history, drill into the trace viewer.
+ * Recent run + tool failures for the consolidated /review dashboard: one row per run that
+ * ended in `failed` state (from `chat_runs`), plus one per `success=false` tool-call span
+ * (from `run_traces`). Cap small (<=50) — for full history, drill into the run pages.
  */
 const recentFailuresSchema = z
 	.object({

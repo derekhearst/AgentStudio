@@ -16,6 +16,12 @@
 	function kindLabel(kind: 'run_failed' | 'tool_failed'): string {
 		return kind === 'run_failed' ? 'run' : 'tool';
 	}
+
+	// A failed run opens its run page, which every run has; most runs have no trace, so the
+	// trace viewer would only say so. A failed tool call lives in a trace span.
+	function failureHref(failure: Failure): string {
+		return failure.kind === 'run_failed' ? `/runs/${failure.runId}` : `/review/trace/${failure.runId}`;
+	}
 </script>
 
 {#if failures.length === 0}
@@ -27,7 +33,8 @@
 		{#each failures as failure (failure.runId + '-' + failure.kind + '-' + new Date(failure.occurredAt).getTime())}
 			<li>
 				<a
-					href="/review/trace/{failure.runId}"
+					href={failureHref(failure)}
+					data-testid="recent-failure"
 					class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 text-sm hover:bg-base-200/40"
 				>
 					<span class="badge badge-xs {kindBadge(failure.kind)}">{kindLabel(failure.kind)}</span>
