@@ -619,9 +619,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				for (const block of msg.message?.content ?? []) {
 					if (block.type !== 'tool_result') continue
 					const id = String(block.tool_use_id)
-					// Folds an image block (browser_screenshot) back into the JSON the card renders.
-					const text = toolResultText(block.content)
 					const toolName = toolNames.get(id) ?? 'unknown'
+					// Folds browser_screenshot's image block back into the JSON its card renders;
+					// every other tool's result is the plain text join.
+					const text = toolResultText(block.content, toolName)
 					const toolArguments = toolInputs.get(id) ?? null
 					const details = toolResultDetails(toolName, structured, toolArguments)
 

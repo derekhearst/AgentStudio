@@ -12,6 +12,9 @@ import { toolResultContent, toolResultText } from '../src/lib/engine/tool-result
  *   - every other result is still one JSON text block, exactly as before
  *   - on the way back, the SDK's Anthropic-format image block is folded into the JSON string
  *     the transcript stores and the tool card renders (`{ …, imageBase64 }`)
+ *   - only for browser_screenshot: an image from any other tool (the SDK's `Read` on a PNG, an
+ *     external MCP server) is dropped from the stored text exactly as it was before, instead
+ *     of landing in the transcript, the card and the context count as base64
  */
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -53,23 +56,28 @@ test.describe('tool result → MCP content', () => {
 
 test.describe('SDK tool_result → transcript text', () => {
 	test('text-only content is joined exactly as before', () => {
-		expect(toolResultText('already a string')).toBe('already a string')
-		expect(toolResultText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }])).toBe('ab')
-		expect(toolResultText(null)).toBe('null')
-		expect(toolResultText({ x: 1 })).toBe('{"x":1}')
+		for (const tool of ['web_fetch', 'browser_screenshot', 'Read']) {
+			expect(toolResultText('already a string', tool)).toBe('already a string')
+			expect(toolResultText([{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }], tool)).toBe('ab')
+			expect(toolResultText(null, tool)).toBe('null')
+			expect(toolResultText({ x: 1 }, tool)).toBe('{"x":1}')
+		}
 	})
 
 	test('an Anthropic image block is folded back into the JSON the tool card renders', () => {
-		const text = toolResultText([
-			{ type: 'text', text: '{"url":"https://example.com/","mimeType":"image/png"}' },
-			{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
-		])
+		const text = toolResultText(
+			[
+				{ type: 'text', text: '{"url":"https://example.com/","mimeType":"image/png"}' },
+				{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+			],
+			'browser_screenshot',
+		)
 		const parsed = JSON.parse(text)
 		expect(parsed).toEqual({ url: 'https://example.com/', mimeType: 'image/png', imageBase64: PNG })
 	})
 
 	test('an MCP-shaped image block is understood too', () => {
-		const parsed = JSON.parse(toolResultText([{ type: 'image', data: PNG, mimeType: 'image/jpeg' }]))
+		const parsed = JSON.parse(toolResultText([{ type: 'image', data: PNG, mimeType: 'image/jpeg' }], 'browser_screenshot'))
 		expect(parsed).toEqual({ mimeType: 'image/jpeg', imageBase64: PNG })
 	})
 
@@ -81,11 +89,32 @@ test.describe('SDK tool_result → transcript text', () => {
 				? { type: 'image', source: { type: 'base64', media_type: block.mimeType, data: block.data } }
 				: block,
 		)
-		expect(JSON.parse(toolResultText(returned))).toEqual({
+		expect(JSON.parse(toolResultText(returned, 'browser_screenshot'))).toEqual({
 			url: 'https://example.com/',
 			title: 'Example',
 			mimeType: 'image/png',
 			imageBase64: PNG,
 		})
+	})
+})
+
+test.describe('images from every other tool stay out of the transcript text', () => {
+	const anthropicImage = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }
+
+	test("the SDK's Read on a PNG (an image block, no caption) is stored as '' — as before", () => {
+		expect(toolResultText([anthropicImage], 'Read')).toBe('')
+	})
+
+	test("an external MCP tool's image is dropped and its text kept — as before", () => {
+		const text = toolResultText([{ type: 'text', text: 'captured' }, anthropicImage], 'mcp__other__screenshot')
+		expect(text).toBe('captured')
+		expect(text).not.toContain(PNG)
+	})
+
+	test('even when its caption looks like ours', () => {
+		// Same shape browser_screenshot sends, from someone else's server: still not folded.
+		const blocks = [{ type: 'text', text: '{"mimeType":"image/png"}' }, anthropicImage]
+		expect(toolResultText(blocks, 'mcp__other__browser_screenshot')).toBe('{"mimeType":"image/png"}')
+		expect(toolResultText(blocks, 'unknown')).toBe('{"mimeType":"image/png"}')
 	})
 })

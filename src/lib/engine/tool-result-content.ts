@@ -10,7 +10,11 @@
  *
  * On the way back the SDK hands us Anthropic-format blocks. The transcript and the tool card
  * still expect the single JSON string they always had, `{ …, mimeType, imageBase64 }`, so
- * `toolResultText` folds the image back into it.
+ * `toolResultText` folds the image back into it — for our own image tools only. Other tools
+ * return images too (the SDK's `Read` on a PNG, an external MCP server's screenshot); their
+ * results keep the plain text join, which drops the image, exactly as before. Folding theirs
+ * in would store the whole base64 as transcript text, show it in the card as a wall of
+ * characters, and count it against the context as if the model had read it as text.
  *
  * Pure — no SDK import, no I/O — so a spec can pin both directions.
  */
@@ -52,11 +56,22 @@ function blockImage(block: unknown): { data: string; mimeType: string } | null {
 	return null
 }
 
-/** The transcript's text for one `tool_result` block's `content`. */
-export function toolResultText(raw: unknown): string {
+/**
+ * Our tools whose result is an image (`toolResultContent` sends it as an image block) and
+ * whose card renders `imageBase64`. Bare names, as `bareToolName` gives them: an external MCP
+ * server's tool of the same name keeps its `mcp__<server>__` prefix and is not matched.
+ */
+const IMAGE_RESULT_TOOLS: ReadonlySet<string> = new Set(['browser_screenshot'])
+
+/**
+ * The transcript's text for one `tool_result` block's `content`. `toolName` is the bare name
+ * of the tool that produced it; only an image tool of ours gets its image folded back in.
+ */
+export function toolResultText(raw: unknown, toolName: string): string {
 	if (typeof raw === 'string') return raw
 	if (!Array.isArray(raw)) return JSON.stringify(raw ?? null)
 	const text = raw.map((c: { text?: unknown }) => (typeof c?.text === 'string' ? c.text : '')).join('')
+	if (!IMAGE_RESULT_TOOLS.has(toolName)) return text
 	const image = raw.map(blockImage).find((i) => i !== null)
 	if (!image) return text
 
