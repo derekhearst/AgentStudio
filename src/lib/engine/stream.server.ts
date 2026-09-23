@@ -164,6 +164,11 @@ export type EngineRunInput = {
 		success: boolean
 		/** The typed result, when the tool has a shape we distil. Lets the ledger record a path or a command. */
 		details?: ToolResultDetails
+		/**
+		 * The `Task` call this came from, when a subagent made the call. The ledger counts it
+		 * either way; anything that speaks for the parent — the pinned checklist — must not.
+		 */
+		subagentId?: string
 	}) => void
 	/**
 	 * Called once, synchronously, with a handle on the live SDK session.
@@ -792,6 +797,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							name: toolName,
 							success: block.is_error !== true,
 							...(details ? { details } : {}),
+							subagentId: parentToolUseId,
 						})
 						continue
 					}

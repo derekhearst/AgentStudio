@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { pinnedTodoListFrom } from '../src/lib/chat/pinned-todo'
 
 /**
  * #21 — the pinned checklist above the composer.
@@ -127,5 +128,27 @@ test.describe('chat/pinned-todo — the latest checklist stays visible', () => {
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}
+	})
+})
+
+test.describe('chat/pinned-todo — whose list gets pinned', () => {
+	test('only the parent\'s TodoWrite becomes the pinned checklist (#133)', () => {
+		const details = {
+			kind: 'todo' as const,
+			items: [{ content: 'Plan', status: 'pending' as const, activeForm: 'Planning' }],
+			completed: 0,
+			total: 1,
+			truncated: false,
+		}
+		const at = new Date('2026-09-22T00:00:00Z')
+
+		expect(pinnedTodoListFrom({ details }, 'run-1', at)).toEqual({
+			items: details.items,
+			updatedAt: at.toISOString(),
+			runId: 'run-1',
+		})
+		// A delegated agent's own sub-steps must not replace the parent's plan.
+		expect(pinnedTodoListFrom({ details, subagentId: 'task-1' }, 'run-1', at)).toBeNull()
+		expect(pinnedTodoListFrom({}, 'run-1', at)).toBeNull()
 	})
 })

@@ -36,6 +36,7 @@ import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approva
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
+import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
 	buildBuiltinAgentPostureSlot,
@@ -513,20 +514,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						 * which are accounted per run. Budget limits sum `cost`, so counting
 						 * cannot move a limit.
 						 */
-						onToolResult: ({ name, success, details }) => {
+						onToolResult: ({ name, success, details, subagentId }) => {
 							/*
 							 * #21 — keep the agent's checklist where it can be seen. The tool block
 							 * carries it into the transcript, but a list scrolls away the moment the
-							 * model says anything after it. Last write wins, which is what
-							 * `TodoWrite` means; on the conversation, because a plan routinely
-							 * outlives the run that wrote it.
+							 * model says anything after it. On the conversation, because a plan
+							 * routinely outlives the run that wrote it; the parent's own lists only
+							 * (`pinnedTodoListFrom`).
 							 */
-							if (details?.kind === 'todo') {
-								const todoList = {
-									items: details.items,
-									updatedAt: new Date().toISOString(),
-									runId: run.id,
-								}
+							const todoList = pinnedTodoListFrom({ details, subagentId }, run.id)
+							if (todoList) {
 								void db
 									.update(conversations)
 									.set({ todoList })

@@ -1,6 +1,6 @@
 /**
- * The chat page's stop controls, as requests. Browser-side; the server half is
- * `/chat/[id]/stop`.
+ * The chat page's stop controls, as requests. Browser-side; the server halves are
+ * `/chat/[id]/stop` and `/chat/[id]/stop-task`.
  */
 
 /**
@@ -27,3 +27,26 @@ export async function requestRunStop(conversationId: string, runId: string | nul
 	}
 }
 
+/**
+ * What to tell the user when stopping a background task did not work, or null when it did.
+ *
+ * `/stop-task` answers a refusal with a 200 and `stopped: false`, and the page used to ignore
+ * the body: the chip's button did nothing and said nothing. `taskGone` is true when the task
+ * cannot still be running — its turn has ended, and with it the process that owned it — so
+ * the chip can go too.
+ */
+export function stopTaskProblem(ok: boolean, body: unknown): { message: string; taskGone: boolean } | null {
+	const answer = (body && typeof body === 'object' ? body : {}) as { stopped?: unknown; reason?: unknown }
+	if (ok && answer.stopped === true) return null
+
+	switch (answer.reason) {
+		case 'run_not_active':
+			return { message: 'That task ended with its turn, so there is nothing left to stop.', taskGone: true }
+		case 'not_reachable':
+			return { message: 'This run is not reachable from here, so the task could not be stopped.', taskGone: false }
+		case 'stop_failed':
+			return { message: 'The task could not be stopped. It may already have finished.', taskGone: false }
+		default:
+			return { message: 'Could not stop the task. Try again in a moment.', taskGone: false }
+	}
+}

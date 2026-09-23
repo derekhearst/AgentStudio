@@ -82,7 +82,7 @@
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
-	import { requestRunStop } from '$lib/chat/run-controls';
+	import { requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
@@ -113,7 +113,8 @@
 	 * Live background tasks, from the SDK's `background_tasks_changed` frame.
 	 *
 	 * REPLACE semantics — each frame carries the whole live set, so this is assigned, never
-	 * merged. Cleared when a turn starts, because the set belongs to the run.
+	 * merged. Cleared when a turn starts and again when its stream ends, because the set
+	 * belongs to the run.
 	 */
 	let backgroundTasks = $state<Array<{ id: string; type: string; description: string }>>([]);
 	/** Monotonic, because the transcript's `{#each}` is keyed and duplicate keys throw. */
@@ -626,6 +627,8 @@
 
 	/** Task ids a stop has been sent for, so the button cannot be double-fired. */
 	let stoppingTasks = $state<string[]>([]);
+	/** Why the last background-task stop did not work, shown briefly under the header. */
+	let backgroundTaskNotice = $state<string | null>(null);
 
 	/**
 	 * #35 — stop one background task.
@@ -634,22 +637,35 @@
 	 * id comes from `context_stats`, which the stream emits before any task can exist, so a
 	 * visible task always has one. The chip is left in place on failure rather than removed
 	 * optimistically: `background_tasks_changed` is the authority on what is live, and it
-	 * arrives on its own the moment the task actually goes away.
+	 * arrives on its own the moment the task actually goes away. The exception is an answer
+	 * that the turn has already ended, which took the task with it. Either way a refusal is
+	 * shown rather than swallowed.
 	 */
 	async function stopBackgroundTask(taskId: string) {
 		const runId = liveContextStats?.runId;
 		if (!runId || stoppingTasks.includes(taskId)) return;
 		stoppingTasks = [...stoppingTasks, taskId];
+		let problem: ReturnType<typeof stopTaskProblem> = null;
 		try {
-			await fetch(`/chat/${conversationId}/stop-task`, {
+			const response = await fetch(`/chat/${conversationId}/stop-task`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ runId, taskId })
 			});
+			problem = stopTaskProblem(response.ok, await response.json().catch(() => null));
 		} catch (error) {
 			console.warn('[chat] failed to stop a background task', error);
+			problem = stopTaskProblem(false, null);
 		} finally {
 			stoppingTasks = stoppingTasks.filter((id) => id !== taskId);
+		}
+		if (problem) {
+			if (problem.taskGone) backgroundTasks = backgroundTasks.filter((task) => task.id !== taskId);
+			const message = problem.message;
+			backgroundTaskNotice = message;
+			setTimeout(() => {
+				if (backgroundTaskNotice === message) backgroundTaskNotice = null;
+			}, 5000);
 		}
 	}
 
@@ -1142,6 +1158,11 @@
 			waitingForFirstToken = false;
 			streamAbortController = null;
 			stoppedByUser = false;
+			// The chips belong to the run this page was watching. It has ended, or is no longer
+			// reporting here, and the run's end closes the session that owned the tasks — a chip
+			// left behind would pulse, and offer a stop, for a process that is gone.
+			backgroundTasks = [];
+			stoppingTasks = [];
 			streamingBlocks = [];
 			currentTextTarget = '';
 			currentThinkingTarget = '';
@@ -1478,6 +1499,11 @@
 			{#if modelSwitchNotice}
 				<div class="alert alert-info mt-1 mb-1 py-2 text-sm">
 					<span>{modelSwitchNotice}</span>
+				</div>
+			{/if}
+			{#if backgroundTaskNotice}
+				<div class="alert alert-warning mt-1 mb-1 py-2 text-sm" role="status" data-testid="background-task-notice">
+					<span>{backgroundTaskNotice}</span>
 				</div>
 			{/if}
 
