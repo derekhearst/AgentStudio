@@ -43,7 +43,7 @@ attempt starts and closed when it ends, so a run that dies mid-flight still leav
 | `id`             | uuid       | Primary key                                                      |
 | `automationId`   | uuid       | FK to `automations`, cascade delete                              |
 | `userId`         | uuid?      | Owner at run time                                                |
-| `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap)         |
+| `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap or paused agent) |
 | `trigger`        | text       | `schedule`, `manual` ("Run now") or `monitor` (a monitor fired)  |
 | `attempt`        | integer    | 1-based; >1 means this attempt is a retry of a failed tick        |
 | `mode`           | text       | Snapshot of the automation's mode at execution time              |
@@ -164,6 +164,14 @@ Automations can attach project or repository context so recurring runs are not c
 ### Budget controls
 
 Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was.
+
+### Paused agents
+
+Pausing an agent on `/agents` (#66) stops the automations assigned to it. When one comes due, the run is skipped before anything is spent and recorded in the run history as `blocked`, with the reason "agent … is paused. Resume it on the Agents page to let this automation run." This applies to every trigger — the schedule, **Run now**, and a monitor firing — and to every mode, because the automation is assigned to that agent whether or not the mode runs the agent's own loop.
+
+A skipped run is not a failure: it does not count toward the disable streak, and it does not reset it. A skipped scheduled tick moves `nextRunAt` on to the next slot, so the dispatcher does not pick it up again every minute; a skipped Run now or monitor-fired run leaves the schedule alone. `lastRunAt` is not touched, because the automation did not run. Resuming the agent lets the next due tick run; skipped ticks are not replayed.
+
+The card shows "(paused)" beside the agent's name, and the agent picker marks paused agents, so an enabled automation that will not run does not look ready to. An automation with no agent is never affected. See [../agents/agents.md](../agents/agents.md).
 
 ### Review policies
 
@@ -336,6 +344,7 @@ A first-class automation recipe exists for your stated goal:
 - Automations execute through jobs, not inline HTTP handlers.
 - Disabled automations do not enqueue new runs.
 - Budget overage blocks execution and creates a review item.
+- An automation assigned to a paused agent does not run; the attempt is recorded as `blocked` and is not a failure.
 - Automations are resumable only through underlying jobs, tasks, and runs primitives, not ad hoc engine state.
 - An automation may write to multiple surfaces, but each delivery is recorded explicitly in `automationDeliveries`.
 

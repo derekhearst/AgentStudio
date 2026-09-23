@@ -12,8 +12,7 @@ Creation workflows are chat-led: New Agent and New Skill actions launch a fresh 
 
 ### Agents
 
-Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page provides a read-only browser for viewing agent status and navigating to agent details.
-Agent detail pages allow editing the assigned model and system prompt.
+Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page lists every agent with its status — Available or Paused — and lets you pause or resume a custom agent: a paused agent is not offered for delegation and its automations and monitors are skipped, but you can still chat with it. Agent detail pages allow editing the assigned model and system prompt. See [docs/agents/agents.md](docs/agents/agents.md).
 
 ### Settings
 
