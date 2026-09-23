@@ -34,6 +34,7 @@ import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
 import {
 	buildApprovalRequiredSet,
 	buildBuiltinAgentPostureSlot,
@@ -570,6 +571,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
 						},
+						// What the resumed session had already spent, so this turn logs its own share.
+						usageBaseline: await loadSessionUsageBaseline(body.conversationId, conversation.sdkSessionId),
 						// Settings-only view; `permissionMode` composes with it inside the engine's
 						// `resolveToolGate`, which is what decides allow / ask / deny.
 						requiresApproval: (name) =>
@@ -624,7 +627,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						: null
 
 				// Subscription runs have no per-token price, so record tokens and force the
-				// dollar figure to zero rather than inventing one from list pricing.
+				// dollar figure to zero rather than inventing one from list pricing. A gateway
+				// run logs this turn's share of the SDK's estimate; when that share cannot be
+				// told apart (`costUsd: null`), the tokens are priced from the model table.
 				const messageCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
@@ -635,7 +640,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: claudeRun ? 0 : summary.usage.costUsd,
+					costOverride: claudeRun ? 0 : (summary.usage.costUsd ?? undefined),
 					metadata: { conversationId: body.conversationId, subscription: claudeRun },
 				})
 
@@ -658,6 +663,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
+						// The next turn's usage baseline — see `loadSessionUsageBaseline`.
+						sessionUsage: summary.sessionUsage ?? undefined,
 						numTurns: summary.numTurns,
 						blocks: summary.blocks.length > 0 ? summary.blocks : undefined,
 						attachmentWarnings:

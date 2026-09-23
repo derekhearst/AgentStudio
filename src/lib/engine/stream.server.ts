@@ -44,6 +44,7 @@ import { decideToolCall, type ToolDecisionContext } from './tool-decision'
 import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { interpretSdkMessage } from './sdk-notices'
+import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
@@ -144,6 +145,12 @@ export type EngineRunInput = {
 	/** Called once the SDK reports its session id, so the conversation can store it for resume. */
 	onSessionId?: (sessionId: string) => void
 	/**
+	 * The running totals the previous turn of the resumed session reported (`./run-result`).
+	 * The SDK's `modelUsage` and `total_cost_usd` include every earlier turn of a resumed
+	 * session; subtracting this is what makes the summary's `usage` this turn's alone.
+	 */
+	usageBaseline?: SessionUsage | null
+	/**
 	 * Called for every tool call that completes, successfully or not.
 	 *
 	 * Exists so the caller can write the usage ledger. The engine cannot do it itself: it
@@ -183,26 +190,15 @@ export type EngineRunInput = {
 	emit: (event: string, payload: unknown) => Promise<void>
 }
 
-export type EngineUsage = {
-	inputTokens: number
-	outputTokens: number
-	cacheCreationTokens: number
-	cacheReadTokens: number
-	/**
-	 * The SDK's own cost estimate. Zero (or meaningless) for subscription runs,
-	 * which is why Claude runs are accounted in tokens rather than dollars.
-	 *
-	 * Caveat: on a resumed session the SDK reports this cumulatively across the
-	 * whole transcript, so it is only safe to treat as a per-turn figure for
-	 * gateway runs, where we start fresh sessions.
-	 */
-	costUsd: number
-}
+/** This turn's usage — Task subagents and compaction included, earlier turns excluded. See `./run-result`. */
+export type { EngineUsage, SessionUsage }
 
 export type EngineRunSummary = {
 	text: string
 	sessionId: string | null
 	usage: EngineUsage
+	/** The session's running totals as of this turn, for the caller to keep as the next turn's baseline. */
+	sessionUsage: SessionUsage | null
 	durationMs: number
 	numTurns: number
 	error: string | null
@@ -835,7 +831,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'result') {
-				const u = (msg.usage ?? {}) as Record<string, number>
+				const { usage, session } = readTurnUsage(msg, {
+					resumed: Boolean(input.options.resume),
+					baseline: input.usageBaseline ?? null,
+				})
 				for (let i = blocks.length - 1; i >= 0; i--) {
 					const b = blocks[i]
 					if (b.kind === 'thinking') {
@@ -846,16 +845,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				return {
 					text: finalText,
 					sessionId,
-					usage: {
-						inputTokens: u.input_tokens ?? 0,
-						outputTokens: u.output_tokens ?? 0,
-						cacheCreationTokens: u.cache_creation_input_tokens ?? 0,
-						cacheReadTokens: u.cache_read_input_tokens ?? 0,
-						costUsd: typeof msg.total_cost_usd === 'number' ? msg.total_cost_usd : 0,
-					},
+					usage,
+					sessionUsage: session,
 					durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
 					numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
-					error: msg.is_error ? String(msg.result ?? 'Run failed') : null,
+					error: resultErrorMessage(msg),
 					blocks,
 					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
 					reasoningTokens,
@@ -869,6 +863,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			text: finalText,
 			sessionId,
 			usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+			sessionUsage: null,
 			durationMs: 0,
 			numTurns: 0,
 			error: null,
