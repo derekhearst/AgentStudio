@@ -83,3 +83,14 @@ export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
  * else that lists the registry, the settings approval list and the MCP endpoint included.
  */
 export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['run_subagent'])
+
+/**
+ * Registry tools the host renders itself, so the engine must not emit tool frames for them.
+ * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ *
+ * `./stream.server` hands them over before either gate — the PreToolUse hook and
+ * `canUseTool` — so no approval setting or permission mode ever reaches them. Here rather
+ * than there so the settings approval list and the MCP endpoint can leave them out without
+ * keeping a copy of their own.
+ */
+export const HOST_OWNED_TOOLS: ReadonlySet<string> = new Set(['ask_user'])

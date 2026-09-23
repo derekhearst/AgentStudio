@@ -37,6 +37,7 @@ import {
 	type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
+import { HOST_OWNED_TOOLS } from './builtin-tools'
 import { resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import type { ConversationPermissionMode } from './permission-mode'
 import { decideToolCall, type ToolDecisionContext } from './tool-decision'
@@ -73,12 +74,6 @@ export type CreateEngineQuery = (params: {
 	prompt: string | AsyncIterable<SDKUserMessage>
 	options: Options
 }) => EngineQuerySource
-
-/**
- * Tools the host renders itself, so the engine must not emit tool frames for them.
- * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
- */
-const HOST_OWNED_TOOLS = new Set(['ask_user'])
 
 export type EngineRunInput = {
 	/**

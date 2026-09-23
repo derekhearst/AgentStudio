@@ -1,5 +1,5 @@
 import { allToolNames, toolDescriptions } from './tool-schemas'
-import { ENGINE_EXCLUDED_TOOLS } from '$lib/engine/builtin-tools'
+import { ENGINE_EXCLUDED_TOOLS, HOST_OWNED_TOOLS } from '$lib/engine/builtin-tools'
 import { logger } from '$lib/observability/logger'
 
 type ToolName = string
@@ -138,21 +138,17 @@ export function estimateToolDefinitionTokens(
 }
 
 /**
- * Registry tools an approval setting never reaches. `ask_user` is the question itself: the
- * engine hands it to the host before any gate runs (`HOST_OWNED_TOOLS` in
- * `$lib/engine/stream.server`), so ticking it — or the all-tools wildcard — changes nothing.
- */
-const NEVER_GATED_TOOLS: ReadonlySet<string> = new Set(['ask_user'])
-
-/**
  * The registry tools a chat run can call, for the settings approval list. Every one of them
  * can be marked as needing approval, one by one.
  *
  * Derived rather than listed: names and descriptions come from `tool-schemas.ts`, and the
- * tools the engine does not register (`ENGINE_EXCLUDED_TOOLS`) or never gates are left out,
- * because a setting that cannot take effect is a false promise. The list used to be grouped
- * into an "always loaded" tier, whose chips could not be toggled, and a "searchable" tier —
- * both described the old loop's deferred loading, which the chat engine never had (#8).
+ * tools the engine does not register (`ENGINE_EXCLUDED_TOOLS`) or never gates
+ * (`HOST_OWNED_TOOLS` — `ask_user` is the question itself, handed to the host before any
+ * gate runs) are left out, because a setting that cannot take effect is a false promise.
+ *
+ * The list used to be grouped into an "always loaded" tier, whose chips could not be
+ * toggled, and a "searchable" tier — both described the old loop's deferred loading, which
+ * the chat engine never had (#8).
  */
 export type BuiltinTool = {
 	name: string
@@ -160,6 +156,6 @@ export type BuiltinTool = {
 }
 
 export const BUILTIN_TOOLS: BuiltinTool[] = allToolNames
-	.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && !NEVER_GATED_TOOLS.has(name))
+	.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && !HOST_OWNED_TOOLS.has(name))
 	.map((name) => ({ name, description: toolDescriptions[name] ?? '' }))
 	.sort((a, b) => a.name.localeCompare(b.name))
