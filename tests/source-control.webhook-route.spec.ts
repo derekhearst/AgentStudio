@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { getActiveUserId, getSql, readEnvVar, uniquePrefix } from './helpers'
+import { TEST_SERVER_ORIGIN } from './server-env'
 
 /**
  * Wave 5 #19 phase 5 — HTTP-level integration tests for `/api/webhooks/github`.
@@ -18,7 +19,7 @@ import { getActiveUserId, getSql, readEnvVar, uniquePrefix } from './helpers'
  * the secret isn't configured — the 503/missing-secret path is always testable.
  */
 
-const BASE_URL = 'http://127.0.0.1:4173'
+const BASE_URL = TEST_SERVER_ORIGIN
 
 function sign(rawBody: string, secret: string): string {
 	return 'sha256=' + createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
@@ -227,6 +228,71 @@ test.describe('webhooks/github — pull_request event', () => {
 			`
 			expect(items[0].count).toBe(0)
 		} finally {
+			await clearPrefix(prefix)
+		}
+	})
+})
+
+test.describe('webhooks/github — status-irrelevant actions and name casing', () => {
+	test('a label on a merged PR leaves it merged and keeps the poller metadata; casing does not matter', async () => {
+		const secret = readEnvVar('GITHUB_WEBHOOK_SECRET') ?? 'e2e-test-webhook-secret-do-not-use-in-prod'
+		const prefix = uniquePrefix('webhook-pr-label')
+		const sql = getSql()
+		const userId = await getActiveUserId()
+
+		try {
+			// Imported from a pasted URL: the casing the user typed, not GitHub's.
+			const [repo] = await sql<{ id: string }[]>`
+				insert into repositories (user_id, provider, owner, name, clone_url, default_branch, metadata)
+				values (${userId}, 'github', ${`${prefix}-OWNER`}, ${`${prefix}-Repo`}, 'https://example.com/r.git', 'main', '{}'::jsonb)
+				returning id
+			`
+			await sql`
+				insert into pull_requests (repository_id, provider_pr_number, title, head_branch, base_branch, status, metadata)
+				values (${repo.id}, 11, ${`${prefix} shipped`}, 'feature/z', 'main', 'merged', ${sql.json({ source: 'agent', headSha: 'abc123' })})
+			`
+
+			const body = JSON.stringify({
+				action: 'labeled',
+				repository: { name: `${prefix}-repo`.toLowerCase(), owner: { login: `${prefix}-owner`.toLowerCase() } },
+				pull_request: {
+					number: 11,
+					state: 'closed',
+					title: `${prefix} shipped`,
+					body: null,
+					html_url: 'https://github.com/o/r/pull/11',
+					merged: true,
+					draft: false,
+					merged_at: '2026-09-01T00:00:00Z',
+					closed_at: '2026-09-01T00:00:00Z',
+					head: { ref: 'feature/z' },
+					base: { ref: 'main' },
+				},
+			})
+			const response = await fetch(`${BASE_URL}/api/webhooks/github`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'X-GitHub-Event': 'pull_request',
+					'X-Hub-Signature-256': sign(body, secret!),
+				},
+				body,
+			})
+			expect(response.status).toBe(200)
+			const result = (await response.json()) as { updated?: boolean; status?: string }
+			expect(result.updated).toBe(true)
+			expect(result.status).toBe('unchanged')
+
+			const [prRow] = await sql<{ status: string; metadata: { source?: string; headSha?: string; lastAction?: string } }[]>`
+				select status::text as status, metadata from pull_requests
+				where repository_id = ${repo.id} and provider_pr_number = 11
+			`
+			expect(prRow.status).toBe('merged')
+			expect(prRow.metadata.headSha).toBe('abc123')
+			expect(prRow.metadata.source).toBe('agent')
+			expect(prRow.metadata.lastAction).toBe('labeled')
+		} finally {
+			await sql`delete from repositories where owner = ${`${prefix}-OWNER`}`
 			await clearPrefix(prefix)
 		}
 	})

@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process'
 import { stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
+import { runGitArgv } from '$lib/source-control/git-exec.server'
 import {
 	buildBranchDeleteArgs,
 	buildHeadBranchArgs,
@@ -13,21 +13,12 @@ import {
 
 export type GitRunner = (args: string[]) => Promise<{ stdout: string; stderr: string; code: number }>
 
-/** Shell out to `git` with the supplied argv. Defined here once so callers can swap a fake in tests. */
-export const defaultGitRunner: GitRunner = (args) =>
-	new Promise((resolve, reject) => {
-		const proc = spawn('git', args, { stdio: ['ignore', 'pipe', 'pipe'] })
-		let stdout = ''
-		let stderr = ''
-		proc.stdout.on('data', (chunk: Buffer) => {
-			stdout += chunk.toString('utf8')
-		})
-		proc.stderr.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString('utf8')
-		})
-		proc.on('error', reject)
-		proc.on('close', (code) => resolve({ stdout, stderr, code: code ?? -1 }))
-	})
+/**
+ * Run `git` with the supplied argv, through the hardened runner every server-side git call
+ * shares (`$lib/source-control/git-exec.server`). Defined here once so callers can swap a
+ * fake in tests.
+ */
+export const defaultGitRunner: GitRunner = (args) => runGitArgv(args)
 
 export type EnsureWorktreeInput = {
 	repoPath: string

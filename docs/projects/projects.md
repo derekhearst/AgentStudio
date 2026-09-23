@@ -59,6 +59,14 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 2. In chat, bind the conversation to the project (or let the agent call `set_project_context`). From then on the agent's system prompt names the project, and it writes files into that working directory rather than anywhere else.
 3. History and diffs come from git — `git_status`, `git_log`, `git_diff`, `prepare_commit`, and, with explicit operator approval, `push_branch` and `create_pull_request`.
 
+### Pull and push from the Repo tab
+
+1. **Pull latest** fetches every branch from the remote and fast-forwards the checked-out branch when it is behind. If it cannot move the branch without losing something — local commits the remote does not have, edits the update would overwrite — it leaves the branch alone and the message under the buttons says why. The remote's branches are recorded either way.
+2. **Push** sends a branch to GitHub under the same name. The **--force-with-lease** box replaces the branch on GitHub only if nobody else has pushed to it since AgentStudio last pulled or pushed it; if someone has, the push is refused with a hint saying why. This works for a local project with no GitHub `origin` too: AgentStudio keeps its own record of what it last pushed where. A branch AgentStudio has never pulled or pushed is never force-pushed over.
+3. **Commit** uses the repository's own name and email, or `AgentStudio <agentstudio@local>` when the repository has none — the server's own git settings are never used.
+
+All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder (or a submodule's) that would run a program are switched off rather than obeyed. Settings that would send the GitHub token elsewhere make pull and push refuse to run. When the runner cannot read the settings in full, it refuses the command rather than run it unprotected; the Repo tab then shows no status for the project until the settings are fixed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
+
 ### Trust a project's own configuration
 
 A repository can carry configuration for the agent: `CLAUDE.md` instructions, `.claude/` commands and skills, and a `.claude/settings.json` that can grant permissions and run hooks. None of it is loaded until the operator marks the project **trusted** on its detail page.
@@ -102,6 +110,7 @@ Everything else the agent does inside a project goes through the ordinary filesy
 - **Filesystem after commit** — repo creation never happens inside the database transaction. A failure compensates by deleting the row and the directory.
 - **Imports need a source** — `repoMode: 'imported'` without a `source` is rejected outright rather than leaving a half-made project.
 - **Slug stability** — a project's slug is fixed at creation.
+- **Git is hardened** — every git command the server runs in a project folder switches off the settings in that folder that could run a program or redirect the GitHub token. The agent can write to `.git`; the server does not trust it.
 - **Trust is opt-in** — a cloned repository's own agent configuration never loads until the operator trusts the project, and changes the agent makes to that configuration always need approval.
 
 ## Edge cases

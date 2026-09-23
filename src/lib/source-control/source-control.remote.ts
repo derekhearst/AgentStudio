@@ -110,6 +110,7 @@ export const pullRepositoryCommand = command(repoIdSchema, async ({ repositoryId
 		repositoryId: result.repository.id,
 		fresh: result.fresh,
 		branch: result.branch,
+		summary: result.summary,
 		metadata: result.repository.metadata,
 		updatedAt: result.repository.updatedAt,
 	}
