@@ -245,10 +245,6 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 					persistentKey: input.persistentKey,
 					worktree: input.worktree,
 					projectId: input.projectId,
-					approvalRequiredTools: input.approvalRequiredTools,
-					isOrchestrator: input.isOrchestrator,
-					loadSearchableTools: input.loadSearchableTools,
-					currentToolNames: () => tools.map((t) => t.function.name),
 				},
 				tc,
 			)

@@ -1,4 +1,5 @@
-import { allToolNames, toolDescriptions, toolDisclosure } from './tool-schemas'
+import { allToolNames, toolDescriptions } from './tool-schemas'
+import { ENGINE_EXCLUDED_TOOLS } from '$lib/engine/builtin-tools'
 import { logger } from '$lib/observability/logger'
 
 type ToolName = string
@@ -22,12 +23,8 @@ export const MANDATORY_APPROVAL_TOOLS: readonly ToolName[] = [
 	'request_plan_approval',
 ]
 
-// Tool tier organization (always-loaded vs searchable) lives in `tool-schemas.ts:toolDisclosure`.
-// The legacy `capabilityGroups` registry was removed when the `enable_capability` meta-tool
-// was replaced by `search_tools` (Tool Search Tool / deferred loading).
-
 /**
- * Model context window sizes (in tokens) for compaction calculations.
+ * Model context window sizes (in tokens), for the context figures a chat run reports.
  */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 	'claude-sonnet-5': 200_000,
@@ -141,39 +138,21 @@ export function estimateToolDefinitionTokens(
 }
 
 /**
- * Tier label for a tool — drives the settings UI's "approve all/none in tier" affordance and
- * mirrors the disclosure-tier system in `tool-schemas.ts`.
+ * The registry tools a chat run can call, for the settings approval list. Every one of them
+ * can be marked as needing approval, one by one.
  *
- *   `always`: tools loaded into the model surface on every request (small core).
- *   `searchable`: tools the model has to discover via `search_tools(query)`.
+ * Derived rather than listed: names and descriptions come from `tool-schemas.ts`, and the
+ * tools the engine does not register (`ENGINE_EXCLUDED_TOOLS`) are left out, because a
+ * setting for a tool the model can never call does nothing. The list used to be grouped into
+ * an "always loaded" tier, whose chips could not be toggled, and a "searchable" tier — both
+ * described the old loop's deferred loading, which the chat engine never had (#8).
  */
-export type BuiltinToolTier = 'always' | 'searchable'
-
 export type BuiltinTool = {
 	name: string
 	description: string
-	tier: BuiltinToolTier
-	tierLabel: string
 }
 
-const tierLabels: Record<BuiltinToolTier, string> = {
-	always: 'Always loaded',
-	searchable: 'Searchable (via search_tools)',
-}
-
-/**
- * BUILTIN_TOOLS is derived from the canonical tool registry. Single source of truth: tool
- * names + descriptions live in `tool-schemas.ts`, the disclosure tier likewise. The settings
- * UI groups by tier so an operator can bulk-approve all "searchable" tools, etc.
- */
 export const BUILTIN_TOOLS: BuiltinTool[] = allToolNames
-	.map((name) => ({
-		name,
-		description: toolDescriptions[name] ?? '',
-		tier: toolDisclosure[name] ?? 'searchable',
-		tierLabel: tierLabels[toolDisclosure[name] ?? 'searchable'],
-	}))
-	.sort((a, b) => {
-		if (a.tier !== b.tier) return a.tier === 'always' ? -1 : 1
-		return a.name.localeCompare(b.name)
-	})
+	.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name))
+	.map((name) => ({ name, description: toolDescriptions[name] ?? '' }))
+	.sort((a, b) => a.name.localeCompare(b.name))

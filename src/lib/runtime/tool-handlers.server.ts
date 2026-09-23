@@ -328,10 +328,6 @@ export type NormalToolContext = {
 	persistentKey: string | null
 	worktree: { repoPath: string; baseBranch?: string; deleteBranchOnCleanup?: boolean } | null
 	projectId: string | null
-	approvalRequiredTools: ReadonlySet<string>
-	isOrchestrator: boolean
-	loadSearchableTools?: (toolNames: string[]) => void
-	currentToolNames: () => string[]
 }
 
 /** Handle a normal tool call (anything registered in `toolSchemas`). */
@@ -360,13 +356,6 @@ export async function handleNormalToolCall(
 		persistentKey: ctx.persistentKey,
 		worktree: ctx.worktree,
 		projectId: ctx.projectId,
-		runtime: {
-			approvalRequiredTools: ctx.approvalRequiredTools,
-			currentToolNames: ctx.currentToolNames,
-			session,
-			isOrchestrator: ctx.isOrchestrator,
-			loadSearchableTools: ctx.loadSearchableTools,
-		},
 	})
 
 	void emitHook('after_tool', {

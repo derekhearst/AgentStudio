@@ -1,0 +1,63 @@
+import { expect, test } from '@playwright/test'
+import { authenticateContext } from './helpers'
+import { ENGINE_EXCLUDED_TOOLS } from '../src/lib/engine/builtin-tools'
+import { allToolNames } from '../src/lib/tools/tool-schemas'
+import { BUILTIN_TOOLS } from '../src/lib/tools/tools'
+
+/**
+ * Settings > Tool Approval lists what a chat run can actually call, and every entry works.
+ *
+ * The panel used to promise things the chat engine never did (audit finding 117):
+ *
+ *   - a "Programmatic tool calling" toggle that exposed `run_code`, which the engine never
+ *     registered and which could not run there (#69 retired the tool);
+ *   - an "Always loaded" tier (web_search, ask_user, run_code, search_tools) and a
+ *     "Searchable" tier "loaded only after the model invokes search_tools" — deferred
+ *     loading that only the old loop ever had (#8 deleted it);
+ *   - and the "Always loaded" chips were rendered disabled, so `web_search`, which the engine
+ *     registers and gates by name, could only be made to ask through the all-tools wildcard.
+ *
+ * The first test is pure. The second opens the page but saves nothing: settings are a single
+ * shared row.
+ */
+
+test.describe('settings/tool-approval — the list is the engine surface', () => {
+	test('it lists exactly the registry tools the engine registers', () => {
+		// `buildToolServer` registers every registry tool outside ENGINE_EXCLUDED_TOOLS for an
+		// unscoped run. A setting for anything else could never take effect.
+		const engineRegistered = allToolNames.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name)).sort()
+		expect(BUILTIN_TOOLS.map((t) => t.name)).toEqual(engineRegistered)
+	})
+
+	test('no entry promises a tool that is gone or hidden', () => {
+		const names = new Set(BUILTIN_TOOLS.map((t) => t.name))
+		for (const gone of ['run_code', 'search_tools', 'run_subagent']) {
+			expect(names.has(gone), gone).toBe(false)
+		}
+		expect(names.has('web_search')).toBe(true)
+		expect(names.has('ask_user')).toBe(true)
+	})
+
+	test('entries carry no tier, so none can be rendered locked', () => {
+		for (const tool of BUILTIN_TOOLS) {
+			expect(Object.keys(tool).sort()).toEqual(['description', 'name'])
+		}
+	})
+})
+
+test.describe('settings/tool-approval — the panel', () => {
+	test('web_search can be toggled on its own, and nothing offers run_code', async ({ page }) => {
+		await authenticateContext(page.context())
+		await page.goto('/settings')
+		await expect(page.getByRole('heading', { name: 'Tool Approval' })).toBeVisible()
+
+		const webSearch = page.getByRole('checkbox', { name: 'web_search', exact: true })
+		await expect(webSearch).toBeVisible()
+		await expect(webSearch).toBeEnabled()
+
+		await expect(page.getByText('Programmatic tool calling')).toHaveCount(0)
+		await expect(page.getByText('Always loaded')).toHaveCount(0)
+		await expect(page.getByRole('checkbox', { name: 'run_code', exact: true })).toHaveCount(0)
+		await expect(page.getByRole('checkbox', { name: 'search_tools', exact: true })).toHaveCount(0)
+	})
+})

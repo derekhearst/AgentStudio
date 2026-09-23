@@ -37,7 +37,6 @@ export const appSettings = pgTable('app_settings', {
 	toolConfig: jsonb('tool_config')
 		.$type<{
 			approvalRequiredTools: string[]
-			programmaticToolCallingEnabled?: boolean
 		}>()
 		.notNull()
 		.default({ approvalRequiredTools: [] }),

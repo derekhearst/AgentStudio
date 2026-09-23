@@ -33,9 +33,8 @@ export const BUILTIN_AGENT_IDS: Record<BuiltinAgentKey, string> = {
  * tools fail closed for these agents until explicitly audited.
  */
 export const READ_ONLY_TOOL_NAMES: readonly string[] = [
-	// Always-loaded essentials (Tool Search Tool `disclosure: 'always'` tier).
+	// Essentials.
 	'ask_user',
-	'search_tools',
 	'web_search',
 	// Plan authoring + handoff. The plan lives on disk now: the planner writes a markdown
 	// file with Write and hands off via request_plan_approval. Write is the one

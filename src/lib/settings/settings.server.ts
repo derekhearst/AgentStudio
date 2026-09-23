@@ -28,7 +28,6 @@ export const DEFAULT_SETTINGS = {
 	},
 	toolConfig: {
 		approvalRequiredTools: [] as string[],
-		programmaticToolCallingEnabled: false,
 	},
 	memoryConfig: {
 		enabled: true,
@@ -90,7 +89,6 @@ export async function updateSettings(input: {
 	}
 	toolConfig?: {
 		approvalRequiredTools?: string[]
-		programmaticToolCallingEnabled?: boolean
 	}
 	memoryConfig?: {
 		enabled?: boolean
@@ -108,7 +106,6 @@ export async function updateSettings(input: {
 					approvalRequiredTools?: string[]
 					approvalMode?: 'auto' | 'confirm' | 'plan'
 					disabledTools?: string[]
-					programmaticToolCallingEnabled?: boolean
 			  }
 			| undefined) ?? {}
 
@@ -117,7 +114,6 @@ export async function updateSettings(input: {
 		: currentToolConfig.approvalMode === 'confirm'
 			? ['*']
 			: []
-	const migratedProgrammaticToolCalling = currentToolConfig.programmaticToolCallingEnabled ?? false
 	const [updated] = await db
 		.update(appSettings)
 		.set({
@@ -139,7 +135,6 @@ export async function updateSettings(input: {
 			},
 			toolConfig: {
 				approvalRequiredTools: migratedApprovalRequiredTools,
-				programmaticToolCallingEnabled: migratedProgrammaticToolCalling,
 				...(input.toolConfig ?? {}),
 			},
 			memoryConfig: {

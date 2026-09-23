@@ -33,7 +33,7 @@ const SERVER_INFO = {
 
 /**
  * Expose every registered tool as an MCP tool. We re-use the canonical registry by calling
- * `getToolDefinitions(undefined, { tierFilter: false })` — that single call returns
+ * `getToolDefinitions()` — that single call returns
  * `{type, function: {name, description, parameters}}` records derived from the same
  * `toolSchemas` + `toolDescriptions` the LLM loop uses, including JSON-schema parameters.
  *
@@ -44,7 +44,7 @@ const SERVER_INFO = {
  * the MCP map dropped half the optional parameters). Pulling from the registry kills the drift.
  */
 function listTools() {
-	return getToolDefinitions(undefined, { tierFilter: false }).map((def) => ({
+	return getToolDefinitions().map((def) => ({
 		name: def.function.name,
 		description: def.function.description,
 		inputSchema: def.function.parameters,
