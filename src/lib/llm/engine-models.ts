@@ -9,21 +9,27 @@
  *
  * So the engine list is built here instead:
  *
- * - **Subscription rows** — the catalogue's Anthropic models, under the CLI's id
- *   (`claude-haiku-4-5`). Catalogue variants (`:thinking`, `:beta`) are left out: they name an
- *   OpenRouter routing mode, not a model the CLI can be asked for. Reasoning has its own
- *   control in the composer.
+ * - **Subscription rows** — the Claude models the bundled CLI can run
+ *   (`SUBSCRIPTION_MODEL_IDS` in `$lib/engine/model-backend`), under the CLI's id
+ *   (`claude-haiku-4-5`). The OpenRouter catalogue only describes them (context window,
+ *   modalities, description) and never adds one: it still lists retired Claude models, some
+ *   under slugs that are not Anthropic ids at all (`anthropic/claude-sonnet-4`), and the CLI
+ *   would refuse those on the first message. Every subscription model is offered whether or
+ *   not the catalogue can be reached, since running one does not involve OpenRouter.
  * - **Gateway rows** — only when the gateway is configured, and only the models the gateway
- *   itself says it serves. Priced from the OpenRouter catalogue when the id is in it; a model
- *   only the gateway knows (a local model behind LiteLLM, say) is listed unpriced.
- * - **Pinned ids** — the saved default model, so it can be picked again even while the
- *   catalogue is unreachable. Only if something here can run it.
+ *   itself says it serves. Priced from the OpenRouter catalogue when the id is in it. The CLI
+ *   sends tools on every request, so a catalogued model that does not take them, or does not
+ *   answer in text, is left out: it would fail on the first message. A model only the gateway
+ *   knows (a local model behind LiteLLM, say) is listed unpriced.
+ * - **Pinned ids** — the saved default model, so it can be picked again even when nothing
+ *   else lists it: a CLI alias (`opus`), a snapshot id, or a gateway model while the gateway's
+ *   own list is unreachable. Only if something here can run it.
  *
  * Pure, so a spec can check the rules without a network.
  */
 
 import type { ModelInfo } from '$lib/llm/models.server'
-import { isClaudeModel, modelBackend, normalizeModelId } from '$lib/engine/model-backend'
+import { isClaudeModel, modelBackend, normalizeModelId, SUBSCRIPTION_MODEL_IDS } from '$lib/engine/model-backend'
 
 export type EngineModelBackend = 'subscription' | 'gateway'
 
@@ -54,6 +60,32 @@ function bareEntry(id: string, backend: EngineModelBackend): EngineModel {
 	}
 }
 
+/**
+ * `claude-haiku-4-5` → `Claude Haiku 4.5`, `claude-fable-5-1` → `Claude Fable 5.1`: the name a
+ * subscription row is listed under, the same whether or not the catalogue has the model.
+ */
+export function claudeDisplayName(id: string): string {
+	const words = id.replace(/^claude-/i, '').split('-')
+	const firstVersion = words.findIndex((word) => /^\d/.test(word))
+	const family = firstVersion === -1 ? words : words.slice(0, firstVersion)
+	const version = firstVersion === -1 ? '' : ` ${words.slice(firstVersion).join('.')}`
+	return `Claude ${family.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}${version}`
+}
+
+/** What every subscription model takes in and gives back, for a row the catalogue lacks. */
+const SUBSCRIPTION_INPUT_MODALITIES = ['text', 'image', 'file']
+const SUBSCRIPTION_OUTPUT_MODALITIES = ['text']
+
+/**
+ * Whether the gateway can run a model the catalogue describes. The CLI sends tools on every
+ * request and reads a text answer, so a catalogued model has to take tools and answer in
+ * text. A model the catalogue does not list is the gateway's own, and nothing says otherwise.
+ */
+function gatewayCanRun(catalogued: ModelInfo | undefined): boolean {
+	if (!catalogued) return true
+	return (catalogued.supportedParameters ?? []).includes('tools') && (catalogued.outputModalities ?? []).includes('text')
+}
+
 export function buildEngineModelList(input: {
 	catalogue: readonly ModelInfo[]
 	gatewayConfigured: boolean
@@ -63,21 +95,38 @@ export function buildEngineModelList(input: {
 	pinned?: readonly string[]
 }): EngineModel[] {
 	const out = new Map<string, EngineModel>()
+	const byId = new Map(input.catalogue.map((model) => [model.id, model]))
 
+	// The catalogue's description of each Claude model, keyed by the CLI's id for it. A variant
+	// (`:thinking`, `:beta`) names an OpenRouter routing mode, not a model, so it describes
+	// nothing here; reasoning has its own control in the composer.
+	const claudeCatalogue = new Map<string, ModelInfo>()
 	for (const model of input.catalogue) {
 		if (!isClaudeModel(model.id) || VARIANT_SUFFIX.test(model.id)) continue
 		const id = normalizeModelId(model.id)
-		if (out.has(id)) continue
-		out.set(id, { ...model, id, backend: 'subscription', priced: true })
+		if (!claudeCatalogue.has(id)) claudeCatalogue.set(id, model)
+	}
+
+	for (const id of SUBSCRIPTION_MODEL_IDS) {
+		const catalogued = claudeCatalogue.get(id)
+		out.set(id, {
+			...(catalogued ?? bareEntry(id, 'subscription')),
+			inputModalities: catalogued?.inputModalities?.length ? catalogued.inputModalities : SUBSCRIPTION_INPUT_MODALITIES,
+			outputModalities: catalogued?.outputModalities?.length ? catalogued.outputModalities : SUBSCRIPTION_OUTPUT_MODALITIES,
+			id,
+			name: claudeDisplayName(id),
+			backend: 'subscription',
+			priced: true,
+		})
 	}
 
 	if (input.gatewayConfigured && input.gatewayModelIds) {
-		const byId = new Map(input.catalogue.map((model) => [model.id, model]))
 		for (const raw of input.gatewayModelIds) {
 			const id = raw.trim()
 			// A Claude model always runs on the subscription, never through the paid gateway.
 			if (!id || isClaudeModel(id) || out.has(id)) continue
 			const catalogued = byId.get(id)
+			if (!gatewayCanRun(catalogued)) continue
 			out.set(id, catalogued ? { ...catalogued, backend: 'gateway', priced: true } : bareEntry(id, 'gateway'))
 		}
 	}
@@ -87,6 +136,7 @@ export function buildEngineModelList(input: {
 		const backend = modelBackend(raw, { gatewayConfigured: input.gatewayConfigured })
 		if (backend === 'unavailable') continue
 		const id = backend === 'subscription' ? normalizeModelId(raw) : raw.trim()
+		if (backend === 'gateway' && !gatewayCanRun(byId.get(id))) continue
 		if (!out.has(id)) out.set(id, bareEntry(id, backend))
 	}
 

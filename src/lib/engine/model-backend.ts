@@ -11,6 +11,8 @@
  *
  * With no gateway configured a non-Claude model is `unavailable`: nothing can run it, so
  * the picker must not offer it and a send naming it is refused before anything is saved.
+ * So is a Claude id the subscription cannot run — a retired model, or a catalogue slug that
+ * is not an Anthropic id at all (`claude-sonnet-4`). Claude never goes to the paid gateway.
  *
  * Pure, with no `$env`, so the picker, the server and the specs all read the same rules.
  */
@@ -50,21 +52,89 @@ export function normalizeModelId(model: string): string {
 	return bare.replace(DOTTED_VERSION, '$1-$2')
 }
 
-/** True when the Claude Code CLI serves `model` on its own login rather than via the gateway. */
+/**
+ * True when `model` names Claude, in either spelling or as a CLI alias. Such a model is the
+ * subscription's to run, never the gateway's — but only one `isSubscriptionModel` accepts
+ * can actually run.
+ */
 export function isClaudeModel(model: string): boolean {
 	const normalized = normalizeModelId(model).toLowerCase()
 	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
+}
+
+/**
+ * The Claude models the subscription can run, under the id the CLI takes for each.
+ *
+ * Taken from the model table of the Claude Code CLI this app bundles
+ * (`@anthropic-ai/claude-agent-sdk` 0.3.278, CLI 2.1.278), less the models that table dates
+ * as retired on Anthropic's own API: the Claude 3 generation, Claude Sonnet 4 and Opus 4
+ * (retired 15 June 2026), and Opus 4.1 (retired 5 August 2026, which the CLI now quietly
+ * remaps to the latest Opus). Mythos is left out too: it is offered only to Project
+ * Glasswing members, not on a subscription.
+ *
+ * OpenRouter's catalogue cannot be the source for this. It keeps listing Claude models after
+ * Anthropic retires them, and under slugs that are not Anthropic ids at all:
+ * `anthropic/claude-sonnet-4` is `claude-sonnet-4-0` to the CLI, and `claude-sonnet-4` is
+ * nothing. When an SDK upgrade brings a CLI that knows a new model, add it here — until
+ * then the pickers do not offer it.
+ */
+export const SUBSCRIPTION_MODEL_IDS: readonly string[] = [
+	'claude-fable-5-1',
+	'claude-fable-5',
+	'claude-opus-5',
+	'claude-opus-4-8',
+	'claude-opus-4-7',
+	'claude-opus-4-6',
+	'claude-opus-4-5',
+	'claude-sonnet-5',
+	'claude-sonnet-4-6',
+	'claude-sonnet-4-5',
+	'claude-haiku-4-5',
+]
+
+const SUBSCRIPTION_MODEL_SET = new Set(SUBSCRIPTION_MODEL_IDS)
+
+/** The dated snapshot ids the CLI's table gives for some of them: the same models. */
+const SUBSCRIPTION_SNAPSHOT_IDS = new Set(['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'])
+
+/** The CLI's own aliases, which it resolves to a current model itself. */
+const CLI_MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan'])
+
+/** The CLI's 1M-context suffix: `claude-sonnet-4-5[1m]`, `opus[1m]`. */
+const ONE_MILLION_SUFFIX = /\[1m\]$/i
+
+/**
+ * True when the subscription can run `model`: an id in `SUBSCRIPTION_MODEL_IDS` in either
+ * spelling (`anthropic/claude-haiku-4.5` too), a dated snapshot of one, or a CLI alias —
+ * with or without the `[1m]` suffix.
+ */
+export function isSubscriptionModel(model: string): boolean {
+	const id = normalizeModelId(model).toLowerCase().replace(ONE_MILLION_SUFFIX, '')
+	return SUBSCRIPTION_MODEL_SET.has(id) || SUBSCRIPTION_SNAPSHOT_IDS.has(id) || CLI_MODEL_ALIASES.has(id)
 }
 
 /** Where a run on this model goes. */
 export type EngineBackend = 'subscription' | 'gateway' | 'unavailable'
 
 export function modelBackend(model: string, options: { gatewayConfigured: boolean }): EngineBackend {
-	if (isClaudeModel(model)) return 'subscription'
+	if (isClaudeModel(model)) return isSubscriptionModel(model) ? 'subscription' : 'unavailable'
 	return options.gatewayConfigured ? 'gateway' : 'unavailable'
 }
 
-/** The message a refused non-Claude model carries, shared by the route and the engine. */
+/** The message a refused non-Claude model carries when there is no gateway. */
 export function gatewayNotConfiguredMessage(model: string): string {
 	return `Model "${model}" needs an Anthropic-compatible gateway, but LLM_GATEWAY_URL / LLM_GATEWAY_TOKEN are not set.`
+}
+
+/** The message a Claude id the subscription cannot run carries. */
+export function unknownClaudeModelMessage(model: string): string {
+	return `Model "${model}" is not a Claude model Claude Code can run: it has been retired, or it is not an Anthropic model id. Pick a model from the list.`
+}
+
+/**
+ * Why `model` cannot run, for any model `modelBackend` calls `unavailable`. Shared by the
+ * stream route, the saves and the engine, so each refuses with the same words.
+ */
+export function unrunnableModelMessage(model: string): string {
+	return isClaudeModel(model) ? unknownClaudeModelMessage(model) : gatewayNotConfiguredMessage(model)
 }

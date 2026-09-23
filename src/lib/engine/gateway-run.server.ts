@@ -7,12 +7,12 @@
 import { getModelPricing } from '$lib/costs/usage'
 import { engineModelBackend } from './gateway.server'
 import { gatewayTurnCost, type GatewayTurnCost } from './gateway-cost'
-import { gatewayNotConfiguredMessage } from './model-backend'
+import { unrunnableModelMessage } from './model-backend'
 import type { EngineUsage } from './run-result'
 
 /** The reason a send naming `model` must be refused, or null when it can run. */
 export function refuseUnrunnableModel(model: string): string | null {
-	return engineModelBackend(model) === 'unavailable' ? gatewayNotConfiguredMessage(model) : null
+	return engineModelBackend(model) === 'unavailable' ? unrunnableModelMessage(model) : null
 }
 
 /**

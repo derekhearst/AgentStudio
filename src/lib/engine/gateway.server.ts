@@ -9,7 +9,7 @@
 import { error } from '@sveltejs/kit'
 import { env } from '$env/dynamic/private'
 import { readGatewayConfig, type GatewayConfig } from './gateway-env'
-import { gatewayNotConfiguredMessage, modelBackend, normalizeModelId, type EngineBackend } from './model-backend'
+import { modelBackend, normalizeModelId, unrunnableModelMessage, type EngineBackend } from './model-backend'
 
 export function gatewayConfig(): GatewayConfig | null {
 	return readGatewayConfig(env)
@@ -33,7 +33,7 @@ export function engineModelBackend(model: string): EngineBackend {
  * first message.
  */
 export function requireRunnableModel(model: string): string {
-	if (engineModelBackend(model) === 'unavailable') error(400, gatewayNotConfiguredMessage(model))
+	if (engineModelBackend(model) === 'unavailable') error(400, unrunnableModelMessage(model))
 	return normalizeModelId(model)
 }
 

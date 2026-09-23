@@ -26,7 +26,7 @@ import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
 import { buildGatewayEnv } from './gateway-env'
 import { gatewayConfig } from './gateway.server'
-import { gatewayNotConfiguredMessage, modelBackend, normalizeModelId } from './model-backend'
+import { modelBackend, normalizeModelId, unrunnableModelMessage } from './model-backend'
 import { engineSandboxSettings } from './engine-sandbox'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
@@ -116,12 +116,13 @@ export type EngineOptionsInput = {
 }
 
 /**
- * Thrown for a non-Claude model when the gateway isn't configured, rather than silently
- * falling back to Claude and billing the wrong backend.
+ * Thrown for a model nothing here can run — a non-Claude model with no gateway configured,
+ * or a Claude id the CLI cannot run — rather than silently falling back to another model
+ * and billing the wrong backend.
  */
 export class GatewayNotConfiguredError extends Error {
 	constructor(model: string) {
-		super(gatewayNotConfiguredMessage(model))
+		super(unrunnableModelMessage(model))
 		this.name = 'GatewayNotConfiguredError'
 	}
 }

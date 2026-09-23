@@ -3,7 +3,7 @@
 	import { getAvailableModels, getEngineModels } from '$lib/llm/models.remote'
 	import type { ModelInfo } from '$lib/llm/models.server'
 	import { findEngineModel, type EngineModelBackend } from '$lib/llm/engine-models'
-	import { modelBackend, normalizeModelId } from '$lib/engine/model-backend'
+	import { modelBackend, normalizeModelId, unrunnableModelMessage } from '$lib/engine/model-backend'
 	import {
 		collectAvailableModalities,
 		filterModels,
@@ -284,7 +284,7 @@
 		{#if valueBackend === 'gateway'}
 			<span class="badge badge-warning badge-xs shrink-0" title="Runs through the LLM gateway and is billed per token">Paid</span>
 		{:else if valueBackend === 'unavailable'}
-			<span class="badge badge-error badge-xs shrink-0" title="Needs an LLM gateway, and none is configured. Pick a Claude model.">Unavailable</span>
+			<span class="badge badge-error badge-xs shrink-0" title={unrunnableModelMessage(value)}>Unavailable</span>
 		{/if}
 		{#if showChevron}
 			<span class="opacity-70">▾</span>
