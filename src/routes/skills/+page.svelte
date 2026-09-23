@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
 
@@ -55,8 +56,10 @@
 		void loadSkills();
 	});
 
+	// Fresh, not cached: this runs after an import, and on the way back from a skill that
+	// was just edited or deleted on its own page.
 	async function loadSkills() {
-		allSkills = await listSkillsQuery({ limit: 200 });
+		allSkills = await fetchFresh(listSkillsQuery({ limit: 200 }));
 		filterLocally();
 	}
 

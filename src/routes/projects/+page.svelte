@@ -11,6 +11,7 @@
 		disconnectGithubCommand,
 	} from '$lib/projects/projects.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import ConnectionsPanel from '$lib/projects/components/ConnectionsPanel.svelte';
 	import ProjectGridItem from '$lib/projects/components/ProjectGridItem.svelte';
 	import CreateProjectModal from '$lib/projects/components/CreateProjectModal.svelte';
@@ -34,11 +35,16 @@
 
 	onMount(() => void load());
 
+	// Reloads after create, delete and disconnect, so it must not read the query cache —
+	// a new project stayed missing and GitHub stayed "connected" until a full reload.
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			[projects, overview] = await Promise.all([listProjectsQuery(), getProjectsOverviewQuery()]);
+			[projects, overview] = await Promise.all([
+				fetchFresh(listProjectsQuery()),
+				fetchFresh(getProjectsOverviewQuery()),
+			]);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load projects';
 		} finally {

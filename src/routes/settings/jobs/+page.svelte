@@ -5,6 +5,7 @@
 	import { listJobsQuery } from '$lib/jobs/jobs.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import { formatDateTime as fmtDate } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof listJobsQuery>>;
@@ -23,11 +24,14 @@
 	async function load() {
 		loading = true;
 		try {
-			result = await listJobsQuery({
-				status: statusFilter ? (statusFilter as 'pending' | 'leased' | 'running' | 'retry_wait' | 'completed' | 'failed' | 'canceled') : undefined,
-				type: typeFilter || undefined,
-				failuresOnly: failuresOnly || undefined,
-			});
+			// Fresh, so Refresh shows a job that failed after the page opened.
+			result = await fetchFresh(
+				listJobsQuery({
+					status: statusFilter ? (statusFilter as 'pending' | 'leased' | 'running' | 'retry_wait' | 'completed' | 'failed' | 'canceled') : undefined,
+					type: typeFilter || undefined,
+					failuresOnly: failuresOnly || undefined,
+				}),
+			);
 		} finally {
 			loading = false;
 		}

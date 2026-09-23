@@ -9,6 +9,7 @@
 		switchProjectBranchCommand,
 	} from '$lib/projects/projects.remote';
 	import { relativeTime } from '$lib/util/relative-time';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type RepoDetail = Awaited<ReturnType<typeof getProjectRepoDetailQuery>>;
 	type DiffResult = Awaited<ReturnType<typeof getProjectDiffQuery>>;
@@ -36,7 +37,9 @@
 		loading = true;
 		error = null;
 		try {
-			detail = await getProjectRepoDetailQuery({ projectId });
+			// Fresh: this reloads after pull, commit, branch and push, and a cached read showed
+			// the repo as it was before the action.
+			detail = await fetchFresh(getProjectRepoDetailQuery({ projectId }));
 			if (detail.status?.branch) pushBranch = detail.status.branch;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load repo detail';

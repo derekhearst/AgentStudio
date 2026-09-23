@@ -5,6 +5,7 @@
 	import { listAgents } from '$lib/agents'
 	import { formatCost, streamPreview, type AgentStreamEntry } from '$lib/agents/agent-format'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { fetchFresh } from '$lib/ui/fresh-query'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
 	const relativeTime = (date: Date | string | null) =>
@@ -84,7 +85,7 @@
 
 	async function loadAgents() {
 		loading = true
-		agents = await listAgents()
+		agents = await fetchFresh(listAgents())
 		loading = false
 	}
 

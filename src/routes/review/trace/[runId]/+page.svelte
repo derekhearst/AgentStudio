@@ -6,6 +6,7 @@
 	import { getRunTraceQuery } from '$lib/observability/review.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import { formatDateTime as fmtDate } from '$lib/util/relative-time';
 
 	type Result = Awaited<ReturnType<typeof getRunTraceQuery>>;
@@ -23,7 +24,8 @@
 		loading = true;
 		error = null;
 		try {
-			result = await getRunTraceQuery(runId);
+			// Fresh, or Refresh on a running run shows the spans it already had.
+			result = await fetchFresh(getRunTraceQuery(runId));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load trace';
 		} finally {

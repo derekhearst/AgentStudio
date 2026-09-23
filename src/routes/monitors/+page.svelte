@@ -13,6 +13,7 @@
 	import MonitorCard from '$lib/monitors/MonitorCard.svelte';
 	import MonitorCreateForm from '$lib/monitors/MonitorCreateForm.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type Result = Awaited<ReturnType<typeof listMonitorsQuery>>;
@@ -30,10 +31,13 @@
 
 	onMount(() => void load());
 
+	// From the server every time: Refresh, and the reload after every action, used to
+	// hand back the list cached on first load — "Check now … refresh in a moment" and
+	// then nothing changed.
 	async function load() {
 		loading = true;
 		try {
-			const result = await listMonitorsQuery({ openOnly: !showAll });
+			const result = await fetchFresh(listMonitorsQuery({ openOnly: !showAll }));
 			rows = result.monitors;
 			error = null;
 		} catch {

@@ -9,6 +9,12 @@ import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expect
  * the UI: verify list visibility, edit description inline, toggle enabled,
  * add a file via the modal, expand it, edit the file, delete it, delete the
  * skill.
+ *
+ * Every step asserts the page as well as the database, and never reloads to get
+ * there. This spec used to reload after adding a file and reset the toggle through
+ * SQL, which hid that the page re-read a cached query after each edit: a saved
+ * description snapped back, a disabled skill still showed as enabled, and a new file
+ * did not appear.
  */
 
 test.describe('/skills — CRUD lifecycle', () => {
@@ -53,21 +59,29 @@ test.describe('/skills — CRUD lifecycle', () => {
 					(rows) => rows[0]?.description === newDescription,
 					{ description: 'skill description updated' },
 				)
+				await expect(page.getByRole('button', { name: newDescription })).toBeVisible()
+				await expect(page.getByRole('button', { name: `${prefix} initial description` })).toHaveCount(0)
 
-				// ── Update: toggle disabled (one direction is sufficient — demonstrates the toggle path)
+				// ── Update: toggle disabled, then back on — both through the switch
 				const enabledToggle = page.locator('input[type="checkbox"].toggle').first()
+				const disabledChip = page.getByText('disabled', { exact: true }).filter({ visible: true })
 				await enabledToggle.click()
 				await pollDb(
 					() => sql<{ enabled: boolean }[]>`select enabled from skills where id = ${seed.id}`,
 					(rows) => rows[0]?.enabled === false,
 					{ description: 'skill toggled off' },
 				)
-				// Toggle it back via SQL so the rest of the test sees an enabled skill
-				// (the toggle re-render race in the page is captured separately by the
-				// /settings/hooks failures page; not the focus of this CRUD test).
-				await sql`update skills set enabled = true where id = ${seed.id}`
-				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
+				await expect(disabledChip).toBeVisible()
+				await expect(enabledToggle).not.toBeChecked()
+
+				await enabledToggle.click()
+				await pollDb(
+					() => sql<{ enabled: boolean }[]>`select enabled from skills where id = ${seed.id}`,
+					(rows) => rows[0]?.enabled === true,
+					{ description: 'skill toggled back on' },
+				)
+				await expect(disabledChip).toHaveCount(0)
+				await expect(enabledToggle).toBeChecked()
 
 				// ── Create: add a file via the modal
 				const fileName = `${prefix.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}-rules.md`
@@ -83,10 +97,10 @@ test.describe('/skills — CRUD lifecycle', () => {
 					(rows) => rows.length === 1 && rows[0].content === fileContent,
 					{ description: 'skill file inserted via UI' },
 				).then((rows) => rows[0].id)
+				await expect(page.getByRole('heading', { name: 'Resource files (1)' })).toBeVisible()
+				await expect(page.getByText(fileName, { exact: true })).toBeVisible()
 
 				// ── Update: edit the file content (inline)
-				await page.reload()
-				await page.waitForLoadState('domcontentloaded')
 				const editedContent = `${fileContent} (edited)`
 				// Click the edit button next to the file
 				const fileRow = page.locator('div.rounded-lg').filter({ hasText: fileName }).first()
@@ -100,6 +114,9 @@ test.describe('/skills — CRUD lifecycle', () => {
 					(rows) => rows[0]?.content === editedContent,
 					{ description: 'skill file content updated' },
 				)
+				// Expanded, the file shows what was just saved — not the content it was added with.
+				await page.getByText(fileName, { exact: true }).click()
+				await expect(page.getByText(editedContent, { exact: true })).toBeVisible()
 
 				// ── Delete: file
 				const fileRowAgain = page.locator('div.rounded-lg').filter({ hasText: fileName }).first()
@@ -110,6 +127,8 @@ test.describe('/skills — CRUD lifecycle', () => {
 					(rows) => rows[0]?.count === 0,
 					{ description: 'skill file deleted' },
 				)
+				await expect(page.getByRole('heading', { name: 'Resource files (0)' })).toBeVisible()
+				await expect(page.getByText(fileName, { exact: true })).toHaveCount(0)
 
 				// ── Delete: the entire skill
 				await page.getByRole('button', { name: 'Delete skill' }).click()
@@ -119,6 +138,9 @@ test.describe('/skills — CRUD lifecycle', () => {
 					(rows) => rows[0]?.count === 0,
 					{ description: 'skill deleted from DB' },
 				)
+				// Deleting sends you back to the list, which must not still offer the skill.
+				await expect(page).toHaveURL(/\/skills$/)
+				await expect(page.locator('a').filter({ hasText: seed.name })).toHaveCount(0)
 
 				// ── Layout
 				await expectNoHorizontalOverflow(page)

@@ -6,6 +6,7 @@
 	import { getAgent, updateAgentCommand } from '$lib/agents'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { fetchFresh } from '$lib/ui/fresh-query'
 	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
 	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
 	import AgentConfigEditor from '$lib/agents/AgentConfigEditor.svelte'
@@ -58,7 +59,8 @@
 
 	async function loadData() {
 		loading = true
-		const result = await getAgent(agentId)
+		// Fresh, so coming back after saving the config below shows what was saved.
+		const result = await fetchFresh(getAgent(agentId))
 		data = result ?? null
 		loading = false
 	}

@@ -12,6 +12,7 @@
 	import { getSettings } from '$lib/settings';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import KpiStrip from './_components/KpiStrip.svelte';
 	import RecentFailures from './_components/RecentFailures.svelte';
 	import LogsPanel from './_components/LogsPanel.svelte';
@@ -76,19 +77,25 @@
 
 	onMount(() => void loadAll());
 
+	/*
+	 * Every load on this page reads from the server, not the query cache (`fetchFresh`).
+	 * Refresh re-awaited the same eight queries with the same arguments and got back what
+	 * it already had, and resolving an inbox item left it on screen as "open", with its
+	 * buttons, inviting a second resolve.
+	 */
 	async function loadAll() {
 		loading = true;
 		try {
 			const [inboxRes, costRes, snapshotRes, logsRes, logSourcesRes, failuresRes, budgetRes, settingsRes] =
 				await Promise.all([
-					listReviewItemsQuery(buildInboxArgs()),
-					getCostSummary({ period }),
-					getOperationalSnapshotQuery(),
-					listAppLogsQuery(buildLogsArgs()),
-					countLogsBySourceQuery({ windowMinutes: 60 * 24 }),
-					listRecentFailuresQuery({ hours: 24, limit: 20 }),
-					getBudgetStatus(),
-					getSettings(),
+					fetchFresh(listReviewItemsQuery(buildInboxArgs())),
+					fetchFresh(getCostSummary({ period })),
+					fetchFresh(getOperationalSnapshotQuery()),
+					fetchFresh(listAppLogsQuery(buildLogsArgs())),
+					fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })),
+					fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })),
+					fetchFresh(getBudgetStatus()),
+					fetchFresh(getSettings()),
 				]);
 			inbox = inboxRes;
 			cost = costRes;
@@ -127,17 +134,17 @@
 	}
 
 	async function reloadCost() {
-		cost = await getCostSummary({ period });
+		cost = await fetchFresh(getCostSummary({ period }));
 	}
 
 	async function reloadInbox() {
-		inbox = await listReviewItemsQuery(buildInboxArgs());
+		inbox = await fetchFresh(listReviewItemsQuery(buildInboxArgs()));
 	}
 
 	async function reloadLogs() {
 		logsLoading = true;
 		try {
-			logs = await listAppLogsQuery(buildLogsArgs());
+			logs = await fetchFresh(listAppLogsQuery(buildLogsArgs()));
 		} finally {
 			logsLoading = false;
 		}

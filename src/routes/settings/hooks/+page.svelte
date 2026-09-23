@@ -5,6 +5,7 @@
 	import { listHookInvocationsQuery } from '$lib/hooks/hooks.remote';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type Result = Awaited<ReturnType<typeof listHookInvocationsQuery>>;
 
@@ -38,11 +39,14 @@
 	async function load() {
 		loading = true;
 		try {
-			result = await listHookInvocationsQuery({
-				event: eventFilter || undefined,
-				hookKind: kindFilter ? (kindFilter as 'builtin' | 'skill') : undefined,
-				failuresOnly: failuresOnly || undefined,
-			});
+			// Fresh, so Refresh shows invocations recorded after the page opened.
+			result = await fetchFresh(
+				listHookInvocationsQuery({
+					event: eventFilter || undefined,
+					hookKind: kindFilter ? (kindFilter as 'builtin' | 'skill') : undefined,
+					failuresOnly: failuresOnly || undefined,
+				}),
+			);
 		} finally {
 			loading = false;
 		}

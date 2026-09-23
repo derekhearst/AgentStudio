@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { listActivity } from '$lib/activity';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
 	type EventType = ActivityRow['type'];
@@ -34,10 +35,13 @@
 
 	async function refresh() {
 		loading = true;
-		events = await listActivity({
-			type: filterType || undefined,
-			limit: 100,
-		});
+		// Fresh, so the Refresh button actually brings in new events.
+		events = await fetchFresh(
+			listActivity({
+				type: filterType || undefined,
+				limit: 100,
+			}),
+		);
 		loading = false;
 	}
 

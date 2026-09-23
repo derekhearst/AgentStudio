@@ -4,6 +4,7 @@
 	import { onMount } from 'svelte';
 	import { listAuditEventsQuery } from '$lib/governance/governance.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type Result = Awaited<ReturnType<typeof listAuditEventsQuery>>;
 	type Event = Result extends { events: infer E } ? (E extends Array<infer R> ? R : never) : never;
@@ -39,10 +40,13 @@
 	async function load() {
 		loading = true;
 		try {
-			result = await listAuditEventsQuery({
-				action: actionFilter || undefined,
-				targetType: targetTypeFilter || undefined,
-			});
+			// Fresh, so Refresh (and returning to a filter already viewed) shows new events.
+			result = await fetchFresh(
+				listAuditEventsQuery({
+					action: actionFilter || undefined,
+					targetType: targetTypeFilter || undefined,
+				}),
+			);
 		} finally {
 			loading = false;
 		}

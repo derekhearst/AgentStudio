@@ -11,6 +11,7 @@
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import AutomationCard from '$lib/automations/AutomationCard.svelte';
 	import AutomationCreateForm from '$lib/automations/AutomationCreateForm.svelte';
 	import { isDueSoon, toTime } from '$lib/automations/automation-format';
@@ -75,13 +76,15 @@
 		void loadPageData();
 	});
 
+	// Every create, toggle and delete reloads through here, so it reads from the server:
+	// a cached read left a deleted card on screen and a toggled one showing its old state.
 	async function loadPageData() {
 		loading = true;
 		formError = null;
 		try {
 			const [automations, agentChoices] = await Promise.all([
-				listAutomationsQuery(),
-				getAgentChoices(),
+				fetchFresh(listAutomationsQuery()),
+				fetchFresh(getAgentChoices()),
 			]);
 			rows = automations;
 			agents = agentChoices;
