@@ -99,7 +99,7 @@ Sources:
 - Thread-first canvas
 - Right workbench becomes bottom sheet tabs
 - Blocking approvals/questions appear as sticky cards above composer
-- Detail pages (an agent, a skill, a project, a run, a trace, the jobs and hooks views) show a **Back** button in the page header beside the menu button at every width. The breadcrumb trail that holds the parent link is only shown on wide screens, and an installed app has no browser Back button, so this button is the way up on phones and tablets. Its label names where it goes, for example "Back to Agents".
+- Detail pages (an agent, a skill, a project, a run, a trace, the jobs and hooks views) show a **Back** button in the page header beside the menu button below the desktop breakpoint, where the breadcrumbs are hidden. On wide screens the breadcrumb trail holds the parent link instead. An installed app has no browser Back button, so on phones and tablets this button is the way up. Its label names where it goes, for example "Back to Agents".
 
 ## Interaction Contracts
 
@@ -138,6 +138,8 @@ Sources:
 
 - Every async surface must define loading, partial, failure, and retry behavior.
 - A page whose data fails to load shows the reason where the content would be, never an endless spinner. If a later refresh fails, the last good data stays on screen under the error.
+- Only a page's first load replaces its content with a spinner. A reload after a change, or from **Refresh**, keeps the current list on screen until the new one arrives, so the reader keeps their place and any panel they had open.
+- On a dashboard made of several sections, each section's error is reported on its own. A section that loads again successfully clears its own error without touching the others.
 - After any change the user makes on a page (create, save, toggle, delete, resolve) and whenever they press **Refresh**, the page reloads its data from the server rather than reusing an earlier answer the browser kept. Otherwise the change is saved but the screen still shows the old state, which reads as the change being lost.
 - Blocking action failures (approval submit, ask_user submit, queue send) must show explicit retry paths.
 - Long-running run disruptions should preserve user intent and offer resume/recover options.
