@@ -25,7 +25,12 @@ function periodStart(period: 'day' | 'week' | 'month'): Date {
 	return new Date(now.getFullYear(), now.getMonth(), 1)
 }
 
+// Spend is reported instance-wide rather than filtered to `user_id`: the deployment has one
+// owner, and background work (embeddings, title generation, memory mining) records usage
+// with no user at all, so a per-user filter would under-report the real bill. The session
+// check is what keeps the ledger private.
 export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
+	requireAuthenticatedRequestUser()
 	const p = period ?? 'month'
 	const since = periodStart(p)
 
@@ -194,6 +199,7 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 })
 
 export const getBudgetStatus = query(async () => {
+	requireAuthenticatedRequestUser()
 	const today = new Date()
 	const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 	const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)

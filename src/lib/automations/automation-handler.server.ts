@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
-import { automations } from '$lib/automations/automation.schema'
+import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
 import { logger } from '$lib/observability/logger'
 import { runAutomationById, checkAndRunAutomations } from './engine'
 import { recordTerminalAutomationFailure } from './automation-failure.server'
@@ -11,6 +11,7 @@ import { pruneAutomationRuns, reapStalledAutomationRuns } from './automation-run
 import {
 	AUTOMATION_MAX_ATTEMPTS,
 	automationRetryDedupeKey,
+	automationTriggerPolicy,
 	computeRetryBackoffMs,
 	describeRetryDecision,
 	nextRetryAt,
@@ -35,7 +36,8 @@ import {
  *
  * The cron route (`/api/cron`) still works as an external trigger — it just calls the same
  * `checkAndRunAutomations` enqueue path. Useful for environments that prefer external cron
- * over the in-process scheduler.
+ * over the in-process scheduler: send `Authorization: Bearer $CRON_SECRET` (see
+ * `cron-trigger.ts`; with no secret configured only a signed-in session can fire it).
  *
  * #31 — failure handling lives HERE rather than in the generic queue retry, and the handler
  * deliberately does not rethrow. Two reasons:
@@ -52,7 +54,7 @@ const AUTOMATION_RUN_PAYLOAD = z.object({
 	automationId: z.string().uuid(),
 	/** 1-based attempt within the current tick; retries carry attempt+1 forward. */
 	attempt: z.number().int().min(1).max(10).optional(),
-	trigger: z.enum(['schedule', 'manual']).optional(),
+	trigger: z.enum(['schedule', 'manual', 'monitor']).optional(),
 })
 
 let registered = false
@@ -145,17 +147,22 @@ export function registerAutomationJobHandlers(): void {
  * Manual runs are never retried — a human is standing there and can press the button again;
  * silently queuing background retries behind a button press is surprising. A manual failure
  * also does not count toward the disable streak, because the streak is about the schedule.
+ *
+ * A monitor-fired run is escalated like a scheduled one: nobody is watching it either, and a
+ * failure nobody hears about is the silence #31 set out to end. The retry carries the
+ * trigger forward, and giving up leaves the schedule where it is — the schedule did not fail.
  */
 async function handleAutomationRunFailure(args: {
 	automationId: string
 	attempt: number
-	trigger: 'schedule' | 'manual'
+	trigger: AutomationRunTrigger
 	jobId: string
 	error: unknown
 }): Promise<Record<string, unknown>> {
 	const message = args.error instanceof Error ? args.error.message : String(args.error)
+	const policy = automationTriggerPolicy(args.trigger)
 
-	if (args.trigger === 'manual') {
+	if (!policy.escalateFailures) {
 		logger.warn('[automations] manual run failed', {
 			automationId: args.automationId,
 			error: message,
@@ -185,7 +192,7 @@ async function handleAutomationRunFailure(args: {
 				// Keyed on the job that failed, so re-delivery of the same failure can't fan
 				// out into a second retry chain.
 				dedupeKey: automationRetryDedupeKey(args.jobId, args.automationId, nextAttempt),
-				payload: { automationId: args.automationId, attempt: nextAttempt, trigger: 'schedule' },
+				payload: { automationId: args.automationId, attempt: nextAttempt, trigger: args.trigger },
 				userId: automation?.userId ?? null,
 			})
 			return {
@@ -216,6 +223,7 @@ async function handleAutomationRunFailure(args: {
 		error: args.error,
 		attempts: args.attempt,
 		jobId: args.jobId,
+		advanceSchedule: !policy.preserveSchedule,
 	})
 
 	return {

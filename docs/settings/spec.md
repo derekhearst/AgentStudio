@@ -95,6 +95,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Tools** — approval-required list
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
+- **System** (read-only) — a checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway, and each integration (OpenRouter, web search, GitHub, webhooks, push, external cron). Each row says whether it is in place and names the environment variable that controls it, never its value. These are deploy-time settings, not stored in `appSettings` — first run collects only the owner account (see [../auth/auth.md](../auth/auth.md)).
 
 
 ## Roles & Permissions

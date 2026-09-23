@@ -185,6 +185,8 @@ A subagent may read a web page, a repo file, an issue body or a PR comment, so a
 | Delete agent                | Admin only                |
 | View another user's agents  | Admin only                |
 
+What is enforced today (AgentStudio has a single owner and no admin tier): viewing the agent catalogue requires signing in, because agent records carry their system prompts. The catalogue itself is shared, but the figures shown with each agent — session count, spend, recent conversations and the automations bound to it — are the viewer's own.
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.

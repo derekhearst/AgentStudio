@@ -31,3 +31,10 @@ export function isDueSoon(value: Date | string | null): boolean {
 	const diff = ms - Date.now()
 	return diff >= 0 && diff <= 3_600_000
 }
+
+/** How a run was started, for tooltips on the automations page. */
+export function describeRunTrigger(trigger: string | null): string {
+	if (trigger === 'manual') return 'run now'
+	if (trigger === 'monitor') return 'fired by a monitor'
+	return 'scheduled'
+}

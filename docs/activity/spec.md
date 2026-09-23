@@ -52,6 +52,8 @@ Activity is a lightweight audit log for significant user-facing events across Ag
 | Write events          | Server-side only    |
 | Delete/edit events    | Nobody              |
 
+The feed is instance-wide (events have no owner), and reading it requires a signed-in session.
+
 ## Integrations
 
 Activity events are emitted by all major domains:

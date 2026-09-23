@@ -36,6 +36,7 @@ const notificationIdSchema = z.object({
 })
 
 export const getPushPublicKey = query(async () => {
+	requireAuthenticatedRequestUser()
 	return {
 		publicKey: await getVapidPublicKey(),
 	}

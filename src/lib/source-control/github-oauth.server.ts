@@ -5,6 +5,8 @@ import {
 	buildAuthorizeUrl,
 	buildCallbackUriFromOrigin,
 	generateOAuthState,
+	oauthFailureLocation,
+	sanitizeOAuthReturnPath,
 } from './github-oauth'
 
 /**
@@ -26,6 +28,8 @@ export {
 	GITHUB_DEFAULT_SCOPES,
 	buildAuthorizeUrl,
 	generateOAuthState,
+	oauthFailureLocation,
+	sanitizeOAuthReturnPath,
 }
 
 export function getGithubOAuthCredentials(): { clientId: string; clientSecret: string } | null {
