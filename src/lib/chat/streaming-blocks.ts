@@ -692,7 +692,18 @@ export function applyToolResult(
 ): { blocks: StreamingBlock[]; missing: boolean; unexpectedStatus: ToolStatus | null } {
 	const finalStatus = payload.success ? ('completed' as const) : ('failed' as const)
 	const resultText = payload.result ?? (payload.success ? 'Success' : 'Tool execution failed')
-	const idx = blocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id)
+	/*
+	 * #81 — an ask_user card is keyed by the host's answer token (the `ask_user` frame) and
+	 * its result by the SDK's tool_use id, so the two never met: the card stayed open with its
+	 * Submit button and an empty block was appended instead. The result belongs to the oldest
+	 * card still waiting for one — a card whose id is still its token — and the card takes the
+	 * SDK's id with it, so a replayed result finds it directly.
+	 */
+	const askUserCard =
+		payload.name === 'ask_user' && !blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
+			? blocks.findIndex((b) => b.kind === 'tool' && b.name === 'ask_user' && !!b.token && b.id === b.token)
+			: -1
+	const idx = askUserCard !== -1 ? askUserCard : blocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id)
 	if (idx === -1) {
 		return {
 			missing: true,
@@ -717,7 +728,9 @@ export function applyToolResult(
 		}
 	}
 	const existing = blocks[idx]
+	// An answered ask_user card is already marked completed by `applyAskUserAnswered`.
 	const unexpected =
+		askUserCard === -1 &&
 		existing.kind === 'tool' &&
 		existing.status !== 'executing' &&
 		existing.status !== 'approved'
@@ -728,6 +741,7 @@ export function applyToolResult(
 			i === idx && b.kind === 'tool'
 				? {
 						...b,
+						...(i === askUserCard ? { id: payload.id } : {}),
 						status: finalStatus,
 						executionMs: payload.executionMs ?? null,
 						result: resultText,
@@ -736,6 +750,23 @@ export function applyToolResult(
 				: b,
 		),
 	}
+}
+
+/**
+ * The server recorded the user's answers to an ask_user card (#81): show it answered now,
+ * rather than with its Submit button still live until the call's `tool_result` arrives. The
+ * card keeps its token as its id, so that result still finds it (`applyToolResult`).
+ */
+export function applyAskUserAnswered(
+	blocks: StreamingBlock[],
+	token: string,
+	answers: Record<string, string>,
+): StreamingBlock[] {
+	return blocks.map((b) =>
+		b.kind === 'tool' && b.name === 'ask_user' && b.token === token
+			? { ...b, status: 'completed' as const, result: JSON.stringify({ answers }) }
+			: b,
+	)
 }
 
 /**

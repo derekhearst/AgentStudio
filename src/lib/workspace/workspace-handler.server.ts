@@ -51,8 +51,9 @@ export function registerWorkspaceJobHandlers(): void {
 		}
 	})
 
-	// Schedule a daily run via the in-process scheduler. Idempotent — `gc:daily` dedupeKey
-	// means multiple boots within a day collapse to one pending job until the worker claims it.
+	// Schedule a daily run via the in-process scheduler. `gc:daily` collapses a tick onto a GC
+	// that is still queued or running; once it finishes, the next tick (or the next boot)
+	// gets a GC of its own. GC is idempotent, so an extra pass after a restart costs a scan.
 	registerScheduledJob({
 		name: 'workspace_gc.daily',
 		intervalMs: DEFAULT_GC_INTERVAL_MS,

@@ -23,8 +23,10 @@ import { logger } from '$lib/observability/logger'
  * How each outcome ends the job:
  *   - complete → the job completes, and the user is notified
  *   - canceled → the handler returns; the job was canceled with the research and stays so
- *   - failed   → the handler throws, so the job is recorded as failed. Research jobs get one
- *                attempt (`enqueueResearchRun`), so this is final rather than a silent re-run
+ *   - failed   → the handler throws, so the job is recorded as failed. The job's second
+ *                attempt (kept for a worker that dies mid-run, see `enqueueResearchRun`) finds
+ *                the row already failed and throws the same error, so a failed run is never
+ *                run again
  */
 
 const RESEARCH_RUN_PAYLOAD = z.object({

@@ -6,7 +6,8 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  *
  * Schema-level proofs that the scheduler's enqueue path interacts correctly with the
  * existing jobs table:
- *   - Repeated tick-driven enqueue collapses via dedupeKey (no duplicate pending rows)
+ *   - Repeated tick-driven enqueue collapses via dedupeKey (no duplicate pending rows), and
+ *     a finished tick frees the key for the next one
  *   - Maintenance-queue jobs at low priority don't preempt user-facing work
  *   - workspace_gc job dedupeKey is `gc:daily`
  *
@@ -52,6 +53,25 @@ test.describe('jobs/scheduler — tick-driven enqueue contract', () => {
 			expect(count).toBe(1)
 		} finally {
 			await cleanupSchedulerPrefix(prefix)
+		}
+	})
+
+	test('a finished tick does not swallow the next one', async () => {
+		const prefix = uniquePrefix('scheduler-tick-next')
+		const sql = getSql()
+		try {
+			const { enqueueJob } = await import('../src/lib/jobs/jobs.server')
+			const dedupeKey = `${prefix}gc:daily`
+			// The type carries no registered handler, so no worker claims these rows.
+			const type = `${prefix}-gc`
+			const first = await enqueueJob({ type, queue: 'maintenance', priority: 10, dedupeKey })
+			await sql`update jobs set status = 'completed'::job_status, finished_at = now() where id = ${first.id}`
+
+			const next = await enqueueJob({ type, queue: 'maintenance', priority: 10, dedupeKey })
+			expect(next.id, "tomorrow's GC must be a new job").not.toBe(first.id)
+			expect(next.status).toBe('pending')
+		} finally {
+			await sql`delete from jobs where type like ${`${prefix}%`}`
 		}
 	})
 

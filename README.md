@@ -27,7 +27,7 @@ Tool execution approvals are configured per tool in Settings. Tools marked for a
 
 On server startup, AgentStudio now ensures the configured PostgreSQL database exists, installs the required extensions, and applies bundled Drizzle migrations before serving requests. The Postgres role in `DATABASE_URL` must be allowed to create the target database and install `pgcrypto` and `vector`.
 
-If the target database already contains AgentStudio tables or enums but has no recorded Drizzle migrations, startup treats that state as legacy unmanaged schema, wipes the app schemas, and then reapplies the bundled migrations from scratch.
+Startup never deletes data on its own. Only one process migrates a database at a time, a failed migration stops startup with an explanation, and a database that has tables but no migration history is refused rather than wiped (an old AgentStudio schema can be rebuilt by starting once with `DB_ALLOW_LEGACY_SCHEMA_RESET=1`). If Postgres is unreachable, startup retries for a few minutes; if it still fails, requests return errors instead of running against a half-initialised database. Details in [`docs/database/database.md`](docs/database/database.md#how-migrations-are-applied).
 
 Build note: `bun run build` skips database bootstrap entirely. `DATABASE_URL` is only required when the server actually starts.
 
@@ -88,20 +88,20 @@ The Claude Code process that runs each chat turn does **not** inherit these. It 
 
 Database note:
 
-- `DATABASE_URL` should point at the final application database name even if that database does not exist yet.
+- `DATABASE_URL` should point at the final application database name even if that database does not exist yet. Use `agentstudiodev` for local development; names follow the lowercase `agentstudio<env>` rule in [`docs/database/database.md`](docs/database/database.md#databases).
 - The configured Postgres role must be able to create that database on first start and run `CREATE EXTENSION IF NOT EXISTS pgcrypto` and `CREATE EXTENSION IF NOT EXISTS vector`.
-- A database with existing AgentStudio schema objects but no Drizzle migration history will be reset on startup before migrations are applied.
-- To force a clean rebuild of a development database, run `bun run db:reset` — drops the target database and reruns the same ensure-exists → migrate → seed bootstrap the server runs at boot.
+- A database with existing tables but no Drizzle migration history is refused at startup, never wiped automatically. See the database doc for the one-time `DB_ALLOW_LEGACY_SCHEMA_RESET=1` escape hatch.
+- To force a clean rebuild of a development database, run `bun run db:reset` — drops the target database and reruns the same ensure-exists → migrate → seed bootstrap the server runs at boot. It refuses any database whose name does not end in `dev`, `test` or `ci`, and any name containing `prod`.
 
 4. Provision the instance (optional — the server does the same on first start when `AUTH_PASSWORD` is set):
 
 ```sh
 bun run db:bootstrap                    # create the database, the owner (from AUTH_PASSWORD) and the sandbox folder
 bun run db:bootstrap --reset-password   # forgot the dev password: set it to AUTH_PASSWORD again (signs every session out)
-bun run db:bootstrap --reset            # start over: drops the database first
+bun run db:bootstrap --reset            # start over: drops the database first (dev/test/ci names only)
 ```
 
-It is idempotent, never prints the password, and refuses to run with `NODE_ENV=production`.
+It is idempotent, never prints the password, and refuses to run with `NODE_ENV=production`. Like `db:reset`, `--reset` refuses any database whose name does not end in `dev`, `test` or `ci`, or that contains `prod`.
 
 5. Run the app:
 
@@ -196,10 +196,17 @@ Notes:
 - Runtime spec: `docs/runtime/spec.md`
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
+- Automations: `docs/automations/automations.md`
+- Monitors: `docs/monitors/monitors.md`
+- Background jobs: `docs/jobs/jobs.md`
 - UI spec: `docs/ui/spec.md`
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
+
+## Background Jobs
+
+Scheduled automations, monitor checks, PR CI polling, memory mining, research runs and workspace cleanup run on a durable job queue in PostgreSQL. Every server process runs a worker and the scheduler by default; `bun run worker` starts a worker without the web tier, for deployments that scale them separately. Workers are configured with optional `JOBS_WORKER_*` environment variables (queues, job types, poll interval, lease length, worker id, shutdown drain time), and `JOBS_WORKER_ENABLED=0` / `JOBS_SCHEDULER_ENABLED=0` turn them off. Job history is at `/settings/jobs`. See [docs/jobs/jobs.md](docs/jobs/jobs.md) for how the queue behaves and the full variable list.
 
 ## Projects
 
@@ -243,7 +250,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/chat/[id]` Chat detail
 - `/cost` Cost dashboard
 - `/agents` Agent management
-- `/automations` Scheduled automation workflows
-- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/spec.md))
+- `/automations` Scheduled automation workflows ([docs](docs/automations/automations.md))
+- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration, including the read-only System checklist

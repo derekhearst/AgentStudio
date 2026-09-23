@@ -77,13 +77,14 @@ test.describe('jobs/cancel — durable cancellation contract', () => {
 				values ('research_run', 'pending'::job_status, ${sql.json({ researchId: randomUUID() })}, ${userId})
 				returning id
 			`
-			// Claim path: status in ('pending', 'retry_wait') — canceled is excluded.
+			// Claim path: status in ('pending', 'retry_wait'), or a lapsed lease on a leased or
+			// running job — canceled is excluded either way.
 			const eligible = await sql<{ id: string }[]>`
 				select id from jobs
 				where type = 'research_run'
 				  and (
 				    (status in ('pending', 'retry_wait') and scheduled_at <= now())
-				    or (status = 'leased' and lease_expires_at < now())
+				    or (status in ('leased', 'running') and lease_expires_at < now())
 				  )
 				  and user_id = ${userId}
 				  and id in (${canceled.id}, ${pending.id})
@@ -153,60 +154,47 @@ test.describe('jobs/cancel — pure helper imports (best-effort)', () => {
 	})
 })
 
-test.describe('jobs/cancel — canceled is final', () => {
+test.describe('jobs/cancel — the cancel signal', () => {
 	/*
-	 * A handler stopped at a cancel checkpoint still returns or throws, and the worker then
-	 * calls completeJob or failJob. Both used to overwrite the cancel: completeJob with
-	 * `completed`, and failJob with `retry_wait` — which put the job back on the queue, where
-	 * it ran to the end.
+	 * That completeJob and failJob leave a canceled job canceled — the handler of a job
+	 * canceled mid-run still returns or throws — is covered with the other late reports in
+	 * jobs.reclaim.spec.ts. What stays here is how a handler recognises the cancel.
 	 */
-	async function insertCanceledJob(prefix: string) {
-		const sql = getSql()
-		const userId = await getActiveUserId()
-		const [job] = await sql<{ id: string }[]>`
-			insert into jobs (type, status, payload, user_id, attempt_count, max_attempts, dedupe_key)
-			values ('research_run', 'canceled'::job_status, ${sql.json({ researchId: randomUUID() })}, ${userId}, 1, 3, ${prefix})
-			returning id
-		`
-		return job.id
-	}
-
-	async function readStatus(jobId: string) {
-		const sql = getSql()
-		const [row] = await sql<{ status: string }[]>`select status::text as status from jobs where id = ${jobId}`
-		return row.status
-	}
-
-	test('failJob does not send a canceled job back for a retry', async () => {
-		const prefix = uniquePrefix('cancel-no-retry')
-		try {
-			const jobId = await insertCanceledJob(prefix)
-			const { failJob } = await import('../src/lib/jobs/jobs.server')
-			const row = await failJob(jobId, { error: { message: 'Job canceled or removed' } })
-			expect(row?.status).toBe('canceled')
-			expect(await readStatus(jobId)).toBe('canceled')
-		} finally {
-			await cleanupCancelPrefix(prefix)
-		}
-	})
-
-	test('completeJob does not turn a canceled job into a completed one', async () => {
-		const prefix = uniquePrefix('cancel-no-complete')
-		try {
-			const jobId = await insertCanceledJob(prefix)
-			const { completeJob } = await import('../src/lib/jobs/jobs.server')
-			const row = await completeJob(jobId, { status: 'canceled' })
-			expect(row?.status).toBe('canceled')
-			expect(await readStatus(jobId)).toBe('canceled')
-		} finally {
-			await cleanupCancelPrefix(prefix)
-		}
-	})
-
 	test('the worker cancel check throws a JobCanceledError, not a plain Error', async () => {
 		const { JobCanceledError, isJobCanceledError } = await import('../src/lib/jobs/worker.server')
 		const err = new JobCanceledError('abc')
 		expect(isJobCanceledError(err)).toBe(true)
 		expect(isJobCanceledError(new Error('Job abc canceled or removed'))).toBe(false)
+	})
+
+	test('a job the queue took back is not reported as canceled', async () => {
+		/*
+		 * The heartbeat returns null for a canceled job and for one the claim path retired
+		 * after this worker's lease lapsed. Only the first may reach a handler as a cancel: the
+		 * research runner records a JobCanceledError as the user's Cancel.
+		 */
+		const prefix = uniquePrefix('cancel-lost-job')
+		const type = `${prefix}-t`
+		const sql = getSql()
+		try {
+			const insert = async (status: 'canceled' | 'failed') => {
+				const [row] = await sql<{ id: string }[]>`
+					insert into jobs (type, status, attempt_count, max_attempts, finished_at)
+					values (${type}, ${status}::job_status, 1, 2, now())
+					returning id
+				`
+				return row.id
+			}
+			const { errorForLostJob, isJobCanceledError } = await import('../src/lib/jobs/worker.server')
+
+			expect(isJobCanceledError(await errorForLostJob(await insert('canceled')))).toBe(true)
+			expect(isJobCanceledError(await errorForLostJob(randomUUID())), 'a job that is gone counts as canceled').toBe(true)
+
+			const retired = await errorForLostJob(await insert('failed'))
+			expect(isJobCanceledError(retired)).toBe(false)
+			expect(retired.message).toContain('failed')
+		} finally {
+			await sql`delete from jobs where type = ${type}`
+		}
 	})
 })

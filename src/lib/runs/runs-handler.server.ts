@@ -46,7 +46,9 @@ export function registerRunsJobHandlers(): void {
 				type: 'runs_reap',
 				queue: 'maintenance',
 				priority: 10,
+				// Once per window, however many times a restart re-fires the schedule inside it.
 				dedupeKey: `runs_reap:5min:${bucket}`,
+				dedupeScope: 'forever',
 				payload: {},
 			}
 		},

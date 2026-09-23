@@ -28,12 +28,15 @@ export function registerCostJobHandlers(): void {
 		intervalMs: VIDEO_COST_RECONCILE_INTERVAL_MS,
 		initialDelayMs: 2 * 60 * 1000,
 		enqueue: () => {
+			// 10min bucket, `forever`: once per window, however many times a restart re-fires the
+			// schedule inside it.
 			const bucket = Math.floor(Date.now() / VIDEO_COST_RECONCILE_INTERVAL_MS)
 			return {
 				type: 'video_cost_reconcile',
 				queue: 'maintenance',
 				priority: 10,
 				dedupeKey: `video_cost_reconcile:10min:${bucket}`,
+				dedupeScope: 'forever',
 				payload: {},
 			}
 		},

@@ -10,7 +10,8 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  * canceled any more and ran the research to the end, notification included.
  *
  * And a failed run was retried: the queue's default three attempts re-ran it on a row still
- * carrying the first attempt's plan (then labelled "user approved"), sources and error.
+ * carrying the first attempt's plan (then labelled "user approved"), sources and error. The
+ * job keeps a second attempt, for a worker that dies mid-run; on a failed row it runs nothing.
  *
  * A Cancel pressed while the report was being written was lost too: nothing looked at the row
  * after the synthesizer answered, so the run saved its report over "canceled", marked itself
@@ -360,16 +361,18 @@ test.describe('research/retry — a finished run is not run again', () => {
 		}
 	})
 
-	test('research jobs are queued with a single attempt and linked to their row', async () => {
-		const prefix = uniquePrefix('research-one-attempt')
+	test('research jobs are queued with one spare attempt, for a dead worker, and linked to their row', async () => {
+		const prefix = uniquePrefix('research-two-attempts')
 		try {
 			// Already canceled, so a worker that claims the job ends it without running anything.
 			const researchId = await insertResearch(prefix, 'canceled')
 			const { enqueueResearchRun } = await import('../src/lib/research/research.server')
 			const job = await enqueueResearchRun({ researchId, userId: await getActiveUserId(), priority: 150 })
 
-			expect(job.maxAttempts).toBe(1)
-			expect((await readJob(job.id)).max_attempts).toBe(1)
+			// One attempt would have the claim path fail the job the first time its worker died
+			// mid-run (staleRunningJobVerdict), leaving the research row at "searching" for good.
+			expect(job.maxAttempts).toBe(2)
+			expect((await readJob(job.id)).max_attempts).toBe(2)
 			expect((await readResearch(researchId)).job_id).toBe(job.id)
 		} finally {
 			await cleanup(prefix)

@@ -16,6 +16,11 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
 async function cleanupMinePrefix(prefix: string) {
 	const sql = getSql()
 	await sql`delete from jobs where type = 'memory_mine' and dedupe_key like ${`mine:${prefix}%`}`
+	// The keys are `mine:<conversation uuid>`, which the prefix match above never catches.
+	await sql`
+		delete from jobs where type = 'memory_mine'
+		and payload->>'conversationId' in (select id::text from conversations where title like ${`${prefix}%`})
+	`
 	await sql`delete from messages where conversation_id in (select id from conversations where title like ${`${prefix}%`})`
 	await sql`delete from conversations where title like ${`${prefix}%`}`
 }
@@ -60,6 +65,43 @@ test.describe('memory/mine-job — dedupe + payload + queue contract', () => {
 				where type = 'memory_mine' and dedupe_key = ${`mine:${conv.id}`}
 			`
 			expect(count).toBe(1)
+		} finally {
+			await cleanupMinePrefix(prefix)
+		}
+	})
+
+	test('once the mining job has run, the next exchange queues a fresh one', async () => {
+		// The key used to be unique over every row, so the first completed `mine:<conv>` job
+		// swallowed every later enqueue and the conversation was only ever mined once.
+		const prefix = uniquePrefix('mine-next-exchange')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			const [conv] = await sql<{ id: string }[]>`
+				insert into conversations (title, user_id, model, total_tokens, total_cost)
+				values (${`${prefix} convo`}, ${userId}, 'anthropic/claude-sonnet-4', 0, '0')
+				returning id
+			`
+			const { enqueueJobWithOutcome } = await import('../src/lib/jobs/jobs.server')
+			// Scheduled far ahead so no worker runs these between the steps of the test.
+			const later = new Date(Date.now() + 24 * 60 * 60_000)
+			const enqueue = () =>
+				enqueueJobWithOutcome({
+					type: 'memory_mine',
+					dedupeKey: `mine:${conv.id}`,
+					payload: { conversationId: conv.id },
+					userId,
+					scheduledAt: later,
+				})
+
+			const first = await enqueue()
+			expect(first.created).toBe(true)
+			expect((await enqueue()).created, 'a second finish folds into the queued job').toBe(false)
+
+			await sql`update jobs set status = 'completed'::job_status, finished_at = now() where id = ${first.job.id}`
+			const next = await enqueue()
+			expect(next.created, 'the next exchange must be mined too').toBe(true)
+			expect(next.job.id).not.toBe(first.job.id)
 		} finally {
 			await cleanupMinePrefix(prefix)
 		}

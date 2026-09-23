@@ -4,43 +4,56 @@
  *
  * `bootstrapDatabase()` runs at module load (kicked off by `db.server.ts`) and:
  *
- *   1. Creates the database if it doesn't exist; reconciles legacy schema state.
- *   2. Installs required Postgres extensions (pgvector, etc).
- *   3. Runs Drizzle migrations against the latest local revision. On dev, recovers
- *      from drift by resetting app schemas + retrying once.
- *   3b. Creates the owner account from AUTH_PASSWORD if there is none yet, then drops
+ *   1. Creates the database if it doesn't exist.
+ *   2. Takes the bootstrap advisory lock, so concurrent processes migrate one at a time.
+ *   3. Reconciles legacy schema state — refusing, with instructions, to touch anything
+ *      it cannot positively identify as AgentStudio's (see `planLegacySchemaReconcile`).
+ *   4. Installs required Postgres extensions (pgvector, etc).
+ *   5. Runs Drizzle migrations against the latest local revision. A failure is reported
+ *      with instructions; it never triggers a reset.
+ *   6. Creates the owner account from AUTH_PASSWORD if there is none yet, then drops
  *      AUTH_PASSWORD from the environment.
- *   4. Seeds the built-in agents, the default evaluator, and any AGENTS.md /
+ *   7. Seeds the built-in agents, the default evaluator, and any AGENTS.md /
  *      SKILL.md repo-discovered rows.
- *   5. Registers job handlers (research, memory mining, evaluations, workspace gc,
+ *   8. Registers job handlers (research, memory mining, evaluations, workspace gc,
  *      automations, metrics sampler, runs reaper, logs retention).
- *   6. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0.
- *   7. Kicks off the skill-embedding backfill in the background.
+ *   9. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0, configured
+ *      from the JOBS_WORKER_* env vars (see jobs/worker-config.ts), and records their handles
+ *      in db/process-state.server.ts — so a standalone worker can drain them on shutdown, and
+ *      a dev-mode re-evaluation of db.server.ts can stop them before starting new ones.
+ *  10. Kicks off the skill-embedding backfill in the background.
  *
- * Each step is fail-isolated: a single broken seeder or handler-registration call
- * logs a warning and continues. The whole pipeline is wrapped in try/catch so a
- * total failure leaves the DB unusable but doesn't crash the process.
+ * Steps 1–5 retry while Postgres is unreachable and otherwise throw: a database that
+ * could not be prepared is reported by `ensureDatabaseReady()` rejecting (see
+ * `readiness.server.ts`), not logged and forgotten. Steps 6–10 are fail-isolated: a
+ * single broken seeder or handler-registration call logs a warning and continues.
  *
  * `console.*` is used here intentionally — the `app_logs` table doesn't exist
- * until step 3 finishes, so the logger's DB sink would have nothing to write to
+ * until step 5 finishes, so the logger's DB sink would have nothing to write to
  * during the early phases. Operators reading container output need these lines.
  */
 
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import {
+	LEGACY_SCHEMA_RESET_FLAG,
 	MIGRATIONS_SCHEMA,
 	MIGRATIONS_TABLE,
+	describeMigrationFailure,
 	ensureDatabaseExists,
 	ensureRequiredExtensions,
+	getKnownAppObjects,
 	getLastAppliedMigrationMillis,
 	getLatestLocalMigrationMillis,
 	getMigrationsFolder,
-	isRecoverableMigrationError,
+	getTargetDatabaseName,
 	reconcileLegacySchemaState,
-	resetAppSchemas,
+	withBootstrapLock,
 } from '$lib/db/migrations.server'
+import { retryOnTransientConnectionError } from '$lib/db/readiness.server'
 import { schema } from '$lib/db/schema.server'
+import { adoptBackgroundJobs, isCurrentBootstrapGeneration } from '$lib/db/process-state.server'
+import { workerOptionsFromEnv } from '$lib/jobs/worker-config'
 import type postgres from 'postgres'
 
 type Client = ReturnType<typeof postgres>
@@ -54,14 +67,48 @@ const createSchemaDb = (client: Client) => drizzle(client, { schema })
 export type BootstrapInput = {
 	client: Client
 	databaseUrl: string
+	/** From `beginBootstrapGeneration()`; a bootstrap overtaken by a newer one starts no jobs. */
+	generation: number
+	/** Backoff between connection retries; defaults to BOOTSTRAP_RETRY_DELAYS_MS. */
+	retryDelaysMs?: readonly number[]
 }
 
 export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
-	const { client, databaseUrl } = input
+	const { client, databaseUrl, generation } = input
+	let databaseName = '(unnamed)'
 
 	try {
-		const createdDatabase = await ensureDatabaseExists(databaseUrl)
-		const resetLegacySchema = await reconcileLegacySchemaState(client)
+		databaseName = getTargetDatabaseName(databaseUrl)
+		await retryOnTransientConnectionError(() => prepareSchema(client, databaseUrl, databaseName), {
+			delaysMs: input.retryDelaysMs,
+			onRetry: (err, attempt, delayMs) => {
+				const detail = err instanceof Error ? err.message : String(err)
+				console.warn(
+					`[db] Database "${databaseName}" not reachable yet (${detail}); retry ${attempt} in ${delayMs / 1000}s`,
+				)
+			},
+		})
+	} catch (err) {
+		console.error(`[db] Bootstrap of "${databaseName}" failed; requests will fail until it is fixed:`, err)
+		throw err
+	}
+
+	await startServices(client, generation)
+}
+
+/**
+ * Steps 1–5: make the schema match the bundled migrations, or throw. Runs again in full on
+ * a retry, which is safe: every step is idempotent and the migrations are transactional.
+ */
+async function prepareSchema(client: Client, databaseUrl: string, databaseName: string): Promise<void> {
+	const createdDatabase = await ensureDatabaseExists(databaseUrl)
+
+	await withBootstrapLock(databaseUrl, async () => {
+		const resetLegacySchema = await reconcileLegacySchemaState(client, {
+			databaseName,
+			getKnownObjects: () => getKnownAppObjects(schema),
+			allowReset: process.env[LEGACY_SCHEMA_RESET_FLAG] === '1',
+		})
 		await ensureRequiredExtensions(client)
 
 		const latestLocalMigrationMillis = getLatestLocalMigrationMillis()
@@ -81,44 +128,37 @@ export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
 			migrationsTable: MIGRATIONS_TABLE,
 		}
 
-		let recoveredFromDrift = false
-
 		try {
-			const bootstrapDb = createSchemaDb(client)
-			await migrate(bootstrapDb, migrationConfig)
+			await migrate(createSchemaDb(client), migrationConfig)
 		} catch (migrationError) {
-			const shouldAttemptRecovery =
-				process.env.NODE_ENV !== 'production' && isRecoverableMigrationError(migrationError)
-
-			if (!shouldAttemptRecovery) {
-				throw migrationError
-			}
-
-			recoveredFromDrift = true
-			console.warn(
-				'[db] Migration drift detected; resetting app schemas and retrying migrations once (development only)',
-			)
-			await resetAppSchemas(client)
-			await ensureRequiredExtensions(client)
-
-			const retryDb = createSchemaDb(client)
-			await migrate(retryDb, migrationConfig)
+			// Never "recover" by dropping the schemas. That used to happen on any process
+			// without NODE_ENV=production, and a drift error replays identically after a
+			// reset, so it bought an empty database and the same failure.
+			throw new Error(describeMigrationFailure(migrationError, databaseName), { cause: migrationError })
 		}
 
-		if (createdDatabase || resetLegacySchema || hasPendingMigrations || recoveredFromDrift) {
-			console.log('[db] Database bootstrapped and ready')
+		if (createdDatabase || resetLegacySchema || hasPendingMigrations) {
+			console.log(`[db] Database bootstrapped and ready (${databaseName})`)
 		} else {
-			console.log('[db] Database ready')
+			console.log(`[db] Database ready (${databaseName})`)
 		}
+	})
+}
 
-		await provisionOwnerFromEnvironment(client)
-		await runSeeders(client)
-		await registerJobHandlers()
-		startWorkerAndScheduler()
-		kickoffBackgroundBackfills()
-	} catch (err) {
-		console.error('[db] Bootstrap failed — database may be unavailable:', err)
-	}
+// Steps 6–10 run once per bootstrap generation, however many times the schema steps are
+// attempted. A new generation (a dev-mode re-evaluation of db.server.ts) has stopped the
+// previous one's worker and scheduler, so it starts its own.
+let servicesStartedForGeneration: number | null = null
+
+async function startServices(client: Client, generation: number): Promise<void> {
+	if (servicesStartedForGeneration === generation) return
+	servicesStartedForGeneration = generation
+
+	await provisionOwnerFromEnvironment(client)
+	await runSeeders(client)
+	await registerJobHandlers()
+	await startWorkerAndScheduler(generation)
+	kickoffBackgroundBackfills()
 }
 
 /**
@@ -326,39 +366,70 @@ async function registerJobHandlers(): Promise<void> {
 }
 
 /**
+ * Whether this process's job worker is running, for `/api/health`. `pending` means the
+ * bootstrap has not reached the worker step yet (the worker start is awaited, so it is
+ * settled by the time `ensureDatabaseReady()` resolves); `disabled` means
+ * JOBS_WORKER_ENABLED=0 (a one-shot script, or a web tier paired with worker containers).
+ */
+export type JobWorkerStatus = 'pending' | 'disabled' | 'running' | 'failed'
+
+let jobWorkerStatus: JobWorkerStatus = 'pending'
+
+export function getJobWorkerStatus(): JobWorkerStatus {
+	return jobWorkerStatus
+}
+
+/**
  * Start the in-process worker + scheduler. Both opt-out via env vars
  * (JOBS_WORKER_ENABLED=0, JOBS_SCHEDULER_ENABLED=0) so a one-shot migration
  * script doesn't accidentally claim jobs.
+ *
+ * Awaited by the bootstrap, so once `ensureDatabaseReady()` resolves the handles are in
+ * `backgroundJobs()`. Each start checks the generation right before it happens — with no
+ * await in between — so a bootstrap that a newer one overtook starts nothing.
  */
-function startWorkerAndScheduler(): void {
-	if (process.env.JOBS_WORKER_ENABLED === '0') return
+async function startWorkerAndScheduler(generation: number): Promise<void> {
+	if (process.env.JOBS_WORKER_ENABLED === '0') {
+		jobWorkerStatus = 'disabled'
+		return
+	}
 
-	void (async () => {
-		try {
-			const { startJobWorker } = await import('$lib/jobs/worker.server')
-			const worker = startJobWorker({ pollIntervalMs: 2000, leaseTtlMs: 120_000 })
-			console.log(`[db] Started in-process job worker (id=${worker.workerId})`)
-		} catch (err) {
-			console.warn('[db] Job worker start failed (non-fatal):', err)
-		}
-	})()
+	try {
+		const { startJobWorker } = await import('$lib/jobs/worker.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const options = workerOptionsFromEnv()
+		const worker = startJobWorker(options)
+		adoptBackgroundJobs(generation, { worker })
+		jobWorkerStatus = 'running'
+		const filters = [
+			options.queues ? `queues=${options.queues.join(',')}` : null,
+			options.types ? `types=${options.types.join(',')}` : null,
+		].filter(Boolean)
+		console.log(
+			`[db] Started in-process job worker (id=${worker.workerId}, poll=${options.pollIntervalMs}ms, lease=${options.leaseTtlMs}ms${filters.length > 0 ? `, ${filters.join(', ')}` : ''})`,
+		)
+	} catch (err) {
+		// A newer generation owns the status once this one has been overtaken.
+		if (isCurrentBootstrapGeneration(generation)) jobWorkerStatus = 'failed'
+		console.error('[db] Job worker start failed; queued jobs will not run in this process:', err)
+	}
 
 	if (process.env.JOBS_SCHEDULER_ENABLED === '0') return
 
-	void (async () => {
-		try {
-			const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
-			startScheduler()
-			const scheduled = listScheduledJobs()
-			if (scheduled.length > 0) {
-				console.log(
-					`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
-				)
-			}
-		} catch (err) {
-			console.warn('[db] Scheduler start failed (non-fatal):', err)
+	try {
+		const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const scheduler = startScheduler()
+		adoptBackgroundJobs(generation, { scheduler })
+		const scheduled = listScheduledJobs()
+		if (scheduled.length > 0) {
+			console.log(
+				`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
+			)
 		}
-	})()
+	} catch (err) {
+		console.warn('[db] Scheduler start failed (non-fatal):', err)
+	}
 }
 
 /**

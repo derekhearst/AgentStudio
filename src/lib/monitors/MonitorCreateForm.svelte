@@ -3,11 +3,13 @@
 		MONITOR_DEFAULT_MAX_CHECKS,
 		MONITOR_MAX_DEADLINE_DAYS,
 		MONITOR_OBSERVABLE_TOOLS,
+		monitorConditionSchema,
 		type MonitorAction,
 		type MonitorCompare,
 		type MonitorObservableTool
 	} from '$lib/monitors/condition';
 	import { createMonitorCommand } from '$lib/monitors/monitors.remote';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	let { onCreated }: { onCreated: (message: string) => void } = $props();
 
@@ -37,26 +39,37 @@
 		{ value: 'run_automation', label: 'Run an automation' }
 	];
 
-	const ARG_PLACEHOLDERS: Partial<Record<MonitorObservableTool, string>> = {
+	// File paths are relative to your sandbox; a project's files live under projects/<id>/.
+	const ARG_PLACEHOLDERS: Record<MonitorObservableTool, string> = {
 		web_fetch: '{ "url": "https://example.com/releases" }',
 		web_search: '{ "query": "acme widgets release" }',
-		Grep: '{ "pattern": "TODO", "path": "src" }',
 		Read: '{ "file_path": "notes.md" }',
+		Grep: '{ "pattern": "ERROR", "path": "logs", "glob": "*.log" }',
+		Glob: '{ "pattern": "reports/*.pdf" }',
 		file_info: '{ "path": "notes.md" }',
-		Glob: '{ "pattern": "**/*", "path": "." }',
-		git_status: '{}',
-		git_log: '{ "max": 5 }',
-		git_diff: '{}',
 		list_pull_requests: '{ "owner": "acme", "repo": "widgets" }',
 		get_pull_request: '{ "pullRequestId": "00000000-0000-0000-0000-000000000000" }',
 		list_projects: '{}'
 	};
 
+	/**
+	 * What `extract` starts as for each tool. Only web_fetch has a field worth narrowing to by
+	 * default (its result carries a `fetchedAt` that changes every check); every other tool
+	 * starts by comparing the whole result.
+	 */
+	const DEFAULT_EXTRACT: Partial<Record<MonitorObservableTool, string>> = {
+		web_fetch: 'text'
+	};
+
+	const INITIAL_ARGS = '{ "url": "https://example.com" }';
+
 	let name = $state('');
 	let conditionKind = $state<'tool_result' | 'model_question'>('tool_result');
 	let tool = $state<MonitorObservableTool>('web_fetch');
-	let argsText = $state('{ "url": "https://example.com" }');
-	let extract = $state('text');
+	let argsText = $state(INITIAL_ARGS);
+	let extract = $state(DEFAULT_EXTRACT.web_fetch ?? '');
+	/** The arguments the form filled in itself, so a tool switch can tell them from the user's. */
+	let prefilledArgs = INITIAL_ARGS;
 	let compare = $state<MonitorCompare>('changed');
 	let compareValue = $state('');
 	let question = $state('');
@@ -75,6 +88,19 @@
 	let error = $state<string | null>(null);
 
 	const needsOperand = $derived(compare !== 'changed' && compare !== 'not_empty');
+
+	function selectTool(next: MonitorObservableTool) {
+		tool = next;
+		// A path narrowed for one tool is rarely in another's result, and a missing path is an
+		// error on every check — so each tool starts from its own default, not the last one's.
+		extract = DEFAULT_EXTRACT[next] ?? '';
+		// Arguments the user never touched belong to the previous tool. Clear them so the new
+		// tool's example shows instead of a stale `url`.
+		if (argsText === prefilledArgs) {
+			argsText = '';
+			prefilledArgs = '';
+		}
+	}
 
 	function parseArgs(text: string, label: string): Record<string, unknown> {
 		const trimmed = text.trim();
@@ -112,6 +138,16 @@
 							context: [{ tool: contextTool, args: parseArgs(contextArgsText, 'Context arguments') }]
 						};
 
+			// Checked here as well as on the server, so a wrong argument is named in the form
+			// rather than coming back as a bare "Bad Request".
+			const checked = monitorConditionSchema.safeParse(condition);
+			if (!checked.success) {
+				const issue = checked.error.issues[0];
+				throw new Error(
+					issue.path.length > 0 ? `${issue.message} (at ${issue.path.map(String).join('.')})` : issue.message
+				);
+			}
+
 			await createMonitorCommand({
 				name: name.trim(),
 				condition,
@@ -133,7 +169,7 @@
 			prompt = '';
 			compareValue = '';
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unable to create the monitor.';
+			error = remoteErrorMessage(err, 'Unable to create the monitor.');
 		} finally {
 			submitting = false;
 		}
@@ -177,7 +213,11 @@
 			<div class="grid gap-2 sm:grid-cols-2">
 				<label class="form-control">
 					<span class="label-text text-xs">Tool</span>
-					<select class="select select-sm select-bordered w-full" bind:value={tool}>
+					<select
+						class="select select-sm select-bordered w-full"
+						bind:value={() => tool, selectTool}
+						data-testid="monitor-tool-select"
+					>
 						{#each MONITOR_OBSERVABLE_TOOLS as t (t)}
 							<option value={t}>{t}</option>
 						{/each}
@@ -185,7 +225,12 @@
 				</label>
 				<label class="form-control">
 					<span class="label-text text-xs">Extract (dotted path, optional)</span>
-					<input class="input input-sm input-bordered w-full" bind:value={extract} placeholder="text" />
+					<input
+						class="input input-sm input-bordered w-full"
+						bind:value={extract}
+						placeholder="whole result"
+						data-testid="monitor-extract-input"
+					/>
 				</label>
 			</div>
 			<label class="form-control">

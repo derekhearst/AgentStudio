@@ -77,7 +77,9 @@ Workers pick from queues in priority order within each queue.
 
 A worker acquires a job by setting `status = leased` and writing a `jobLeases` row. The lease has a TTL. If the worker crashes or hangs, the lease expires and another worker picks up the job on the next scan. This prevents jobs from being stuck due to worker failure.
 
-Workers renew their lease via heartbeat while the job is running.
+Workers renew their lease via heartbeat while the job is running. A lapsed lease is reclaimable whether the job is still `leased` (claimed, never started) or already `running` (its worker died mid-handler). Two cases are failed instead of re-leased: a `running` job whose lease lapsed more than an hour ago, which is too stale to resume safely (recorded in the job's `error` only — a boot after a long gap can retire dozens at once), and a recently orphaned `running` job with no attempts left — a handler that keeps killing its worker would otherwise crash every worker in turn — which also opens a `job_stuck` review item.
+
+A standalone worker (`scripts/worker.ts`) drains on SIGINT/SIGTERM: it stops claiming and waits up to `JOBS_WORKER_DRAIN_MS` for the job in flight before exiting. Worker settings come from the `JOBS_WORKER_*` environment variables; see [jobs.md](jobs.md#worker-configuration).
 
 ### Retry with exponential backoff
 
@@ -89,7 +91,9 @@ When a job fails:
 
 ### Deduplication
 
-Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same `dedupeKey` and a non-terminal status already exists, the new enqueue is a no-op and returns the existing job ID. Prevents double-mining a conversation when two hooks fire in quick succession.
+Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same `type` and `dedupeKey` and a non-terminal status already exists, the new enqueue is a no-op and returns the existing job ID. Prevents double-mining a conversation when two hooks fire in quick succession. The database enforces this with a partial unique index over the non-terminal statuses (`jobs_type_dedupe_active_uidx`); once a job finishes, its key is free for the next one.
+
+A caller that needs at-most-once-ever semantics — one run per automation slot, one evaluation per chat run, one sample per metrics window — passes `dedupeScope: 'forever'`, and the enqueue returns the existing job whatever its status. That lookup reads finished jobs too, which the partial index cannot serve, so a plain index over `(type, dedupeKey)` (`jobs_type_dedupe_idx`) keeps it from scanning the type's whole history.
 
 ### Concurrency limits
 
@@ -120,7 +124,7 @@ Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same
 - Deduplication is best-effort at enqueue time. If two workers try to lease the same job simultaneously, the database lease constraint prevents double-execution.
 - A job's `payload` is immutable after creation. Retry attempts use the same payload.
 - `canceled` jobs are soft-stopped: if a worker is already executing the job, it will finish the current execution unit but not commit a result.
-- `canceled` is final even for a job that was running when it was canceled. When its handler winds down — returning, or throwing at a cancel checkpoint — the job is neither marked completed nor failed, and it is never put back for a retry. A handler's cancel checkpoint (`checkCancellation`) throws a `JobCanceledError`, so the handler can tell "the user canceled" from any other error. Before 2026-09-23 a canceled job whose handler threw went to `retry_wait` and ran again from the start.
+- `canceled` is final even for a job that was running when it was canceled. When its handler winds down — returning, or throwing at a cancel checkpoint — the job is neither marked completed nor failed, and it is never put back for a retry: heartbeat, complete and fail only touch a job that is still `leased` or `running`, which also keeps a late report from a worker that lost its lease from undoing a retirement. A handler's cancel checkpoint (`checkCancellation`) throws a `JobCanceledError` only for a job that was canceled (or deleted), so the handler can tell "the user canceled" from any other error; a job the claim path took back after the worker's lease lapsed gets a plain error instead. Before 2026-09-23 a canceled job whose handler threw went to `retry_wait` and ran again from the start.
 
 ## Roles & Permissions
 

@@ -1,0 +1,2 @@
+CREATE INDEX "memory_drawers_source_message_idx" ON "memory_drawers" USING btree ("source_message_id");--> statement-breakpoint
+CREATE INDEX "memory_rooms_conversation_idx" ON "memory_rooms" USING btree ("conversation_id");

@@ -101,6 +101,9 @@ export async function updateResearchUnlessEnded(
 	return row ?? null
 }
 
+/** See `enqueueResearchRun`: the first attempt, and one more if its worker dies. */
+export const RESEARCH_RUN_MAX_ATTEMPTS = 2
+
 export type EnqueueResearchRunInput = {
 	researchId: string
 	userId: string | null
@@ -112,11 +115,18 @@ export type EnqueueResearchRunInput = {
 /**
  * Queue the background run for a research row and link the job back to the row.
  *
- * One attempt. The queue's default is three, and a research run is ten minutes of paid model
- * calls and a few dozen page fetches: a second attempt re-ran all of it on a row that still
- * carried the first attempt's error, plan and sources, while the open page had already
- * stopped polling at "failed". A failed run now stays failed, where the user can see it,
- * and the job lands in the review inbox as a job failure.
+ * Two attempts, and the second is only for a run whose worker died. The queue's default was
+ * three, and a research run is ten minutes of paid model calls and a few dozen page fetches:
+ * a retry after a failure re-ran all of it on a row that still carried the first attempt's
+ * error, plan and sources, while the open page had already stopped polling at "failed". The
+ * runner now returns an ended row as it stands, so a failed run stays failed — its second
+ * attempt ends at once with the same error — and the job lands in the review inbox as a job
+ * failure.
+ *
+ * Not one attempt: the claim path fails a job whose worker died mid-run once it has no
+ * attempts left (jobs.server `staleRunningJobVerdict`), so a single attempt would turn every
+ * deploy or crash during a run into a "Job stuck" item and a run left at "searching" for
+ * good. With a second one, another worker picks the run up from its saved plan and sources.
  */
 export async function enqueueResearchRun(input: EnqueueResearchRunInput): Promise<JobRow> {
 	const job = await enqueueJob({
@@ -127,7 +137,7 @@ export async function enqueueResearchRun(input: EnqueueResearchRunInput): Promis
 		userId: input.userId,
 		runId: input.runId ?? null,
 		dedupeKey: input.dedupeKey,
-		maxAttempts: 1,
+		maxAttempts: RESEARCH_RUN_MAX_ATTEMPTS,
 	})
 	await updateResearch(input.researchId, { jobId: job.id })
 	return job

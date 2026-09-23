@@ -6,10 +6,12 @@ import {
 	claimNextJob,
 	completeJob,
 	failJob,
+	getJobById,
 	heartbeatJob,
 	type ClaimJobOptions,
 } from './jobs.server'
 import type { JobRow } from './jobs.schema'
+import { createInFlightTracker } from './in-flight'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -28,7 +30,10 @@ import { logger } from '$lib/observability/logger'
  *   - Calls `ctx.checkCancellation()` at safe boundaries to honor cancellation
  *
  * The worker is opt-in: callers wire `startJobWorker()` once on boot behind an env flag so
- * test environments don't spin up a polling loop.
+ * test environments don't spin up a polling loop. The boot path reads its options from the
+ * environment (worker-config.ts) and keeps the handle (db/process-state.server.ts), so a
+ * standalone worker can drain on shutdown and a re-evaluated dev module can stop the old
+ * loop.
  */
 
 export type JobHandlerContext = {
@@ -36,7 +41,8 @@ export type JobHandlerContext = {
 	workerId: string
 	/**
 	 * Throws `JobCanceledError` when the job has been canceled — handlers should call at safe
-	 * boundaries. Any other error it throws (a database hiccup) is not a cancellation.
+	 * boundaries. Any other error it throws is not a cancellation: a database hiccup, or the
+	 * queue having taken the job back after this worker's lease lapsed (`errorForLostJob`).
 	 */
 	checkCancellation: () => Promise<void>
 }
@@ -60,6 +66,21 @@ export function isJobCanceledError(err: unknown): err is JobCanceledError {
 	return err instanceof JobCanceledError || (err instanceof Error && err.name === 'JobCanceledError')
 }
 
+/**
+ * What `checkCancellation` throws once the heartbeat finds the job no longer in flight.
+ *
+ * `heartbeatJob` returns null for a job that was canceled, and also for one the claim path
+ * retired as failed after this worker's lease lapsed — a database outage longer than the
+ * lease. Only the first is a cancel. Reporting the second as one would record a research run
+ * as canceled by a user who never pressed Cancel, so it gets a plain Error, which a handler
+ * treats as the failure it is. A job that is gone counts as canceled, as it always has.
+ */
+export async function errorForLostJob(jobId: string): Promise<Error> {
+	const current = await getJobById(jobId)
+	if (!current || current.status === 'canceled') return new JobCanceledError(jobId)
+	return new Error(`Job ${jobId} was taken back by the queue (now ${current.status}) after this worker's lease lapsed`)
+}
+
 export type JobResult = Record<string, unknown> | undefined | void
 
 export type JobHandler = (ctx: JobHandlerContext) => Promise<JobResult>
@@ -81,7 +102,10 @@ export function _resetJobHandlers(): void {
 export type WorkerOptions = {
 	/** Filter by queue. Default: all queues. */
 	queues?: string[]
-	/** Filter by job type. Default: all registered types. */
+	/**
+	 * Filter by job type. Default: all registered types. Types without a registered handler
+	 * are dropped from the filter — claiming one would only fail it for want of a handler.
+	 */
 	types?: string[]
 	/** Lease TTL — default 60s. Heartbeats every (leaseTtlMs/3). */
 	leaseTtlMs?: number
@@ -93,7 +117,14 @@ export type WorkerOptions = {
 
 export type Worker = {
 	readonly workerId: string
-	stop: () => Promise<void>
+	/**
+	 * Stop claiming jobs. With `timeoutMs`, also wait up to that long for the job in flight to
+	 * finish (heartbeats keep its lease alive meanwhile). Resolves true when nothing is left
+	 * running; false when a job was still in flight at the deadline — it is abandoned
+	 * mid-handler if the process then exits, and the next worker reclaims it once its lease
+	 * lapses.
+	 */
+	stop: (opts?: { timeoutMs?: number }) => Promise<boolean>
 	/** Process exactly one available job (returns false when queue is empty). For tests + Phase 1 manual ticks. */
 	tickOnce: () => Promise<boolean>
 }
@@ -103,24 +134,28 @@ export type Worker = {
  * callers will use a single instance per process; a future Phase 6 split runs N instances
  * across a worker pool.
  *
- * NOTE: this is opt-in — the SvelteKit server doesn't auto-start a worker. The intended
- * trigger is a boot-time check (`if (env.JOBS_WORKER_ENABLED) startJobWorker()`) or an
- * external worker process that imports this module.
+ * The boot path (db/bootstrap.server.ts) starts one per process unless
+ * `JOBS_WORKER_ENABLED=0`; `scripts/worker.ts` is that same boot path without the web tier.
  */
 export function startJobWorker(opts: WorkerOptions = {}): Worker {
 	const workerId = opts.workerId ?? `${hostname()}:${randomUUID().slice(0, 8)}`
 	const leaseTtlMs = opts.leaseTtlMs ?? 60_000
 	const pollIntervalMs = opts.pollIntervalMs ?? 1_000
 	let stopped = false
+	/** The `processOne` currently running, so `stop()` can wait for it. */
+	const inFlight = createInFlightTracker()
 
 	async function processOne(): Promise<boolean> {
 		if (stopped) return false
 		if (handlers.size === 0) return false
+		const types = opts.types ? opts.types.filter((type) => handlers.has(type)) : [...handlers.keys()]
+		// An empty list would build no type filter at all and claim EVERY type.
+		if (types.length === 0) return false
 		const claimOpts: ClaimJobOptions = {
 			workerId,
 			leaseTtlMs,
 			queues: opts.queues,
-			types: opts.types ?? [...handlers.keys()],
+			types,
 		}
 		const job = await claimNextJob(claimOpts).catch((err) => {
 			logger.warn('[jobs/worker] claimNextJob failed', { err })
@@ -152,10 +187,18 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 				workerId,
 				checkCancellation: async () => {
 					const fresh = await heartbeatJob(job.id, leaseTtlMs)
-					if (!fresh) throw new JobCanceledError(job.id)
+					if (!fresh) throw await errorForLostJob(job.id)
 				},
 			})
-			await completeJob(job.id, normalizeResult(result))
+			const finished = await completeJob(job.id, normalizeResult(result))
+			if (!finished) {
+				// Canceled, or retired by another worker after this one's lease lapsed: whatever
+				// happened to the job meanwhile stands.
+				logger.info('[jobs/worker] job was no longer in flight when its handler finished; result not recorded', {
+					jobId: job.id,
+					type: job.type,
+				})
+			}
 		} catch (err) {
 			await failJob(job.id, {
 				error: { message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined },
@@ -170,13 +213,13 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 	}
 
 	async function loop() {
-		// Defer the first poll briefly so module-level awaits in db.server.ts (the `db` export
-		// resolves AFTER `await databaseReadyPromise`) have a chance to settle. Otherwise the
-		// first claim runs against an undefined db proxy.
+		// Defer the first poll briefly. Bootstrap only starts the worker once migrations have
+		// run, so the database is ready; the delay lets the rest of startup (the scheduler,
+		// background backfills) get going before the first claim.
 		await delay(2_000)
 		while (!stopped) {
 			try {
-				const processed = await processOne()
+				const processed = await inFlight.track(processOne())
 				if (!processed) {
 					await delay(pollIntervalMs)
 				}
@@ -191,10 +234,11 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 
 	return {
 		workerId,
-		stop: async () => {
+		stop: async ({ timeoutMs = 0 } = {}) => {
 			stopped = true
+			return inFlight.drain(timeoutMs)
 		},
-		tickOnce: () => processOne(),
+		tickOnce: () => inFlight.track(processOne()),
 	}
 }
 

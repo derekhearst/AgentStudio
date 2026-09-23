@@ -25,6 +25,7 @@ import {
 	recordExclusionHits,
 	type CompiledExclusionRule,
 } from '$lib/memory/exclusions.server'
+import { tombstoneMessages } from '$lib/memory/tombstones.server'
 import { logger } from '$lib/observability/logger'
 
 export type MiningTurn = {
@@ -217,11 +218,13 @@ export async function mineSession(opts: {
 	const keptTurns: MiningTurn[] = []
 	const firedRuleIds: Array<string | null> = []
 	const firedRuleNames: string[] = []
+	const excludedMessageIds: string[] = []
 	for (const turn of opts.session.turns) {
 		const match = exclusionRules.length > 0 ? findExclusionMatch(turn.content, exclusionRules) : null
 		if (match) {
 			firedRuleIds.push(match.ruleId)
 			firedRuleNames.push(match.ruleName)
+			if (turn.sourceMessageId) excludedMessageIds.push(turn.sourceMessageId)
 			logger.info('[memory] exclusion rule dropped a turn before mining', {
 				rule: match.ruleName,
 				sample: match.sample,
@@ -236,6 +239,11 @@ export async function mineSession(opts: {
 	const excludedByRule = [...new Set(firedRuleNames)]
 	if (excludedTurns > 0) {
 		await recordExclusionHits(firedRuleIds)
+		// A conversation is mined again after every exchange; without a tombstone the same
+		// dropped turn would be re-checked, and re-counted against its rule, every time.
+		await tombstoneMessages(userId, excludedMessageIds, 'excluded_by_rule').catch((error) => {
+			logger.warn('[memory] failed to tombstone excluded turns', { err: error })
+		})
 	}
 
 	if (keptTurns.length === 0) {

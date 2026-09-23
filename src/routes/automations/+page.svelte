@@ -14,6 +14,7 @@
 	import AutomationCard from '$lib/automations/AutomationCard.svelte';
 	import AutomationCreateForm from '$lib/automations/AutomationCreateForm.svelte';
 	import { isDueSoon, toTime } from '$lib/automations/automation-format';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
@@ -35,6 +36,8 @@
 		prompt: string;
 		enabled: boolean;
 		conversationMode: 'new_each_run' | 'reuse';
+		mode: AutomationRow['mode'];
+		outputTarget: AutomationRow['outputTarget'];
 		selectedAgentId: string;
 	} | null>(null);
 
@@ -97,6 +100,8 @@
 			prompt: automation.prompt,
 			enabled: automation.enabled,
 			conversationMode: automation.conversationMode,
+			mode: automation.mode,
+			outputTarget: automation.outputTarget,
 			selectedAgentId: automation.agentId ?? 'orchestrator',
 		};
 		createMessage = 'Copied automation settings into the creation studio.';
@@ -120,8 +125,8 @@
 		try {
 			await updateAutomationCommand({ id: automation.id, enabled: !automation.enabled });
 			await loadPageData();
-		} catch {
-			formError = 'Unable to update automation status right now.';
+		} catch (err) {
+			formError = remoteErrorMessage(err, 'Unable to update automation status right now.');
 		} finally {
 			togglingAutomationId = null;
 		}
@@ -139,8 +144,8 @@
 			setTimeout(() => {
 				void loadPageData();
 			}, 3000);
-		} catch {
-			formError = 'Unable to queue this automation right now.';
+		} catch (err) {
+			formError = remoteErrorMessage(err, 'Unable to queue this automation right now.');
 		} finally {
 			runningAutomationId = null;
 		}
@@ -161,8 +166,8 @@
 		try {
 			await deleteAutomationCommand({ id: automation.id });
 			await loadPageData();
-		} catch {
-			formError = 'Unable to delete automation right now.';
+		} catch (err) {
+			formError = remoteErrorMessage(err, 'Unable to delete automation right now.');
 		} finally {
 			deletingAutomationId = null;
 		}
