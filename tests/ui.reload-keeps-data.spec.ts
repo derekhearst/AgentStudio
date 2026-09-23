@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import {
 	answerConfirmDialog,
@@ -59,6 +63,25 @@ async function clickRefresh(page: Page) {
 }
 
 const pageSpinner = (page: Page) => page.locator('.loading-spinner.loading-lg')
+
+/**
+ * A project whose repo is a real, empty git repository in the OS temp directory. A commit
+ * from the Repo tab has nothing to stage there, so it changes nothing and still reloads.
+ */
+async function seedLocalRepoProject(prefix: string) {
+	const project = await seedProject(prefix)
+	const repoPath = mkdtempSync(join(tmpdir(), 'e2e-repo-tab-'))
+	execFileSync('git', ['init', '-q'], { cwd: repoPath })
+	await getSql()`
+		update projects set repo_kind = 'local', repo_local_path = ${repoPath} where id = ${project.id}
+	`
+	return { ...project, repoPath }
+}
+
+async function commitNothing(page: Page) {
+	await page.getByPlaceholder('commit message').fill('e2e: nothing to stage')
+	await page.getByRole('button', { name: 'Stage all + commit' }).click()
+}
 
 test.describe('a reload keeps the list on screen', () => {
 	test('/automations: toggling a card keeps it, and its open History, in place', async ({ page }) => {
@@ -159,6 +182,60 @@ test.describe('a reload keeps the list on screen', () => {
 			await expect(keptCard).toBeVisible()
 		} finally {
 			await cleanupExtendedPrefix(prefix)
+		}
+	})
+})
+
+test.describe('/projects/[id] Repo tab keeps the repo on screen', () => {
+	test('a reload after a commit leaves the tab and the result in place', async ({ page }) => {
+		const prefix = uniquePrefix('keep-repo-tab')
+		await cleanupExtendedPrefix(prefix)
+		const project = await seedLocalRepoProject(prefix)
+		await authenticateContext(page.context())
+		try {
+			await page.goto(`/projects/${project.id}`)
+			await waitForHydration(page)
+			const workingTree = page.getByText('Working tree', { exact: true })
+			await expect(workingTree).toBeVisible({ timeout: 15_000 })
+
+			const held = await holdRemote(page, 'getProjectRepoDetailQuery')
+			await commitNothing(page)
+			await held.arrived
+
+			// The reload is in flight. The whole tab, the commit's result with it, used to be a
+			// spinner for the length of the git round trip.
+			await expect(page.getByText('Nothing to commit — working tree clean')).toBeVisible()
+			await expect(workingTree).toBeVisible()
+			// Let the reload's git reads finish before the repo is deleted.
+			const reloaded = page.waitForResponse(remotePattern('getProjectRepoDetailQuery'))
+			held.release()
+			await reloaded
+			await expect(page.getByRole('button', { name: 'Stage all + commit' })).toBeVisible()
+		} finally {
+			await cleanupExtendedPrefix(prefix)
+			rmSync(project.repoPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+		}
+	})
+
+	test('a failed reload shows its error above the repo', async ({ page }) => {
+		const prefix = uniquePrefix('keep-repo-tab-fail')
+		await cleanupExtendedPrefix(prefix)
+		const project = await seedLocalRepoProject(prefix)
+		await authenticateContext(page.context())
+		try {
+			await page.goto(`/projects/${project.id}`)
+			await waitForHydration(page)
+			const workingTree = page.getByText('Working tree', { exact: true })
+			await expect(workingTree).toBeVisible({ timeout: 15_000 })
+
+			await failRemote(page, 'getProjectRepoDetailQuery')
+			await commitNothing(page)
+			// This error used to replace the whole tab.
+			await expect(page.getByRole('alert').filter({ hasText: 'Failed to fetch' })).toBeVisible()
+			await expect(workingTree).toBeVisible()
+		} finally {
+			await cleanupExtendedPrefix(prefix)
+			rmSync(project.repoPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 		}
 	})
 })
