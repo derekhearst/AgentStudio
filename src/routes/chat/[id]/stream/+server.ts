@@ -66,7 +66,7 @@ import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
-import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
+import { prepareRunWorkspace, type RunWorkspace } from '$lib/workspace/workspace.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -232,6 +232,32 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const policyTools = agentToolPolicy.kind === 'readOnly' ? Array.from(agentToolPolicy.allow) : undefined
 	const scopedTools = workspaceConfig?.scopedAgentTools ?? policyTools
 
+	/*
+	 * The run's workspace, resolved once and created up front. It is the SDK's working
+	 * directory, the root the containment guard confines every file call to, and where
+	 * attachments are staged — one value, so they cannot disagree about where the workspace
+	 * is. They did: the guard ignored SANDBOX_WORKSPACE and the SDK was never given a cwd.
+	 *
+	 * A chat with no project gets a fresh `runs/<runId>` directory every turn. That does not
+	 * break `resume`: the CLI finds a session by id across working directories and keeps
+	 * appending to the transcript where it started (checked against the bundled CLI).
+	 */
+	let workspace: RunWorkspace
+	try {
+		workspace = await prepareRunWorkspace({
+			userId: user.id,
+			runId: run.id,
+			persistentKey: workspaceConfig?.persistentKey ?? null,
+			worktree: workspaceConfig?.worktreeConfig ?? null,
+			projectId: conversation.projectId ?? null,
+		})
+	} catch (error) {
+		logger.error('[chat/stream] workspace preparation failed', { runId: run.id, error: String(error) })
+		const message = 'Could not prepare the workspace for this run.'
+		await db.update(chatRuns).set({ state: 'failed', label: 'Failed', error: message }).where(eq(chatRuns.id, run.id))
+		return json({ error: message }, { status: 500 })
+	}
+
 	// The tool server is constructed before the stream opens, but ask_user needs to
 	// push a frame, so the emitter is assigned once the stream starts.
 	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
@@ -311,13 +337,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		text: body.content ?? '',
 		attachments: body.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
-		io: createAttachmentIo({
-			userId: user.id,
-			runId: run.id,
-			persistentKey: workspaceConfig?.persistentKey ?? null,
-			worktree: workspaceConfig?.worktreeConfig ?? null,
-			projectId: conversation.projectId ?? null,
-		}),
+		io: createAttachmentIo(workspace.context),
 	})
 	const attachmentNotice = formatAttachmentWarnings(preparedPrompt.warnings)
 	if (preparedPrompt.warnings.length > 0) {
@@ -330,8 +350,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	/*
 	 * Whether this project's committed `.claude/` config may load. Read per run rather than
 	 * cached: revoking trust has to take effect on the next turn, not on the next restart.
+	 * Only when the run is standing in the project's checkout — trust is about that
+	 * directory's content, not whatever persistent or worktree directory the agent uses.
 	 */
-	const projectSettingsTrusted = conversation.projectId
+	const projectSettingsTrusted = conversation.projectId && workspace.projectCheckout
 		? ((
 				await db
 					.select({ trusted: projects.settingsTrusted })
@@ -360,6 +382,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
 			allowedTools: scopedTools,
+			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
 			resumeSessionId: conversation.sdkSessionId ?? undefined,
@@ -548,20 +571,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						requiresApproval: (name) =>
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
-						// Confines every built-in filesystem call to this run's workspace (#15).
-						// Resolved the same way the run's own tools resolve it, so the guard and
-						// the tools can never disagree about where the workspace is.
+						// Confines every built-in filesystem call to this run's workspace (#15) —
+						// the same root the SDK was given as its cwd, so a relative path means the
+						// same file to the guard and to the tool.
 						// Bash is confined by the OS where bubblewrap exists (the production image
 						// ships it) and gated on approval where it does not — never silently
 						// unconfined. Both halves read the same signal so they cannot disagree.
 						bashPolicy: resolveBashPolicy({ sandboxAvailable: sandboxAvailable() }),
-						workspaceRoot: resolveWorkspaceRoot({
-							userId: user.id,
-							runId: run.id,
-							persistentKey: workspaceConfig?.persistentKey ?? null,
-							worktree: workspaceConfig?.worktreeConfig ?? null,
-							projectId: conversation.projectId ?? null,
-						}),
+						workspaceRoot: workspace.root,
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {

@@ -407,6 +407,8 @@ export async function handleNormalToolCall(
 		runId: session.runId,
 		persistentKey: ctx.persistentKey,
 		worktree: ctx.worktree,
+		// Same root `executeTool` just ran the tool in, above.
+		projectId: ctx.projectId,
 	})
 	const resultStr = trimmed.visible
 

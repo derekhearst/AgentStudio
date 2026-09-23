@@ -171,3 +171,32 @@ test.describe('tools/output-offload — server wrapper materializes to disk', ()
 		}
 	})
 })
+
+test.describe('tools/output-offload — project-bound runs', () => {
+	test("the payload lands in the project's checkout, where the relative marker points", async () => {
+		// A project-bound run's tools work in `<user>/projects/<projectId>`. The offload used
+		// to ignore the project and write under `<user>/runs/<runId>`, so the marker's
+		// `.tool-outputs/<callId>.txt` named a file no tool in that run could open.
+		const sandboxRoot = resolve(tmpdir(), `agentstudio-offload-${randomUUID()}`)
+		await mkdir(sandboxRoot, { recursive: true })
+		const previous = process.env.SANDBOX_WORKSPACE
+		process.env.SANDBOX_WORKSPACE = sandboxRoot
+		const userId = `u${randomUUID().slice(0, 8)}`
+		const runId = randomUUID()
+		const projectId = randomUUID()
+		const callId = `c${randomUUID().slice(0, 8)}`
+		const big = 'P'.repeat(50_000)
+		try {
+			const { trimToolResultWithOffload } = await import('../src/lib/tools/output-offload.server')
+			const result = await trimToolResultWithOffload({ toolName: 'Bash', content: big, callId, userId, runId, projectId })
+			expect(result.offloaded).toBe(true)
+			const inProject = resolve(sandboxRoot, userId, 'projects', projectId, '.tool-outputs', `${callId}.txt`)
+			expect(await readFile(inProject, 'utf-8')).toBe(big)
+			expect(await pathExists(resolve(sandboxRoot, userId, 'runs', runId, '.tool-outputs', `${callId}.txt`))).toBe(false)
+		} finally {
+			if (previous === undefined) delete process.env.SANDBOX_WORKSPACE
+			else process.env.SANDBOX_WORKSPACE = previous
+			await rm(sandboxRoot, { recursive: true, force: true })
+		}
+	})
+})

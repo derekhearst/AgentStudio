@@ -8,7 +8,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 import { getUploadDir } from '$lib/server/config'
-import { ensureWorkspace, safePathWithin, type WorktreeConfig } from '$lib/workspace/workspace.server'
+import { ensureWorkspace, safePathWithin, type WorkspaceContext } from '$lib/workspace/workspace.server'
 import type { AttachmentIo, ChatAttachment } from './attachments.server'
 
 /** Directory inside the run workspace where message attachments land. */
@@ -42,33 +42,20 @@ export function safeAttachmentName(attachment: ChatAttachment): string {
 	return cleaned ? `${short}-${cleaned}` : short
 }
 
-export type WorkspaceTarget = {
-	userId: string
-	runId: string
-	persistentKey: string | null
-	worktree: WorktreeConfig | null
-	projectId: string | null
-}
-
 /**
  * Build the IO seam for one run.
  *
- * `stage` resolves the same workspace root the run's tools resolve
- * (`resolveWorkspaceRoot` with identical inputs), so the path handed to the
- * model is exactly the path `pdf_read` / `Read` will open.
+ * `workspace` is the run's context as `resolveRunWorkspace` produced it — sandbox root
+ * included — so the path handed to the model is exactly the path `Read` opens, the
+ * containment guard allows, and the SDK's working directory resolves. It used to rebuild
+ * the context here from its own `process.env` read while the guard's copy had none, and the
+ * two disagreed about where the workspace was.
  */
-export function createAttachmentIo(target: WorkspaceTarget): AttachmentIo {
+export function createAttachmentIo(workspace: WorkspaceContext): AttachmentIo {
 	return {
 		read: async (attachment) => readFile(resolveUploadPath(attachment.url)),
 		stage: async (attachment, bytes) => {
-			const root = await ensureWorkspace({
-				userId: target.userId,
-				runId: target.runId,
-				persistentKey: target.persistentKey,
-				worktree: target.worktree,
-				projectId: target.projectId,
-				sandboxRoot: process.env.SANDBOX_WORKSPACE,
-			})
+			const root = await ensureWorkspace(workspace)
 			const relative = `${ATTACHMENT_DIR}/${safeAttachmentName(attachment)}`
 			const full = safePathWithin(root, relative)
 			await mkdir(dirname(full), { recursive: true })
