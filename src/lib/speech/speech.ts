@@ -15,8 +15,9 @@
 export const TTS_MAX_CHARACTERS = 8000
 
 /**
- * Defaults for a new settings row. Kokoro is the cheapest paid speech model in OpenRouter's
- * catalogue and lists dozens of English voices; `af_heart` is the one its authors rate best.
+ * Defaults for a new settings row. Kokoro is among the cheapest paid speech models in
+ * OpenRouter's catalogue (about $4 per million characters; only a preview model undercuts
+ * it) and lists dozens of English voices; `af_heart` is the one its authors rate best.
  * The previous hard-coded `openai/gpt-4o-mini-tts` is not in the catalogue — OpenRouter
  * answers "Model openai/gpt-4o-mini-tts does not exist" — so every request failed.
  */

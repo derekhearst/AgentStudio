@@ -12,7 +12,7 @@ Dictation (speaking to AgentStudio) is the reverse direction and is not covered 
 
 | Concept | What it means |
 | --- | --- |
-| **Read-aloud model** | The OpenRouter speech model that turns text into audio. Stored per user as `ttsModel`. Default: `hexgrad/kokoro-82m`, the cheapest paid speech model in OpenRouter's catalogue. |
+| **Read-aloud model** | The OpenRouter speech model that turns text into audio. Stored per user as `ttsModel`. Default: `hexgrad/kokoro-82m`, one of the cheapest paid speech models in OpenRouter's catalogue (about $4 per million characters). |
 | **Voice** | One of the voices the chosen model offers, for example `af_heart`. Stored per user as `ttsVoice`. Left empty, the model uses its own default voice. |
 | **Speech catalogue** | OpenRouter's list of speech models, with each model's price per character and the voices it accepts. The Settings pickers are filled from it, and it is used to price each request. It is fetched from OpenRouter at most once an hour. |
 | **Chunk** | A piece of a reply sent for synthesis in one request. A request can carry at most 8,000 characters, so longer replies are split. |
