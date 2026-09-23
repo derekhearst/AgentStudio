@@ -15,6 +15,7 @@ import {
 import { pushBranchToGithub, type PushBranchResult } from '$lib/source-control/git-push.server'
 import { getProjectPath, fetchProjectRemote } from './project-fs.server'
 import { getActiveGithubConnection } from '$lib/source-control/source-control.server'
+import { GITHUB_RECONNECT_MESSAGE } from '$lib/source-control/github-oauth'
 
 /**
  * Project-aware wrappers around the existing git primitives. The agent + UI layer should
@@ -138,7 +139,7 @@ export async function pullProject(
 
 	if (repository.provider === 'github') {
 		const conn = await getActiveGithubConnection(userId)
-		if (!conn) throw new Error('GitHub connection unavailable. Reconnect at /projects.')
+		if (!conn) throw new Error(GITHUB_RECONNECT_MESSAGE)
 		token = conn.accessToken
 		credentialUsername = 'x-access-token'
 	}
@@ -175,7 +176,7 @@ export async function pushProjectBranch(
 	}
 
 	const conn = await getActiveGithubConnection(userId)
-	if (!conn) throw new Error('GitHub connection unavailable. Reconnect at /projects.')
+	if (!conn) throw new Error(GITHUB_RECONNECT_MESSAGE)
 
 	return pushBranchToGithub({
 		repoPath: path,

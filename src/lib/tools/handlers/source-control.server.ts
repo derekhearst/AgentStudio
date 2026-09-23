@@ -17,6 +17,7 @@ import { ensureWorkspaceDir, getWorkspace, safePath, toolUserContext } from '../
 import { logger } from '$lib/observability/logger'
 import type { ToolHandler } from '../handler-types'
 import { isSafeRevision } from '$lib/source-control/git-exec'
+import { githubNotConnectedMessage } from '$lib/source-control/github-oauth'
 
 export const sourceControlHandlers: Record<string, ToolHandler> = {
 	list_my_repos: async (call, { userId, startedAt }) => {
@@ -89,7 +90,7 @@ export const sourceControlHandlers: Record<string, ToolHandler> = {
 			return {
 				success: false,
 				tool: call.name,
-				error: 'No active GitHub connection. Connect at /source-control before pushing or opening pull requests.',
+				error: githubNotConnectedMessage('pushing or opening pull requests'),
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -161,7 +162,7 @@ export const sourceControlHandlers: Record<string, ToolHandler> = {
 			return {
 				success: false,
 				tool: call.name,
-				error: 'No active GitHub connection. Connect at /source-control before pushing or opening pull requests.',
+				error: githubNotConnectedMessage('pushing or opening pull requests'),
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -351,7 +352,7 @@ export const sourceControlHandlers: Record<string, ToolHandler> = {
 				success: false,
 				tool: call.name,
 				input,
-				error: 'No active GitHub connection. Connect at /source-control before cloning private repos.',
+				error: githubNotConnectedMessage('cloning private repos'),
 				executionMs: Date.now() - startedAt,
 			}
 		}

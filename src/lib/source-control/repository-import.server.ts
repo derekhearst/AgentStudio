@@ -15,6 +15,7 @@ import { getSandboxRoot } from '$lib/server/config'
 import { createProject, getProjectById } from '$lib/projects/projects.server'
 import type { ProjectRow } from '$lib/projects/projects.schema'
 import { credentialUsernameForProvider, mirrorOwnerName, parseCloneUrl } from './parse-clone-url'
+import { GITHUB_RECONNECT_MESSAGE, githubNotConnectedMessage } from './github-oauth'
 import { materializeRepoMirror } from './repo-mirror.server'
 import { listRecentCommits, type GitCommitSummary } from './git-local.server'
 import { getActiveGithubConnection } from './github-provider.server'
@@ -66,9 +67,7 @@ export async function importRepository(input: ImportRepositoryInput): Promise<Im
 	if (parsed.provider === 'github') {
 		const conn = await getActiveGithubConnection(input.userId)
 		if (!conn) {
-			throw new Error(
-				'No active GitHub connection. Connect GitHub at /source-control before importing private repos.',
-			)
+			throw new Error(githubNotConnectedMessage('importing private repos'))
 		}
 		token = conn.accessToken
 	} else {
@@ -177,7 +176,7 @@ export async function pullRepositoryLatest(
 	let credentialUsername = credentialUsernameForProvider(repo.provider)
 	if (repo.provider === 'github') {
 		const conn = await getActiveGithubConnection(userId)
-		if (!conn) throw new Error('GitHub connection unavailable. Reconnect at /source-control.')
+		if (!conn) throw new Error(GITHUB_RECONNECT_MESSAGE)
 		token = conn.accessToken
 	}
 

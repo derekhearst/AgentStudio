@@ -12,6 +12,19 @@ export const GITHUB_OAUTH_STATE_COOKIE = 'AgentStudio_github_oauth_state'
 export const GITHUB_OAUTH_RETURN_COOKIE = 'AgentStudio_github_oauth_return'
 export const GITHUB_DEFAULT_SCOPES = ['repo', 'read:user', 'read:org'] as const
 
+/**
+ * Where a user connects or reconnects GitHub: the Connections panel on /projects. The old
+ * standalone /source-control page is gone (only its OAuth endpoints remain), so every "no
+ * connection" message is built here and none can drift back to a route that 404s.
+ */
+export const GITHUB_CONNECT_PAGE = '/projects'
+
+export function githubNotConnectedMessage(beforeWhat: string): string {
+	return `No active GitHub connection. Connect GitHub from the Connections panel at ${GITHUB_CONNECT_PAGE} before ${beforeWhat}.`
+}
+
+export const GITHUB_RECONNECT_MESSAGE = `GitHub connection unavailable. Reconnect from the Connections panel at ${GITHUB_CONNECT_PAGE}.`
+
 export function generateOAuthState(): string {
 	return randomBytes(24).toString('base64url')
 }

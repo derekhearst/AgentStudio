@@ -23,8 +23,9 @@ import { logger } from '$lib/observability/logger'
  *   4. Encrypt the token + upsert into `repository_connections`.
  *   5. Clear the OAuth cookies + 302 back to the requested return URL.
  *
- * On any failure, redirects to /source-control with an `?error=` query param so the page
- * can surface a friendly message. Never bubbles a token through a query param or fragment.
+ * On any failure, redirects back to the page the flow started from (default /projects, where
+ * the Connections panel lives) with an `?error=` query param so the page can surface a
+ * friendly message. Never bubbles a token through a query param or fragment.
  */
 
 export const GET: RequestHandler = async ({ url, cookies }) => {

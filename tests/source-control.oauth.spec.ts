@@ -56,3 +56,18 @@ test.describe('source-control/github-oauth — pure helpers', () => {
 		expect(GITHUB_OAUTH_RETURN_COOKIE).toBe('AgentStudio_github_oauth_return')
 	})
 })
+
+test.describe('source-control — where "connect GitHub" messages send the user', () => {
+	test('every connection message names a page that exists', async () => {
+		const { existsSync } = await import('node:fs')
+		const { GITHUB_CONNECT_PAGE, GITHUB_RECONNECT_MESSAGE, githubNotConnectedMessage } = await import(
+			'../src/lib/source-control/github-oauth'
+		)
+		// The standalone /source-control page was deleted; only its OAuth endpoints remain.
+		expect(existsSync(`src/routes${GITHUB_CONNECT_PAGE}/+page.svelte`)).toBe(true)
+		for (const message of [githubNotConnectedMessage('pushing'), GITHUB_RECONNECT_MESSAGE]) {
+			expect(message).toContain(GITHUB_CONNECT_PAGE)
+			expect(message).not.toMatch(/\/source-control\b/)
+		}
+	})
+})
