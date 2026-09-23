@@ -21,6 +21,8 @@ import {
 	startTurn,
 	toSpeakableText,
 	TTS_MAX_CHARACTERS,
+	voiceForModel,
+	type SpeechModel,
 } from '../src/lib/speech/speech'
 import { appSettings } from '../src/lib/settings/settings.schema'
 
@@ -210,6 +212,22 @@ test.describe('speech/catalogue and settings defaults', () => {
 		expect(DEFAULT_TTS_MODEL).not.toBe('openai/gpt-4o-mini-tts')
 		expect(SPEECH_MODEL_ID_PATTERN.test(DEFAULT_TTS_MODEL)).toBe(true)
 		expect(SPEECH_VOICE_PATTERN.test(DEFAULT_TTS_VOICE)).toBe(true)
+	})
+
+	test('picking a model keeps a voice it offers, else its first; a model with no voice list gets its default', () => {
+		const kokoro: SpeechModel = { id: 'hexgrad/kokoro-82m', name: 'Kokoro', pricePerCharacter: 0.000004, voices: ['af_heart', 'am_adam'] }
+		// fish-audio/s1 and friends: the catalogue lists no voices, so the field is free text.
+		const fish: SpeechModel = { id: 'fish-audio/s1', name: 'Fish Audio S1', pricePerCharacter: 0.000015, voices: [] }
+
+		expect(voiceForModel(kokoro, 'am_adam')).toBe('am_adam')
+		expect(voiceForModel(kokoro, 'alloy')).toBe('af_heart')
+		expect(voiceForModel(kokoro, '')).toBe('af_heart')
+		// Kokoro's af_heart would be refused as an unknown voice: fall back to the model's own.
+		expect(voiceForModel(fish, 'af_heart')).toBe('')
+		expect(voiceForModel(fish, '')).toBe('')
+		// Not in the catalogue (it could not be read, or the id was typed): leave the voice alone.
+		expect(voiceForModel(undefined, 'af_heart')).toBe('af_heart')
+		expect(voiceForModel(null, '')).toBe('')
 	})
 
 	test('model and voice patterns accept real catalogue names and refuse junk', () => {

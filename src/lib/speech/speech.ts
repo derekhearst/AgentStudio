@@ -6,7 +6,7 @@
  * `splitForSpeech` then cuts that prose into pieces the synthesis endpoint accepts, on
  * sentence boundaries so the joins are not audible, with a short first piece so playback
  * starts quickly. `startTurn` / `repliesToSpeak` pick which replies a finished turn produced,
- * for auto-read.
+ * for auto-read, and `voiceForModel` which voice carries over when Settings changes model.
  *
  * No `$lib` imports and no DOM: specs import this directly in the plain Playwright loader.
  */
@@ -81,6 +81,19 @@ export function parseSpeechCatalog(body: unknown): SpeechModel[] {
 		})
 	}
 	return models.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The voice to keep when the user picks `model` in Settings. Voices are per model: one the
+ * new model offers is kept, otherwise its first voice is chosen. A model whose voices the
+ * catalogue does not list gets the empty voice — its own default — because a voice carried
+ * over from another model would almost certainly be refused. A model missing from the
+ * catalogue leaves the voice alone.
+ */
+export function voiceForModel(model: SpeechModel | null | undefined, voice: string): string {
+	if (!model) return voice
+	if (model.voices.length === 0) return ''
+	return model.voices.includes(voice) ? voice : model.voices[0]
 }
 
 /** Append a full stop when a line has no closing punctuation, so the voice pauses after it. */

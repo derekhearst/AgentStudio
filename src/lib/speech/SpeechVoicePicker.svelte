@@ -5,12 +5,12 @@
 	 * Two rows for the panel's grid. The model list is OpenRouter's speech catalogue with its
 	 * per-character price; the voice list is whatever the chosen model says it accepts. When
 	 * the catalogue is unreachable, or a model lists no voices, the field becomes free text —
-	 * an empty voice means the model's own default. Preview reads a sample with the choices
-	 * on screen, before they are saved.
+	 * an empty voice means the model's own default, and it starts empty when such a model is
+	 * picked. Preview reads a sample with the choices on screen, before they are saved.
 	 */
 	import { getSpeechModels } from './speech.remote';
 	import { speechPlayer } from './speech-player.svelte';
-	import type { SpeechModel } from './speech';
+	import { voiceForModel, type SpeechModel } from './speech';
 
 	let {
 		model,
@@ -45,9 +45,9 @@
 
 	function chooseModel(id: string) {
 		onModelChange(id);
-		// Voices are per model; keep the current one only if the new model offers it.
-		const next = catalog.find((m) => m.id === id);
-		if (next && next.voices.length > 0 && !next.voices.includes(voice)) onVoiceChange(next.voices[0]);
+		// Voices are per model: see voiceForModel for what carries over.
+		const nextVoice = voiceForModel(catalog.find((m) => m.id === id), voice);
+		if (nextVoice !== voice) onVoiceChange(nextVoice);
 	}
 </script>
 
