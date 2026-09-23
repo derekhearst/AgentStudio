@@ -121,7 +121,6 @@ export const monitorFileToolArgsSchemas = {
 function checkObservationArgs(
 	source: { tool: MonitorObservableTool; args: Record<string, unknown> },
 	ctx: z.RefinementCtx,
-	at: PropertyKey[],
 ): void {
 	if (!isMonitorFileTool(source.tool)) return
 	const parsed = monitorFileToolArgsSchemas[source.tool].safeParse(source.args)
@@ -130,7 +129,7 @@ function checkObservationArgs(
 		ctx.addIssue({
 			code: 'custom',
 			message: `${source.tool} arguments: ${issue.message}`,
-			path: [...at, 'args', ...issue.path],
+			path: ['args', ...issue.path],
 		})
 	}
 }
@@ -155,7 +154,7 @@ const observationSourceSchema = z
 		tool: z.enum(MONITOR_OBSERVABLE_TOOLS),
 		args: z.record(z.string(), z.unknown()).default({}),
 	})
-	.superRefine((source, ctx) => checkObservationArgs(source, ctx, []))
+	.superRefine((source, ctx) => checkObservationArgs(source, ctx))
 
 export const toolResultConditionSchema = z.object({
 	kind: z.literal('tool_result'),
@@ -170,7 +169,7 @@ export const toolResultConditionSchema = z.object({
 	compare: monitorCompareSchema.default('changed'),
 	/** Operand for equals / contains / matches. Ignored by `changed` and `not_empty`. */
 	value: z.string().max(2_000).optional(),
-}).superRefine((condition, ctx) => checkObservationArgs(condition, ctx, []))
+}).superRefine((condition, ctx) => checkObservationArgs(condition, ctx))
 
 export const modelQuestionConditionSchema = z.object({
 	kind: z.literal('model_question'),

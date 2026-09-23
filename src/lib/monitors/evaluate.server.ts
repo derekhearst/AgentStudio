@@ -151,7 +151,8 @@ async function runObservationTool(
 function retiredToolIn(condition: unknown): string | null {
 	if (!condition || typeof condition !== 'object') return null
 	const stored = condition as { tool?: unknown; context?: unknown }
-	const tools = [stored.tool, ...(Array.isArray(stored.context) ? stored.context.map((c) => (c as { tool?: unknown })?.tool) : [])]
+	const context = Array.isArray(stored.context) ? stored.context : []
+	const tools = [stored.tool, ...context.map((source) => (source as { tool?: unknown } | null)?.tool)]
 	for (const tool of tools) {
 		if (typeof tool === 'string' && !(MONITOR_OBSERVABLE_TOOLS as readonly string[]).includes(tool)) return tool
 	}
