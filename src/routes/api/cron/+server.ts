@@ -6,7 +6,7 @@ import { logger } from '$lib/observability/logger'
 import { getCronSecret } from '$lib/server/config'
 import { hasCronAccess } from '$lib/automations/cron-trigger'
 
-// A public path (see hooks.server.ts): this check is the whole of its access control.
+// A public path (see PUBLIC_PATH_PREFIXES in src/lib/auth/gate.ts): this check is the whole of its access control.
 export const POST: RequestHandler = async ({ request, locals }) => {
 	const allowed = hasCronAccess({
 		authenticated: locals.authenticated === true,
