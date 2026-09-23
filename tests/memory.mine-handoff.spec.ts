@@ -44,7 +44,7 @@ async function markAllMined(fixture: Fixture): Promise<number> {
 	const sql = getSql()
 	const rows = await sql<{ message_id: string }[]>`
 		insert into memory_message_tombstones (message_id, user_id, reason)
-		select m.id, ${fixture.userId}, 'excluded_by_rule'
+		select m.id, ${fixture.userId}::uuid, 'excluded_by_rule'
 		from messages m
 		where m.conversation_id = ${fixture.conversationId}
 		  and not exists (select 1 from memory_message_tombstones t where t.message_id = m.id)

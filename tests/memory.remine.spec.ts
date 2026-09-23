@@ -196,7 +196,7 @@ test.describe('memory/re-mine — tombstoning a long conversation', () => {
 			const fixture = await makeConversation(prefix)
 			const rows = await sql<{ id: string }[]>`
 				insert into messages (conversation_id, role, content, sequence)
-				select ${fixture.conversationId}, 'user'::message_role, 'turn', g from generate_series(1, 22000) g
+				select ${fixture.conversationId}::uuid, 'user'::message_role, 'turn', g from generate_series(1, 22000) g
 				returning id
 			`
 			const { tombstoneMessages } = await import('../src/lib/memory/tombstones.server')
