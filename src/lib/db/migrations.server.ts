@@ -138,6 +138,17 @@ export function getTargetDatabaseName(databaseUrl: string) {
 	return databaseName
 }
 
+/**
+ * Whether `bun run db:reset` may drop this database. Names follow `agentstudio<env>`
+ * (docs/database/database.md#databases): one ending in dev, test or ci is a throwaway by
+ * convention. A name containing "prod" never is, whatever it ends in.
+ */
+export function isDisposableDatabaseName(name: string): boolean {
+	const lower = name.toLowerCase()
+	if (lower.includes('prod')) return false
+	return /(dev|test|ci)$/.test(lower)
+}
+
 export function getBootstrapDatabaseUrl(databaseUrl: string) {
 	const parsedUrl = new URL(databaseUrl)
 	parsedUrl.pathname = '/postgres'
