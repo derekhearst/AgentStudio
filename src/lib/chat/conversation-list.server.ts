@@ -10,7 +10,7 @@
  * what the `(conversation_id, sequence)` unique index serves.
  */
 
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
@@ -87,4 +87,26 @@ export async function listRecentConversations(userId: string, limit = RECENT_CON
 				: null,
 		}
 	})
+}
+
+/**
+ * A fingerprint of the user's conversation list: how many there are and when the latest
+ * one last changed. The chat monitor pushes it, and a page holding the list refreshes when
+ * it moves (#79) — a chat created in another tab or by an automation, a turn's reply landing
+ * (which bumps `updatedAt`), a generated title (which does too), or a deletion.
+ *
+ * The list is a cached remote query read once per session, and nothing ever refreshed it:
+ * a new chat never appeared, its title stayed "New conversation" and the order never moved
+ * until a hard reload. The title in particular is written a moment after the turn ends, by
+ * a background call nothing on the page can wait for, so the page has to be told.
+ */
+export async function conversationListVersion(userId: string): Promise<string> {
+	const [row] = await db
+		.select({
+			count: sql<number>`count(*)::int`,
+			latest: sql<string | null>`max(${conversations.updatedAt})::text`,
+		})
+		.from(conversations)
+		.where(eq(conversations.userId, userId))
+	return `${row?.count ?? 0}:${row?.latest ?? ''}`
 }

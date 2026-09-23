@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { handOffAttachments, type HandoffAttachment } from '$lib/chat/new-chat-handoff';
+	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
@@ -34,7 +35,12 @@
 		lastHeartbeatAt?: string | Date | null;
 		updatedAt?: string | Date | null;
 	};
-	let recentChats = $state<Conversation[]>([]);
+	/*
+	 * Read reactively, not copied out once (#79): a refresh — after a chat is created here,
+	 * or when the monitor says the list changed — has to reach the list without a reload.
+	 */
+	const conversationsQuery = browser ? getConversations() : null;
+	const recentChats = $derived<Conversation[]>(conversationsQuery?.current ?? []);
 	let agentChoices = $state<AgentChoice[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
 
@@ -68,7 +74,6 @@
 	}
 
 	async function loadRecent() {
-		recentChats = await getConversations();
 		agentChoices = await listAgentsForPicker();
 		// Pick the user's default agent (or the first built-in) once choices land.
 		if (agentId == null && agentChoices.length > 0) {
@@ -107,6 +112,9 @@
 	onMount(() => {
 		if (!browser) return;
 		const source = new EventSource('/api/chat/monitor');
+		// The recent list follows the conversation list too (#79). With the nav listening as well,
+		// one change still makes one refresh — see `onConversationListChange`.
+		onConversationListChange(source, () => getConversations().refresh());
 		source.onmessage = (event) => {
 			try {
 				const runs = JSON.parse(event.data) as LiveRun[];
@@ -212,6 +220,8 @@
 			const trimmedPrompt = initialPrompt?.trim() ?? '';
 			const title = trimmedPrompt.slice(0, 80) || 'New conversation';
 			const created = await createConversation({ title, model, agentId: agentId ?? undefined });
+			// The sidebar and the recent list read this query; the new chat belongs in them now.
+			void getConversations().refresh().catch(() => {});
 			// The conversation's page sends them with the prompt (#59); the URL can only carry text.
 			handOffAttachments(created.id, attachments);
 			if (trimmedPrompt) {

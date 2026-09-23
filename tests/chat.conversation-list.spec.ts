@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
+import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix, waitForHydration } from './helpers'
 
 /**
  * #4 / #77 — the sidebar's recent-conversations list.
@@ -62,4 +62,69 @@ test('a user with no conversations gets an empty list without further queries fa
 	// No such user: the conversation query returns nothing, and the per-conversation lookups
 	// are skipped rather than run with an empty id list.
 	expect(await listRecentConversations('00000000-0000-4000-8000-000000000000')).toEqual([])
+})
+
+/**
+ * #79 — the sidebar read the list once per session and never again: a new chat did not
+ * appear, a generated title never replaced "New conversation", the order never moved. The
+ * chat monitor now pushes a fingerprint of the list, and the nav refreshes when it moves.
+ */
+test('the list fingerprint moves with a new chat, a reply or a title, and a deletion', async () => {
+	const sql = getSql()
+	const userId = await getActiveUserId()
+	const prefix = uniquePrefix('conv-list-version')
+	const { conversationListVersion } = await import('../src/lib/chat/conversation-list.server')
+
+	try {
+		const before = await conversationListVersion(userId)
+		const [created] = await sql<{ id: string }[]>`
+			insert into conversations (title, user_id, model, total_tokens, total_cost)
+			values (${`${prefix} new`}, ${userId}, ${'anthropic/claude-sonnet-4'}, 0, '0')
+			returning id
+		`
+		const afterCreate = await conversationListVersion(userId)
+		expect(afterCreate).not.toBe(before)
+
+		// A reply landing and a title being written both move `updated_at`.
+		await sql`update conversations set title = ${`${prefix} titled`}, updated_at = now() + interval '1 second' where id = ${created.id}`
+		const afterTitle = await conversationListVersion(userId)
+		expect(afterTitle).not.toBe(afterCreate)
+
+		await sql`delete from conversations where id = ${created.id}`
+		expect(await conversationListVersion(userId)).not.toBe(afterTitle)
+	} finally {
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('the sidebar shows a chat created elsewhere, and its new title, without a reload', async ({ page }, testInfo) => {
+	test.skip(testInfo.project.name !== 'desktop', 'the sidebar is desktop chrome; the mobile drawer mounts the same component')
+	test.setTimeout(60_000)
+	const sql = getSql()
+	const userId = await getActiveUserId()
+	const prefix = uniquePrefix('conv-list-sidebar')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+
+	try {
+		await page.goto('/', { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const sidebar = page.locator('.console-sb__chatlist').first()
+		await expect(sidebar).toBeVisible()
+
+		// Created by another tab, an automation or the home page of another device.
+		const [created] = await sql<{ id: string }[]>`
+			insert into conversations (title, user_id, model, total_tokens, total_cost)
+			values (${`${prefix} New conversation`}, ${userId}, ${'anthropic/claude-sonnet-4'}, 0, '0')
+			returning id
+		`
+		const row = sidebar.locator(`a.console-chatrow[href="/chat/${created.id}"]`)
+		await expect(row).toContainText(`${prefix} New conversation`, { timeout: 15_000 })
+
+		// The generated title lands a moment after the turn.
+		await sql`update conversations set title = ${`${prefix} Fixing the login page`}, updated_at = now() + interval '1 second' where id = ${created.id}`
+		await expect(row).toContainText(`${prefix} Fixing the login page`, { timeout: 15_000 })
+	} finally {
+		await cleanupPrefixedRecords(prefix)
+	}
 })

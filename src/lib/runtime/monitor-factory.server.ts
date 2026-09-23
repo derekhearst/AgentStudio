@@ -8,11 +8,23 @@
  */
 
 import type { RequestHandler } from '@sveltejs/kit'
-import { encodeSseData } from '$lib/runtime/sse-codec'
+import { encodeSseData, encodeSseFrame } from '$lib/runtime/sse-codec'
 
 const POLL_INTERVAL_MS = 700
+/** The version is read on every third snapshot (~2s): a list catching up is not a live run. */
+const VERSION_EVERY_POLLS = 3
 
-export function createSseMonitorHandler<T>(fetchSnapshot: (userId: string) => Promise<T>): RequestHandler {
+export type MonitorVersionSignal = {
+	/** The SSE event name. A named event, so a listener on the snapshots never sees it. */
+	event: string
+	/** A cheap fingerprint of something the page caches; sent only when it changes. */
+	read: (userId: string) => Promise<string>
+}
+
+export function createSseMonitorHandler<T>(
+	fetchSnapshot: (userId: string) => Promise<T>,
+	options: { version?: MonitorVersionSignal } = {},
+): RequestHandler {
 	return ({ request, locals }) => {
 		if (!locals.user) {
 			return new Response('Unauthorized', { status: 401 })
@@ -20,6 +32,8 @@ export function createSseMonitorHandler<T>(fetchSnapshot: (userId: string) => Pr
 
 		const userId = locals.user.id
 		let intervalId: ReturnType<typeof setInterval> | undefined
+		let lastVersion: string | null = null
+		let polls = 0
 
 		const readable = new ReadableStream<Uint8Array>({
 			start(controller) {
@@ -27,6 +41,16 @@ export function createSseMonitorHandler<T>(fetchSnapshot: (userId: string) => Pr
 					const snapshot = await fetchSnapshot(userId)
 					try {
 						controller.enqueue(encodeSseData(snapshot))
+					} catch {
+						if (intervalId) clearInterval(intervalId)
+						return
+					}
+					if (!options.version || polls++ % VERSION_EVERY_POLLS !== 0) return
+					const version = await options.version.read(userId).catch(() => null)
+					if (version === null || version === lastVersion) return
+					lastVersion = version
+					try {
+						controller.enqueue(encodeSseFrame(options.version.event, { version }))
 					} catch {
 						if (intervalId) clearInterval(intervalId)
 					}
