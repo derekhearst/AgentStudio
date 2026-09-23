@@ -18,6 +18,8 @@
 	import { getAvailableModels } from '$lib/llm';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
+	import { buildChatPageCommands } from '$lib/chat/chat-page-commands';
+	import { searchWorkspaceFiles } from '$lib/chat-console/mentions.remote';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
 	import { consoleState } from '$lib/chat-console/console-state.svelte';
 	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
@@ -1715,13 +1717,6 @@
 			/>
 		{/if}
 
-		<!-- Mobile quick chips above composer -->
-		<div class="console-quick">
-			<button type="button"><Icon name="plus" size={12} /> Attach</button>
-			<button type="button">@ Context</button>
-			<button type="button">/ Commands</button>
-		</div>
-
 		<div class="chat-composer-transition w-full">
 
 			<!--
@@ -1761,6 +1756,16 @@
 				onAgentChange={handleAgentChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
+				onMentionSearch={(q) => searchWorkspaceFiles({ conversationId, q })}
+				commands={buildChatPageCommands({
+					conversationId,
+					permissionMode: () => conversationData?.conversation.permissionMode,
+					onPermissionModeChange: (next) => {
+						if (conversationData) conversationData.conversation.permissionMode = next;
+					},
+					compact: compactContext,
+					research: handleResearchSubmit,
+				})}
 			/>
 		</div>
 	</section>
