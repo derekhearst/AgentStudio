@@ -260,7 +260,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
 | #27 | Wire up or delete the TTS endpoint | **delete** | confirmed dead: no UI reference, and the setting the issue mentions does not exist |
 | #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
-| #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules); the old loop stays while automations, monitors and CI fix runs call it |
+| #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules) and the exports left without a caller (the tiktoken estimator and the `js-tiktoken` dependency, the settings prompt preview query, the agent tool-definition filter, the OpenRouter `plugins` option); the old loop stays while automations, monitors and CI fix runs call it |
 
 ### #16 — diffs
 

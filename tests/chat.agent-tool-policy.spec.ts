@@ -1,20 +1,23 @@
 import { expect, test } from '@playwright/test'
 
 /**
- * Per-agent tool policy filter (replaces the prior `chat.mode-tool-filter` after the
+ * Per-agent tool policy (replaces the prior `chat.mode-tool-filter` after the
  * modes-into-agents unification).
  *
  * The pure resolver lives in `agent-tool-filter.ts` so it can be tested without pulling
  * in `$lib/db.server`. Two policy shapes:
- *   - `unrestricted`: pass-through (Chat, Autonomous built-ins; all custom agents)
+ *   - `unrestricted`: no scope (Chat, Autonomous built-ins; all custom agents)
  *   - `readOnly`:     allow-list (Research, Plan built-ins). Allow-list shape so newly
  *                     added tools fail closed for those agents until explicitly audited.
+ *
+ * The chat stream route resolves the bound agent's policy and hands a `readOnly` allow-list
+ * to the engine as its tool scope, so what these tests read off `allow` is what the engine
+ * lets the agent call. The module used to export a filter over OpenAI-style tool
+ * definitions as well; its only caller was the old loop's tool assembly, deleted in #8.
  */
 
-const MOCK_TOOL = (name: string) => ({ type: 'function' as const, function: { name } })
-
 /**
- * The real allow-list, loaded from the source.
+ * The real allow-list, loaded from the source and resolved the way the stream route does it.
  *
  * This file used to keep a hand-written copy of it. A test that builds a policy from its
  * own copy of the list is not testing the policy — it is testing that a Set behaves like
@@ -23,114 +26,91 @@ const MOCK_TOOL = (name: string) => ({ type: 'function' as const, function: { na
  * away from read-only agents, that is the one failure mode worth catching.
  */
 async function readOnlyPolicy() {
-	const { READ_ONLY_TOOL_NAMES } = await import('../src/lib/agents/builtin-agents.server')
-	return { kind: 'readOnly' as const, allow: new Set(READ_ONLY_TOOL_NAMES) }
+	const [{ READ_ONLY_TOOL_NAMES }, { resolveAgentToolPolicy }] = await Promise.all([
+		import('../src/lib/agents/builtin-agents.server'),
+		import('../src/lib/chat/agent-tool-filter'),
+	])
+	// The config the built-in Research and Plan agents are seeded with.
+	const policy = resolveAgentToolPolicy({ toolPolicy: { kind: 'readOnly', allow: READ_ONLY_TOOL_NAMES } })
+	if (policy.kind !== 'readOnly') throw new Error('the built-in read-only config did not resolve to readOnly')
+	return policy
 }
 
-
 test.describe('agent-tool-policy — unrestricted policy', () => {
-	test('unrestricted passes every tool through', async () => {
-		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const tools = [MOCK_TOOL('Bash'), MOCK_TOOL('Write'), MOCK_TOOL('push_branch')]
-		expect(filterToolsByAgentPolicy(tools, { kind: 'unrestricted' })).toEqual(tools)
-	})
-
 	test('resolveAgentToolPolicy defaults to unrestricted on missing/malformed config', async () => {
 		const { resolveAgentToolPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		expect(resolveAgentToolPolicy(null).kind).toBe('unrestricted')
 		expect(resolveAgentToolPolicy({}).kind).toBe('unrestricted')
 		expect(resolveAgentToolPolicy({ toolPolicy: null }).kind).toBe('unrestricted')
 		expect(resolveAgentToolPolicy({ toolPolicy: { kind: 'garbage' } }).kind).toBe('unrestricted')
+		expect(resolveAgentToolPolicy({ toolPolicy: { kind: 'unrestricted' } }).kind).toBe('unrestricted')
+	})
+
+	test('a readOnly config without an allow array is not a readOnly policy', async () => {
+		const { resolveAgentToolPolicy } = await import('../src/lib/chat/agent-tool-filter')
+		expect(resolveAgentToolPolicy({ toolPolicy: { kind: 'readOnly' } }).kind).toBe('unrestricted')
+		expect(resolveAgentToolPolicy({ toolPolicy: { kind: 'readOnly', allow: 'Read' } }).kind).toBe('unrestricted')
 	})
 })
 
 test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)', () => {
-	test('readOnly strips destructive tools (Bash, Edit, push_branch)', async () => {
+	test('readOnly leaves out destructive tools (Bash, Edit, push_branch)', async () => {
 		// Note the absence of `Write`. It is allow-listed deliberately — the planner writes
 		// its plan to a markdown file and hands off — and the next test asserts it survives.
 		// Listing it here too was a straight contradiction between two neighbouring tests.
-		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = await readOnlyPolicy()
-		const tools = [
-			MOCK_TOOL('Bash'),
-			MOCK_TOOL('Edit'),
-			MOCK_TOOL('delete_file'),
-			MOCK_TOOL('push_branch'),
-			MOCK_TOOL('create_pull_request'),
-			MOCK_TOOL('clone_repository'),
-			MOCK_TOOL('create_skill'),
-			MOCK_TOOL('update_agent'),
-			MOCK_TOOL('create_automation'),
+		const destructive = [
+			'Bash',
+			'Edit',
+			'delete_file',
+			'push_branch',
+			'create_pull_request',
+			'clone_repository',
+			'create_skill',
+			'update_agent',
+			'create_automation',
 		]
-		expect(filterToolsByAgentPolicy(tools, policy)).toHaveLength(0)
+		expect(destructive.filter((name) => policy.allow.has(name))).toEqual([])
 	})
 
 	test('readOnly keeps allow-listed tools (web_search, Read, Write, request_plan_approval)', async () => {
-		const { filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = await readOnlyPolicy()
-		const tools = [
-			MOCK_TOOL('web_search'),
-			MOCK_TOOL('web_fetch'),
-			MOCK_TOOL('Read'),
-			MOCK_TOOL('Glob'),
-			MOCK_TOOL('Grep'),
-			MOCK_TOOL('list_my_repos'),
-			MOCK_TOOL('list_pull_requests'),
-			MOCK_TOOL('get_pull_request'),
-			MOCK_TOOL('prepare_commit'),
-			MOCK_TOOL('git_status'),
-			MOCK_TOOL('list_skills'),
-			MOCK_TOOL('read_skill'),
-			MOCK_TOOL('Write'),
-			MOCK_TOOL('request_plan_approval'),
-			MOCK_TOOL('list_projects'),
-			MOCK_TOOL('ask_user'),
+		const kept = [
+			'ask_user',
+			'Read',
+			'Write',
+			'get_pull_request',
+			'git_status',
+			'Glob',
+			'list_my_repos',
+			'list_projects',
+			'list_pull_requests',
+			'list_skills',
+			'prepare_commit',
+			'read_skill',
+			'request_plan_approval',
+			'Grep',
+			'web_fetch',
+			'web_search',
 		]
-		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual(
-			[
-				'ask_user',
-				'Read',
-				'Write',
-				'get_pull_request',
-				'git_status',
-				'Glob',
-				'list_my_repos',
-				'list_projects',
-				'list_pull_requests',
-				'list_skills',
-				'prepare_commit',
-				'read_skill',
-				'request_plan_approval',
-				'Grep',
-				'web_fetch',
-				'web_search',
-			].sort(),
-		)
+		expect(kept.filter((name) => !policy.allow.has(name))).toEqual([])
 	})
 
 	test('readOnly fails closed for unknown tool names (allow-list semantics)', async () => {
-		const { filterToolsByAgentPolicy, isToolAllowedByPolicy } = await import('../src/lib/chat/agent-tool-filter')
 		const policy = await readOnlyPolicy()
-		const tools = [MOCK_TOOL('hypothetical_new_tool_added_later')]
-		expect(filterToolsByAgentPolicy(tools, policy)).toEqual([])
-		expect(isToolAllowedByPolicy('hypothetical_new_tool_added_later', policy)).toBe(false)
-		// Unrestricted: pass through.
-		expect(filterToolsByAgentPolicy(tools, { kind: 'unrestricted' })).toEqual(tools)
-		expect(isToolAllowedByPolicy('hypothetical_new_tool_added_later', { kind: 'unrestricted' })).toBe(true)
+		expect(policy.allow.has('hypothetical_new_tool_added_later')).toBe(false)
 	})
 })
 
 test.describe('agent-tool-policy — resolver round-trips JSON config', () => {
 	test('resolveAgentToolPolicy parses readOnly config from agents.config.toolPolicy', async () => {
-		const { resolveAgentToolPolicy, filterToolsByAgentPolicy } = await import('../src/lib/chat/agent-tool-filter')
-		const config = { toolPolicy: { kind: 'readOnly', allow: ['web_search', 'Read'] } }
+		const { resolveAgentToolPolicy } = await import('../src/lib/chat/agent-tool-filter')
+		// Non-string entries in stored JSON are dropped rather than trusted.
+		const config = { toolPolicy: { kind: 'readOnly', allow: ['web_search', 'Read', 42, null] } }
 		const policy = resolveAgentToolPolicy(config)
 		expect(policy.kind).toBe('readOnly')
-		const tools = [MOCK_TOOL('web_search'), MOCK_TOOL('Bash'), MOCK_TOOL('Read')]
-		expect(filterToolsByAgentPolicy(tools, policy).map((t) => t.function.name).sort()).toEqual([
-			'Read',
-			'web_search',
-		])
+		if (policy.kind !== 'readOnly') return
+		expect([...policy.allow].sort()).toEqual(['Read', 'web_search'])
 	})
 })
 

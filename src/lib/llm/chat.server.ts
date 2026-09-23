@@ -14,9 +14,7 @@ type TextContent = { type: 'text'; text: string; cacheControl?: CacheControl }
 type ImageContent = { type: 'image_url'; image_url: { url: string }; cacheControl?: CacheControl }
 /**
  * OpenRouter file content block. Supports PDFs via base64 data URLs (`data:application/pdf;base64,...`)
- * or direct URLs. The optional `plugins: [{ id: 'file-parser', pdf: { engine } }]` request-level
- * field controls parser engine: `'native'` (model handles directly, e.g. Gemini 2.5),
- * `'mistral-ocr'` (per-page OCR for scanned docs), or `'pdf-text'` / Cloudflare default.
+ * or direct URLs.
  */
 type FileContent = {
 	type: 'file'
@@ -54,26 +52,13 @@ export type ResponseFormat = {
 }
 
 /**
- * OpenRouter plugins block — currently used for PDF parser engine selection. The `file-parser`
- * plugin's `pdf.engine` accepts:
- *   - `'native'` — the model handles the PDF directly (Gemini 2.5+, GPT-4o-file)
- *   - `'mistral-ocr'` — per-page OCR, best for scanned/image-heavy docs
- *   - `'pdf-text'` — Cloudflare default, fast text extraction
- */
-export type ChatPlugin =
-	| { id: 'file-parser'; pdf?: { engine?: 'native' | 'mistral-ocr' | 'pdf-text' } }
-	| { id: string; [key: string]: unknown }
-
-/**
- * Optional per-call options bag. Lets us add new OpenRouter passthroughs (cache headers,
- * plugins) without growing the positional argument list.
+ * Optional per-call options bag. Lets us add new OpenRouter passthroughs (cache headers and
+ * the like) without growing the positional argument list.
  */
 export type ChatOptions = {
 	responseFormat?: ResponseFormat
 	/** OpenRouter platform-level response cache. Distinct from Anthropic's prompt cache. */
 	cache?: { enabled?: boolean; ttlSeconds?: number }
-	/** Plugin slots — file parser engine, etc. */
-	plugins?: ChatPlugin[]
 }
 
 export type LlmMessage = {
@@ -166,9 +151,6 @@ export async function chat(messages: LlmMessage[], model = DEFAULT_MODEL, option
 	if (options.responseFormat) {
 		chatRequest.response_format = options.responseFormat
 	}
-	if (options.plugins && options.plugins.length > 0) {
-		chatRequest.plugins = options.plugins
-	}
 
 	// Cache-enabled calls go via raw fetch so we can attach the OpenRouter caching headers.
 	if (options.cache?.enabled) {
@@ -203,7 +185,6 @@ export async function streamChat(
 	model = DEFAULT_MODEL,
 	tools?: ChatTool[],
 	reasoning?: ReasoningConfig,
-	options: ChatOptions = {},
 ) {
 	const client = getClient()
 	const chatMessages = toChatMessages(messages)
@@ -219,11 +200,5 @@ export async function streamChat(
 		...(reasoning ? { reasoning } : {}),
 	}
 	;(chatRequest as Record<string, unknown>).usage = { include: true }
-	if (options.responseFormat) {
-		;(chatRequest as Record<string, unknown>).response_format = options.responseFormat
-	}
-	if (options.plugins && options.plugins.length > 0) {
-		;(chatRequest as Record<string, unknown>).plugins = options.plugins
-	}
 	return client.chat.send({ chatRequest })
 }

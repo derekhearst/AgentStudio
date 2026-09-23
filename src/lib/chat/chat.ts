@@ -21,22 +21,6 @@ import sql from 'highlight.js/lib/languages/sql'
 import typescript from 'highlight.js/lib/languages/typescript'
 import xml from 'highlight.js/lib/languages/xml'
 
-export type LlmMessage = {
-	role: 'system' | 'user' | 'assistant' | 'tool'
-	content:
-		| string
-		| Array<
-				| { type: 'text'; text: string }
-				| { type: 'image_url'; image_url: { url: string } }
-				| { type: 'file'; file: { filename: string; file_data: string } }
-				| { type: 'video_url'; video_url: { url: string } }
-		  >
-	/** Set on tool-role messages — points back at the assistant tool_call that produced it. */
-	toolCallId?: string
-	/** Set on assistant messages that called tools. Mirrors LoopMessage / runtime LlmMessage. */
-	toolCalls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
-}
-
 /* ── Markdown Rendering ────────────────────────────────────── */
 
 hljs.registerLanguage('bash', bash)
