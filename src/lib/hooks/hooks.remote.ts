@@ -13,7 +13,8 @@ import { logger } from '$lib/observability/logger'
  * for the header summary so the UI doesn't have to roll them up client-side.
  *
  * Hard-cap of 500 rows; the bus is fire-and-forget so this table grows fast on a busy run
- * and we don't want a runaway page load. Future work could add cursor pagination + retention.
+ * and we don't want a runaway page load. Rows older than the app log's retention window are
+ * deleted daily (`purgeOldHookInvocations`); cursor pagination is still future work.
  */
 
 const listSchema = z

@@ -10,9 +10,22 @@
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
+	import { renderMarkdown } from '$lib/chat/chat';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
+	type InboxItem = Inbox['items'][number];
+
+	/**
+	 * A maintenance automation's output — the weekly usage digest (#38) or a model-written
+	 * summary — is markdown meant to be read, not a JSON string with `\n` escapes. Rendered
+	 * through the chat's sanitizing renderer, because a model-written summary is untrusted.
+	 */
+	function automationSummary(item: InboxItem): string | null {
+		if (item.type !== 'automation_summary') return null;
+		const summary = item.payload.summary;
+		return typeof summary === 'string' && summary.trim() ? summary : null;
+	}
 
 	let {
 		inbox,
@@ -234,20 +247,28 @@
 					<li class="rounded-xl border border-base-300/60 bg-base-100">
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+							class="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 							onclick={() => toggleExpand(item.id)}
 						>
 							<span class="badge badge-xs {severityTone(item.severity)}">{item.severity}</span>
 							<span class="badge badge-xs badge-outline">{typeLabel(item.type)}</span>
 							<span class="badge badge-xs {statusTone(item.status)}">{item.status}</span>
-							<span class="line-clamp-1 flex-1 text-xs leading-tight">{item.summary ?? '(no summary)'}</span>
+							<!-- On a phone the badges and date fill the row, and a flex-1 summary shrank to
+							     nothing — every item's text was invisible. It takes its own line there. -->
+							<span class="order-last line-clamp-1 w-full text-xs leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{item.summary ?? '(no summary)'}</span>
 							<span class="font-mono text-xs text-base-content/40">{fmtDate(item.createdAt)}</span>
 							<svg class="size-3 transition-transform {isOpen ? 'rotate-180' : ''}" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
 								<polyline points="3 5 6 8 9 5" />
 							</svg>
 						</button>
 						{#if isOpen}
+							{@const summaryMarkdown = automationSummary(item)}
 							<div class="space-y-2 border-t border-base-300/60 px-3 py-3 text-xs">
+								{#if summaryMarkdown}
+									<div class="markdown-body max-h-96 overflow-auto rounded-lg bg-base-200/60 p-3 text-xs" data-testid="inbox-automation-summary">
+										{@html renderMarkdown(summaryMarkdown)}
+									</div>
+								{/if}
 								{#if item.runId}
 									<p>
 										<span class="font-semibold uppercase tracking-wide opacity-50">Run:</span>

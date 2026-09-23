@@ -1,4 +1,4 @@
-import { inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { memoryMessageTombstones, type MemoryTombstoneReason } from '$lib/memory/memory.schema'
 
@@ -35,4 +35,21 @@ export async function findTombstonedMessageIds(messageIds: string[]): Promise<Se
 		.from(memoryMessageTombstones)
 		.where(inArray(memoryMessageTombstones.messageId, messageIds))
 	return new Set(rows.map((row) => row.messageId))
+}
+
+/**
+ * Let the miner look again at turns set aside because their exclusion check ran out of time
+ * (`exclusion_timed_out`). No rule was seen to match them — the rule set may simply have been
+ * too slow, or the machine too busy — so they are not excluded for good: once the rules change
+ * (the slow rule may be gone or reworded), or the user asks for Mine pending, they are released,
+ * and the next pass over their conversation checks them afresh. Returns how many were released.
+ */
+export async function releaseTimedOutTurns(userId: string): Promise<number> {
+	const released = await db
+		.delete(memoryMessageTombstones)
+		.where(
+			and(eq(memoryMessageTombstones.userId, userId), eq(memoryMessageTombstones.reason, 'exclusion_timed_out')),
+		)
+		.returning({ messageId: memoryMessageTombstones.messageId })
+	return released.length
 }

@@ -38,7 +38,7 @@ Two supporting records exist purely so a user can manage what was remembered:
 
 | Entity | What it is |
 | --- | --- |
-| **Exclusion rule** | A named pattern the miner checks before storing anything. Credential rules ship built in; users add their own. Tracks how many turns it has blocked and when it last fired. |
+| **Exclusion rule** | A named pattern checked before anything is stored or sent out — by the miner on every turn, and by recall on every message. Credential rules ship built in; users add their own. Tracks how many turns it has blocked and when it last fired. |
 | **Recall event** | One row per drawer per recall, holding the query, the source (chat / agent / search / bench), the rank, and the semantic / keyword / temporal / pinned components of its score. Retained 30 days; deleted with its drawer. |
 
 ### AAAK index
@@ -55,17 +55,24 @@ Drawers carry a 1536-dimension embedding (OpenAI `text-embedding-3-small`). When
 
 1. **Semantic similarity** — cosine match on embeddings via pgvector HNSW.
 2. **Keyword boost** — Postgres full-text search over drawer content + AAAK tags.
-3. **Temporal proximity** — recent drawers ranked higher than old ones for time-sensitive queries.
+3. **Temporal proximity** — recent drawers ranked higher than old ones. Recency is measured from the moment the question is asked, and each drawer is dated when its message was said — not when its conversation started, so a conversation that ran for weeks is not treated as one moment.
 4. **Preference patterns** — recurring user choices boost relevance for matching topics.
 5. **Pin boost** — drawers the user pinned are added to the candidate pool regardless of distance and get a small additive bonus.
 
 Drawers flagged **never recall** are removed from the candidate pool before any of this runs. Every drawer that survives carries its component scores back to the caller, which is what the palace uses to answer "why was this recalled?".
 
+The similarity search has one index over every drawer in the database, including ones recall must skip (never-recall drawers, and in a shared database other people's). How it is used depends on the size of the palace:
+
+- **Up to 2,000 drawers that can be recalled** — the question is compared with each of them directly. At that size this is quick, and it always finds the nearest ones. Every new palace starts here.
+- **More than that** — the index is used. It keeps looking until it has a full pool of candidates that may be recalled; if it still comes up short (for example when many of the nearest drawers are never-recall ones), the palace is compared drawer by drawer instead.
+
+Either way a palace gets its own nearest memories however crowded the index is around the question. Pinned drawers are always looked up directly.
+
 The top results get formatted into a `<memory_context>…</memory_context>` block prepended to the system prompt.
 
 ### Optional rerank
 
-When `useRerank` is enabled in settings, the top 20 candidates are sent to a cheap reader model (default `anthropic/claude-haiku`) which promotes the best 5. This trades a small amount of latency for higher precision on ambiguous queries.
+When `useRerank` is enabled in settings, the top 20 candidates are sent to a cheap reader model (default Claude Haiku 4.5) which promotes the best 5. This trades a small amount of latency for higher precision on ambiguous queries. If the reranker cannot be reached or gives an unusable answer, recall keeps its own order and logs a warning naming the model.
 
 ## User flows
 
@@ -74,8 +81,11 @@ When `useRerank` is enabled in settings, the top 20 candidates are sent to a che
 1. The user finishes a chat exchange (or the run completes naturally).
 2. The system queues a background mining job for that conversation — the user sees their assistant reply immediately and never waits.
 3. The job mines only what is new: turns that already have a drawer are skipped, and so are turns the user removed from memory (see **Managing what was remembered** below).
-4. Mining extracts entities and topics via a small LLM call, then writes one drawer per new turn into the palace, computing AAAK indexes and embeddings inline.
-5. An `agent_action` activity event of type `memory_mined` records what landed.
+4. Every new turn is checked against the user's exclusion rules (see **Exclusion rules** below); a matching turn is dropped here.
+5. Mining extracts entities and topics with one call to the app's default model, embeds the remaining turns, and only then writes anything: one drawer per new turn, with its AAAK index and embedding. If embedding fails (rate limit, no credit, no key), the job fails with nothing half-built and is retried.
+6. An `agent_action` activity event of type `memory_mined` records what landed.
+
+If the extraction call fails or answers with something unusable, mining still stores the turns — under a wing named after the conversation, in one `general` closet, with no people, place or topic tags — and the job's result in `/settings/jobs` says `extractorFallback: true`, with a warning in the logs naming the model. That is the signal the extractor needs attention; before September 2026 it failed on every call without saying so.
 
 A conversation holds at most one queued mining job at a time: if the user sends several messages while a job is still waiting, they all fold into that one job. If an exchange finishes while the job is already mining, the job goes round again for the new turns before it finishes — so the last exchange of a conversation is mined too, not left for an exchange that may never come. (It goes round at most five times; anything still left after that waits for the next exchange or **Mine pending**.) Once the job is done, the next exchange queues a fresh one. (Until September 2026 a conversation's mining job could only ever run once, so everything said after its first exchange was never memorized. **Mine pending** on the Memory page catches up any conversation left behind.)
 
@@ -83,13 +93,20 @@ A conversation holds at most one queued mining job at a time: if the user sends 
 
 The **Mine pending** button on the Memory page queues a mining job for every conversation that still holds a turn the miner would pick up — a turn with some text, no drawer, and not removed by the user. It reports how many conversations it scanned and how many new jobs it queued; a conversation whose mining job was already waiting is not counted twice.
 
+It also gives another chance to turns that were set aside because their exclusion check ran out of time (see **Slow patterns** below), so those are checked again too.
+
 ### Automatic recall (on every user message)
 
 1. The user types a message and submits.
 2. Before the model is called, `recallForUser(userId, message, { topK })` runs.
-3. The retrieval pipeline returns the top-K drawers ranked by hybrid score.
-4. The drawers are rendered into a compact memory context block (`<memory_context>…</memory_context>`) and prepended to the system prompt.
-5. The model now has the relevant past context and can answer with continuity.
+3. The message is checked against the user's exclusion rules first. If it matches — say it contains an API key — recall is skipped for that turn: the message is not sent to the embedding provider, not written to the recall log, and the reply simply has no memory context. If the rules cannot be loaded at all (a database hiccup), recall is skipped the same way rather than run unchecked.
+4. Otherwise the retrieval pipeline returns the top-K drawers ranked by hybrid score.
+5. The drawers are rendered into a compact memory context block (`<memory_context>…</memory_context>`) and prepended to the system prompt.
+6. The model now has the relevant past context and can answer with continuity.
+
+The palace search box and an agent's task description go through the same check.
+
+The same message also picks which skills are listed in the system prompt: it is compared with each skill's description to choose the most relevant few. That comparison goes through the same check first. A message that matches a rule is not sent to the embedding provider for it either — every skill is listed instead, as happens when the embedding provider is unavailable. When the message is sent, recall and the skill ranking both ask the provider not to keep a cached copy of it.
 
 ### Manual palace browsing (`/memory`)
 
@@ -136,7 +153,9 @@ Deleting a drawer works the same way: the message it came from is marked as remo
 
 #### Exclusion rules
 
-Exclusion rules are a deny list the miner checks **before** it calls the embedding provider and before it writes anything. A turn that matches an enabled rule is dropped entirely: it never leaves the process and never becomes a drawer. Ordering matters here — filtering after insert would mean the secret had already been embedded and stored.
+Exclusion rules are a deny list the miner checks **before** it calls the embedding provider and before it writes anything. A turn that matches an enabled rule is dropped entirely: it never leaves the process and never becomes a drawer. Ordering matters here — filtering after insert would mean the secret had already been embedded and stored. Recall applies the same rules to each new message before searching memory with it (see **Automatic recall**).
+
+The whole turn is checked, however long. (Until September 2026 only the first 40,000 characters were, while the rest of a long paste was still stored — so a password near the end of a pasted log got through.)
 
 Each rule has a name, a match kind (`regex` or `substring`), a pattern, an on/off switch, and a running count of how many turns it has blocked.
 
@@ -154,9 +173,17 @@ A set of credential rules is built in and enabled for every user:
 | JSON web token | three base64url segments in JWT shape |
 | Connection string credentials | `scheme://user:password@host` URLs |
 
-Built-in rules can be disabled or reworded but not deleted. Users can add their own for anything else they would rather not have remembered — a home address, a client name, a medical detail.
+Built-in rules can be disabled or reworded but not deleted. Users can add their own for anything else they would rather not have remembered — a home address, a client name, a medical detail. Editing a rule changes its name, note or pattern and nothing else: a rule that was switched off stays off.
 
-The Manage dialog includes a **tester**: paste something you would not want remembered and it reports which rule would block it (showing only a redacted fragment of the match, never the whole value). Nothing typed into the tester is stored.
+**Slow patterns.** A regex pattern can be written so that checking it against the wrong text takes practically forever — the classic shape is a repeated group that also repeats inside, like `(a+)+`. The rule editor refuses that shape and says which part of the pattern to change; `(\w+\s?)*` is refused, `(\d{3}-)+` is fine. As a second safety net every check runs apart from the rest of the server with a time limit of one second per turn: a rule that runs out of time is treated as a match, so that turn is not stored, and the rest of the app is never slowed down by it. A rule saved before the editor refused slow patterns keeps working under that limit, and the rules list flags it with a note saying what to change.
+
+A turn dropped because its check ran out of time is only **set aside**, not excluded for good. No rule was actually seen to match it, so it does not count as a hit for the rule, and the job result reports it separately (`timedOutTurns`). The next time you save, switch or delete a rule — or press **Mine pending** — set-aside turns are released and checked again when their conversation is next mined. If the rule still cannot finish in time they are set aside again; if it now finishes, the turn is either kept or excluded for real. (Until September 2026 a timed-out turn was excluded for good under the slow rule's name, and fixing the rule did not bring it back.)
+
+Checks are handled by a small, fixed number of background workers — two to four, depending on the machine. When more checks arrive at once they wait their turn instead of each starting a worker of its own, and a check's one-second limit starts only when a worker picks it up, so waiting never counts against it. (Until September 2026 every check started its own worker, and a burst of a few hundred tester requests against a slow pattern could use up the server's memory.) A worker that finished its check in time is kept for the next one, which also saves each chat turn the cost of starting one.
+
+**Built-in rules stay fast on long text.** Each built-in rule takes time in step with the length of the text. Two of them used to be much slower on long runs of dotted or dashed text such as `a.a.a.…` — over a second for 120,000 characters, so a harmless paste was dropped as if it held a credential. In September 2026 the *Connection string credentials* rule was limited to schemes of at most 32 characters, and the *JSON web token* rule now requires the token to start its run of characters. A user's copy of either rule that still has the old wording is updated automatically the next time mining runs or the rules list is opened; a copy the user has reworded is left as it is.
+
+The Manage dialog includes a **tester**: paste something you would not want remembered and it reports which rule would block it (showing only a redacted fragment of the match, never the whole value). Nothing typed into the tester is stored, and the pasted text is sent in the body of the request rather than in its web address, so it does not end up in a proxy's access log. One test per user runs at a time: pressing **Check** while a test is still running says so ("Another check is still running") instead of starting a second one.
 
 ### Settings
 
@@ -165,7 +192,7 @@ Users can configure memory behavior under Settings → Memory:
 - **Enabled** — turn auto-mining + recall on or off entirely.
 - **Top-K** — how many drawers to inject per turn (default 5; higher = more context, more tokens).
 - **Use rerank** — pass top-20 through a reader model for higher precision (small latency cost).
-- **Rerank model** — defaults to `anthropic/claude-haiku-4.5`.
+- **Rerank model** — defaults to Claude Haiku 4.5. Either spelling of a Claude model works here: the Agent SDK's `claude-haiku-4-5` or OpenRouter's `anthropic/claude-haiku-4.5`.
 - **Embedding model** — defaults to `openai/text-embedding-3-small` (1536-dim, must match the pgvector column).
 - **Auto-mine** — disable to make mining manual-only.
 
@@ -182,18 +209,20 @@ Per-agent override: `agents.config.memory` lets you disable recall for specific 
 - **Chat domain** — automatic mining hook fires when a chat run reaches `completed`; recall runs in the chat stream entry point before the LLM call.
 - **Settings domain** — memory behavior toggles live in `appSettings.memoryConfig` (enabled / topK / useRerank / rerankModel / embeddingModel / autoMine).
 - **Activity domain** — every mining run emits an `agent_action` event so users can see what got remembered.
-- **OpenRouter** — embeddings + entity-extraction LLM calls + optional rerank model all route through the existing OpenRouter client; cost rolls into the existing per-source breakdown (`memory_embed`, `memory_extract`, `memory_rerank`, `memory_qa`).
+- **OpenRouter** — embeddings + entity-extraction LLM calls + optional rerank model all route through the existing OpenRouter client; cost rolls into the existing per-source breakdown (`memory_embed`, `memory_extract`, `memory_rerank`, `memory_qa`). The app's defaults name Claude models the way the Agent SDK does (`claude-sonnet-5`); the OpenRouter client converts those to OpenRouter's own names (`anthropic/claude-sonnet-5`) before sending, since OpenRouter refuses anything else. The embedding of a recall query is sent without OpenRouter's response cache; drawer content still uses it, since rebuilds embed the same text again.
 
 ## Business rules
 
 - **Verbatim-only drawers** — mining never paraphrases; AAAK + embeddings are the index and the source text stays exact for auditability. The one exception is a deliberate human edit, which is stamped with an `editedAt` timestamp so the change is visible.
 - **Text and vector must agree** — a drawer's embedding is derived from its content. Any write that changes content either writes a fresh embedding or writes none at all. A stale vector is never left behind, because it would make the drawer match wording it no longer contains while the UI showed something else.
-- **Exclusion runs before embedding** — the deny list is evaluated on the raw turn before the extraction call and before the embedding call, so excluded content never leaves the process.
+- **Exclusion runs before embedding** — the deny list is evaluated on the raw turn before the extraction call and before the embedding call, and on each new chat message before recall or the skill ranking embeds it, so excluded content never leaves the process.
+- **Exclusion checks are bounded** — a check that cannot finish within its time limit counts as a match. A deny list can afford to drop a turn; it cannot afford to store a secret or to stall the server. The number of checks running at once is capped too, so a burst of them queues rather than exhausting the server. A turn dropped this way is set aside until the rules change or Mine pending runs, not excluded for good.
+- **No deny list, no memory** — if the exclusion rules cannot be loaded, mining fails (and is retried later) and recall is skipped. Neither ever runs without the rules.
 - **Never-recall is enforced in the query, not the ranking** — excluded drawers are filtered out of the candidate pool by the database predicate rather than scored to the bottom, so no scoring change can accidentally surface them.
 - **Per-user isolation** — every drawer/wing/entity is FK'd to a `userId` with cascade-on-delete. There's no shared memory pool.
 - **Soft staleness on relations** — overwriting a relation creates a new row and bumps `validTo` on the old one rather than mutating it; the timeline is preserved.
 - **Embedding-dimension lock** — the pgvector column is `vector(1536)`. Switching embedding models that change dimension requires a migration + reindex; the settings UI restricts choices to compatible models.
-- **Mining cost cap** — each conversation incurs one small LLM call for entity extraction (default `openai/gpt-4o-mini` via OpenRouter) plus one embedding call per turn. These show up in the cost dashboard tagged `source='memory_extract'` and `source='memory_embed'`.
+- **Mining cost cap** — each mining pass makes one LLM call for entity extraction (the app's default model, via OpenRouter) plus one embedding call per batch of turns. These show up in the cost dashboard tagged `source='memory_extract'` and `source='memory_embed'`.
 
 ## Benchmark
 
@@ -215,11 +244,15 @@ The benchmark uses an isolated test schema scoped per-run so it never pollutes t
 - **Empty conversation** — mining no-ops; no drawers created.
 - **No matching memories** — recall returns an empty context block (the `<memory_context>` element is omitted) so the model doesn't see "no memories found" filler.
 - **Agent with `memory.disabled = true`** — recall is skipped for that agent's chats but mining still runs (so other agents in the same user's palace benefit).
-- **Embedding API failure** — drawer is still written but with a null embedding; a backfill job (future work, queued onto the `#17` jobs system) re-embeds nullable rows.
-- **Massive conversations (>50 turns)** — mining batches the entity-extraction call across windows of 8-10 turns to keep the LLM input bounded.
+- **Embedding API failure while mining** — the mining job fails before it writes anything (no empty wing or room is left behind) and is retried. A room with no closets from before this change shows "No closets in this room." in the palace.
+- **Massive conversations** — each mining pass sends only the turns not yet mined, in one entity-extraction call. After every exchange that is just the latest few turns, but the first pass over a long conversation that was never mined (for example after **Mine pending**) sends all of it at once. If the model cannot handle it or gives an unusable answer, mining falls back to a simple extraction (the job shows `extractorFallback`) and still stores every turn.
 - **Duplicate detection** — wings/rooms/closets dedupe by slug + alias matching; mining the same conversation twice is idempotent, because a turn that already has a drawer is skipped.
-- **A turn that arrives while its conversation is being mined** — the running job has already read the conversation, so that turn waits for the next exchange's job (or a **Mine pending** sweep).
+- **A turn that arrives while its conversation is being mined** — the running job goes round again for it before it finishes (see **Automatic mining**).
 - **Every turn in a conversation is excluded** — mining reports the exclusion count and the rules that fired (visible on the job in `/settings/jobs`), so "nothing was mined" is distinguishable from "a rule blocked it".
-- **A broken exclusion pattern** — a rule whose regex no longer compiles is logged and treated as never matching, rather than throwing and wedging the mining job. The rule editor validates patterns on save, so this only happens to rules written before a validation change.
+- **A broken exclusion pattern** — a rule whose regex no longer compiles is logged and treated as never matching, rather than throwing and wedging the mining job. The rule editor validates patterns on save, so this only happens to rules written before a validation change. The rules list flags such a rule and says that it never matches until it is fixed.
+- **A slow exclusion pattern** — see **Slow patterns** above: the turn it cannot finish checking in time is set aside, the log names the rule, and the rest of the conversation is checked as usual. Changing any rule, or Mine pending, lets the turn be checked again.
+- **Exclusion rules cannot be loaded** — a mining job fails before anything is sent to the extraction model or the embedding provider, and is retried. (Until September 2026 it logged a warning and mined without the deny list, so a brief database hiccup could send secrets out and store them.)
+- **A closet's drawers fail to load** — the palace says so under the closet tabs; picking the closet again retries.
+- **Reorganize analysis fails** — the panel shows the error and a **Try again** button; it does not retry on its own. Each time the panel opens it analyses the palace afresh, so it never lists merges an earlier apply already made.
 - **Editing a drawer while the embedding provider is down** — the text is saved and the vector is cleared. The drawer keeps working in keyword search and stays browsable; **Reorganize** re-embeds it later.
 - **Forgetting a conversation that spans several wings** — each wing that has rooms from that conversation loses those rooms; wings left with nothing are deleted, wings with other rooms survive.

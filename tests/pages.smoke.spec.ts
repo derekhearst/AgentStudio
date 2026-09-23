@@ -40,7 +40,14 @@ const STATIC_ROUTES: SmokeRoute[] = [
 	{ name: 'monitors', path: '/monitors' },
 	{ name: 'projects', path: '/projects' },
 	{ name: 'source-control', path: '/source-control' },
-	{ name: 'activity', path: '/activity' },
+	{
+		name: 'activity',
+		path: '/activity',
+		// #38 — the usage strip's queries must answer, not just the feed's.
+		ready: async (page) => {
+			await expect(page.getByTestId('usage-runs')).toBeVisible({ timeout: 12_000 })
+		},
+	},
 	{ name: 'memory', path: '/memory' },
 	{ name: 'research', path: '/research' },
 	{ name: 'users', path: '/users' },

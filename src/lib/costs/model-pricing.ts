@@ -17,7 +17,7 @@
  */
 
 import { logger } from '$lib/observability/logger'
-import { toOpenRouterModelId } from '$lib/llm/model-ids'
+import { toOpenRouterModelId } from '$lib/llm/openrouter-model'
 
 export type ModelPrice = { promptPrice: number; completionPrice: number }
 

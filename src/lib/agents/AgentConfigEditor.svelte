@@ -178,7 +178,7 @@
 
 	<p class="mb-1 text-xs font-semibold uppercase tracking-wide text-base-content/45">Hook bindings</p>
 	<p class="mb-2 text-[11px] leading-snug text-base-content/55">
-		Bind opt-in built-in hook handlers OR (future) skill slugs to lifecycle events for this agent only. Globally-registered handlers (activity emit, etc.) fire automatically — bindings here are additive. <a href="/settings/hooks" class="link link-hover">View invocation log</a>.
+		Bind opt-in built-in hook handlers or skill names to lifecycle events for this agent only. They run for its chats and its automations. Globally-registered handlers (activity emit, etc.) fire automatically — bindings here are additive. <a href="/settings/hooks" class="link link-hover">View invocation log</a>.
 	</p>
 	{#if editing}
 		<div class="space-y-1.5">

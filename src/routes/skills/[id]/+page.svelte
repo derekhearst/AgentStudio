@@ -17,6 +17,7 @@
 	} from '$lib/skills';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import AddSkillFileDialog from '$lib/skills/AddSkillFileDialog.svelte';
 	import SkillExportDialog from '$lib/skills/SkillExportDialog.svelte';
 	import SkillFileItem from '$lib/skills/SkillFileItem.svelte';
@@ -80,11 +81,19 @@
 		void refresh();
 	});
 
+	/**
+	 * Load the skill from the server — never the query cache (see `fetchFresh`). Every edit
+	 * on this page ends here, and a cached read showed the pre-edit skill: a saved
+	 * description snapped back, a disabled skill still read as enabled, and a new file did
+	 * not appear until a full reload.
+	 */
 	async function refresh() {
-		loading = true;
+		// Only the first load swaps the page for a spinner. A reload after an edit keeps the
+		// skill on screen, so the control that was just used is not rebuilt under the pointer.
+		loading = !skill;
 		error = null;
 		try {
-			skill = await getSkillByIdQuery({ id: skillId });
+			skill = await fetchFresh(getSkillByIdQuery({ id: skillId }));
 			if (!skill) error = 'Skill not found';
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load';
@@ -126,9 +135,12 @@
 	}
 
 	/* ── Skill actions ───────────────────── */
-	async function handleToggleEnabled() {
+	// The switch's own state, not `!skill.enabled`: that is only as current as the last
+	// load, and a stale one sent the same value twice.
+	async function handleToggleEnabled(event: Event) {
 		if (!skill || skill.isSystem) return;
-		await toggleSkillEnabledCommand({ id: skill.id, enabled: !skill.enabled });
+		const enabled = (event.currentTarget as HTMLInputElement).checked;
+		await toggleSkillEnabledCommand({ id: skill.id, enabled });
 		await refresh();
 	}
 
@@ -241,10 +253,15 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 		<div class="mx-auto max-w-4xl space-y-4">
+			<!--
+				Above the skill, not instead of it: when the reload after an edit fails, the skill as
+				last loaded stays on screen under the error rather than vanishing.
+			-->
+			{#if error}
+				<div role="alert" class="alert alert-error">{error}</div>
+			{/if}
 			{#if loading}
 				<div class="flex justify-center py-16"><span class="loading loading-spinner loading-lg"></span></div>
-			{:else if error}
-				<div class="alert alert-error">{error}</div>
 			{:else if skill}
 				{@const s = skill}
 				{#if isSystemSkill}

@@ -12,6 +12,20 @@ The implementation is consolidated under `src/lib/llm/`.
 - **Model catalog** — list all available models with context windows, pricing, modalities, and capabilities. Cached with a 1-hour TTL.
 - **Cost calculation** — given model ID + token counts, return USD cost using live catalog pricing.
 - **Model selection UI** — `ModelSelector` component for picking a model across the app.
+- **Text-to-speech** — `tts.server.ts` turns reply text into MP3 through OpenRouter's speech endpoint, prices it from the separate speech-model catalogue (speech models are not in the chat-model list), checks budget limits and records the spend under `tts`. See [../speech/speech.md](../speech/speech.md).
+
+## Model ids
+
+The app keeps two spellings of a Claude model. The Agent SDK engine uses Anthropic's bare id (`claude-haiku-4-5`), and since the engine migration that is what the app's defaults and stored settings hold. OpenRouter, which the rest of the app still calls directly (research, memory mining and reranking, monitors, titles, automations, the legacy runtime loop), only accepts its own catalogue names (`anthropic/claude-haiku-4.5`) and refuses anything else. So `chat()` and `streamChat()` convert before sending (`toOpenRouterModelId` in `src/lib/llm/openrouter-model.ts`), and the usage ledger looks prices up with the same conversion:
+
+| Stored id | Sent to OpenRouter |
+| --- | --- |
+| `claude-sonnet-5` | `anthropic/claude-sonnet-5` |
+| `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-sonnet-4-5[1m]` | `anthropic/claude-haiku-4.5`, `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.5` |
+| `anthropic/claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
+| `openai/gpt-4o-mini`, or an alias such as `sonnet` | unchanged |
+
+A bare Claude id gains the `anthropic/` prefix, loses any snapshot date or `[1m]` suffix, and has its version written with a dot. Only ids it can map with certainty are changed; anything else goes to OpenRouter as written, so OpenRouter's own error names it. Callers that log usage log the converted id, since that is the one the model catalogue prices. Before 2026-09-23 the bare id was sent as-is, so every research run failed at its first planner call, every memory extraction and rerank quietly degraded, and the few calls that did succeed were priced at nothing.
 
 ## Data Model
 
@@ -60,7 +74,7 @@ Options accepted by `streamChat()`:
 
 | Field         | Type                     | Notes                                              |
 | ------------- | ------------------------ | -------------------------------------------------- |
-| `model`       | string                   | OpenRouter model ID                                |
+| `model`       | string                   | OpenRouter model ID, or a bare Claude id           |
 | `messages`    | `LlmMessage[]`           | Conversation history                               |
 | `tools`       | tool definitions[]       | Optional tool schemas                              |
 | `temperature` | number                   | Optional                                           |
@@ -78,22 +92,9 @@ Options accepted by `streamChat()`:
 | `listModels()`                              | Returns full model catalog from OpenRouter (1h cache)                    |
 | `getModel(id)`                              | Returns a single `ModelInfo` by ID                                       |
 | `calculateCost(model, tokensIn, tokensOut)` | Returns USD cost as a number using live pricing                          |
-| `toOpenRouterModelId(id)`                   | Translates a stored model id into the one OpenRouter knows (below)       |
-
-## Model ids
-
-The app stores Anthropic models the way the Claude Agent SDK names them: `claude-sonnet-5`, `claude-haiku-4-5`. That is what the chat engine needs. OpenRouter, which the rest of the app still calls directly (research, memory mining, reranking, monitors, the legacy runtime loop), only knows the vendor's prefix and a dotted version: `anthropic/claude-sonnet-5`, `anthropic/claude-haiku-4.5`.
-
-`chat()` and `streamChat()` therefore send every model id through `toOpenRouterModelId`, and the usage ledger looks prices up with it too:
-
-| Stored id | Sent to OpenRouter |
-| --- | --- |
-| `claude-sonnet-5` | `anthropic/claude-sonnet-5` |
-| `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-sonnet-4-5[1m]` | `anthropic/claude-haiku-4.5`, `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.5` |
-| `anthropic/claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
-| `openai/gpt-4o-mini`, or an alias such as `sonnet` | unchanged |
-
-Only ids it can map with certainty are changed; anything else goes to OpenRouter as written. Before 2026-09-23 the bare id was sent as-is, so every research run failed at its first planner call, and the few calls that did succeed were priced at nothing.
+| `toOpenRouterModelId(id)`                   | Translates a stored model id into the one OpenRouter knows (see Model ids) |
+| `synthesizeSpeech(input)`                   | One chunk of text → MP3 via OpenRouter; budget-checked, ledgered as `tts` |
+| `listSpeechModels()`                        | OpenRouter's speech models with per-character price and voices (1h cache; a failed fetch is retried after a minute) |
 
 ## Reasoning Support
 

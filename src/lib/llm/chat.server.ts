@@ -1,6 +1,6 @@
 import { OpenRouter } from '@openrouter/sdk'
 import { requireOpenRouterApiKey } from '$lib/server/config'
-import { toOpenRouterModelId } from './model-ids'
+import { toOpenRouterModelId } from './openrouter-model'
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -178,6 +178,7 @@ async function chatViaFetch(
 export async function chat(messages: LlmMessage[], model = DEFAULT_MODEL, options: ChatOptions = {}) {
 	const chatMessages = toChatMessages(messages)
 	const chatRequest: Record<string, unknown> = {
+		// Defaults and settings hold the Agent SDK's bare ids; OpenRouter rejects those.
 		model: toOpenRouterModelId(model),
 		messages: chatMessages,
 		stream: false,

@@ -15,3 +15,15 @@ export function remoteErrorMessage(err: unknown, fallback: string): string {
 	if (err instanceof Error && err.message) return err.message
 	return fallback
 }
+
+/**
+ * Whether a remote call failed because the record it asked for is not there.
+ *
+ * A 404 says so directly. A 400 says the same thing for a page whose only argument is an
+ * id from the URL: the query's schema rejected it (`/agents/not-a-uuid`), so no such
+ * record can exist. Such a page should say "not found" rather than show SvelteKit's bare
+ * "Bad Request".
+ */
+export function isNotFoundError(err: unknown): boolean {
+	return isHttpError(err) && (err.status === 404 || err.status === 400)
+}

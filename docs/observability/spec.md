@@ -61,7 +61,7 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 
 ### Unified Review Inbox
 
-`/review` is the primary inbox for human-required actions. Items are sorted by severity (critical first) then by age. The inbox unifies:
+`/review` is the primary inbox for human-required actions. Items are sorted by severity (critical first) then by age. Resolving an item updates the inbox at once, and **Refresh** reloads every section from the server. Each section of the dashboard (inbox, cost, platform health, logs, recent failures, budget) loads on its own: if one cannot be loaded, the page names it in an error above the dashboard, and the rest still shows as long as the inbox itself loaded. Each section's error clears as soon as that section loads again, for example when the next logs filter change works, without affecting what the error says about the others. The inbox unifies:
 
 | Item type                 | Severity | Triggered by                                                |
 | ------------------------- | -------- | ----------------------------------------------------------- |
@@ -101,7 +101,7 @@ Answering from /review a run that has already stopped waiting is refused with a 
 
 ### Run traces
 
-`/runs/[id]/trace` shows the step timeline for a run: each LLM call (with token counts and cost), each tool call (with duration and success/failure), each compaction event, and each hook invocation. Timeline is scrollable and expandable.
+`/review/trace/[runId]` shows the step timeline for a run: each LLM call (with token counts and cost), each tool call (with duration and success/failure), each compaction event, and each hook invocation. Timeline is scrollable and expandable. **Refresh** reloads the trace from the server, so a run that is still going shows its newest steps. A run id that is not a valid id at all shows "No run with this id." A valid id with no trace behind it, whether the run never existed or simply recorded nothing, shows "No trace recorded for this run". Any other failure to load shows its reason instead of a spinner, and if a Refresh fails, the trace already on screen stays there under the error.
 
 ### Recent failures
 
@@ -162,7 +162,7 @@ The logger writes to two sinks:
 
 Operators browse logs at `/observability/logs` (admin-only, mobile-friendly). Filters: min level, source, free-text search across message + JSON context, time-since, row limit. The sidebar shows row counts per source for the last 15min/1h/6h/24h so you can spot a noisy domain without scanning.
 
-A daily `app_logs_purge` job deletes rows older than `APP_LOGS_RETENTION_DAYS` (default `14`). The job is registered alongside the metrics handler at bootstrap.
+A daily `app_logs_purge` job deletes rows older than `APP_LOGS_RETENTION_DAYS` (default `14`). The same job, with the same window, deletes old `hook_invocations` rows (the hook log behind `/settings/hooks`), which grow by one row per hook per chat tool call. The job is registered alongside the metrics handler at bootstrap.
 
 Intentional exceptions where `console.*` is preferred over `logger`:
 

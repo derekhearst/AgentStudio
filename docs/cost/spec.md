@@ -17,7 +17,7 @@ The current foundation (`llm_usage` table + cost summary query) tracks LLM spend
 | `runId`     | uuid?     | FK to `runs` — which run caused this LLM call                                                               |
 | `taskId`    | uuid?     | FK to `tasks` — which task the run belongs to                                                               |
 | `agentId`   | uuid?     | FK to `agents` — which agent configuration was active                                                       |
-| `source`    | text      | Logical source: `chat`, `agent_planner`, `agent_synthesis`, `subagent`, `titlegen`, `image_gen`, `memory_*` |
+| `source`    | text      | Logical source: `chat`, `agent_planner`, `agent_synthesis`, `subagent`, `titlegen`, `image_gen`, `memory_*`, `tts` |
 | `model`     | text      | Model ID as returned by provider                                                                            |
 | `tokensIn`  | integer   | Prompt tokens                                                                                               |
 | `tokensOut` | integer   | Completion tokens                                                                                           |
@@ -121,6 +121,10 @@ If a call cannot be priced, the ledger says so rather than recording it as free:
 
 Each unpriced case logs a warning, at most once an hour per model and reason. No price is ever guessed. The cost summary counts unpriced calls, and /review says how many calls are missing from its total. Before 2026-09-23 both cases wrote cost 0 with no flag and no log, so the calls were invisible to budget limits.
 
+### What read-aloud records
+
+Each chunk of a reply read aloud writes one row with source `tts` (shown as "Read Aloud"). Speech is billed per character and OpenRouter sends no cost with the audio, so the cost is characters × the model's per-character price from OpenRouter's speech catalogue, and `tokensIn` holds the character count. A model the catalogue does not price, or a chunk read while the speech catalogue cannot be fetched, is recorded at $0 with `metadata.priced = false` and the same `metadata.unpriced` reason as any other unpriced call (above), so /review counts it among the calls missing from its total. Read-aloud is checked against budget limits before each chunk, like a chat turn, and records the same budget alerts: a warning at a limit's warning line and a block alert when a limit refuses a chunk. A chunk the listener stopped after OpenRouter already had it is still finished and recorded, because OpenRouter charges for it either way. See [../speech/speech.md](../speech/speech.md).
+
 ### Tool-call cost tracking
 
 When a tool call invokes a paid external service (web search, browser, code execution), the tool wrapper emits a `tool_usage` row with the estimated cost. Costs default to configured per-unit estimates and can be overridden by actual provider-returned cost if available.
@@ -129,6 +133,21 @@ When a tool call invokes a paid external service (web search, browser, code exec
 
 - A generated image with a cost writes one `image_generate` credit row. (Before 2026-09-23 the cost was kept on the image only.)
 - A video job writes a `video_generate` row with `metadata.costStatus = 'pending'` when it is submitted. The first thing to see the job end fills in the cost: the tool itself, the `/api/video-jobs` status page, or the `video_cost_reconcile` job, which checks pending jobs every ten minutes. A row is only ever settled once. A job that completes without a reported cost is marked unpriced. A job nobody sees finish within 48 hours is marked `abandoned` and a warning is logged. (Before, a job that outlasted the tool's wait was billed and never recorded.)
+
+### Tool-call counts
+
+Every tool call a chat turn makes — reading a file, editing one, running a command — also writes a `tool_usage` row with unit `call` and a cost of **$0**. These rows record that the call happened (and, for edits and commands, which file or command), not what it cost: a local call spends no money, and its real price is the tokens already counted for the turn. Because budget limits add up `cost`, these rows can never move a limit. A paid tool writes both a `call` row and a row carrying its spend; anything that counts calls counts only the `call` rows.
+
+Not yet counted: tool calls made through the older agent loop, which agent-attached automations, monitor actions and PR fixes still use.
+
+### Usage strip and weekly digest (#38)
+
+The usage strip on `/activity` and the optional weekly usage digest are built from these ledgers; see [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what they show. Four things about them belong to this domain:
+
+- **Tokens lead, dollars are "metered".** Claude runs record $0 (above), so the digest reports tokens first and labels dollars as metered spend — what gateway models, OpenRouter calls and paid tools charged.
+- **Budget headroom reads spend the way enforcement does.** The strip's Budget tile uses the same per-limit spend calculation as the check that blocks runs, over the same period, so the two cannot disagree. It only shows limits that enforcement applies: global limits, and agent limits that name an agent. Per-run limits, project limits (nothing enforces those yet) and agent limits with no agent are left out. The Settings → Budget daily and monthly limits are among them (see below); the tile brings them up to date with Settings before it reads, as the check does.
+- **Budget limits do not block the digest.** It spends nothing, so the automation budget check is skipped for it; that way it can still report a limit that is blocking everything else.
+- **The digest itself costs nothing.** It is rendered by code with no model call and records a run cost of $0.
 
 ### Cost summary
 
@@ -155,7 +174,7 @@ A hard limit with `action = 'block'` **does not interrupt a run already in progr
 
 ### Budget alert notifications
 
-When a limit reaches its warning level or its limit, a `budget_alerts` row is written and the user is notified in the app and by push. Each alert is written, and notified, once per limit, kind (warn or block) and period, however many runs are checked after it. Chat and automation runs both record warnings. Budget alerts are sent whatever the notification switches in Settings say: the user turns them off by clearing the limit.
+When a limit reaches its warning level or its limit, a `budget_alerts` row is written and the user is notified in the app and by push. Each alert is written, and notified, once per limit, kind (warn or block) and period, however many runs are checked after it. Chat runs, automation runs and read-aloud all record warnings, and a block alert when a limit refuses them. Budget alerts are sent whatever the notification switches in Settings say: the user turns them off by clearing the limit.
 
 A block alert records the spend that tripped the limit. Before 2026-09-23 both callers recorded the limit itself, so every block alert said spend and limit were equal and hid how far over it went.
 

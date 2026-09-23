@@ -9,6 +9,7 @@
 		switchProjectBranchCommand,
 	} from '$lib/projects/projects.remote';
 	import { relativeTime } from '$lib/util/relative-time';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type RepoDetail = Awaited<ReturnType<typeof getProjectRepoDetailQuery>>;
 	type DiffResult = Awaited<ReturnType<typeof getProjectDiffQuery>>;
@@ -36,7 +37,9 @@
 		loading = true;
 		error = null;
 		try {
-			detail = await getProjectRepoDetailQuery({ projectId });
+			// Fresh: this reloads after pull, commit, branch and push, and a cached read showed
+			// the repo as it was before the action.
+			detail = await fetchFresh(getProjectRepoDetailQuery({ projectId }));
 			if (detail.status?.branch) pushBranch = detail.status.branch;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load repo detail';
@@ -46,7 +49,10 @@
 	}
 
 	$effect(() => {
-		if (projectId) void load();
+		if (!projectId) return;
+		// Another project's repo must not stay on screen while this one's loads.
+		detail = null;
+		void load();
 	});
 
 	async function runAction<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
@@ -130,18 +136,27 @@
 		relativeTime(d, { weekFallback: true, nullLabel: '—' });
 </script>
 
+<!--
+	The spinner and the bare error are for a first load only. Every pull, commit, branch and
+	push reloads from the server, and swapping the tab for a spinner during that round trip
+	hid the action's result and any open diff; a failed reload blanked the tab. A reload's
+	error sits above the repo as it was last loaded.
+-->
 {#if repoKind === 'none'}
 	<div class="rounded-xl border border-base-300/60 bg-base-200/30 p-8 text-center text-sm text-base-content/55">
 		This project has no filesystem footprint. Create a new project with a local or imported repo to get git controls.
 	</div>
-{:else if loading}
+{:else if loading && !detail}
 	<div class="flex justify-center py-10">
 		<span class="loading loading-spinner loading-md text-primary"></span>
 	</div>
-{:else if error || !detail}
-	<div class="alert alert-error text-sm">{error ?? 'Failed to load.'}</div>
+{:else if !detail}
+	<div role="alert" class="alert alert-error text-sm">{error ?? 'Failed to load.'}</div>
 {:else}
 	<div class="space-y-3">
+		{#if error}
+			<div role="alert" class="alert alert-error text-sm">{error}</div>
+		{/if}
 		{#if actionMessage}
 			<div class="alert alert-info py-2 text-xs">{actionMessage}</div>
 		{/if}

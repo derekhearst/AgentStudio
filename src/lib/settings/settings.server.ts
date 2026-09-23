@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
 import { syncSettingsBudgetLimits } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
+import { DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE } from '$lib/speech/speech'
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
@@ -17,6 +18,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 export const DEFAULT_SETTINGS = {
 	defaultModel: 'claude-sonnet-5',
 	transcriptionModel: 'google/gemini-2.5-flash',
+	ttsModel: DEFAULT_TTS_MODEL,
+	ttsVoice: DEFAULT_TTS_VOICE,
 	notificationPrefs: {
 		taskCompleted: true,
 		needsInput: true,
@@ -60,6 +63,8 @@ export async function getOrCreateSettings(userId: string) {
 			userId,
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			transcriptionModel: DEFAULT_SETTINGS.transcriptionModel,
+			ttsModel: DEFAULT_SETTINGS.ttsModel,
+			ttsVoice: DEFAULT_SETTINGS.ttsVoice,
 			// notificationPrefs: schema's column-default fills in dreamSummary for legacy
 			// rows; we just don't expose it through this pipeline anymore.
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
@@ -77,6 +82,9 @@ export async function updateSettings(input: {
 	userId: string
 	defaultModel?: string
 	transcriptionModel?: string
+	ttsModel?: string
+	/** Empty string: the speech model's own default voice. */
+	ttsVoice?: string
 	theme?: string
 	notificationPrefs?: {
 		taskCompleted?: boolean
@@ -129,6 +137,8 @@ export async function updateSettings(input: {
 			.set({
 				defaultModel: input.defaultModel ?? current.defaultModel,
 				transcriptionModel: input.transcriptionModel ?? current.transcriptionModel,
+				ttsModel: input.ttsModel ?? current.ttsModel,
+				ttsVoice: input.ttsVoice ?? current.ttsVoice,
 				theme: 'AgentStudio-night',
 				notificationPrefs: {
 					...current.notificationPrefs,
@@ -217,14 +227,13 @@ export async function resetSettings(userId: string) {
 		const [row] = await tx
 			.update(appSettings)
 			.set({
-				defaultModel: DEFAULT_SETTINGS.defaultModel,
-				theme: DEFAULT_SETTINGS.theme,
-				notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
-				// The row ids stay: the sync below needs them to switch the old limits off.
+				// Every default, by spreading the one list of them. This used to name the fields
+				// one by one and missed `transcriptionModel`, so Reset said "Settings reset to
+				// defaults." and left the transcription model as it was. The read-aloud model and
+				// voice (#27) are in the list, so they come back too.
+				...DEFAULT_SETTINGS,
+				// The budget row ids stay: the sync below needs them to switch the old limits off.
 				budgetConfig: { ...DEFAULT_SETTINGS.budgetConfig, limitIds: current.budgetConfig?.limitIds },
-				contextConfig: DEFAULT_SETTINGS.contextConfig,
-				toolConfig: DEFAULT_SETTINGS.toolConfig,
-				memoryConfig: DEFAULT_SETTINGS.memoryConfig,
 				updatedAt: new Date(),
 			})
 			.where(eq(appSettings.id, current.id))

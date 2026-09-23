@@ -8,16 +8,25 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
+
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
 
 ### Agents
 
-Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page provides a read-only browser for viewing agent status and navigating to agent details.
-Agent detail pages allow editing the assigned model and system prompt.
+Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page lists every agent with its status — Available or Paused — and lets you pause or resume a custom agent: a paused agent is not offered for delegation and its automations and monitors are skipped, but you can still chat with it. Agent detail pages allow editing the assigned model, system prompt and hook bindings; hooks run for an agent's chats as well as its automations (see [docs/hooks/hooks.md](docs/hooks/hooks.md)). The Plan and Research agents hand an approved plan to another agent — usually Chat or Autonomous — and find its id with the read-only `list_agents` tool. See [docs/agents/agents.md](docs/agents/agents.md).
+
+### Skills
+
+Reusable instruction sets agents load on demand, managed at `/skills`. A skill exports as a `SKILL.md` package with its resource files, and importing that package recreates it exactly. See [docs/skills/skills.md](docs/skills/skills.md).
+
+### Activity and Usage
+
+`/activity` opens with a usage strip for the last 24 hours, 7 days or 30 days: runs and their failure rate, tokens (the real measure, since Claude subscription runs record $0) with metered dollars underneath, automation runs, the top models and agents (each with its metered dollars), the most-used tools, the review inbox, budget headroom, and a short list of anomalies such as a spend spike or an automation that started failing. Below it is the chronological activity feed. The same numbers can be sent every Monday as a weekly usage digest to the review inbox or a chat thread; it is opt-in and written by code, with no model call. See [docs/activity/spec.md](docs/activity/spec.md).
 
 ### Settings
 
-Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits. The daily and monthly budget limits block new chat and automation runs once spend reaches them and alert at 80% and 100% (see [`docs/cost/spec.md`](docs/cost/spec.md)); the notification switches decide which notifications are sent (see [`docs/notifications/spec.md`](docs/notifications/spec.md)).
+Settings persist default model, transcription and read-aloud (text-to-speech) model and voice, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits. The daily and monthly budget limits block new chat and automation runs once spend reaches them, alert at 80% and 100%, and show as headroom on `/activity` (see [`docs/cost/spec.md`](docs/cost/spec.md)); the notification switches decide which notifications are sent (see [`docs/notifications/spec.md`](docs/notifications/spec.md)).
 
 Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 
@@ -74,7 +83,7 @@ cp .env.example .env
 
 - `DATABASE_URL`
 - `AUTH_PASSWORD` (creates the owner account the first time the server starts against an empty database; never overwrites an existing password. Optional `AUTH_OWNER_NAME` / `AUTH_OWNER_USERNAME` default to `Owner` / `owner`)
-- `OPENROUTER_API_KEY`
+- `OPENROUTER_API_KEY` (also powers voice transcription and read-aloud)
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`). It must be a directory the app can create folders in: every chat turn creates its workspace there before the agent starts, and a turn fails with "Could not prepare the workspace for this run." when it cannot. On a development machine without a writable `/workspace`, point it at a local folder such as `./.sandbox` (gitignored).
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
@@ -83,6 +92,7 @@ cp .env.example .env
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
 - `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` (only needed for non-Claude models, which run through an Anthropic-compatible gateway)
 - `CRON_SECRET` (optional; lets an external scheduler fire `POST /api/cron` with `Authorization: Bearer <secret>` when the in-process scheduler is turned off; unset → only a signed-in session can fire it)
+- `BODY_SIZE_LIMIT` (production only; the largest request body the server accepts, e.g. `25M`). The Docker image sets `25M`, which fits a 20MB project knowledge file or chat attachment. Without it the server's own default of 512K refuses every upload over half a megabyte. Raise it (e.g. `110M`) for 100MB video attachments; never set it to an empty value, which the server reads as 0 and refuses every upload. `bun run dev` enforces no limit. See [`src/lib/server/body-limit.ts`](src/lib/server/body-limit.ts).
 
 The Claude Code process that runs each chat turn does **not** inherit these. It gets a short allow-list — `PATH`, `HOME` / `USERPROFILE`, temp and locale variables, proxy and CA settings, `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN` for its own login, and the gateway's `ANTHROPIC_*` for gateway models — so an agent's shell command cannot read the server's secrets. A proxy or certificate setting the agent needs must use one of those names. See [`docs/runtime/spec.md`](docs/runtime/spec.md).
 
@@ -203,6 +213,10 @@ Notes:
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
+- Agents: `docs/agents/agents.md`
+- Hooks (what runs when, on chats and automations): `docs/hooks/hooks.md`
+- Skills (including export and import): `docs/skills/skills.md`
+- Read aloud (text-to-speech, auto-read): `docs/speech/speech.md`
 
 ## Background Jobs
 
@@ -210,7 +224,7 @@ Scheduled automations, monitor checks, PR CI polling, memory mining, research ru
 
 ## Projects
 
-Projects are durable containers for the work users produce with their agents. Most projects have a real working directory on disk — either a fresh `git init` or a clone imported from GitHub — and the agent writes files there, with git as the version history. Browse at `/projects`; a conversation can be bound to a project with `set_project_context` so the agent knows where to work. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
+Projects are durable containers for the work users produce with their agents. Most projects have a real working directory on disk — either a fresh `git init` or a clone imported from GitHub — and the agent writes files there, with git as the version history. Browse at `/projects`; a conversation can be bound to a project with `set_project_context` so the agent knows where to work. A project can also hold knowledge files (up to 20MB each) that the agent reads like any other file; deleting a project removes its directory, knowledge included. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
 
 ## Memory Palace
 
@@ -248,9 +262,11 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
-- `/cost` Cost dashboard
+- `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
+- `/review` Cost, recent failures, logs and the review inbox
 - `/agents` Agent management
 - `/automations` Scheduled automation workflows ([docs](docs/automations/automations.md))
 - `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration, including the read-only System checklist
+- `POST /api/tts` Read-aloud: one chunk of reply text in, MP3 out ([docs](docs/speech/speech.md))

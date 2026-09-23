@@ -11,6 +11,7 @@
 		disconnectGithubCommand,
 	} from '$lib/projects/projects.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import ConnectionsPanel from '$lib/projects/components/ConnectionsPanel.svelte';
 	import ProjectGridItem from '$lib/projects/components/ProjectGridItem.svelte';
 	import CreateProjectModal from '$lib/projects/components/CreateProjectModal.svelte';
@@ -34,11 +35,16 @@
 
 	onMount(() => void load());
 
+	// Reloads after create, delete and disconnect, so it must not read the query cache —
+	// a new project stayed missing and GitHub stayed "connected" until a full reload.
 	async function load() {
 		loading = true;
 		error = null;
 		try {
-			[projects, overview] = await Promise.all([listProjectsQuery(), getProjectsOverviewQuery()]);
+			[projects, overview] = await Promise.all([
+				fetchFresh(listProjectsQuery()),
+				fetchFresh(getProjectsOverviewQuery()),
+			]);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load projects';
 		} finally {
@@ -61,10 +67,14 @@
 	}
 
 	async function handleDelete(project: ProjectRow) {
-		const fsNote = project.repoKind !== 'none' ? ' Filesystem and git repo will also be removed.' : '';
+		// Every project's directory goes with it, repository or not, so every kind gets a warning.
+		const fsNote =
+			project.repoKind === 'none'
+				? "The project's files (knowledge files and anything agents wrote there) will also be removed."
+				: "The project's files and git repo (including knowledge files and anything agents wrote there) will also be removed.";
 		const ok = await confirmDialog({
 			title: `Delete "${project.name}"?`,
-			message: `${fsNote.trim() ? fsNote.trim() + ' ' : ''}This cannot be undone.`,
+			message: `${fsNote} This cannot be undone.`,
 			confirmLabel: 'Delete',
 			variant: 'danger'
 		});
@@ -118,16 +128,24 @@
 			onDisconnectGithub={disconnectGithub}
 		/>
 
-		{#if loading}
+		<!--
+			The error sits above the grid rather than in its place: a failed delete, or a failed
+			reload after one, used to blank every project on the page. And the spinner is for a
+			first load only, so a reload after a change does not throw the reader to the top.
+		-->
+		{#if error}
+			<div role="alert" class="alert alert-error text-sm">{error}</div>
+		{/if}
+		{#if loading && projects.length === 0}
 			<div class="flex justify-center py-20">
 				<span class="loading loading-spinner loading-lg text-primary"></span>
 			</div>
-		{:else if error}
-			<div class="alert alert-error text-sm">{error}</div>
 		{:else if projects.length === 0}
-			<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
-				No projects yet. Click <span class="font-mono">+ New project</span> above to start.
-			</div>
+			{#if !error}
+				<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
+					No projects yet. Click <span class="font-mono">+ New project</span> above to start.
+				</div>
+			{/if}
 		{:else}
 			<div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
 				{#each projects as project (project.id)}

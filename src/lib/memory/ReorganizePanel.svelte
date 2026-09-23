@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		analyzeMemoryReorganizationQuery,
 		applyMemoryReorganizationCommand,
@@ -19,27 +20,42 @@
 	let loading = $state(false);
 	let applying = $state(false);
 	let error = $state<string | null>(null);
+	// Whether this opening has asked for an analysis. Not reactive on purpose: the panel analyses
+	// once per opening. Keyed on "no plan and not loading" instead, a failed analysis — which
+	// leaves no plan — retried in a loop, and the error flickered without ever staying up.
+	let requested = false;
+	// Moves on at every close, so an analysis that lands after the panel closed — or closed and
+	// opened again — writes nothing. Not reactive either.
+	let opening = 0;
 
 	$effect(() => {
-		if (open && !plan && !loading) {
-			void load();
-		}
 		if (!open) {
+			requested = false;
+			opening += 1;
+			plan = null;
 			result = null;
 			error = null;
+			loading = false;
+			return;
 		}
+		if (requested) return;
+		requested = true;
+		// Fresh each time it opens: the cached analysis may predate mining or an apply.
+		untrack(() => void load({ force: true }));
 	});
 
 	async function load(opts: { force?: boolean } = {}) {
+		const current = opening;
 		loading = true;
 		error = null;
 		try {
 			if (opts.force) await analyzeMemoryReorganizationQuery().refresh();
-			plan = (await analyzeMemoryReorganizationQuery()) as MemoryReorganizePlan;
+			const next = (await analyzeMemoryReorganizationQuery()) as MemoryReorganizePlan;
+			if (current === opening) plan = next;
 		} catch (e) {
-			error = (e as Error).message ?? 'Failed to analyze';
+			if (current === opening) error = (e as Error).message ?? 'Failed to analyze';
 		} finally {
-			loading = false;
+			if (current === opening) loading = false;
 		}
 	}
 
@@ -55,6 +71,8 @@
 		error = null;
 		try {
 			result = (await applyMemoryReorganizationCommand()) as MemoryReorganizeResult;
+			// The analysis this came from is stale now; the next opening, or Re-analyze, fetches
+			// a fresh one rather than the cached copy that still lists these merges.
 			plan = null;
 			onApplied?.();
 		} catch (e) {
@@ -102,6 +120,12 @@
 		<div class="reorganize__body">
 			{#if error}
 				<div class="reorganize__error">{error}</div>
+				{#if !plan && !result && !loading}
+					<div class="reorganize__actions">
+						<button class="btn btn-sm btn-primary" onclick={refresh}>Try again</button>
+						<button class="btn btn-sm btn-ghost" onclick={close}>Close</button>
+					</div>
+				{/if}
 			{/if}
 
 			{#if result}

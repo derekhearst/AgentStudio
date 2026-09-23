@@ -8,7 +8,7 @@ import {
 	type AutomationRunTrigger,
 } from '$lib/automations/automation.schema'
 import { logger } from '$lib/observability/logger'
-import { toOutputExcerpt } from './failure-policy'
+import { AUTOMATION_RUN_RETENTION_DAYS, toOutputExcerpt } from './failure-policy'
 
 /**
  * #31 — the automation run ledger.
@@ -206,7 +206,10 @@ export async function getLatestRunSummaries(
  * Age-based retention. The ledger is an operational aid, not an audit log — a year of
  * per-minute ticks would be millions of rows nobody reads. Called from the dispatch tick.
  */
-export async function pruneAutomationRuns(olderThanDays = 30, now = new Date()): Promise<number> {
+export async function pruneAutomationRuns(
+	olderThanDays = AUTOMATION_RUN_RETENTION_DAYS,
+	now = new Date(),
+): Promise<number> {
 	try {
 		const cutoff = new Date(now.getTime() - olderThanDays * 24 * 60 * 60 * 1000)
 		const deleted = await db

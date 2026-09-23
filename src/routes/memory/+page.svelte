@@ -129,21 +129,46 @@
 		try {
 			const result = await mineAllPendingCommand();
 			mineResult = { conversationsScanned: result.conversationsScanned, enqueued: result.enqueued };
-			// Poll stats for ~30s so the chip updates as jobs complete.
-			let ticks = 0;
-			pollTimer = setInterval(async () => {
-				ticks += 1;
-				await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
-				stats = (await getMemoryStatsQuery()) as MemoryStats;
-				wings = (await listMemoryWingsQuery()) as MemoryWingRow[];
-				if (ticks >= 15 || stats.pendingMineJobs === 0) {
-					if (pollTimer) clearInterval(pollTimer);
-					pollTimer = null;
-				}
-			}, 2000);
+			startMinePolling();
 		} finally {
 			mining = false;
 		}
+	}
+
+	/**
+	 * Poll stats for ~30s so the chip updates as jobs complete. One poller at a time: the button
+	 * is enabled again as soon as the jobs are queued, and a second click used to overwrite the
+	 * handle of a poller still running — which then ran every 2s for the life of the tab.
+	 */
+	function startMinePolling() {
+		stopMinePolling();
+		let ticks = 0;
+		const timer = setInterval(async () => {
+			ticks += 1;
+			let nextStats: MemoryStats;
+			let nextWings: MemoryWingRow[];
+			try {
+				await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
+				nextStats = (await getMemoryStatsQuery()) as MemoryStats;
+				nextWings = (await listMemoryWingsQuery()) as MemoryWingRow[];
+			} catch {
+				// A failed tick changes nothing; the next one asks again, and the tick cap still ends it.
+				if (pollTimer === timer && ticks >= 15) stopMinePolling();
+				return;
+			}
+			// Stopped (or replaced) while those were in flight: write nothing, and above all do
+			// not stop the poller that replaced this one.
+			if (pollTimer !== timer) return;
+			stats = nextStats;
+			wings = nextWings;
+			if (ticks >= 15 || stats.pendingMineJobs === 0) stopMinePolling();
+		}, 2000);
+		pollTimer = timer;
+	}
+
+	function stopMinePolling() {
+		if (pollTimer) clearInterval(pollTimer);
+		pollTimer = null;
 	}
 
 	function formatNum(n: number): string {
@@ -156,9 +181,7 @@
 
 	onMount(() => {
 		void loadAll();
-		return () => {
-			if (pollTimer) clearInterval(pollTimer);
-		};
+		return stopMinePolling;
 	});
 </script>
 
