@@ -17,7 +17,9 @@ import { acquireGlobalStateLock, getActiveUserId, getSql, pollDb } from './helpe
  *   - a listener who stopped before the provider was called costs nothing, and one who
  *     stops after it has the request does not lose the ledger row for it: OpenRouter bills
  *     a sent request in full either way. The route ties the signal to the listener's
- *     connection (server.client-disconnect.spec.ts).
+ *     connection (server.client-disconnect.spec.ts);
+ *   - an unreachable catalogue is not asked again for a minute, so it cannot add its timeout
+ *     to every chunk of a reply.
  */
 
 const PRICE_PER_CHARACTER = 0.00001
@@ -60,6 +62,10 @@ let previousKey: string | undefined
 let releaseBudgetLock: (() => Promise<void>) | null = null
 test.beforeEach(async () => {
 	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+	// Each test's stub answers the catalogue itself; a list or a failure cached by the last one
+	// would decide the price instead.
+	const { _resetSpeechCatalog } = await import('../src/lib/llm/tts.server')
+	_resetSpeechCatalog()
 	previousKey = process.env.OPENROUTER_API_KEY
 	// Any non-empty value: fetch is stubbed, so the key never leaves the process.
 	process.env.OPENROUTER_API_KEY = previousKey?.trim() || 'e2e-placeholder'
@@ -265,5 +271,52 @@ test('a blocking budget limit refuses speech before the provider is called', asy
 	} finally {
 		stub.restore()
 		if (limitId) await sql`delete from budget_limits where id = ${limitId}`
+	}
+})
+
+test('an unreachable catalogue is asked again after a minute, not before every chunk', async () => {
+	const { listSpeechModels } = await import('../src/lib/llm/tts.server')
+	const realFetch = globalThis.fetch
+	const realNow = Date.now
+	let now = realNow()
+	let reachable = false
+	let asked = 0
+	Date.now = () => now
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = input instanceof Request ? input.url : String(input)
+		if (!url.includes('/models?output_modalities=speech')) return realFetch(input, init)
+		asked += 1
+		if (!reachable) throw new TypeError('fetch failed')
+		return Response.json(CATALOGUE)
+	}) as typeof fetch
+	const minutes = (n: number) => (now += n * 60_000)
+	try {
+		// Nothing cached: the failure is the answer until the minute is up, without asking again.
+		await expect(listSpeechModels()).rejects.toThrow('fetch failed')
+		minutes(0.5)
+		await expect(listSpeechModels()).rejects.toThrow('fetch failed')
+		expect(asked).toBe(1)
+
+		minutes(1)
+		reachable = true
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		expect(asked).toBe(2)
+
+		// An hour on, the refresh fails: the stale list is served, and the catalogue left alone
+		// for a minute.
+		minutes(61)
+		reachable = false
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		minutes(0.5)
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		expect(asked).toBe(3)
+
+		minutes(1)
+		reachable = true
+		await listSpeechModels()
+		expect(asked).toBe(4)
+	} finally {
+		Date.now = realNow
+		globalThis.fetch = realFetch
 	}
 })

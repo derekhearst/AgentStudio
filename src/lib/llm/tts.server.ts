@@ -29,6 +29,7 @@ const OPENROUTER_SPEECH_MODELS_URL = 'https://openrouter.ai/api/v1/models?output
 const TTS_TIMEOUT_MS = 90_000
 const CATALOG_TIMEOUT_MS = 15_000
 const CATALOG_TTL_MS = 1000 * 60 * 60 // 1 hour, like the chat-model list
+const CATALOG_RETRY_MS = 1000 * 60 // after a failed refresh
 /** How much of a provider's error message reaches the user. Voice lists can be long. */
 const PROVIDER_MESSAGE_MAX = 400
 
@@ -69,13 +70,23 @@ export type SynthesizeSpeechResult = {
 }
 
 let catalogCache: { at: number; models: SpeechModel[] } | null = null
+/**
+ * The last failed refresh, until one succeeds. Every chunk prices itself from the catalogue
+ * first, so without this an unreachable catalogue would add its whole timeout to each one.
+ */
+let catalogFailure: { at: number; error: unknown } | null = null
 
 /**
  * OpenRouter's speech models, with their per-character price and voices. Cached for an hour.
- * A failed refresh serves the stale list when there is one; with none it throws.
+ * A failed refresh serves the stale list when there is one; with none it throws. Either way
+ * the catalogue is not asked again for a minute.
  */
 export async function listSpeechModels(): Promise<SpeechModel[]> {
 	if (catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) return catalogCache.models
+	if (catalogFailure && Date.now() - catalogFailure.at < CATALOG_RETRY_MS) {
+		if (catalogCache) return catalogCache.models
+		throw catalogFailure.error
+	}
 	try {
 		const apiKey = getOpenRouterApiKey()
 		const response = await fetch(OPENROUTER_SPEECH_MODELS_URL, {
@@ -85,14 +96,22 @@ export async function listSpeechModels(): Promise<SpeechModel[]> {
 		if (!response.ok) throw new Error(`speech model catalogue answered HTTP ${response.status}`)
 		const models = parseSpeechCatalog(await response.json())
 		catalogCache = { at: Date.now(), models }
+		catalogFailure = null
 		return models
 	} catch (err) {
+		catalogFailure = { at: Date.now(), error: err }
 		if (catalogCache) {
 			logger.warn('[tts] speech model catalogue refresh failed; serving the cached list', { err })
 			return catalogCache.models
 		}
 		throw err
 	}
+}
+
+/** Forget the cached catalogue and any failed refresh. Specs only. */
+export function _resetSpeechCatalog(): void {
+	catalogCache = null
+	catalogFailure = null
 }
 
 /**

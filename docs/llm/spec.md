@@ -80,7 +80,7 @@ Options accepted by `streamChat()`:
 | `getModel(id)`                              | Returns a single `ModelInfo` by ID                                       |
 | `calculateCost(model, tokensIn, tokensOut)` | Returns USD cost as a number using live pricing                          |
 | `synthesizeSpeech(input)`                   | One chunk of text → MP3 via OpenRouter; budget-checked, ledgered as `tts` |
-| `listSpeechModels()`                        | OpenRouter's speech models with per-character price and voices (1h cache) |
+| `listSpeechModels()`                        | OpenRouter's speech models with per-character price and voices (1h cache; a failed fetch is retried after a minute) |
 
 ## Reasoning Support
 
