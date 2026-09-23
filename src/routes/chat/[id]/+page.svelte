@@ -929,6 +929,10 @@
 			}
 
 			if (!response.ok || !response.body) {
+				// A refused send (an unrunnable model, #9) saved nothing, so its bubble must not
+				// stay as if sent; Retry still carries the text. A message the server did save is
+				// back from `refreshAll` in `finally`.
+				pendingUserMessages = pendingUserMessages.filter((message) => message.id !== optimisticUserId);
 				const responseText = await response.text().catch(() => '');
 				throw new Error(
 					`Failed to open stream (status ${response.status})${responseText ? `: ${responseText}` : ''}`

@@ -12,13 +12,15 @@ import {
 	waitForHydration,
 } from './helpers'
 import { listRemoteFunctions } from './remote-functions'
+import { isSubscriptionModel } from '../src/lib/engine/model-backend'
 
 /**
  * #9 — picking a model nothing can run is impossible, not a failure on the first send.
  *
- * Without a gateway only Claude can run. The engine pickers list only Claude, labelled as
- * running on the subscription; a send, an agent save or a default-model save naming another
- * model is refused before anything is written; and a conversation already on such a model
+ * Without a gateway only Claude can run, and only the Claude models the bundled CLI knows.
+ * The engine pickers list only those, labelled as running on the subscription; a send, an
+ * agent save or a default-model save naming another model — or a Claude slug the CLI cannot
+ * run — is refused before anything is written; and a conversation already on such a model
  * says so in the composer instead of waiting for the send to fail.
  *
  * All of this is the gateway-off posture, which is CI's. A developer whose .env configures a
@@ -31,6 +33,8 @@ const gatewayConfigured = ['LLM_GATEWAY_URL', 'LLM_GATEWAY_TOKEN'].every(
 test.skip(gatewayConfigured, 'the test server has an LLM gateway configured, so non-Claude models can run')
 
 const GATEWAY_MODEL = 'moonshotai/kimi-k2'
+/** OpenRouter's slug for Claude Sonnet 4: `claude-sonnet-4` is no id the CLI or the API know. */
+const STALE_CLAUDE_MODEL = 'anthropic/claude-sonnet-4'
 
 const remotes = listRemoteFunctions()
 function remote(file: string, name: string) {
@@ -77,6 +81,15 @@ test('a send naming a model nothing can run is refused before the message or a r
 		const body = (await response.json()) as { error?: string }
 		expect(body.error).toContain(GATEWAY_MODEL)
 		expect(body.error).toContain('LLM_GATEWAY_URL')
+
+		// A Claude slug the CLI cannot run is refused the same way, for its own reason.
+		const stale = await page.request.post(`/chat/${conversation.id}/stream`, {
+			data: { conversationId: conversation.id, content: `${prefix} hello`, model: STALE_CLAUDE_MODEL },
+		})
+		expect(stale.status()).toBe(400)
+		const staleBody = (await stale.json()) as { error?: string }
+		expect(staleBody.error).toContain(STALE_CLAUDE_MODEL)
+		expect(staleBody.error).toContain('retired')
 
 		// No orphan user message, no failed run: the refusal came before either was written.
 		expect(await counts()).toEqual(before)
@@ -149,6 +162,13 @@ test('the default model cannot be set to one nothing can run', async ({ page, ba
 	expect(refused).toMatchObject({ type: 'error', status: 400 })
 	expect(refused.error?.message).toContain('LLM_GATEWAY_URL')
 	expect(await defaultModel()).toBe(before)
+
+	const stale = await callCommand(page, baseURL!, 'src/lib/settings/settings.remote.ts', 'updateAppSettings', '/settings', {
+		defaultModel: STALE_CLAUDE_MODEL,
+	})
+	expect(stale).toMatchObject({ type: 'error', status: 400 })
+	expect(stale.error?.message).toContain('retired')
+	expect(await defaultModel()).toBe(before)
 })
 
 test('the engine model list offers only Claude, on the subscription, in the CLI’s spelling', async ({ page }) => {
@@ -175,7 +195,11 @@ test('the engine model list offers only Claude, on the subscription, in the CLI�
 		expect(model.id, 'a bare CLI id').not.toContain('/')
 		expect(model.id, 'versions written with a dash').not.toMatch(/\d\.\d/)
 		expect(model.id, 'no catalogue variants').not.toContain(':')
+		// Only a model the CLI can run: OpenRouter's catalogue still lists `anthropic/claude-sonnet-4`
+		// and `anthropic/claude-3-haiku`, which would fail on the first message.
+		expect(isSubscriptionModel(model.id), `${model.id} runs on the subscription`).toBe(true)
 	}
+	expect(list.models.map((model) => model.id)).not.toContain('claude-sonnet-4')
 })
 
 test('the default-model picker labels each model as running on the subscription', async ({ page }) => {
@@ -226,6 +250,39 @@ test('a conversation already on an unrunnable model says so in the composer, and
 		const reasoning = page.getByRole('button', { name: 'Reasoning effort' }).filter({ visible: true }).first()
 		await expect(reasoning).toBeDisabled()
 		await expect(reasoning).toContainText('reasoning:off')
+	} finally {
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('a send the server refuses leaves no bubble behind as if it had been sent', async ({ page }) => {
+	const prefix = uniquePrefix('engine-model-bubble')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	try {
+		const conversation = await seedConversation(prefix, { userId: await getActiveUserId() })
+		await getSql()`update conversations set model = ${GATEWAY_MODEL} where id = ${conversation.id}`
+
+		await page.goto(`/chat/${conversation.id}`)
+		await waitForHydration(page)
+
+		const text = `${prefix} refused send`
+		const composer = page.getByPlaceholder('Message AgentStudio...')
+		await composer.waitFor({ state: 'visible', timeout: 30_000 })
+		await composer.fill(text)
+		const refusal = page.waitForResponse((response) => response.url().endsWith(`/chat/${conversation.id}/stream`))
+		await page.getByRole('button', { name: /send message/i }).filter({ visible: true }).first().click()
+		expect((await refusal).status()).toBe(400)
+
+		// The refusal is shown, with Retry — which still carries the text.
+		await expect(page.getByText(/LLM_GATEWAY_URL/).first()).toBeVisible({ timeout: 15_000 })
+		await expect(page.getByRole('button', { name: /retry/i }).filter({ visible: true }).first()).toBeVisible()
+		// Nothing was saved, so nothing stands in the transcript as if it had been sent.
+		await expect(page.getByText(text, { exact: true })).toHaveCount(0)
+		const [row] = await getSql()<{ count: number }[]>`
+			select count(*)::int as count from messages where conversation_id = ${conversation.id} and content = ${text}
+		`
+		expect(row.count).toBe(0)
 	} finally {
 		await cleanupPrefixedRecords(prefix)
 	}
