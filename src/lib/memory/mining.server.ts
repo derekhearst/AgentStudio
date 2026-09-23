@@ -12,6 +12,7 @@
 
 import { count, desc, eq } from 'drizzle-orm'
 import { DEFAULT_MODEL, chat } from '$lib/llm/chat.server'
+import { toOpenRouterModelId } from '$lib/llm/openrouter-model'
 import { db } from '$lib/db.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
@@ -51,6 +52,12 @@ export type MineResult = {
 	excludedTurns: number
 	/** Names of the rules that fired, for the job result + activity feed. */
 	excludedByRule: string[]
+	/**
+	 * True when the extractor call failed or answered with something unusable, so the turns were
+	 * filed under the conversation title and a `general` closet with no tags. Mining still
+	 * succeeds; this is what makes a broken extractor visible in `/settings/jobs`.
+	 */
+	extractorFallback: boolean
 }
 
 const EXTRACTOR_BASE = `You are an information extractor for a hierarchical memory system.
@@ -97,6 +104,9 @@ type ExtractorOutput = {
 	turns: Array<{ topic: string; tags: AaakTags }>
 }
 
+/** The extractor's model, as OpenRouter names it — the app default is the Agent SDK's bare id. */
+const EXTRACTOR_MODEL = toOpenRouterModelId(DEFAULT_MODEL)
+
 function fallbackExtraction(session: MiningSession): ExtractorOutput {
 	return {
 		primaryWing: { kind: 'topic', name: session.sessionLabel ?? 'general', aliases: [] },
@@ -120,25 +130,31 @@ function tryParseExtractor(content: string): ExtractorOutput | null {
 	return null
 }
 
+/** What the extractor made of a session, and whether that is the fallback rather than its answer. */
+type Extraction = ExtractorOutput & { fallback: boolean }
+
 async function extractSession(
 	session: MiningSession,
 	existingWings: ExtractorWingCandidate[] = [],
-): Promise<ExtractorOutput> {
+): Promise<Extraction> {
 	if (session.turns.length === 0) {
-		return fallbackExtraction(session)
+		return { ...fallbackExtraction(session), fallback: false }
 	}
 
 	const transcript = session.turns.map((turn, i) => `[${i + 1}] ${turn.role.toUpperCase()}: ${turn.content}`).join('\n')
 
 	try {
-		const result = await chat([
-			{ role: 'system', content: buildExtractorSystem(existingWings) },
-			{ role: 'user', content: transcript },
-		])
+		const result = await chat(
+			[
+				{ role: 'system', content: buildExtractorSystem(existingWings) },
+				{ role: 'user', content: transcript },
+			],
+			EXTRACTOR_MODEL,
+		)
 
 		await logLlmUsage({
 			source: 'memory_extract',
-			model: DEFAULT_MODEL,
+			model: EXTRACTOR_MODEL,
 			tokensIn: result.usage?.promptTokens ?? 0,
 			tokensOut: result.usage?.completionTokens ?? 0,
 			metadata: { conversationId: session.conversationId ?? null, turns: session.turns.length },
@@ -165,14 +181,21 @@ async function extractSession(
 			} else if (parsed.turns.length > session.turns.length) {
 				parsed.turns.length = session.turns.length
 			}
-			return parsed
+			return { ...parsed, fallback: false }
 		}
-		logger.warn('[memory] extractor returned unusable JSON, using fallback')
+		logger.warn('[memory] extractor returned unusable JSON; filing the turns under the fallback wing', {
+			model: EXTRACTOR_MODEL,
+			conversationId: session.conversationId ?? null,
+		})
 	} catch (error) {
-		logger.warn('[memory] extractor call failed', { err: error })
+		logger.warn('[memory] extractor call failed; filing the turns under the fallback wing', {
+			model: EXTRACTOR_MODEL,
+			conversationId: session.conversationId ?? null,
+			err: error,
+		})
 	}
 
-	return fallbackExtraction(session)
+	return { ...fallbackExtraction(session), fallback: true }
 }
 
 async function nextDrawerNumber(closetId: string): Promise<number> {
@@ -202,7 +225,15 @@ export async function mineSession(opts: {
 }): Promise<MineResult> {
 	const { userId, agentId } = opts
 	if (opts.session.turns.length === 0) {
-		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns: 0, excludedByRule: [] }
+		return {
+			wingIds: [],
+			roomIds: [],
+			closetIds: [],
+			drawerIds: [],
+			excludedTurns: 0,
+			excludedByRule: [],
+			extractorFallback: false,
+		}
 	}
 
 	// Exclusion pass runs FIRST — before the extractor LLM call and before embedding — so
@@ -247,7 +278,15 @@ export async function mineSession(opts: {
 	}
 
 	if (keptTurns.length === 0) {
-		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns, excludedByRule }
+		return {
+			wingIds: [],
+			roomIds: [],
+			closetIds: [],
+			drawerIds: [],
+			excludedTurns,
+			excludedByRule,
+			extractorFallback: false,
+		}
 	}
 
 	const session: MiningSession = { ...opts.session, turns: keptTurns }
@@ -346,6 +385,7 @@ export async function mineSession(opts: {
 		drawerIds,
 		excludedTurns,
 		excludedByRule,
+		extractorFallback: extraction.fallback,
 	}
 }
 
@@ -362,6 +402,7 @@ export async function mineSessions(opts: {
 		drawerIds: [],
 		excludedTurns: 0,
 		excludedByRule: [],
+		extractorFallback: false,
 	}
 	for (const session of opts.sessions) {
 		const result = await mineSession({ userId: opts.userId, agentId: opts.agentId, session })
@@ -371,6 +412,7 @@ export async function mineSessions(opts: {
 		totals.drawerIds.push(...result.drawerIds)
 		totals.excludedTurns += result.excludedTurns
 		totals.excludedByRule.push(...result.excludedByRule)
+		totals.extractorFallback ||= result.extractorFallback
 	}
 	totals.excludedByRule = [...new Set(totals.excludedByRule)]
 	return totals

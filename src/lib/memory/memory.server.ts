@@ -34,6 +34,7 @@ export async function mineConversation(opts: {
 		closetIds: [],
 		excludedTurns: 0,
 		excludedByRule: [],
+		extractorFallback: false,
 	}
 	const [conversation] = await db.select().from(conversations).where(eq(conversations.id, opts.conversationId)).limit(1)
 	if (!conversation) return empty

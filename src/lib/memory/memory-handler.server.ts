@@ -62,6 +62,7 @@ export async function executeMemoryMineJob(
 	const closetIds = new Set<string>()
 	const excludedByRule = new Set<string>()
 	let excludedTurns = 0
+	let extractorFallback = false
 	let passes = 0
 
 	for (;;) {
@@ -73,6 +74,7 @@ export async function executeMemoryMineJob(
 		for (const id of result.closetIds) closetIds.add(id)
 		for (const name of result.excludedByRule) excludedByRule.add(name)
 		excludedTurns += result.excludedTurns
+		extractorFallback ||= result.extractorFallback
 
 		// No key, nothing could have folded into this job.
 		if (!job.dedupeKey) break
@@ -97,6 +99,9 @@ export async function executeMemoryMineJob(
 		// /settings/jobs so a user can tell "nothing was mined" from "a rule fired".
 		excludedTurns,
 		excludedByRule: [...excludedByRule],
+		// The extractor failed and the turns were filed with no wing, topic or tags of their
+		// own. Mining still "succeeded", so without this nothing says the extractor is broken.
+		extractorFallback,
 	}
 }
 

@@ -7,6 +7,7 @@
 
 import { z } from 'zod'
 import { chat, type ResponseFormat } from '$lib/llm/chat.server'
+import { toOpenRouterModelId } from '$lib/llm/openrouter-model'
 import { logLlmUsage } from '$lib/costs/usage'
 import type { RetrievedDrawer } from '$lib/memory/retrieval.server'
 import { logger } from '$lib/observability/logger'
@@ -83,7 +84,8 @@ export async function rerank(
 
 		await logLlmUsage({
 			source: 'memory_rerank',
-			model,
+			// The id OpenRouter billed, so the ledger can price it.
+			model: toOpenRouterModelId(model),
 			tokensIn: result.usage?.promptTokens ?? 0,
 			tokensOut: result.usage?.completionTokens ?? 0,
 			metadata: { candidates: candidates.length },
@@ -91,7 +93,12 @@ export async function rerank(
 
 		const text = typeof result.content === 'string' ? result.content : ''
 		const rankedIds = safeParseRanked(text)
-		if (!rankedIds || rankedIds.length === 0) return candidates.slice(0, keepTopK)
+		if (!rankedIds || rankedIds.length === 0) {
+			logger.warn('[memory] rerank returned no usable ranking; returning original order', {
+				model: toOpenRouterModelId(model),
+			})
+			return candidates.slice(0, keepTopK)
+		}
 		const byId = new Map(candidates.map((c) => [c.drawerId, c]))
 		const ordered: RetrievedDrawer[] = []
 		for (const id of rankedIds) {
@@ -107,7 +114,10 @@ export async function rerank(
 		}
 		return ordered.slice(0, keepTopK)
 	} catch (error) {
-		logger.warn('[memory] rerank failed; returning original order', { err: error })
+		logger.warn('[memory] rerank failed; returning original order', {
+			model: toOpenRouterModelId(model),
+			err: error,
+		})
 		return candidates.slice(0, keepTopK)
 	}
 }
