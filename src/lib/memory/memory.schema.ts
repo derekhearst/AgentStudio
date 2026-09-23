@@ -70,7 +70,12 @@ export const memoryRooms = pgTable(
 		occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [index('memory_rooms_wing_idx').on(t.wingId), index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt)],
+	(t) => [
+		index('memory_rooms_wing_idx').on(t.wingId),
+		index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt),
+		// Backs the ON DELETE SET NULL from conversations, which otherwise scans the table.
+		index('memory_rooms_conversation_idx').on(t.conversationId),
+	],
 )
 
 export const memoryClosets = pgTable(
@@ -122,6 +127,10 @@ export const memoryDrawers = pgTable(
 		index('memory_drawers_closet_idx').on(t.closetId),
 		index('memory_drawers_user_occurred_idx').on(t.userId, t.occurredAt),
 		index('memory_drawers_user_pinned_idx').on(t.userId, t.pinned),
+		// Two hot paths look drawers up by source message: the per-turn mining job's
+		// "already mined?" check, and the ON DELETE SET NULL that runs once per message when
+		// a conversation is deleted. Without this each was a full scan of the table.
+		index('memory_drawers_source_message_idx').on(t.sourceMessageId),
 		// HNSW index for cosine semantic search; added by hand-edited migration.
 		index('memory_drawers_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
 		index('memory_drawers_content_tsv_idx').using('gin', sql`to_tsvector('english', ${t.content})`),
