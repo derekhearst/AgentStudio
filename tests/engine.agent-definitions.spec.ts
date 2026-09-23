@@ -40,8 +40,12 @@ test.describe('what is offered to the model', () => {
 	})
 
 	test('a paused agent is not offered', () => {
-		// The only thing `agents.status` does anywhere in the app — see #66.
+		// Half of what pausing means (#66); the other half, automations and monitors skipping
+		// the agent, is pinned in automations.paused-agent.spec.ts.
 		expect(agentDefinitionFrom(row({ status: 'paused' }), { parentIsClaude: true })).toBeNull()
+		// Idle (the default here) and active are both available — the shared rule in
+		// `$lib/agents/agent-status`. Resume writes `active`.
+		expect(agentDefinitionFrom(row({ status: 'active' }), { parentIsClaude: true })).not.toBeNull()
 	})
 
 	test('an agent with no prompt is not offered', () => {
