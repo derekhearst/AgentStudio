@@ -4,7 +4,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import {
 		deleteMessagesAfter,
 		editMessage,
@@ -48,6 +48,7 @@
 	import {
 		appendThinking,
 		applyAskUser,
+		applyAskUserAnswered,
 		applyDeltaStart,
 		applySubagentDelta,
 		applySubagentDone,
@@ -82,7 +83,9 @@
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
+	import { approvalAnswerProblem, askUserAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
+	import { dropPromptParam, takeHandedOffAttachments } from '$lib/chat/new-chat-handoff';
 
 	type ChatAttachment = {
 		id: string;
@@ -112,7 +115,8 @@
 	 * Live background tasks, from the SDK's `background_tasks_changed` frame.
 	 *
 	 * REPLACE semantics — each frame carries the whole live set, so this is assigned, never
-	 * merged. Cleared when a turn starts, because the set belongs to the run.
+	 * merged. Cleared when a turn starts and again when its stream ends, because the set
+	 * belongs to the run.
 	 */
 	let backgroundTasks = $state<Array<{ id: string; type: string; description: string }>>([]);
 	/** Monotonic, because the transcript's `{#each}` is keyed and duplicate keys throw. */
@@ -336,10 +340,11 @@
 	// getSerializableBlocksForMetadata / getCompletedToolCalls. Each takes streamingBlocks
 	// as an argument instead of closing over it.
 
-	async function persistPartialIfIncomplete() {
+	async function persistPartialIfIncomplete(runConversationId: string) {
 		// Persist any visible partial whenever the stream didn't complete with a `done` event
 		// (i.e., `pendingMessageId` was never assigned). Covers user-stop AND error paths —
 		// without this, the finally block wipes streamingBlocks and the partial vanishes.
+		// Into the conversation the stream belongs to, which the caller captured when it began.
 		if (pendingMessageId) return;
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
@@ -350,7 +355,7 @@
 		if (!contentToPersist) return;
 
 		await savePartialAssistant({
-			conversationId,
+			conversationId: runConversationId,
 			content: contentToPersist,
 			model,
 			toolCalls: getCompletedToolCalls(streamingBlocks),
@@ -384,6 +389,18 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 		};
+	});
+
+	/**
+	 * True once this page has gone — another conversation opened (the chat/[id] layout
+	 * remounts the page per id, #74) or another page entirely. Leaving is not a Stop: the run
+	 * carries on and saves its own reply, and coming back re-attaches to it. So the stream is
+	 * let go of, and nothing it was doing may still write a partial, refresh or navigate.
+	 */
+	let leftPage = false;
+	onDestroy(() => {
+		leftPage = true;
+		streamAbortController?.abort();
 	});
 
 	$effect(() => {
@@ -462,7 +479,7 @@
 			stats,
 			messages,
 			totalBudget: activeContextLimit,
-			liveTokenEstimate: liveContextStats?.tokenEstimate ?? null,
+			systemPromptTokens: liveContextStats?.systemPromptTokens ?? null,
 		}),
 	);
 
@@ -494,22 +511,28 @@
 		}
 	});
 
+	/*
+	 * The first message handed over by the page that created this conversation (#75, #59).
+	 * Only once the conversation has loaded — `messages` is empty until then, so the "already
+	 * sent" check never fired and a reload sent the prompt again. And the prompt leaves the
+	 * URL and the history entry before it is sent, not after the reply ends: a reload, a
+	 * restored tab or a Back to this page must not repeat it, and a navigation at the end of
+	 * the reply pulled the user off whatever page they had moved on to.
+	 */
 	$effect(() => {
 		const prompt = initialPrompt;
-		if (!prompt || consumedInitialPrompt || !conversationId || streaming) return;
-		if (messages.length > 0 || pendingUserMessages.length > 0) {
-			consumedInitialPrompt = true;
-			return;
-		}
-
+		if (!prompt || consumedInitialPrompt || !conversationId || !conversationData) return;
 		consumedInitialPrompt = true;
-		void streamMessage(prompt, false).finally(() => {
-			void goto(`/chat/${conversationId}`, {
-				replaceState: true,
-				noScroll: true,
-				keepFocus: true
+		const attachments = takeHandedOffAttachments(conversationId);
+		void dropPromptParam(page.url, page.state)
+			.catch((error) => logChatUi('warn', 'Could not take the prompt out of the URL', { error: String(error) }))
+			.then(() => {
+				if (leftPage) return;
+				// Already sent: the conversation has messages, or a turn is running (re-attached to below).
+				if (messages.length > 0 || pendingUserMessages.length > 0) return;
+				if (streaming || conversationData?.liveRunId) return;
+				void streamMessage(prompt, false, attachments);
 			});
-		});
 	});
 
 	$effect(() => {
@@ -600,6 +623,8 @@
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
 		stoppedByUser = true;
+		// Dropping the connection alone no longer stops the run (a reload must not), so say so.
+		void requestRunStop(conversationId, liveContextStats?.runId ?? attachedRunId);
 		streamAbortController.abort();
 	}
 
@@ -623,6 +648,8 @@
 
 	/** Task ids a stop has been sent for, so the button cannot be double-fired. */
 	let stoppingTasks = $state<string[]>([]);
+	/** Why the last background-task stop did not work, shown briefly under the header. */
+	let backgroundTaskNotice = $state<string | null>(null);
 
 	/**
 	 * #35 — stop one background task.
@@ -631,22 +658,35 @@
 	 * id comes from `context_stats`, which the stream emits before any task can exist, so a
 	 * visible task always has one. The chip is left in place on failure rather than removed
 	 * optimistically: `background_tasks_changed` is the authority on what is live, and it
-	 * arrives on its own the moment the task actually goes away.
+	 * arrives on its own the moment the task actually goes away. The exception is an answer
+	 * that the turn has already ended, which took the task with it. Either way a refusal is
+	 * shown rather than swallowed.
 	 */
 	async function stopBackgroundTask(taskId: string) {
 		const runId = liveContextStats?.runId;
 		if (!runId || stoppingTasks.includes(taskId)) return;
 		stoppingTasks = [...stoppingTasks, taskId];
+		let problem: ReturnType<typeof stopTaskProblem> = null;
 		try {
-			await fetch(`/chat/${conversationId}/stop-task`, {
+			const response = await fetch(`/chat/${conversationId}/stop-task`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ runId, taskId })
 			});
+			problem = stopTaskProblem(response.ok, await response.json().catch(() => null));
 		} catch (error) {
 			console.warn('[chat] failed to stop a background task', error);
+			problem = stopTaskProblem(false, null);
 		} finally {
 			stoppingTasks = stoppingTasks.filter((id) => id !== taskId);
+		}
+		if (problem) {
+			if (problem.taskGone) backgroundTasks = backgroundTasks.filter((task) => task.id !== taskId);
+			const message = problem.message;
+			backgroundTaskNotice = message;
+			setTimeout(() => {
+				if (backgroundTaskNotice === message) backgroundTaskNotice = null;
+			}, 5000);
 		}
 	}
 
@@ -657,9 +697,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ token, approved: true }),
 			});
-			if (!response.ok) {
-				throw new Error(`Tool approval request failed with status ${response.status}`);
-			}
+			const problem = approvalAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem) throw new Error(problem);
 			clearRecoverableError();
 			streamingBlocks = streamingBlocks.map((b) =>
 				b.kind === 'tool' && b.token === token ? { ...b, status: 'approved' as const } : b
@@ -681,9 +720,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ token, approved: false }),
 			});
-			if (!response.ok) {
-				throw new Error(`Tool denial request failed with status ${response.status}`);
-			}
+			const problem = approvalAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem) throw new Error(problem);
 			clearRecoverableError();
 			streamingBlocks = streamingBlocks.map((b) =>
 				b.kind === 'tool' && b.token === token ? { ...b, status: 'denied' as const } : b
@@ -720,14 +758,22 @@
 				body: JSON.stringify({ token, answers }),
 			});
 
-			if (!response.ok) {
-				throw new Error(`Failed to submit ask_user answers (status ${response.status})`);
+			// #83 — a 200 is not an answer: `resolved: false` means it went nowhere.
+			const problem = askUserAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem?.gone) {
+				// Nothing to retry. Say so, and let the server's view replace the stale question.
+				setRecoverableError(problem.message, null, { token, action: 'resolveAskUser' });
+				if (!streaming) await refreshAll();
+				return;
 			}
+			if (problem) throw new Error(problem.message);
 
 			clearRecoverableError();
 
 			// ask_user answers should come from streamed/persisted assistant blocks only.
 			// Do not create optimistic user bubbles for ask_user to avoid ordering/race issues.
+			// The card itself shows the recorded answers (#81).
+			streamingBlocks = applyAskUserAnswered(streamingBlocks, token, answers);
 
 			pendingAskUser = null;
 			askUserModalOpen = false;
@@ -792,13 +838,29 @@
 		}
 	}
 
-	async function streamMessage(content: string, regenerate = false, attachments: ChatAttachment[] = []) {
+	/**
+	 * Run one turn and stream it — or, with `attachRunId`, follow a turn already running (#129):
+	 * a reloaded page, or a send refused because a turn was in progress. Attaching replays the
+	 * run's saved frames from the start through `stream/resume` and then follows it live, so
+	 * its tool cards, approvals and Stop button are back. Text written before the attach is
+	 * not in the replay; it arrives with the saved reply when the turn ends.
+	 */
+	async function streamMessage(
+		content: string,
+		regenerate = false,
+		attachments: ChatAttachment[] = [],
+		attachRunId: string | null = null,
+	) {
 		if (!conversationId || streaming) return;
+		const runConversationId = conversationId;
 
 		const abortController = new AbortController();
 		const startedAt = new Date();
 		const optimisticUserId = `pending-user-${startedAt.getTime()}`;
-		if (!regenerate) {
+		/** Set when the send was refused because this turn is already running. */
+		let busyRunId: string | null = null;
+		attachedRunId = attachRunId;
+		if (!regenerate && !attachRunId) {
 			pendingUserMessages = [
 				...pendingUserMessages,
 				{ id: optimisticUserId, content: content.trim(), createdAt: startedAt }
@@ -806,7 +868,8 @@
 		}
 
 		streaming = true;
-		clearRecoverableError();
+		// An attach is automatic; it must not hide why the user's own send was refused.
+		if (!attachRunId) clearRecoverableError();
 		streamingBlocks = [];
 		currentTextTarget = '';
 		currentThinkingTarget = '';
@@ -819,25 +882,50 @@
 		backgroundTasks = [];
 		liveContextStats = null;
 		let streamHandshakeSucceeded = false;
+		/** What Retry does after a failure. Nothing, for an attach: there is no send to repeat. */
+		const retryIntentFor = (): RetryIntent | null =>
+			attachRunId
+				? null
+				: {
+						kind: 'stream',
+						content,
+						regenerate: regenerate || streamHandshakeSucceeded,
+						attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
+					};
 		try {
-			logChatUi('info', 'Opening stream', {
+			logChatUi('info', attachRunId ? 'Attaching to a running turn' : 'Opening stream', {
+				attachRunId,
 				regenerate,
 				attachmentCount: attachments.length,
 				reasoningEffort,
 			});
-			const response = await fetch(`/chat/${conversationId}/stream`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					conversationId,
-					content,
-					model,
-					reasoningEffort,
-					regenerate,
-					attachments,
-				}),
-				signal: abortController.signal
-			});
+			const resumeUrl = (since: number) => {
+				const runId = attachRunId ?? liveContextStats?.runId ?? null;
+				return `/chat/${conversationId}/stream/resume?since=${since}${runId ? `&runId=${runId}` : ''}`;
+			};
+			const response = attachRunId
+				? await fetch(resumeUrl(0), { signal: abortController.signal })
+				: await fetch(`/chat/${conversationId}/stream`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							conversationId,
+							content,
+							model,
+							reasoningEffort,
+							regenerate,
+							attachments,
+						}),
+						signal: abortController.signal
+					});
+
+			if (response.status === 409) {
+				// A turn is already running here — started in another tab, or before a reload.
+				const conflict = await response.json().catch(() => null);
+				busyRunId = typeof conflict?.runId === 'string' ? conflict.runId : null;
+				pendingUserMessages = pendingUserMessages.filter((message) => message.id !== optimisticUserId);
+				throw new Error('A turn is already running in this conversation, so this message was not sent. Send it again once that turn finishes.');
+			}
 
 			if (!response.ok || !response.body) {
 				const responseText = await response.text().catch(() => '');
@@ -852,11 +940,8 @@
 
 			for await (const sseEvent of consumeSseStream({
 				initialResponse: response,
-				fetchResume: (since) =>
-					fetch(`/chat/${conversationId}/stream/resume?since=${since}`, {
-						signal: abortController.signal,
-					}),
-				shouldStop: () => doneReceived || stoppedByUser,
+				fetchResume: (since) => fetch(resumeUrl(since), { signal: abortController.signal }),
+				shouldStop: () => doneReceived || stoppedByUser || leftPage,
 				onResumeAttempt: (info) => logChatUi('info', 'Attempting stream resume', info),
 				onResumeRejected: (info) => logChatUi('warn', 'Resume rejected', info),
 				onResumeError: (err) =>
@@ -1030,6 +1115,7 @@
 					}
 
 					if (eventName === 'context_stats') {
+						if (typeof payload.runId === 'string') watchedRunIds.add(payload.runId);
 						liveContextStats = {
 							runId: typeof payload.runId === 'string' ? payload.runId : null,
 							tokenEstimate: typeof payload.tokenEstimate === 'number' ? payload.tokenEstimate : null,
@@ -1050,16 +1136,15 @@
 							const message = String(payload.error);
 							setRecoverableError(
 								message,
-								{
-									kind: 'stream',
-									content,
-									regenerate: regenerate || streamHandshakeSucceeded,
-									attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-								},
+								retryIntentFor(),
 								{ eventName: 'done', regenerate, streamHandshakeSucceeded }
 							);
-						} else if (payload.messageId) {
-							clearRecoverableError();
+						}
+						// A saved reply, even one that ended in an error (max turns, an overloaded
+						// API): its id is what stops the finally block saving a partial copy of it
+						// as a second assistant message (#76).
+						if (payload.messageId) {
+							if (!payload.error) clearRecoverableError();
 							finalizeCurrentThinkingBlock();
 							finalizeCurrentTextBlock();
 							// Keep content visible until refreshAll() confirms DB message
@@ -1088,27 +1173,17 @@
 			// Successful stream end — don't call refreshAll here; finally handles it
 		} catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
-				if (!stoppedByUser) {
+				if (!stoppedByUser && !leftPage) {
 					setRecoverableError(
 						'Stream interrupted',
-						{
-							kind: 'stream',
-							content,
-							regenerate: regenerate || streamHandshakeSucceeded,
-							attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-						},
+						retryIntentFor(),
 						{ regenerate, streamHandshakeSucceeded, reason: 'abort' }
 					);
 				}
 			} else {
 				setRecoverableError(
 					error instanceof Error ? error.message : 'Streaming error',
-					{
-						kind: 'stream',
-						content,
-						regenerate: regenerate || streamHandshakeSucceeded,
-						attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-					},
+					retryIntentFor(),
 					{
 						regenerate,
 						streamHandshakeSucceeded,
@@ -1117,18 +1192,21 @@
 				);
 			}
 		} finally {
-			await persistPartialIfIncomplete().catch((error) => {
-				logChatUi('warn', 'Failed to persist partial assistant message', {
-					error: error instanceof Error ? error.message : String(error),
+			// The page is gone (#74): the run saves its own reply, and there is nothing to show.
+			if (!leftPage) {
+				await persistPartialIfIncomplete(runConversationId).catch((error) => {
+					logChatUi('warn', 'Failed to persist partial assistant message', {
+						error: error instanceof Error ? error.message : String(error),
+					});
 				});
-			});
 
-			// Always reload messages so user & assistant messages show even after an error
-			await refreshAll().catch((error) => {
-				logChatUi('warn', 'Failed to refresh chat state after stream', {
-					error: error instanceof Error ? error.message : String(error),
+				// Always reload messages so user & assistant messages show even after an error
+				await refreshAll().catch((error) => {
+					logChatUi('warn', 'Failed to refresh chat state after stream', {
+						error: error instanceof Error ? error.message : String(error),
+					});
 				});
-			});
+			}
 			// ask_user optimistic user bubbles are disabled, so no ask_user cleanup needed here.
 			if (pendingMessageId && messages.some((message) => message.id === pendingMessageId)) {
 				streamingBlocks = [];
@@ -1139,13 +1217,38 @@
 			waitingForFirstToken = false;
 			streamAbortController = null;
 			stoppedByUser = false;
+			// The chips belong to the run this page was watching. It has ended, or is no longer
+			// reporting here, and the run's end closes the session that owned the tasks — a chip
+			// left behind would pulse, and offer a stop, for a process that is gone.
+			backgroundTasks = [];
+			stoppingTasks = [];
 			streamingBlocks = [];
 			currentTextTarget = '';
 			currentThinkingTarget = '';
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
+			attachedRunId = null;
+			if (busyRunId && !leftPage) attachToRun(busyRunId);
 		}
 	}
+
+	/** Runs this page has streamed or attached to — each is attached at most once. */
+	const watchedRunIds = new Set<string>();
+	/** The run an attach is following, so Stop can name it before its first frame arrives. */
+	let attachedRunId: string | null = null;
+
+	/** Follow a turn that is running without this page watching it (#129). */
+	function attachToRun(runId: string) {
+		if (streaming || watchedRunIds.has(runId)) return;
+		watchedRunIds.add(runId);
+		void streamMessage('', false, [], runId);
+	}
+
+	// A turn still running when the page loads — a reload, or a return to the conversation.
+	$effect(() => {
+		const runId = conversationData?.liveRunId ?? null;
+		if (runId && !streaming) attachToRun(runId);
+	});
 
 	async function handleEdit(messageId: string, content: string) {
 		try {
@@ -1297,13 +1400,14 @@
 		consoleState.persistedToolCalls = persisted;
 	});
 
+	// The rail shows the same figure as the header's meter (#78): the stream's own estimate is
+	// the system prompt alone, which read as a nearly empty context from the first turn on.
 	$effect(() => {
-		const lc = liveContextStats;
-		consoleState.liveContext = lc
+		consoleState.liveContext = conversationData
 			? {
-					tokenEstimate: lc.tokenEstimate,
-					contextWindow: lc.contextWindow,
-					didCompact: lc.didCompact,
+					tokenEstimate: contextMetrics.used,
+					contextWindow: contextMetrics.total,
+					didCompact: liveContextStats?.didCompact ?? false,
 				}
 			: null;
 	});
@@ -1475,6 +1579,11 @@
 			{#if modelSwitchNotice}
 				<div class="alert alert-info mt-1 mb-1 py-2 text-sm">
 					<span>{modelSwitchNotice}</span>
+				</div>
+			{/if}
+			{#if backgroundTaskNotice}
+				<div class="alert alert-warning mt-1 mb-1 py-2 text-sm" role="status" data-testid="background-task-notice">
+					<span>{backgroundTaskNotice}</span>
 				</div>
 			{/if}
 

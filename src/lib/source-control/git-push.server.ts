@@ -1,25 +1,41 @@
-import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { runGit } from './git-exec.server'
+import { assertSafeBranchName, isSafeBranchName } from './git-exec'
+import { githubCloneUrl } from './repo-mirror'
+import { parseCloneUrl } from './parse-clone-url'
 
 /**
  * Wave 5 #19 phase 3 finish — `git push` with a GitHub OAuth token.
  *
- * Two safety choices in this module:
+ * Safety choices in this module:
  *
- *   1. Token is passed via the `GIT_TOKEN` env var, not argv. The git child reads it through
- *      a one-line credential helper that echoes `username=x-access-token` + `password=$GIT_TOKEN`.
- *      The argv (visible via `ps`) carries the helper string but not the token itself; the
- *      env var is scoped to this single git invocation via `spawn`'s `env` option.
+ *   1. The token never reaches argv, a file, or a credential helper. `runGit` hands it to
+ *      git as an `Authorization` header scoped to the exact GitHub URL, through
+ *      `GIT_CONFIG_COUNT` in the child environment, with the repository's hooks, helpers
+ *      and program-running config switched off (see `git-exec.ts`).
  *
  *   2. We push to a fully-qualified GitHub HTTPS URL, never to whatever the local `origin`
- *      remote happens to be. Even if an attacker mutated `.git/config` to point origin at a
- *      different host, this push always goes to the GitHub repo the agent + operator agreed
- *      on. As a side effect, the local `origin` remote is left untouched.
+ *      remote happens to be. If the repository's config rewrites or reroutes that URL, the
+ *      rewritten destination does not match the header's scope and gets no token.
  *
  * `--force-with-lease` is opt-in via `force: true` and is the safer cousin of `--force`:
- * the push is rejected if the remote ref has moved since the agent last fetched. We never
- * use plain `--force` — agents should never overwrite work without seeing it first.
+ * the push is rejected if the remote branch has moved since AgentStudio last saw it. We
+ * never use plain `--force` — agents should never overwrite work without seeing it first.
+ *
+ * "Last saw it" needs a record, and a push to a URL has none: git's bare
+ * `--force-with-lease` looks for a remote-tracking ref, finds nothing for an anonymous URL,
+ * and rejects every existing branch as "stale info". So the lease is spelled out, from one
+ * of two records:
+ *
+ *   - `refs/remotes/origin/<branch>` when the repository's `origin` is the push target.
+ *     Clone, "Pull latest" and every successful push below keep it current.
+ *   - Otherwise `refs/agentstudio/pushed/<target>/<branch>` (`pushRecordRef`): what
+ *     AgentStudio itself last pushed there. Written after every successful push, whatever
+ *     the target — a local project with no `origin`, or a push to a repo that is not it.
+ *
+ * With no record the expectation is "the branch does not exist yet".
  *
  * Returns the structured push result (stderr is the source of truth for git's pretty output)
  * so the caller can show the operator exactly what happened.
@@ -56,81 +72,146 @@ async function pathIsGitRepository(absPath: string): Promise<boolean> {
 	}
 }
 
-function buildPushArgs(input: PushBranchInput): { args: string[]; remote: string } {
-	const remote = `https://github.com/${input.owner}/${input.repo}.git`
-	const args = [
-		// Helper sourced via shell: prefix `!` makes git treat the value as a shell command.
-		// The helper echoes static credentials drawn from $GIT_TOKEN; argv carries the helper
-		// string only, never the token.
-		'-c',
-		'credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_TOKEN"; }; f',
-		'-C',
-		input.repoPath,
-		'push',
-		remote,
-		`refs/heads/${input.branch}:refs/heads/${input.branch}`,
-	]
-	if (input.force) args.push('--force-with-lease')
-	return { args, remote }
+/**
+ * The push argv. `leaseExpected` is only read when `force` is set: a sha means "only if
+ * the remote branch is still at this commit", an empty string means "only if it does not
+ * exist".
+ */
+function buildPushArgs(input: {
+	remote: string
+	branch: string
+	force?: boolean
+	leaseExpected?: string
+}): string[] {
+	const branch = assertSafeBranchName(input.branch)
+	const args = ['push']
+	if (input.force) args.push(`--force-with-lease=refs/heads/${branch}:${input.leaseExpected ?? ''}`)
+	args.push(input.remote, `refs/heads/${branch}:refs/heads/${branch}`)
+	return args
 }
 
-function redact(text: string, token: string): string {
-	if (!token) return text
-	return text.split(token).join('***REDACTED***')
+/** Same repository? GitHub URLs compare by owner/repo, anything else by normalized URL. */
+function sameRemote(a: string, b: string): boolean {
+	try {
+		const pa = parseCloneUrl(a)
+		const pb = parseCloneUrl(b)
+		if (pa.provider === 'github' && pb.provider === 'github') {
+			return pa.owner.toLowerCase() === pb.owner.toLowerCase() && pa.repo.toLowerCase() === pb.repo.toLowerCase()
+		}
+	} catch {
+		// Not a URL parseCloneUrl knows; fall through to the plain comparison.
+	}
+	const normalize = (url: string) => url.trim().toLowerCase().replace(/\/+$/, '').replace(/\.git$/, '')
+	return normalize(a) === normalize(b)
 }
 
-export async function pushBranchToGithub(input: PushBranchInput): Promise<PushBranchResult> {
+/**
+ * The tracking ref recording what AgentStudio last saw of `branch` on `remote` — the
+ * repository's `refs/remotes/origin/<branch>`, but only when `origin` is that remote.
+ */
+async function trackingRefFor(repoPath: string, remote: string, branch: string): Promise<string | null> {
+	const res = await runGit(['config', '--get', 'remote.origin.url'], { repoPath })
+	if (res.code !== 0 || !sameRemote(res.stdout.trim(), remote)) return null
+	return `refs/remotes/origin/${branch}`
+}
+
+/** Refs under here are AgentStudio's own bookkeeping; git and the user's tools ignore them. */
+const PUSH_RECORD_NAMESPACE = 'refs/agentstudio/pushed'
+
+/**
+ * Where the commit AgentStudio last pushed to `branch` at `remote` is recorded. Keyed by
+ * the target: `github.com/<owner>/<repo>` (lower-cased, as GitHub compares them) for a
+ * GitHub URL, a hash of the normalised URL for anything else.
+ */
+export function pushRecordRef(remote: string, branch: string): string {
+	assertSafeBranchName(branch)
+	let key: string | null = null
+	try {
+		const parsed = parseCloneUrl(remote)
+		if (parsed.provider === 'github') {
+			const candidate = `github.com/${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}`
+			if (isSafeBranchName(candidate)) key = candidate
+		}
+	} catch {
+		// Not a URL parseCloneUrl knows; hashed below.
+	}
+	if (!key) {
+		const normalized = remote.trim().toLowerCase().replace(/\/+$/, '').replace(/\.git$/, '')
+		key = `url/${createHash('sha256').update(normalized).digest('hex').slice(0, 24)}`
+	}
+	return `${PUSH_RECORD_NAMESPACE}/${key}/${branch}`
+}
+
+async function resolveCommit(repoPath: string, ref: string): Promise<string | null> {
+	const res = await runGit(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`], { repoPath })
+	const sha = res.code === 0 ? res.stdout.trim() : ''
+	return sha.length > 0 ? sha : null
+}
+
+/**
+ * Push `branch` to the same branch name at `remote`. The GitHub wrapper below is what the
+ * app calls; this takes any URL so the lease logic can be exercised against a local server.
+ */
+export async function pushBranch(input: {
+	repoPath: string
+	remote: string
+	branch: string
+	token: string
+	username?: string
+	force?: boolean
+}): Promise<PushBranchResult> {
 	if (!(await pathIsGitRepository(input.repoPath))) {
 		throw new Error(`Path is not a git repository: ${input.repoPath}`)
 	}
+	assertSafeBranchName(input.branch)
 
-	const { args, remote } = buildPushArgs(input)
+	const trackingRef = await trackingRefFor(input.repoPath, input.remote, input.branch)
+	const recordRef = pushRecordRef(input.remote, input.branch)
+	const leaseRef = trackingRef ?? recordRef
+	const leaseExpected = input.force ? ((await resolveCommit(input.repoPath, leaseRef)) ?? '') : ''
+	const pushedSha = await resolveCommit(input.repoPath, `refs/heads/${input.branch}`)
+	const args = buildPushArgs({ remote: input.remote, branch: input.branch, force: input.force, leaseExpected })
 
-	return new Promise<PushBranchResult>((resolve) => {
-		const ac = new AbortController()
-		const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS)
-		let stdout = ''
-		let stderr = ''
-		const proc = spawn('git', args, {
-			stdio: ['ignore', 'pipe', 'pipe'],
-			env: {
-				...process.env,
-				GIT_TOKEN: input.token,
-				// Belt-and-suspenders: even if credential lookup fails, refuse to prompt
-				// interactively (we'd hang the worker forever otherwise).
-				GIT_TERMINAL_PROMPT: '0',
-			},
-			signal: ac.signal,
-		})
+	const res = await runGit(args, {
+		repoPath: input.repoPath,
+		remote: { url: input.remote, username: input.username ?? 'x-access-token', token: input.token },
+		timeoutMs: REQUEST_TIMEOUT_MS,
+	})
 
-		proc.stdout.on('data', (chunk: Buffer) => {
-			stdout += chunk.toString('utf8')
-		})
-		proc.stderr.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString('utf8')
-		})
-		proc.on('error', (err) => {
-			clearTimeout(timer)
-			resolve({
-				success: false,
-				branch: input.branch,
-				remote,
-				stdout: redact(stdout, input.token),
-				stderr: redact(`${stderr}\n${(err as Error).message}`, input.token),
-				exitCode: -1,
-			})
-		})
-		proc.on('close', (code) => {
-			clearTimeout(timer)
-			resolve({
-				success: code === 0,
-				branch: input.branch,
-				remote,
-				stdout: redact(stdout, input.token),
-				stderr: redact(stderr, input.token),
-				exitCode: code ?? -1,
-			})
-		})
+	let stderr = res.stderr
+	if (res.code === 0) {
+		// Record what the remote branch now is, the way a push to a named remote would, so the
+		// next force-with-lease has an accurate expectation — whichever record it will read.
+		if (pushedSha) {
+			await runGit(['update-ref', recordRef, pushedSha], { repoPath: input.repoPath })
+			if (trackingRef) await runGit(['update-ref', trackingRef, pushedSha], { repoPath: input.repoPath })
+		}
+	} else if (input.force && /stale info/.test(stderr)) {
+		stderr += trackingRef
+			? '\nhint: the remote branch has commits AgentStudio has not fetched. Pull latest, check what changed, then push again.'
+			: '\nhint: the remote branch is not where AgentStudio last pushed it — someone else pushed, or AgentStudio never ' +
+				'pushed this branch there. Check what is on the remote first; a force-push will not overwrite work AgentStudio has not seen.'
+	}
+
+	return {
+		success: res.code === 0,
+		branch: input.branch,
+		remote: input.remote,
+		stdout: res.stdout,
+		stderr,
+		exitCode: res.code,
+	}
+}
+
+export async function pushBranchToGithub(input: PushBranchInput): Promise<PushBranchResult> {
+	return pushBranch({
+		repoPath: input.repoPath,
+		// Validates owner and repo as path segments before anything runs.
+		remote: githubCloneUrl(input.owner, input.repo),
+		branch: input.branch,
+		token: input.token,
+		username: 'x-access-token',
+		force: input.force,
 	})
 }
 

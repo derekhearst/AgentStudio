@@ -2,12 +2,12 @@
  * Context-window utilization metrics shown in the ContextWindow strip on the chat page.
  *
  * Pure transformation: takes the visible message list, recorded message stats
- * (per-row token counts from the LLM), the live tokenizer-accurate total from
- * the SSE stream, and the model's own context limit, then returns the
- * percent-of-budget breakdown plus a per-model usage chart.
+ * (per-row token counts from the LLM), the size of the system prompt the stream
+ * reported, and the model's own context limit, then returns the percent-of-budget
+ * breakdown plus a per-model usage chart.
  *
- * Estimates fall back to chars/4 (estimateTokens) when no live count is
- * available — the very first prompt before the stream has reported.
+ * Every part is an estimate (chars/4, `estimateTokens`) except the system prompt, which
+ * the stream measures when it assembles it.
  */
 
 import { estimateTokens } from './streaming-blocks'
@@ -28,6 +28,8 @@ export type ContextMetricsInput = {
 		role: string
 		content: string
 		toolCalls?: Array<{ result?: unknown }>
+		/** A saved reply's `metadata`; its `blocks` hold the turn's tool output. */
+		metadata?: unknown
 	}>
 	stats: Array<{
 		id: string
@@ -37,7 +39,18 @@ export type ContextMetricsInput = {
 	}>
 	messages: Array<{ id: string; content: string }>
 	totalBudget: number
-	liveTokenEstimate: number | null
+	/**
+	 * The assembled system prompt's size, from the stream's `context_stats` frame
+	 * (`systemPromptTokens`). Null before any turn has streamed on this page.
+	 *
+	 * #78 — this used to arrive as `liveTokenEstimate` and REPLACE the whole figure, on the
+	 * belief that it was a tokenizer-accurate count of the context. It is only the system
+	 * prompt: since the Agent SDK, the history lives in the SDK session and never passes
+	 * through the prompt assembly. So from the first turn on, a 150K-token conversation read
+	 * as ~3K, and the model-switch auto-compact, which compares this figure to the smaller
+	 * model's window, never fired. It now stands in for the system part only.
+	 */
+	systemPromptTokens: number | null
 }
 
 export type ContextMetrics = {
@@ -53,33 +66,59 @@ export type ContextMetrics = {
 	modelUsage: Array<{ label: string; value: number; color: string }>
 }
 
+function resultTokens(result: unknown): number {
+	return estimateTokens(typeof result === 'string' ? result : JSON.stringify(result ?? {}))
+}
+
+/**
+ * Tool output recorded on a saved reply's blocks, or null when the blocks hold no tool call.
+ * A turn run through the Agent SDK saves its calls there (with `toolCalls` left empty), and
+ * the output stays in the session's context, so leaving it out made a tool-heavy
+ * conversation look nearly empty.
+ */
+function blockResultTokens(metadata: unknown): number | null {
+	const blocks = metadata && typeof metadata === 'object' ? (metadata as { blocks?: unknown }).blocks : null
+	if (!Array.isArray(blocks)) return null
+	let sum: number | null = null
+	for (const block of blocks) {
+		if (block && typeof block === 'object' && (block as { kind?: unknown }).kind === 'tool') {
+			sum = (sum ?? 0) + resultTokens((block as { result?: unknown }).result)
+		}
+	}
+	return sum
+}
+
+/**
+ * One reply's tool output, read from one source. A stopped or failed partial is saved with
+ * the same results on both `toolCalls` and the blocks, so adding the two counted every
+ * result twice. The blocks win when they hold a tool call, as they do in MessageBubble.
+ */
+function messageResultTokens(message: ContextMetricsInput['displayedMessages'][number]): number {
+	const fromBlocks = blockResultTokens(message.metadata)
+	if (fromBlocks !== null) return fromBlocks
+	let sum = 0
+	for (const call of message.toolCalls ?? []) sum += resultTokens(call.result)
+	return sum
+}
+
 export function computeContextMetrics(input: ContextMetricsInput): ContextMetrics {
-	const { displayedMessages, stats, messages, totalBudget, liveTokenEstimate } = input
+	const { displayedMessages, stats, messages, totalBudget, systemPromptTokens } = input
 
 	const messageTokens = displayedMessages.reduce(
 		(sum, message) => sum + estimateTokens(message.content),
 		0,
 	)
 
-	const toolResultTokens = displayedMessages.reduce((sum, message) => {
-		const calls = message.toolCalls ?? []
-		for (const call of calls) {
-			const resultText = typeof call.result === 'string' ? call.result : JSON.stringify(call.result ?? {})
-			sum += estimateTokens(resultText)
-		}
-		return sum
-	}, 0)
+	const toolResultTokens = displayedMessages.reduce((sum, message) => sum + messageResultTokens(message), 0)
 
 	const otherTokens = 0
 
-	// Live SSE-supplied tokenizer-accurate count from the stream handler takes precedence
-	// when available (Phase 7 of #4). Falls back to the chars/4-derived estimate above
-	// for the very first prompt before the stream has reported.
+	const systemTokens =
+		typeof systemPromptTokens === 'number' && systemPromptTokens > 0 ? systemPromptTokens : SYSTEM_PROMPT_TOKEN_FLOOR
+
 	const used = Math.min(
 		totalBudget,
-		typeof liveTokenEstimate === 'number' && liveTokenEstimate > 0
-			? liveTokenEstimate
-			: SYSTEM_PROMPT_TOKEN_FLOOR + TOOL_DEFINITION_TOKEN_FLOOR + messageTokens + toolResultTokens + otherTokens,
+		systemTokens + TOOL_DEFINITION_TOKEN_FLOOR + messageTokens + toolResultTokens + otherTokens,
 	)
 
 	const toPct = (value: number) =>
@@ -107,7 +146,7 @@ export function computeContextMetrics(input: ContextMetricsInput): ContextMetric
 		total: totalBudget,
 		used,
 		breakdown: {
-			system: toPct(SYSTEM_PROMPT_TOKEN_FLOOR),
+			system: toPct(systemTokens),
 			tools: toPct(TOOL_DEFINITION_TOKEN_FLOOR),
 			messages: toPct(messageTokens),
 			results: toPct(toolResultTokens),

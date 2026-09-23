@@ -25,10 +25,11 @@ import { logger } from '$lib/observability/logger'
  *   4. Encrypt the token + upsert into `repository_connections`.
  *   5. Clear the OAuth cookies + 302 back to the requested return URL.
  *
- * On any failure, redirects to the return path with an `?error=` query param so the page
- * can surface a friendly message. Never bubbles a token through a query param or fragment.
- * The return path comes from a cookie the client controls, so it is re-validated here, not
- * only when connect set it.
+ * On any failure, redirects back to the page the flow started from (default /projects, where
+ * the Connections panel lives) with an `?error=` query param so the page can surface a
+ * friendly message. Never bubbles a token through a query param or fragment. The return path
+ * comes from a cookie the client controls, so it is re-validated here, not only when connect
+ * set it.
  */
 
 export const GET: RequestHandler = async ({ url, cookies }) => {

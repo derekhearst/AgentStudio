@@ -46,9 +46,9 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 | Feature | Verdict | Ours | Theirs |
 | --- | --- | --- | --- |
-| Agent SDK session loop, resume | **even** | `$lib/engine`, session id persisted per conversation | same SDK |
+| Agent SDK session loop, resume | **even** | `$lib/engine`, session id persisted per conversation; a turn outlives a reload, the reopened page re-attaches to it with Stop, and a conversation runs one turn at a time (since 2026-09-23) | same SDK |
 | Streaming with thinking | **even** | `delta` + `reasoning` frames, adaptive thinking, effort picker | same |
-| Tool approval | **behind** | per-tool global settings + mandatory-approval list | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
+| Tool approval | **behind** | per-tool settings + mandatory-approval list, checked for every call (subagents' included) ahead of the SDK's own allow rules; inline Allow/Deny cards, which never rendered on the engine path until 2026-09-22 (the frame carried no approval token) | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
 | Permission modes (plan / acceptEdits / bypass) | **absent** (#19) | hardcoded `default`; the Plan agent is a persona, not a mode | four modes, switchable mid-session |
 | Diff rendering | **far behind** (#16) | raw JSON in a tool card | inline diffs with per-hunk accept/reject |
 | Checkpoints and rewind | **far behind** (#24) | rewinds the transcript only; files stay written | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both |
@@ -70,7 +70,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
 | Code execution | **broken** | `run_code` throws on the engine path — it needs a runtime context only the old loop supplies, so every call since the engine migration has returned "can only be invoked from inside the chat loop". Unregistered from the engine surface rather than left advertised; see the re-audit | analysis tool / sandboxed Python, renders charts |
-| File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
+| File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped; files attached on the new-chat page go with the first message (they were silently dropped until 2026-09-23) | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
 | Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |

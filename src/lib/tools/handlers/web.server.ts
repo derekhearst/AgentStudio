@@ -3,13 +3,14 @@
  *
  * `web_search` logs a per-call usage row so operators can budget paid-search backends
  * (SearXNG defaults to $0/call). The other handlers delegate to `web-fetch.server.ts`
- * and `sandbox-browser.server.ts`.
+ * and `sandbox-browser.server.ts`, which reach the network only through the egress guard
+ * (`egress.server.ts`) — public addresses only, every redirect hop re-checked.
  */
 
 import { toolSchemas } from '../tool-schemas'
 import { webSearch } from '../web-search.server'
 import { webFetch, pdfRead } from '../web-fetch.server'
-import { sandboxBrowserNavigate, sandboxBrowserScreenshot, toolUserContext } from '../sandbox.server'
+import { browserScreenshot, toolUserContext } from '../sandbox.server'
 import { getSearchCostPerCall, getSearxngUrl } from '$lib/server/config'
 import { logToolUsage } from '$lib/costs/usage'
 import { logger } from '$lib/observability/logger'
@@ -45,17 +46,18 @@ export const webHandlers: Record<string, ToolHandler> = {
 
 	browser_screenshot: async (call, { startedAt }) => {
 		const input = toolSchemas.browser_screenshot.parse(call.arguments)
-		if (input.url) {
-			await sandboxBrowserNavigate(input.url)
-		}
-		const buffer = await sandboxBrowserScreenshot()
+		const shot = await browserScreenshot(input.url)
 		return {
 			success: true,
 			tool: call.name,
 			input,
+			// `{ mimeType, imageBase64 }` is the shape the engine turns into an image block for
+			// the model (engine/tool-result-content.ts) and the tool card renders.
 			result: {
+				url: shot.url,
+				title: shot.title,
 				mimeType: 'image/png',
-				imageBase64: buffer.toString('base64'),
+				imageBase64: shot.image.toString('base64'),
 			},
 			executionMs: Date.now() - startedAt,
 		}

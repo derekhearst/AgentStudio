@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, or, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import {
 	pullRequestChecks,
@@ -181,7 +181,13 @@ export type RecordPullRequestInput = {
 	body?: string | null
 	headBranch: string
 	baseBranch: string
+	/**
+	 * The PR's status, when the caller knows it changed. Omit it and an existing row keeps
+	 * the status it has — a label or a pushed commit says nothing about open vs merged.
+	 */
 	status?: PullRequestStatus
+	/** Status for a row this call creates, when `status` is omitted. Defaults to `draft`. */
+	statusIfNew?: PullRequestStatus
 	runId?: string | null
 	createdBy?: string | null
 	providerUrl?: string | null
@@ -190,10 +196,16 @@ export type RecordPullRequestInput = {
 
 /**
  * Record a pull request known to the system. Idempotent on (repositoryId, providerPrNumber)
- * — re-recording an existing PR updates the mutable fields (status, body, metadata, etc.)
- * without creating a duplicate row. Use for both agent-created and externally-created PRs.
+ * — re-recording an existing PR updates the mutable fields without creating a duplicate
+ * row. Use for both agent-created and externally-created PRs.
+ *
+ * On an existing row, `metadata` is merged in, never swapped: the poller's `headSha` and
+ * `lastPolledAt`, and whatever the webhook wrote, survive each other. The one key the
+ * incoming side does not overwrite is `source` — it records who first recorded the PR
+ * (`agent`, `github_webhook`), and a later webhook delivery does not change that.
  */
 export async function recordPullRequest(input: RecordPullRequestInput): Promise<PullRequestRow> {
+	const incoming = input.metadata ?? {}
 	const [row] = await db
 		.insert(pullRequests)
 		.values({
@@ -203,25 +215,54 @@ export async function recordPullRequest(input: RecordPullRequestInput): Promise<
 			body: input.body ?? null,
 			headBranch: input.headBranch,
 			baseBranch: input.baseBranch,
-			status: input.status ?? 'draft',
+			status: input.status ?? input.statusIfNew ?? 'draft',
 			runId: input.runId ?? null,
 			createdBy: input.createdBy ?? null,
 			providerUrl: input.providerUrl ?? null,
-			metadata: input.metadata ?? {},
+			metadata: incoming,
 		})
 		.onConflictDoUpdate({
 			target: [pullRequests.repositoryId, pullRequests.providerPrNumber],
 			set: {
 				title: input.title,
 				body: input.body ?? null,
-				status: input.status ?? 'draft',
+				...(input.status ? { status: input.status } : {}),
 				providerUrl: input.providerUrl ?? null,
-				metadata: input.metadata ?? {},
+				metadata: sql`${pullRequests.metadata} || ${JSON.stringify(incoming)}::jsonb || jsonb_strip_nulls(jsonb_build_object('source', ${pullRequests.metadata} -> 'source'))`,
 				updatedAt: new Date(),
 			},
 		})
 		.returning()
 	return row
+}
+
+/**
+ * Repository rows a GitHub webhook delivery is about. Webhooks are not user-scoped, so
+ * every user who connected the repo gets the update.
+ *
+ * GitHub names are case-insensitive, and a repo imported from a pasted URL keeps the
+ * casing the user typed while the payload carries GitHub's canonical casing — so the match
+ * ignores case. It is restricted to `github` rows, so a same-named repo on another host is
+ * never touched. A row synced from the GitHub API also carries the numeric repo id, which
+ * still matches after the repo is renamed or transferred.
+ */
+export async function findGithubRepositoriesForWebhook(input: {
+	owner: string
+	name: string
+	providerRepoId?: number | null
+}): Promise<RepositoryRow[]> {
+	const byName = and(
+		sql`lower(${repositories.owner}) = lower(${input.owner})`,
+		sql`lower(${repositories.name}) = lower(${input.name})`,
+	)
+	const byId =
+		typeof input.providerRepoId === 'number'
+			? sql`${repositories.metadata} ->> 'providerRepoId' = ${String(input.providerRepoId)}`
+			: undefined
+	return db
+		.select()
+		.from(repositories)
+		.where(and(eq(repositories.provider, 'github'), byId ? or(byName, byId) : byName))
 }
 
 export async function listPullRequestsForRepository(repositoryId: string): Promise<PullRequestRow[]> {

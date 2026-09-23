@@ -6,7 +6,7 @@ import {
 	getPullRequestFromProvider,
 	listCheckRunsForRef,
 	listCommitStatusesForRef,
-	GithubApiError,
+	isGithubCredentialFailure,
 } from './github-api.server'
 import { getActiveGithubConnection } from './github-provider.server'
 import {
@@ -352,9 +352,11 @@ export async function pollPullRequestChecks(
 	} catch (err) {
 		// A revoked or expired token is a connection problem, not a PR problem — flip the
 		// connection so `getActiveGithubConnection` stops handing it out and every other
-		// watched PR skips instead of hammering a 401. Never log the token itself.
-		if (err instanceof GithubApiError && (err.status === 401 || err.status === 403)) {
-			await markConnectionStatus(conn.connection.id, 'error', err.message)
+		// watched PR skips instead of hammering a 401. A 403 on this one PR (rate limit, an
+		// org's SSO or app restrictions) is not, and must not disable every other repo.
+		// Never log the token itself.
+		if (isGithubCredentialFailure(err, 'resource')) {
+			await markConnectionStatus(conn.connection.id, 'error', (err as Error).message)
 		}
 		throw err
 	}

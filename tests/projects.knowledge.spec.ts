@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import {
 	authenticateContext,
@@ -189,6 +192,70 @@ test.describe('projects/knowledge — the directory', () => {
 				await rm(getProjectPath(userId, projectId), { recursive: true, force: true }).catch(() => {})
 			}
 			await cleanupPrefixedRecords(prefix)
+		}
+	})
+})
+
+test.describe('projects/knowledge — a symlink in an imported repo', () => {
+	/**
+	 * `.agentstudio` lives inside somebody else's checkout, so a repo can commit it as a
+	 * symlink — and the agent's Bash can make one. Either way the knowledge directory must
+	 * not become a door to the rest of the host.
+	 */
+	function link(target: string, path: string) {
+		try {
+			symlinkSync(target, path, 'dir')
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code
+			if (process.platform === 'win32' && code === 'EPERM') return symlinkSync(target, path, 'junction')
+			if (code === 'EPERM') test.skip(true, 'this host cannot create symlinks')
+			throw error
+		}
+	}
+
+	test('a knowledge directory that points out of the project is never written, listed or deleted from', async () => {
+		const userId = `u${randomUUID().slice(0, 8)}`
+		const projectId = randomUUID()
+		const projectPath = getProjectPath(userId, projectId)
+		const outside = resolve(tmpdir(), `agentstudio-knowledge-${randomUUID()}`)
+		mkdirSync(join(outside, 'knowledge'), { recursive: true })
+		writeFileSync(join(outside, 'knowledge', 'host.md'), 'belongs to the host')
+		mkdirSync(projectPath, { recursive: true })
+
+		try {
+			link(outside, join(projectPath, '.agentstudio'))
+
+			await expect(
+				saveKnowledgeFile({ userId, projectId, filename: 'spec.md', bytes: bytes('x') }),
+			).rejects.toThrow(/escapes sandbox workspace/)
+			expect(existsSync(join(outside, 'knowledge', 'spec.md'))).toBe(false)
+
+			// Listing is empty rather than an error, so the project page still loads.
+			expect(await listKnowledgeFiles(userId, projectId)).toEqual([])
+
+			await expect(deleteKnowledgeFile(userId, projectId, 'host.md')).rejects.toThrow(/escapes sandbox workspace/)
+			expect(existsSync(join(outside, 'knowledge', 'host.md'))).toBe(true)
+		} finally {
+			rmSync(dirname(dirname(projectPath)), { recursive: true, force: true })
+			rmSync(outside, { recursive: true, force: true })
+		}
+	})
+
+	test('a symlinked .git/info does not turn the git exclusion into a write elsewhere', async () => {
+		const userId = `u${randomUUID().slice(0, 8)}`
+		const projectId = randomUUID()
+		const projectPath = getProjectPath(userId, projectId)
+		const outside = resolve(tmpdir(), `agentstudio-gitinfo-${randomUUID()}`)
+		mkdirSync(outside, { recursive: true })
+		mkdirSync(join(projectPath, '.git'), { recursive: true })
+
+		try {
+			link(outside, join(projectPath, '.git', 'info'))
+			await ensureKnowledgeDir(userId, projectId)
+			expect(existsSync(join(outside, 'exclude'))).toBe(false)
+		} finally {
+			rmSync(dirname(dirname(projectPath)), { recursive: true, force: true })
+			rmSync(outside, { recursive: true, force: true })
 		}
 	})
 })

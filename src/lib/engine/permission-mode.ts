@@ -196,7 +196,8 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 		note: 'Naming-convention fallback: list_*/get_*/read_* are read-only by construction.',
 	},
 
-	// 3b. Delegation. Deliberately NOT read-only, though a `Task` call does nothing by
+	// 3b. Delegation — `Agent`, which the CLI still also answers to as `Task`, so both are
+	//     matched. Deliberately NOT read-only, though a delegation does nothing by
 	//     itself: what it costs is decided by the child, and the child's own calls are only
 	//     gated if they reach `canUseTool` — which this codebase has not established they
 	//     do. `sdkPermissionModeFor` hands the SDK 'default' in plan mode, so nothing else
@@ -204,7 +205,7 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 	//     mode refuses it outright rather than allowing a channel whose contents it cannot
 	//     see. Revisit as `read` once a child's tool call is observed reaching the gate.
 	{
-		match: /^task$/i,
+		match: /^(task|agent)$/i,
 		capabilities: ['mutate'],
 		note: 'SUBAGENT_TOOL — delegation is only as read-only as the agent it delegates to.',
 	},

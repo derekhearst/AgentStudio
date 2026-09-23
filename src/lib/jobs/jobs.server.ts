@@ -459,9 +459,14 @@ export async function heartbeatJob(jobId: string, leaseTtlMs?: number): Promise<
 	if (!row) return null
 	// Update the most recent lease row's heartbeat. Best-effort — the cached lease_expires_at
 	// on jobs is the source of truth for the claim path.
+	//
+	// The expiry is bound as an ISO string with an explicit cast. Drizzle's postgres-js driver
+	// switches off postgres.js's own Date serialisation (columns convert Dates themselves), so
+	// a bare Date in a raw template reaches the wire unconverted and the query throws — which
+	// made every heartbeat fail.
 	await db.execute(drizzleSql`
 		update job_leases
-		set heartbeat_at = now(), expires_at = ${newExpiry}
+		set heartbeat_at = now(), expires_at = ${newExpiry.toISOString()}::timestamptz
 		where job_id = ${jobId}
 		and id = (select id from job_leases where job_id = ${jobId} order by heartbeat_at desc limit 1)
 	`)

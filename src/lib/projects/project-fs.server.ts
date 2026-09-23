@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
 import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { logger } from '$lib/observability/logger'
 import { safePathWithin } from '$lib/workspace/workspace.server'
-import { materializeRepoMirror } from '$lib/source-control/repo-mirror.server'
+import { runGit } from '$lib/source-control/git-exec.server'
+import { cloneRepository, materializeRepoMirror, refreshClone } from '$lib/source-control/repo-mirror.server'
+import type { CloneRefreshOutcome } from '$lib/source-control/repo-mirror'
 
 /**
  * Sandboxed filesystem layout for projects.
@@ -24,8 +25,8 @@ const DEFAULT_SANDBOX_ROOT = '/workspace/users'
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
 // UUID v4 with mixed case allowed; shape-only check, not a strict v4 regex.
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9-]+$/
-const SAFE_BRANCH = /^[a-zA-Z0-9_/-]+$/
-const REQUEST_TIMEOUT_MS = 120_000
+// No leading `-`: git would read the name as an option rather than a branch.
+const SAFE_BRANCH = /^(?!-)[a-zA-Z0-9_/-]+$/
 
 function getSandboxRoot(): string {
 	return process.env.SANDBOX_WORKSPACE || DEFAULT_SANDBOX_ROOT
@@ -66,35 +67,6 @@ async function pathExists(absPath: string): Promise<boolean> {
 	}
 }
 
-async function runGit(args: string[], cwd: string, env: Record<string, string> = {}): Promise<{ stdout: string; stderr: string; code: number }> {
-	return new Promise((resolveRun) => {
-		const ac = new AbortController()
-		const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS)
-		let stdout = ''
-		let stderr = ''
-		const proc = spawn('git', args, {
-			cwd,
-			stdio: ['ignore', 'pipe', 'pipe'],
-			env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env },
-			signal: ac.signal,
-		})
-		proc.stdout.on('data', (chunk: Buffer) => {
-			stdout += chunk.toString('utf8')
-		})
-		proc.stderr.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString('utf8')
-		})
-		proc.on('error', (err) => {
-			clearTimeout(timer)
-			resolveRun({ stdout, stderr: `${stderr}\n${(err as Error).message}`, code: -1 })
-		})
-		proc.on('close', (code) => {
-			clearTimeout(timer)
-			resolveRun({ stdout, stderr, code: code ?? -1 })
-		})
-	})
-}
-
 export type InitLocalProjectInput = {
 	userId: string
 	projectId: string
@@ -122,7 +94,7 @@ export async function initLocalProjectRepo(input: InitLocalProjectInput): Promis
 
 	await mkdir(projectPath, { recursive: true })
 
-	const initRes = await runGit(['init', '-b', branch], projectPath)
+	const initRes = await runGit(['init', '-b', branch], { cwd: projectPath })
 	if (initRes.code !== 0) {
 		throw new Error(`git init failed (exit ${initRes.code}): ${initRes.stderr.trim() || initRes.stdout.trim()}`)
 	}
@@ -134,14 +106,14 @@ export async function initLocalProjectRepo(input: InitLocalProjectInput): Promis
 
 	// Commit identity is local-only (per-repo config) so the initial commit doesn't depend on
 	// the operator having a global git identity set.
-	await runGit(['config', 'user.email', 'agentstudio@local'], projectPath)
-	await runGit(['config', 'user.name', 'AgentStudio'], projectPath)
+	await runGit(['config', 'user.email', 'agentstudio@local'], { repoPath: projectPath })
+	await runGit(['config', 'user.name', 'AgentStudio'], { repoPath: projectPath })
 
-	const addRes = await runGit(['add', '-A'], projectPath)
+	const addRes = await runGit(['add', '-A'], { repoPath: projectPath })
 	if (addRes.code !== 0) {
 		throw new Error(`git add failed (exit ${addRes.code}): ${addRes.stderr.trim()}`)
 	}
-	const commitRes = await runGit(['commit', '-m', 'Initial commit'], projectPath)
+	const commitRes = await runGit(['commit', '-m', 'Initial commit'], { repoPath: projectPath })
 	if (commitRes.code !== 0) {
 		throw new Error(`git commit failed (exit ${commitRes.code}): ${commitRes.stderr.trim() || commitRes.stdout.trim()}`)
 	}
@@ -186,24 +158,16 @@ export async function cloneIntoProject(input: CloneIntoProjectInput): Promise<Pr
 	const mirrorParent = getProjectsRoot(input.userId)
 	await mkdir(mirrorParent, { recursive: true })
 
-	const credentialUsername = input.credentialUsername ?? (input.token ? 'x-access-token' : '')
-	const credentialHelper =
-		credentialUsername.length > 0
-			? `credential.helper=!f() { echo "username=${credentialUsername}"; echo "password=$GIT_TOKEN"; }; f`
-			: 'credential.helper=' // explicit empty helper for anonymous clones
-
-	const cloneRes = await runGit(
-		['-c', credentialHelper, 'clone', '--no-tags', input.cloneUrl, projectPath],
-		mirrorParent,
-		input.token ? { GIT_TOKEN: input.token } : {},
-	)
-	if (cloneRes.code !== 0) {
-		const redacted = redact(cloneRes.stderr.trim() || cloneRes.stdout.trim(), input.token)
-		throw new Error(`git clone failed (exit ${cloneRes.code}): ${redacted}`)
-	}
+	await cloneRepository({
+		remoteUrl: input.cloneUrl,
+		targetPath: projectPath,
+		token: input.token ?? '',
+		credentialUsername: input.credentialUsername,
+		cwd: mirrorParent,
+	})
 
 	let branch = 'main'
-	const headRes = await runGit(['symbolic-ref', '--short', 'HEAD'], projectPath)
+	const headRes = await runGit(['symbolic-ref', '--short', 'HEAD'], { repoPath: projectPath })
 	if (headRes.code === 0) {
 		const detected = headRes.stdout.trim()
 		if (detected.length > 0) branch = detected
@@ -213,9 +177,10 @@ export async function cloneIntoProject(input: CloneIntoProjectInput): Promise<Pr
 }
 
 /**
- * Best-effort `git fetch --prune` against the project's existing clone. Used by the "Pull
- * latest" button. Reuses the same credential-helper trick as cloneIntoProject so the token
- * never lands in argv.
+ * Refresh the project's clone from its remote — the "Pull latest" button. Every remote
+ * branch is fetched into `origin/*`, and the checked-out branch is fast-forwarded when it
+ * is strictly behind; `refreshClone` says when it is left alone instead. The token travels
+ * as a URL-scoped header in the child environment, never argv.
  */
 export async function fetchProjectRemote(input: {
 	userId: string
@@ -223,25 +188,17 @@ export async function fetchProjectRemote(input: {
 	cloneUrl: string
 	token?: string
 	credentialUsername?: string
-}): Promise<{ stdout: string; stderr: string }> {
+}): Promise<CloneRefreshOutcome> {
 	const projectPath = getProjectPath(input.userId, input.projectId)
 	if (!(await pathExists(join(projectPath, '.git')))) {
 		throw new Error(`Project is not a git repository: ${projectPath}`)
 	}
-	const credentialUsername = input.credentialUsername ?? (input.token ? 'x-access-token' : '')
-	const credentialHelper =
-		credentialUsername.length > 0
-			? `credential.helper=!f() { echo "username=${credentialUsername}"; echo "password=$GIT_TOKEN"; }; f`
-			: 'credential.helper='
-	const res = await runGit(
-		['-c', credentialHelper, 'fetch', '--prune', input.cloneUrl],
-		projectPath,
-		input.token ? { GIT_TOKEN: input.token } : {},
-	)
-	if (res.code !== 0) {
-		throw new Error(`git fetch failed (exit ${res.code}): ${redact(res.stderr.trim() || res.stdout.trim(), input.token)}`)
-	}
-	return { stdout: res.stdout, stderr: res.stderr }
+	return refreshClone({
+		repoPath: projectPath,
+		remoteUrl: input.cloneUrl,
+		token: input.token ?? '',
+		credentialUsername: input.credentialUsername,
+	})
 }
 
 /**
@@ -255,11 +212,6 @@ export async function deleteProjectFs(userId: string, projectId: string): Promis
 	} catch (err) {
 		logger.warn('[projects] deleteProjectFs failed', { userId, projectId, err })
 	}
-}
-
-function redact(text: string, token: string | undefined): string {
-	if (!token || token.length === 0) return text
-	return text.split(token).join('***REDACTED***')
 }
 
 // Re-exported so `projects.server.ts` can pass a stub mirror result through after a clone

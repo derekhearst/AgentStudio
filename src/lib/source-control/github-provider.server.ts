@@ -12,7 +12,7 @@ import { db } from '$lib/db.server'
 import { logger } from '$lib/observability/logger'
 import { decryptSecret } from './encryption.server'
 import {
-	GithubApiError,
+	isGithubCredentialFailure,
 	listAuthenticatedUserRepos,
 	type GithubRepoSummary,
 } from './github-api.server'
@@ -71,10 +71,9 @@ export async function syncGithubReposForUser(
 		remoteRepos = await listAuthenticatedUserRepos(conn.accessToken, { maxPages: options?.maxPages })
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
-		await markConnectionStatus(conn.connection.id, 'error', message)
-		if (err instanceof GithubApiError && (err.status === 401 || err.status === 403)) {
-			return { total: 0, inserted: 0, updated: 0, skipped: 0, errorMessage: message }
-		}
+		// Only a dead token takes the connection out of service. A timeout, a 5xx or a rate
+		// limit is reported to the caller and the connection stays usable for the next try.
+		if (isGithubCredentialFailure(err)) await markConnectionStatus(conn.connection.id, 'error', message)
 		return { total: 0, inserted: 0, updated: 0, skipped: 0, errorMessage: message }
 	}
 
@@ -192,9 +191,7 @@ export async function listGithubImportCandidates(userId: string): Promise<{
 		remoteRepos = await listAuthenticatedUserRepos(conn.accessToken, { maxPages: 4 })
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err)
-		if (err instanceof GithubApiError && (err.status === 401 || err.status === 403)) {
-			await markConnectionStatus(conn.connection.id, 'error', message)
-		}
+		if (isGithubCredentialFailure(err)) await markConnectionStatus(conn.connection.id, 'error', message)
 		return { candidates: [], errorMessage: message }
 	}
 

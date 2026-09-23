@@ -165,8 +165,8 @@ async function startServices(client: Client, generation: number): Promise<void> 
  * Create the owner from `AUTH_PASSWORD` when the database has none — the non-interactive
  * first run, and what makes a fresh CI database or Docker deploy usable without `/setup`.
  * Never overwrites an existing owner's password. Removes `AUTH_PASSWORD` from
- * `process.env` whatever happens, because Agent SDK subprocesses inherit it. Details in
- * src/lib/auth/provision.server.ts.
+ * `process.env` whatever happens, because the server's child processes inherit it. Details
+ * in src/lib/auth/provision.server.ts.
  *
  * Runs before the seeders and before the web tier serves anything (every request awaits
  * this pipeline), so the setup gate never sees a window where the owner is missing.

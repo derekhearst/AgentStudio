@@ -16,6 +16,8 @@ import {
 } from '$lib/chat/agent-switch.server'
 import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { listRecentConversations } from '$lib/chat/conversation-list.server'
+import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
 import {
 	describePermissionMode,
 	PERMISSION_MODES,
@@ -56,70 +58,7 @@ const savePartialAssistantSchema = z.object({
 
 export const getConversations = query(async () => {
 	const user = requireAuthenticatedRequestUser()
-	const activeStates = new Set(['queued', 'running', 'waiting_tool_approval', 'waiting_user_input'])
-	const rows = await db
-		.select()
-		.from(conversations)
-		.where(eq(conversations.userId, user.id))
-		.orderBy(desc(conversations.updatedAt))
-		.limit(50)
-
-	const conversationIds = rows.map((row) => row.id)
-	const lastMessages = conversationIds.length
-		? await db
-				.select()
-				.from(messages)
-				.where(eq(messages.role, 'assistant'))
-				.orderBy(desc(messages.createdAt), desc(messages.id))
-		: []
-
-	const conversationIdSet = new Set(conversationIds)
-
-	const activeRuns = conversationIds.length
-		? await db
-				.select({
-					id: chatRuns.id,
-					conversationId: chatRuns.conversationId,
-					state: chatRuns.state,
-					label: chatRuns.label,
-					startedAt: chatRuns.startedAt,
-					lastHeartbeatAt: chatRuns.lastHeartbeatAt,
-					updatedAt: chatRuns.updatedAt,
-					error: chatRuns.error,
-				})
-				.from(chatRuns)
-				.where(and(eq(chatRuns.userId, user.id), isNull(chatRuns.finishedAt)))
-				.orderBy(desc(chatRuns.updatedAt))
-		: []
-
-	const activeRunByConversation = new Map<string, (typeof activeRuns)[number]>()
-	for (const run of activeRuns) {
-		if (!conversationIdSet.has(run.conversationId)) continue
-		if (!activeStates.has(run.state)) continue
-		if (!activeRunByConversation.has(run.conversationId)) {
-			activeRunByConversation.set(run.conversationId, run)
-		}
-	}
-
-	return rows.map((conversation) => {
-		const last = lastMessages.find((message) => message.conversationId === conversation.id)
-		const activeRun = activeRunByConversation.get(conversation.id)
-		return {
-			...conversation,
-			lastMessage: last?.content ?? null,
-			activeRun: activeRun
-				? {
-						id: activeRun.id,
-						state: activeRun.state,
-						label: activeRun.label,
-						startedAt: activeRun.startedAt,
-						lastHeartbeatAt: activeRun.lastHeartbeatAt,
-						updatedAt: activeRun.updatedAt,
-						error: activeRun.error,
-					}
-				: null,
-		}
-	})
+	return listRecentConversations(user.id)
 })
 
 export const getConversation = query(conversationIdSchema, async (conversationId) => {
@@ -135,7 +74,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 	}
 
 	// Parallelize messages + active-run lookup — both are scoped to the now-verified conversation.
-	const [rows, [activeRun]] = await Promise.all([
+	const [rows, [activeRun], liveRunId] = await Promise.all([
 		db
 			.select()
 			.from(messages)
@@ -157,6 +96,8 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 			)
 			.orderBy(desc(chatRuns.updatedAt))
 			.limit(1),
+		// The chat turn still running, which a reloaded page re-attaches to (#129).
+		findLiveChatRun(conversationId, user.id),
 	])
 
 	// Surface the first un-decided ask_user entry so a hard refresh during a paused question
@@ -172,6 +113,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		conversation,
 		messages: rows,
 		pendingAskUser,
+		liveRunId,
 	}
 })
 

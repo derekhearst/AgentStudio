@@ -12,7 +12,12 @@
 /** Built-in SDK tools that replaced the in-house filesystem registry entries (#15). */
 export const BUILTIN_FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep'] as const
 
-export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell'] as const
+/**
+ * `TaskStop` is what the CLI calls `KillShell` now (see `LEGACY_TOOL_NAMES`). `BashOutput`
+ * no longer exists in the bundled CLI at all — a background command's output is read with
+ * `Read` — and stays listed only so an agent configured with it keeps validating.
+ */
+export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop'] as const
 
 /**
  * Built-ins we deliberately refuse, because an in-house tool does the same job *and* more.
@@ -25,13 +30,34 @@ export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell'] as const
 export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch'] as const
 
 /**
+ * The CLI's current name for each built-in it has renamed, keyed by the old name.
+ *
+ * The same table the SDK applies to permission rules (`Task` → `Agent` and so on in
+ * `sdk.mjs`), and the CLI resolves the old names as aliases when it builds its tool list.
+ * What it does not do is rename a call: the model calls the tool by its current name, so a
+ * PreToolUse hook and `canUseTool` are handed `Agent`, never `Task`. Anything of ours that
+ * compares a call's name against a configured list has to compare canonical names, or a
+ * scope that says `Task` refuses every delegation.
+ */
+export const LEGACY_TOOL_NAMES: Readonly<Record<string, string>> = {
+	Task: 'Agent',
+	KillShell: 'TaskStop',
+	KillBash: 'TaskStop',
+}
+
+/** A tool name as the CLI calls it today — `Task` → `Agent`; anything else unchanged. */
+export function canonicalToolName(name: string): string {
+	return Object.hasOwn(LEGACY_TOOL_NAMES, name) ? LEGACY_TOOL_NAMES[name] : name
+}
+
+/**
  * The SDK's delegation tool — the one way an `Options.agents` definition is reached (#5).
  *
- * Named here rather than inlined because three places have to agree on it: the option
- * builder adds it to a scoped run's allowlist, the capability rules classify it, and the
- * stream loop reads a call to it as the start of a child transcript.
+ * `Agent`, not `Task`: the bundled CLI renamed it and keeps `Task` only as an alias, so a
+ * delegation arrives at the hook as `Agent`. Named here rather than inlined because the
+ * tool scope adds it to a run that was given agents, and the capability rules classify it.
  */
-export const SUBAGENT_TOOL = 'Task'
+export const SUBAGENT_TOOL = 'Agent'
 
 /** Membership test so an allowlist can carry both surfaces without qualifying built-ins. */
 export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
