@@ -38,11 +38,19 @@ import { ensureDatabaseReady } from '$lib/db.server'
 import { backgroundJobs } from '$lib/db/process-state.server'
 import { drainTimeoutFromEnv } from '$lib/jobs/worker-config'
 
-await ensureDatabaseReady()
+// The first bootstrap already waits out a Postgres that is still starting. If it fails
+// anyway, a worker with no handlers and no loop would idle here forever looking alive, so
+// exit instead and let the container's restart policy retry.
+try {
+	await ensureDatabaseReady()
+} catch (err) {
+	console.error('[worker] database bootstrap failed; exiting so the process is restarted:', err)
+	process.exit(1)
+}
 
 const { worker } = backgroundJobs()
 if (!worker) {
-	console.error('[worker] No job worker is running — the bootstrap failed or JOBS_WORKER_ENABLED=0. Exiting.')
+	console.error('[worker] No job worker is running — it failed to start (see above) or JOBS_WORKER_ENABLED=0. Exiting.')
 	process.exit(1)
 }
 

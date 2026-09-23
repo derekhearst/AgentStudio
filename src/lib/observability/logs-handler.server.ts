@@ -5,8 +5,8 @@ import { logger, registerDbSink, type LogEntry } from './logger'
 
 /**
  * Registers the daily `app_logs_purge` job + retention schedule, and turns on the logger's
- * DB sink. Called from db.server.ts after `ensureDatabaseReady` completes so the
- * `app_logs` table exists before the first flush.
+ * DB sink. Called from database bootstrap (db/bootstrap.server.ts) once migrations have
+ * run, so the `app_logs` table exists before the first flush.
  *
  * Retention default: 14 days. Override with `APP_LOGS_RETENTION_DAYS` if needed (e.g. on a
  * resource-constrained host where 14d is too noisy).

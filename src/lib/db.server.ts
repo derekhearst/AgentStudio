@@ -5,6 +5,7 @@ import postgres from 'postgres'
 import { handleDatabaseNotice } from '$lib/db/migrations.server'
 import { bootstrapDatabase } from '$lib/db/bootstrap.server'
 import { beginBootstrapGeneration, reuseDatabaseClient } from '$lib/db/process-state.server'
+import { createBootstrapGate, type BootstrapGate } from '$lib/db/readiness.server'
 
 // Load .env into process.env so server modules can read directly without depending on
 // SvelteKit's `$env/dynamic/private` virtual module. Bun auto-loads .env when invoking
@@ -96,13 +97,30 @@ const client = skipDatabaseInitialization ? null : reuseDatabaseClient(() => cre
 // module's load to complete. All real callers (hooks.server.ts, every remote function
 // handler) already call `ensureDatabaseReady()` at the request boundary, so the promise
 // is awaited at the right time without blocking the module graph.
-const databaseReadyPromise =
-	skipDatabaseInitialization || !client || !databaseUrl
-		? Promise.resolve()
-		: bootstrapDatabase({ client, databaseUrl, generation: beginBootstrapGeneration() })
+//
+// A failed bootstrap makes `ensureDatabaseReady()` reject rather than resolve, so requests
+// fail loudly instead of running against a half-initialised database. After a cooldown the
+// next caller retries — once, without the boot-time backoff, because a request is waiting.
+const bootstrapGate =
+	skipDatabaseInitialization || !client || !databaseUrl ? null : startBootstrap(client, databaseUrl)
+
+function startBootstrap(connection: ReturnType<typeof createDatabaseClient>, url: string): BootstrapGate {
+	// One generation per evaluation of this module, not per attempt: opening a generation is
+	// what stops the previous evaluation's worker and scheduler, and the gate's re-attempts
+	// after a failed bootstrap belong to this evaluation.
+	const generation = beginBootstrapGeneration()
+	return createBootstrapGate((attempt) =>
+		bootstrapDatabase({
+			client: connection,
+			databaseUrl: url,
+			generation,
+			retryDelaysMs: attempt === 0 ? undefined : [],
+		}),
+	)
+}
 
 export async function ensureDatabaseReady() {
-	await databaseReadyPromise
+	await bootstrapGate?.ensureReady()
 }
 
 export const db: Database = client ? createDatabase(client) : createUnavailableDatabase()

@@ -37,6 +37,10 @@ The same pattern drives monitor checks, PR CI polling and workspace cleanup.
 3. The next worker to look for work finds the job and runs it again, counting it as a new attempt.
 4. Two exceptions. If the job has already used all its attempts, the handler is probably what is killing the server, so the job is marked **failed** instead of being handed to another worker, and a **Job stuck** item appears in the Review inbox. And if the lease lapsed more than an hour ago — a server that was off overnight — the job is marked failed rather than re-run against a world that has moved on. Those leftovers are recorded on the job itself (its error in `/settings/jobs` says what happened) rather than in the inbox, because a server coming back after a long gap can find dozens of them at once.
 
+### Starting a standalone worker
+
+A standalone worker (`bun run worker`) prepares the database the same way the web server does, and waits a few minutes for a Postgres that is still starting. If it still cannot, or if its job worker fails to start, it exits with an error so its container's restart policy tries again, rather than sitting idle while jobs pile up. `/api/health` reports whether the web server's own worker is running (`jobWorker`); see [`docs/database/database.md`](../database/database.md#when-startup-cannot-reach-the-database).
+
 ### Stopping a standalone worker
 
 A deployment can run workers as separate processes (`bun run worker`) next to the web server. When such a process is asked to stop:

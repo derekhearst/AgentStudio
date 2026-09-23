@@ -173,9 +173,9 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 	}
 
 	async function loop() {
-		// Defer the first poll briefly so module-level awaits in db.server.ts (the `db` export
-		// resolves AFTER `await databaseReadyPromise`) have a chance to settle. Otherwise the
-		// first claim runs against an undefined db proxy.
+		// Defer the first poll briefly. Bootstrap only starts the worker once migrations have
+		// run, so the database is ready; the delay lets the rest of startup (the scheduler,
+		// background backfills) get going before the first claim.
 		await delay(2_000)
 		while (!stopped) {
 			try {

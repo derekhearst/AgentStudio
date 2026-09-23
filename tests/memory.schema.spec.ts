@@ -299,3 +299,24 @@ test.describe('memory/schema — temporal knowledge graph', () => {
 		}
 	})
 })
+
+test.describe('memory/schema — indexes behind hot foreign keys', () => {
+	test('drawers are indexed by source message, and rooms by conversation', async () => {
+		// Both columns are ON DELETE SET NULL foreign keys. Without an index, deleting a
+		// conversation ran one full scan of memory_drawers per deleted message, and every
+		// post-turn mining job scanned the table to find already-mined messages.
+		const sql = getSql()
+		const rows = await sql<{ tablename: string; indexname: string; indexdef: string }[]>`
+			select tablename, indexname, indexdef from pg_indexes
+			where schemaname = 'public'
+				and indexname in ('memory_drawers_source_message_idx', 'memory_rooms_conversation_idx')
+			order by indexname
+		`
+		expect(rows.map((row) => [row.tablename, row.indexname])).toEqual([
+			['memory_drawers', 'memory_drawers_source_message_idx'],
+			['memory_rooms', 'memory_rooms_conversation_idx'],
+		])
+		expect(rows[0].indexdef).toContain('(source_message_id)')
+		expect(rows[1].indexdef).toContain('(conversation_id)')
+	})
+})
