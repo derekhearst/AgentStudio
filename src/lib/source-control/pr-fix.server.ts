@@ -5,7 +5,7 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
-import { buildFixPrompt } from './pr-checks'
+import { buildFixPrompt, CI_FIX_POLICY } from './pr-checks'
 import { mayFixPullRequest } from './pr-fix'
 import { pullRequestChecks, pullRequests, repositories } from './source-control.schema'
 
@@ -237,8 +237,13 @@ async function requireDefaultAgentId(userId: string, preferred: string | null): 
  * Run the agent detached. Nobody is streaming this — the operator pressed a button in
  * /review and will come back to the conversation — so the loop is bounded and no tool
  * needs an interactive approval surface. `push_branch` and `create_pull_request` already
- * refuse non-`chat_stream` runs of their own accord, so a fix run can diagnose and edit
- * but cannot silently push over the operator's branch; that last step stays a human's.
+ * refuse non-`chat_stream` runs of their own accord, so a fix run cannot silently push over
+ * the operator's branch; that last step stays a human's.
+ *
+ * It runs on the old loop, whose unattended tool list is `web_search` alone since `run_code`
+ * was retired (#69; `$lib/runtime/detached-tools`). So today a fix run can reason about the
+ * failure it is handed but cannot edit the checkout, and its prompt and `CI_FIX_POLICY` say
+ * so: they ask for a proposed patch. Moving it onto the engine is the fix.
  */
 async function runFixLoop(input: {
 	userId: string
@@ -256,13 +261,7 @@ async function runFixLoop(input: {
 		agent,
 		userId: input.userId,
 		intent: input.prompt,
-		toolPolicy: [
-			'CI fix policy:',
-			'- A continuous-integration check failed on a pull request you opened; no user is watching in real time.',
-			'- Diagnose before editing. Say what broke and why before you change a line.',
-			'- If the failure is unrelated to this branch, report that and stop rather than rewriting working code.',
-			'- Do not push or re-open the pull request yourself; summarize the fix and leave the push to the operator.',
-		].join('\n'),
+		toolPolicy: CI_FIX_POLICY,
 	})
 
 	const [conversation] = await db
@@ -282,8 +281,7 @@ async function runFixLoop(input: {
 				{ role: 'system', content: definition.systemPrompt },
 				{ role: 'user', content: input.prompt },
 			],
-			initialTools: definition.tools,
-			computeTools: async () => definition.tools,
+			tools: definition.tools,
 			maxRounds: 12,
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
@@ -291,7 +289,6 @@ async function runFixLoop(input: {
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			projectId: conversation?.projectId ?? null,
-			spawnSubagent: undefined,
 		})
 
 		const { logLlmUsage } = await import('$lib/costs/usage')

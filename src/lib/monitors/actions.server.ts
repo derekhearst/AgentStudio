@@ -277,8 +277,7 @@ async function fireConversation(
 				{ role: 'system', content: definition.systemPrompt },
 				{ role: 'user', content: seeded },
 			],
-			initialTools: definition.tools,
-			computeTools: async () => definition.tools,
+			tools: definition.tools,
 			// Bounded — nobody is here to course-correct a runaway.
 			maxRounds: 10,
 			approvalRequiredTools: new Set<string>(),
@@ -287,7 +286,6 @@ async function fireConversation(
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			projectId: conversation.projectId ?? null,
-			spawnSubagent: undefined,
 		})
 
 		const { logLlmUsage } = await import('$lib/costs/usage')

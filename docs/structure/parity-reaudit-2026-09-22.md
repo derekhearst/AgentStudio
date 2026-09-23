@@ -193,6 +193,24 @@ callable from inside the script" has not been true on this path since the engine
 Restoring it means giving the engine its own approval route for nested calls, which is a
 piece of work in its own right, not a line change.
 
+**Decided (#69), and both deleted (#8).** `run_code` was retired rather than restored. What
+only it could do — call AgentStudio's own tools from inside a script — did not justify a
+second approval gate kept in lockstep with `canUseTool`: the SDK's sandboxed `Bash` already
+runs scripts in the workspace, and the model already makes independent tool calls in one
+step. Both tools are now gone from the registry, not just from the engine, because an
+exclusion left them on every other surface that lists the registry (the settings approval
+list, `/api/mcp`). `search_tools` went with the always-loaded/searchable tier it existed
+for, and the settings "Programmatic tool calling" toggle with `run_code`. `/api/mcp` also
+stopped offering the tools that refuse without a chat run — `ask_user`, the
+mandatory-approval tools and `set_project_context` (`mcpExposedToolNames` in
+`src/lib/tools/tools.ts`) — and refuses a call to one before any handler runs.
+
+That costs the old loop something, and it is worth saying where. Its unattended callers —
+automations with an agent attached, a monitor's `start_conversation`, CI fix runs — were
+offered the always-loaded tier, and `run_code` was their only way to touch files. They now
+get `web_search` alone (`src/lib/runtime/detached-tools.ts`). Moving them onto the engine is
+what gives them files and commands back, and it is also what lets `$lib/runtime` finally go.
+
 **The per-tool-call cost ledger covers three tools.** `logToolUsage` has exactly two callers
 outside its own module — `handlers/web.server.ts:27` and `handlers/media.server.ts:41`.
 Built-in `Read` / `Write` / `Edit` / `Bash` calls never reach `onExecuted`
@@ -242,7 +260,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
 | #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
 | #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
-| #8 | Delete dead engine code | **as filed** | grows once #5 lands; `search_tools` joins the list |
+| #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules) and the exports left without a caller (the tiktoken estimator and the `js-tiktoken` dependency, the settings prompt preview query, the agent tool-definition filter, the OpenRouter `plugins` option, the image lookups the images remote module left behind); the old loop stays while automations, monitors and CI fix runs call it |
 
 ### #16 — diffs
 
@@ -564,7 +582,7 @@ unless one of those is the actual goal.
 2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
    of #35, and real context accounting.
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool
-   calls.
+   calls. **Done**: both fixed, and `search_tools` has since been deleted outright (#8).
 4. **#5, then #32 reshaped** — the orchestration keystone, which also deletes `$lib/runtime`
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.

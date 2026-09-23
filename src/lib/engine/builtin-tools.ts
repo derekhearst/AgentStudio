@@ -70,38 +70,28 @@ export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
 /**
  * Registry tools the engine deliberately does not expose.
  *
- * `search_tools` implements deferred loading — "only a small core is in your tools array;
- * call this to load the rest". That is real on the *old* loop, where `getToolDefinitions`
- * filters by `toolDisclosure` tier and the runtime maintains a per-run loaded set. It has
- * never been real here: `buildToolServer` registers the whole registry on round one, and
- * the callback the handler needs (`ctx.runtime.loadSearchableTools`) is only ever supplied
- * by `$lib/runtime/loop.server`.
- *
- * So on this path the tool could only ever tell the model it had "loaded N tools for the
- * next round" that were already in its tools array — costing a round, a tool definition in
- * every request, and the model's trust in what its prompt tells it. Unregistering it here
- * leaves the old loop's copy working, because subagents there genuinely need the escape
- * hatch; when `$lib/runtime` goes (#5, #8) the tool goes with it.
- *
- * `run_code` is excluded for a blunter reason: on this path it cannot run at all.
- * `runCodeTool` throws unless `toolUserContext` carries a `runtime` — it needs
- * `currentToolNames()` to decide what the script may call and a `session` to route the
- * approvals those nested calls go through — and the only code that ever supplies one is
- * `$lib/runtime/tool-handlers.server`. The engine passes a workspace with no runtime, so
- * every engine-path invocation ends at "run_code requires runtime context … It can only be
- * invoked from inside the chat loop."
- *
- * Registering it anyway cost a round every time the model believed the ~1,200-character
- * description advertising it, and cost that description in the tool definitions of every
- * single request. Unregistering does not remove a capability; it stops advertising one that
- * was never here. Restoring it properly means giving the engine path its own approval route
- * for nested calls, which is its own piece of work.
- *
  * `run_subagent` is excluded because it has been replaced, not removed. Delegation is the
  * SDK's `Task` tool now, against the agents `./agent-definitions.server` describes in the
  * system prompt. The in-house tool dispatched by `agentId` — a uuid nothing ever put in the
  * model's context — so it could name an agent only by guessing one; the SDK's names every
  * agent it offers. Keeping both would give the model two ways to delegate, one of which
  * renders a nested transcript and one of which does not.
+ *
+ * `search_tools` and `run_code` used to be listed here as well. Both could only work inside
+ * the old loop — deferred loading and a script's nested tool calls — and both were deleted
+ * from the registry instead (#8, #69): hidden here, they were still offered by everything
+ * else that lists the registry, the settings approval list and the MCP endpoint included.
  */
-export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['search_tools', 'run_code', 'run_subagent'])
+export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['run_subagent'])
+
+/**
+ * Registry tools the host renders itself, so the engine must not emit tool frames for them.
+ * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ *
+ * `./stream.server` hands them over before either gate — the PreToolUse hook and
+ * `canUseTool` — so no approval setting or permission mode ever reaches them. This is the
+ * set the settings approval list and the MCP endpoint leave out. The engine still keeps its
+ * own copy for that bypass; `tests/engine.stream-approvals.spec.ts` drives the engine and
+ * fails if the tools it actually hands over ever differ from this set.
+ */
+export const HOST_OWNED_TOOLS: ReadonlySet<string> = new Set(['ask_user'])

@@ -35,7 +35,6 @@ export const DEFAULT_SETTINGS = {
 	},
 	toolConfig: {
 		approvalRequiredTools: [] as string[],
-		programmaticToolCallingEnabled: false,
 	},
 	memoryConfig: {
 		enabled: true,
@@ -102,7 +101,6 @@ export async function updateSettings(input: {
 	}
 	toolConfig?: {
 		approvalRequiredTools?: string[]
-		programmaticToolCallingEnabled?: boolean
 	}
 	memoryConfig?: {
 		enabled?: boolean
@@ -121,7 +119,6 @@ export async function updateSettings(input: {
 						approvalRequiredTools?: string[]
 						approvalMode?: 'auto' | 'confirm' | 'plan'
 						disabledTools?: string[]
-						programmaticToolCallingEnabled?: boolean
 				  }
 				| undefined) ?? {}
 
@@ -130,7 +127,6 @@ export async function updateSettings(input: {
 			: currentToolConfig.approvalMode === 'confirm'
 				? ['*']
 				: []
-		const migratedProgrammaticToolCalling = currentToolConfig.programmaticToolCallingEnabled ?? false
 		const currentBudgetConfig = current.budgetConfig ?? DEFAULT_SETTINGS.budgetConfig
 		const [row] = await tx
 			.update(appSettings)
@@ -157,7 +153,6 @@ export async function updateSettings(input: {
 				},
 				toolConfig: {
 					approvalRequiredTools: migratedApprovalRequiredTools,
-					programmaticToolCallingEnabled: migratedProgrammaticToolCalling,
 					...(input.toolConfig ?? {}),
 				},
 				memoryConfig: {

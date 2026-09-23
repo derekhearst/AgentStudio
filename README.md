@@ -30,7 +30,7 @@ Settings persist default model, transcription and read-aloud (text-to-speech) mo
 
 Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 
-Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved.
+Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved. See [docs/tools/tools.md](docs/tools/tools.md) for what each kind of run can call, how approvals work, and how code runs (through the sandboxed shell; the separate `run_code` tool was retired).
 
 ### Database Bootstrap
 
@@ -204,6 +204,7 @@ Notes:
 - Master implementation order: `docs/structure/implementation-order.md`
 - Architecture refactor plan: `docs/structure/plan.md`
 - Runtime spec: `docs/runtime/spec.md`
+- Tools (what agents can call, approvals, code execution): `docs/tools/tools.md`
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
 - Automations: `docs/automations/automations.md`

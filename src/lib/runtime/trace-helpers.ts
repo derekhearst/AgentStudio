@@ -42,8 +42,7 @@ export function closeRunTrace(runId: string, status: 'completed' | 'failed' = 'c
  * the tools prefix gets cached when stable. OpenRouter forwards this to
  * Anthropic; other providers ignore the field. camelCase `cacheControl`
  * matches the OpenRouter SDK input shape (it converts to `cache_control` on
- * the wire). Done every round so progressive-disclosure refreshes still get
- * the marker.
+ * the wire). The loop marks its fixed tool list once per run.
  *
  * Pure transform — does not mutate the input array.
  */

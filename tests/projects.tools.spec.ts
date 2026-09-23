@@ -83,11 +83,9 @@ test.describe('projects/tools — capability group + agent-tool storage shape', 
 test.describe('projects/tools — registry presence', () => {
 	test('both project tools are registered in the schema registry', async () => {
 		try {
-			const { allToolNames, toolDisclosure } = await import('../src/lib/tools/tool-schemas')
+			const { allToolNames } = await import('../src/lib/tools/tool-schemas')
 			for (const name of ['list_projects', 'create_project']) {
 				expect(allToolNames).toContain(name)
-				// Project tools live in the searchable tier (Tool Search Tool deferred loading).
-				expect(toolDisclosure[name as keyof typeof toolDisclosure]).toBe('searchable')
 			}
 		} catch (err) {
 			// Server-import fallback per project pattern.

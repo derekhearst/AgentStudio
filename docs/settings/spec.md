@@ -72,6 +72,8 @@ Each limit is enforced as a budget limit (see [../cost/spec.md](../cost/spec.md)
 }
 ```
 
+The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own, except three that always ask: `push_branch`, `create_pull_request` and `request_plan_approval`. Those show ticked, marked "always asks", and cannot be unticked, and the **All** and **None** buttons leave them alone, because they ask for approval in every mode whatever is stored. `ask_user` is left off, because it is a question to you rather than an action, and no approval setting ever reaches it. The panel's old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
+
 **`memoryConfig`**
 
 ```ts
@@ -101,7 +103,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%
-- **Tools** — approval-required list
+- **Tools** — approval-required list: one tickable entry per tool (the three always-ask tools locked on), plus a switch that requires approval for every tool
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
 - **Job queue** (`/settings/jobs`) and **Hook invocations** (`/settings/hooks`) — admin views of background work. **Refresh** fetches the latest rows from the server, and if they cannot be loaded the page shows the reason instead of a spinner.
@@ -124,7 +126,7 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
-- Surfaces: `/settings` category panels (models, memory, context, budget, tools, notifications, appearance) plus prompt preview panel.
+- Surfaces: `/settings` category panels (models, memory, context, budget, tools, notifications, appearance). A prompt preview panel was planned; its data query (`getFullPromptPreview`) was never called by any page and was deleted (#8).
 - States and badges: clean, unsaved, saving, saved, validation-error, and out-of-policy.
 - Save behavior: edits are section-scoped, optimistic when safe, and show rollback on write failure; unsaved changes warn before navigation.
 - Blocking actions: lowering budget caps below current spend and disabling required safety controls require explicit confirmation.

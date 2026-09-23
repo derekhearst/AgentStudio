@@ -83,7 +83,7 @@ A monitor can trigger an existing automation (see [../monitors/spec.md](../monit
 ## Integrations
 
 - **Job queue** — every run is a job, so runs survive a restart and show up in `/settings/jobs`. See [../jobs/jobs.md](../jobs/jobs.md).
-- **Chat and agents** — chat follow-up runs write into conversations and can use an attached agent.
+- **Chat and agents** — chat follow-up runs write into conversations and can use an attached agent. An agent run is unattended, so it is offered one tool, `web_search`, and cannot read or change files or run commands; see [../tools/tools.md](../tools/tools.md).
 - **Research** — research mode starts a research report and links it to the automation's conversation.
 - **Budgets** — before each run, the owner's spend caps are checked. A run that would exceed a blocking cap is not executed; it is recorded as **blocked**, the slot moves on, and a review item lets the owner lift or keep the cap.
 - **Review inbox and notifications** — failures, budget blocks and maintenance summaries routed to the inbox appear there; failures also send a notification.

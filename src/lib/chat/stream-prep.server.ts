@@ -11,13 +11,8 @@
  * from this module keep working.
  */
 
-import { compactMessages, shouldCompact } from '$lib/chat/chat.server'
-import { trimHistoricalToolResults } from '$lib/chat/chat'
-import { getToolDefinitions } from '$lib/tools/tools.server'
-import { filterToolsByAgentPolicy, type resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { checkBudgetLimits, recordBudgetAlert, recordBudgetWarnings } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
-import type { LlmMessage } from '$lib/llm/chat.server'
 import type { getSettings } from '$lib/settings'
 
 type AppSettings = Awaited<ReturnType<typeof getSettings>>
@@ -43,25 +38,19 @@ export {
  *   2. The MANDATORY_APPROVAL_TOOLS allowlist — destructive source-control
  *      operations (push_branch, create_pull_request) that always require
  *      approval regardless of user settings.
- *
- * Also returns whether programmatic tool calling is enabled — surfaced from
- * the same toolConfig blob so callers don't reach into the JSONB twice.
  */
 export async function buildApprovalRequiredSet(settings: AppSettings): Promise<{
 	approvalRequiredTools: Set<string>
-	programmaticToolCallingEnabled: boolean
 }> {
 	const toolConfig = settings.toolConfig as
 		| {
 				approvalRequiredTools?: string[]
 				approvalMode?: string
-				programmaticToolCallingEnabled?: boolean
 		  }
 		| undefined
 	const approvalRequiredTools = new Set(
 		toolConfig?.approvalRequiredTools ?? (toolConfig?.approvalMode === 'confirm' ? ['*'] : []),
 	)
-	const programmaticToolCallingEnabled = toolConfig?.programmaticToolCallingEnabled === true
 
 	// Wave 5 #19 phase 3 finish — destructive source-control tools always require
 	// operator approval. Refused outright in non-interactive runs at the tool
@@ -69,57 +58,7 @@ export async function buildApprovalRequiredSet(settings: AppSettings): Promise<{
 	const { MANDATORY_APPROVAL_TOOLS } = await import('$lib/tools/tools')
 	for (const toolName of MANDATORY_APPROVAL_TOOLS) approvalRequiredTools.add(toolName)
 
-	return { approvalRequiredTools, programmaticToolCallingEnabled }
-}
-
-export type CompactionStats = {
-	messagesBefore: number
-	messagesAfter: number
-	originalTokens: number
-	compactedTokens: number
-	summaryTokens: number
-	compactionModel: string
-}
-
-/**
- * Run conversation compaction if the message list has grown past the model's
- * context window. Mutates `llmMessages` in place when compaction succeeds and
- * returns the stats summary the SSE handler emits to the client. `tokensBefore`
- * comes from the shouldCompact probe so the SSE compaction event can show the
- * pre-compaction token estimate even when no compaction ran (degenerate cases
- * like an empty history that produced no summary).
- */
-export async function maybeCompactConversation(input: {
-	llmMessages: LlmMessage[]
-	model: string
-	userId: string
-}): Promise<{ didCompact: boolean; stats: CompactionStats | null; tokensBefore: number }> {
-	const compactionCheck = await shouldCompact(input.llmMessages, input.model, input.userId)
-	const tokensBefore = compactionCheck.tokenEstimate
-	if (!compactionCheck.needed) {
-		return { didCompact: false, stats: null, tokensBefore }
-	}
-
-	const messagesBefore = input.llmMessages.length
-	const result = await compactMessages(input.llmMessages, input.userId, input.model)
-	if (!result.summary) {
-		return { didCompact: false, stats: null, tokensBefore }
-	}
-
-	input.llmMessages.length = 0
-	input.llmMessages.push(...result.compacted)
-	return {
-		didCompact: true,
-		tokensBefore,
-		stats: {
-			messagesBefore,
-			messagesAfter: result.compacted.length,
-			originalTokens: result.originalTokens,
-			compactedTokens: result.compactedTokens,
-			summaryTokens: result.summaryTokens,
-			compactionModel: result.compactionModel,
-		},
-	}
+	return { approvalRequiredTools }
 }
 
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
@@ -182,147 +121,6 @@ export {
 	enqueueEvaluationJob,
 	type AssistantPersistInput,
 } from './stream-persistence.server'
-
-/**
- * Detect whether the trimmed message list contains a PDF attachment (file
- * content block) and return the OpenRouter `chatPlugins` config that engages
- * the file-parser. We default to the `pdf-text` engine — a good middle ground
- * for text-only PDFs without paying the OCR cost. Returns `undefined` when
- * no PDFs are present so the caller can omit the plugin field entirely.
- */
-export function detectPdfPluginConfig(
-	messages: LlmMessage[],
-): Array<{ id: 'file-parser'; pdf: { engine: 'pdf-text' } }> | undefined {
-	const hasPdfAttachment = messages.some(
-		(m) =>
-			Array.isArray(m.content) &&
-			m.content.some((b) => typeof b === 'object' && b !== null && 'type' in b && b.type === 'file'),
-	)
-	return hasPdfAttachment ? [{ id: 'file-parser', pdf: { engine: 'pdf-text' } }] : undefined
-}
-
-/**
- * Wrap `trimHistoricalToolResults` with the per-user `preserveToolResults`
- * config. Tools listed there have their results passed through unmodified;
- * everything else is subject to the default trimming rules. Returns the
- * trimmed list plus the appliedEdits the SSE handler emits to the client.
- */
-export function trimToolResultsForRun(input: {
-	messages: LlmMessage[]
-	settings: AppSettings
-}): ReturnType<typeof trimHistoricalToolResults> {
-	const preserveToolResultsRaw = (input.settings.contextConfig as { preserveToolResults?: string[] } | null)
-		?.preserveToolResults
-	const preserveToolNames =
-		Array.isArray(preserveToolResultsRaw) && preserveToolResultsRaw.length > 0
-			? new Set(preserveToolResultsRaw)
-			: undefined
-	return trimHistoricalToolResults(input.messages, { preserveToolNames })
-}
-
-export type ToolComputerConfig = {
-	scopedAgentTools: string[] | null
-	isOrchestrator: boolean
-	programmaticToolCallingEnabled: boolean
-	agentToolPolicy: ReturnType<typeof resolveAgentToolPolicy>
-	dreamingOnlyTools: ReadonlySet<string>
-}
-
-/**
- * Factory for the per-run `computeTools()` closure. Owns the mutable
- * `loadedSearchableTools` set so the runtime can extend the loaded surface
- * via `search_tools(query)` between rounds.
- *
- * Resolution order on each compute:
- *   1. scopedAgentTools (agent.config.allowedTools) — explicit fixed surface,
- *      tier filter off.
- *   2. Default — only `disclosure: 'always'` tools loaded; everything else is
- *      searchable via search_tools. Once invoked, the runtime adds matched
- *      names to loadedSearchableTools and the next compute picks them up.
- *
- * `ask_user` is stripped for non-orchestrator agents (they return control
- * instead of asking the user). `run_code` is stripped when programmatic tool
- * calling is disabled. Built-in Research/Plan agents apply the
- * agentToolPolicy allow-list so newly-added tools fail closed.
- */
-export function createToolComputer(config: ToolComputerConfig): {
-	loadedSearchableTools: Set<string>
-	computeTools: () => ReturnType<typeof getToolDefinitions>
-} {
-	const loadedSearchableTools = new Set<string>()
-
-	const computeTools = () => {
-		const all = getToolDefinitions(undefined, {
-			tierFilter: !config.scopedAgentTools,
-			loadedSearchable: loadedSearchableTools,
-		})
-		const askUserFiltered = all.filter(
-			(tool) => (config.isOrchestrator ? true : tool.function.name !== 'ask_user'),
-		)
-		const ptcFiltered = config.programmaticToolCallingEnabled
-			? askUserFiltered
-			: askUserFiltered.filter((tool) => tool.function.name !== 'run_code')
-		let assembled: typeof ptcFiltered
-		if (config.scopedAgentTools) {
-			const allowed = config.scopedAgentTools
-			assembled = ptcFiltered.filter((tool) => allowed.includes(tool.function.name))
-		} else {
-			assembled = ptcFiltered.filter((tool) => !config.dreamingOnlyTools.has(tool.function.name))
-		}
-		return filterToolsByAgentPolicy(assembled, config.agentToolPolicy)
-	}
-
-	return { loadedSearchableTools, computeTools }
-}
-
-type HistoryRow = {
-	role: string
-	content: string
-	attachments: Array<{ mimeType: string; url: string; filename?: string | null }> | null
-}
-
-/**
- * Convert chat history rows from the DB into the LlmMessage[] shape the
- * runtime feeds to OpenRouter. Multimodal attachments (images, PDFs, videos)
- * are unpacked into per-type content blocks; text-only messages stay as a
- * plain string. Tool/system rows that aren't user/assistant/system are filtered
- * out — the chat history table can hold tool messages but the LLM input list
- * doesn't carry them through (they're rebuilt from tool_calls metadata).
- */
-export function buildLlmMessagesFromHistory(historyRows: HistoryRow[]): LlmMessage[] {
-	return historyRows
-		.filter((row) => row.role === 'system' || row.role === 'user' || row.role === 'assistant')
-		.map((row) => {
-			const attachments = row.attachments ?? []
-			const imageAttachments = attachments.filter((a) => a.mimeType.startsWith('image/'))
-			const pdfAttachments = attachments.filter((a) => a.mimeType === 'application/pdf')
-			const videoAttachments = attachments.filter((a) => a.mimeType.startsWith('video/'))
-			const hasMultimodal =
-				row.role === 'user' &&
-				(imageAttachments.length > 0 || pdfAttachments.length > 0 || videoAttachments.length > 0)
-			if (hasMultimodal) {
-				return {
-					role: row.role as 'user',
-					content: [
-						{ type: 'text' as const, text: row.content },
-						...imageAttachments.map((a) => ({
-							type: 'image_url' as const,
-							image_url: { url: a.url },
-						})),
-						...pdfAttachments.map((a) => ({
-							type: 'file' as const,
-							file: { filename: a.filename || 'document.pdf', file_data: a.url },
-						})),
-						...videoAttachments.map((a) => ({
-							type: 'video_url' as const,
-							video_url: { url: a.url },
-						})),
-					],
-				} as LlmMessage
-			}
-			return { role: row.role as 'user' | 'assistant' | 'system', content: row.content }
-		})
-}
 
 export type BudgetEnforcementResult =
 	| { blocked: false }
