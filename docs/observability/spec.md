@@ -61,7 +61,7 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 
 ### Unified Review Inbox
 
-`/review` is the primary inbox for human-required actions. Items are sorted by severity (critical first) then by age. The inbox unifies:
+`/review` is the primary inbox for human-required actions. Items are sorted by severity (critical first) then by age. Resolving an item updates the inbox at once, and **Refresh** reloads every section from the server. Each section of the dashboard (inbox, cost, platform health, logs, recent failures, budget) loads on its own: if one cannot be loaded, the page names it in an error above the dashboard, and the rest still shows as long as the inbox itself loaded. The inbox unifies:
 
 | Item type                 | Severity | Triggered by                                                |
 | ------------------------- | -------- | ----------------------------------------------------------- |
@@ -88,7 +88,7 @@ Each item type has a resolution action appropriate to the item:
 
 ### Run traces
 
-`/runs/[id]/trace` shows the step timeline for a run: each LLM call (with token counts and cost), each tool call (with duration and success/failure), each compaction event, and each hook invocation. Timeline is scrollable and expandable.
+`/review/trace/[runId]` shows the step timeline for a run: each LLM call (with token counts and cost), each tool call (with duration and success/failure), each compaction event, and each hook invocation. Timeline is scrollable and expandable. **Refresh** reloads the trace from the server, so a run that is still going shows its newest steps. A run id that does not exist, or is not a valid id, shows "No run with this id."; any other failure to load shows its reason instead of a spinner.
 
 ### Operational dashboard
 

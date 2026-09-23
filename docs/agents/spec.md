@@ -159,8 +159,8 @@ A subagent may read a web page, a repo file, an issue body or a PR comment, so a
 ### Agent management UI
 
 `/agents` — list of all agents with model, active status, tags, and usage badges (`Main`, `Evaluator`, category assignments).
-`/agents/[id]` — agent detail with tabs for: Identity (markdown editor), Config, Hooks, Skills, Runs.
-`/agents/new` — create a new agent from a form or by pasting an AGENT.md.
+`/agents/[id]` — agent detail with tabs for: Identity (markdown editor), Config, Hooks, Skills, Runs. While the agent is running, a **Live session** banner shows the latest text it has written and a **Watch live** link to the conversation; a run that has started but not written anything yet shows an empty preview. An id that does not exist, or is not a valid id at all, shows "Agent not found." with a link back to the list.
+`/agents/new` — opens a guided **Create agent** chat: an agent asks what the new agent should do and then writes it. The page swaps itself for the chat in the browser history, so **Back** from the chat returns to wherever you came from rather than starting another chat (each start is a new conversation and a paid model run). If the chat cannot be started, the page says why and links back to the list. There is no form or AGENT.md paste box; to add an agent from a file, put its `AGENT.md` under `docs/agents/<slug>/` (see above).
 
 ## Behavior Contracts
 

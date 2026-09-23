@@ -91,7 +91,7 @@ Each agent can add custom hooks on top of the built-ins via `config.hooks`. Orde
 
 ### Hook management UI
 
-`/settings/hooks` — global hook registry, enable/disable built-ins, view recent invocations.
+`/settings/hooks` — global hook registry, enable/disable built-ins, view recent invocations. **Refresh** fetches invocations recorded since the page opened.
 `/agents/[id]/hooks` — per-agent hook overrides, custom hook slugs, invocation history.
 
 ## Behavior Contracts

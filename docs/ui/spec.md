@@ -99,6 +99,7 @@ Sources:
 - Thread-first canvas
 - Right workbench becomes bottom sheet tabs
 - Blocking approvals/questions appear as sticky cards above composer
+- Detail pages (an agent, a skill, a project, a run, a trace, the jobs and hooks views) show a **Back** button in the page header beside the menu button at every width. The breadcrumb trail that holds the parent link is only shown on wide screens, and an installed app has no browser Back button, so this button is the way up on phones and tablets. Its label names where it goes, for example "Back to Agents".
 
 ## Interaction Contracts
 
@@ -131,10 +132,13 @@ Sources:
 - First-run users should get contextual starter prompts and mode guidance without modal overload.
 - Empty states must direct users toward the next meaningful action (start chat, pick project, review pending blockers).
 - Multi-session empty states must distinguish "no sessions" from "no active sessions".
+- A searchable list must tell apart "still loading", "nothing matches your search" (with a way to clear the search) and "nothing here yet". Showing "nothing yet" to someone whose search simply found nothing sends them looking for a create button they do not need.
 
 ### Failure, retry, and degraded states
 
 - Every async surface must define loading, partial, failure, and retry behavior.
+- A page whose data fails to load shows the reason where the content would be, never an endless spinner. If a later refresh fails, the last good data stays on screen under the error.
+- After any change the user makes on a page (create, save, toggle, delete, resolve) and whenever they press **Refresh**, the page reloads its data from the server rather than reusing an earlier answer the browser kept. Otherwise the change is saved but the screen still shows the old state, which reads as the change being lost.
 - Blocking action failures (approval submit, ask_user submit, queue send) must show explicit retry paths.
 - Long-running run disruptions should preserve user intent and offer resume/recover options.
 

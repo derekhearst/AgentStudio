@@ -126,9 +126,10 @@ list_skills(category?: string) → Returns all active skills with their summarie
 
 ### Skill editor UI
 
-`/skills` — paginated list of all skills grouped by category, with search.
-`/skills/[slug]` — full-page markdown editor for the skill content and summary. Saving increments `version` and takes effect on the next skill load.
-`/skills/new` — create a skill with a slug, category, summary, and body.
+`/skills` — list of all skills grouped by category, with search. The list tells three situations apart: a spinner while it loads, "No skills match …" with a **Clear search** button when a search finds nothing, and "No skills yet" only when there really are none. **+ New skill** starts a guided chat in which an agent asks what the skill is for and then writes it; **Import** adds a skill from a SKILL.md package. If the list cannot be loaded, the page shows the reason.
+`/skills/[id]` — full-page markdown editor for the skill content and summary, its category, the **Enabled** switch and its resource files. Every change shows on the page as soon as it is saved, without a reload. Saving increments `version` and takes effect on the next skill load.
+
+There is no separate `/skills/new` page: new skills come from the guided chat, an import, or an agent calling the skill tools.
 
 ### Skill seeding strategy
 
