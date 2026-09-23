@@ -4,7 +4,8 @@ import { emitHook } from '$lib/hooks'
 import type { LoopMessage, RunChatLoopInput, RunChatLoopResult } from './types'
 import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
 import { closeRunTrace, markLastToolForCaching, openRunTrace } from './trace-helpers'
-import { checkToolApproval, handleAskUserCall, handleNormalToolCall } from './tool-handlers.server'
+import { dispatchToolCall, type DispatchContext } from './tool-handlers.server'
+import { offeredToolNames } from './offered-tools'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
@@ -50,6 +51,18 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	let reasoningTokens: number | null = null
 	let finishedNaturally = false
 	const toolsForRequest = markLastToolForCaching(input.tools)
+	const dispatchContext: DispatchContext = {
+		session,
+		userId: input.userId,
+		conversationId: input.conversationId,
+		agentId: input.agentId ?? null,
+		persistentKey: input.persistentKey,
+		worktree: input.worktree,
+		projectId: input.projectId,
+		offeredTools: offeredToolNames(input.tools),
+		approvalRequiredTools: input.approvalRequiredTools,
+		isOrchestrator: input.isOrchestrator,
+	}
 
 	for (let round = 0; round <= input.maxRounds; round++) {
 		await setRunRound(session.runId, round)
@@ -155,45 +168,12 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			break
 		}
 
-		// Execute each tool call serially.
+		// Execute each tool call serially. `dispatchToolCall` refuses a name this run did not
+		// offer before approval or execution: these runs pass no approval set, so the offered
+		// list is the only thing between the model and the rest of the registry.
 		const toolResults: Array<{ call_id: string; name: string; result: string }> = []
 		for (const tc of plannedToolCalls) {
-			// ── Approval gate (no-op when no approval required).
-			const approval = await checkToolApproval(session, tc, input.approvalRequiredTools)
-			if (approval.kind === 'denied') {
-				toolResults.push(approval.outcome.toolResult)
-				allToolCalls.push(approval.outcome.allToolCallsEntry)
-				continue
-			}
-
-			// ── ask_user (orchestrator-only). Self-contained: emits + pushes block inside.
-			if (tc.name === 'ask_user') {
-				const outcome = await handleAskUserCall(session, tc, input.isOrchestrator)
-				toolResults.push(outcome.toolResult)
-				allToolCalls.push(outcome.allToolCallsEntry)
-				continue
-			}
-
-			await session.updateRun({
-				state: 'running',
-				label: `Executing ${tc.name}`,
-				heartbeat: true,
-			})
-			await session.emit('tool_call', { id: tc.id, name: tc.name, arguments: tc.arguments })
-
-			// ── normal tool dispatch
-			const outcome = await handleNormalToolCall(
-				{
-					session,
-					userId: input.userId,
-					conversationId: input.conversationId,
-					agentId: input.agentId ?? null,
-					persistentKey: input.persistentKey,
-					worktree: input.worktree,
-					projectId: input.projectId,
-				},
-				tc,
-			)
+			const outcome = await dispatchToolCall(dispatchContext, tc)
 			toolResults.push(outcome.toolResult)
 			allToolCalls.push(outcome.allToolCallsEntry)
 		}

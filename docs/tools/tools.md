@@ -101,7 +101,7 @@ Three kinds of job still run on the old loop, with no person watching:
 - a monitor whose action is to start a conversation;
 - a CI fix run started from the review inbox.
 
-These runs are offered one AgentStudio tool: `web_search`. An agent's `allowedTools` list can take it away but cannot add others. None of Claude's own tools are available there, so these runs cannot read or change files, run commands, or push anything.
+These runs are offered one AgentStudio tool: `web_search`. An agent's `allowedTools` list can take it away but cannot add others. None of Claude's own tools are available there, so these runs cannot read or change files, run commands, or push anything. If the agent asks for any other tool anyway (for example because a web page it read told it to), the run refuses the call before anything happens and tells the agent that tool is not available to this run.
 
 Until September 2026 they could also use two tools that have since been removed:
 

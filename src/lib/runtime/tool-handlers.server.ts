@@ -4,7 +4,7 @@
  * The loop's per-round body executes each pending tool call serially. The original code had
  * inline branches (`ask_user`, `run_subagent`, normal tool dispatch) plus an approval check,
  * all repetitive emit/pushBlock/result-shaping. Each branch is a coherent unit (build result →
- * emit → push block → return record for state arrays); the loop just chains them. The
+ * emit → push block → return record for state arrays); `dispatchToolCall` chains them. The
  * `run_subagent` branch went with the in-house subagents (#5, #8).
  *
  * Each handler returns a `ToolHandlerOutcome` — the record to append to `toolResults` (LLM
@@ -27,6 +27,7 @@ import {
 } from '$lib/tools/tools.server'
 import { emitHook } from '$lib/hooks'
 import { logger } from '$lib/observability/logger'
+import { NOT_OFFERED_REASON, notOfferedMessage } from './offered-tools'
 import type { Session } from './types'
 
 export type PlannedToolCall = {
@@ -45,6 +46,65 @@ export type ApprovalOutcome =
 	| { kind: 'not_required' }
 	| { kind: 'approved' }
 	| { kind: 'denied'; outcome: ToolHandlerOutcome }
+
+export type DispatchContext = NormalToolContext & {
+	/** The tool names this run offered the model (`offeredToolNames(input.tools)`). */
+	offeredTools: ReadonlySet<string>
+	approvalRequiredTools: ReadonlySet<string>
+	isOrchestrator: boolean
+}
+
+/**
+ * Run one planned call through every gate, in order: the offered list, approval, then
+ * `ask_user` or the registry. A name the run did not offer is refused before anything else,
+ * so it never reaches an approval card or `executeTool` (see `./offered-tools`).
+ */
+export async function dispatchToolCall(ctx: DispatchContext, tc: PlannedToolCall): Promise<ToolHandlerOutcome> {
+	const { session } = ctx
+	if (!ctx.offeredTools.has(tc.name)) return refuseUnofferedCall(session, tc)
+
+	// ── Approval gate (no-op when no approval required).
+	const approval = await checkToolApproval(session, tc, ctx.approvalRequiredTools)
+	if (approval.kind === 'denied') return approval.outcome
+
+	// ── ask_user (orchestrator-only). Self-contained: emits + pushes block inside.
+	if (tc.name === 'ask_user') return handleAskUserCall(session, tc, ctx.isOrchestrator)
+
+	await session.updateRun({
+		state: 'running',
+		label: `Executing ${tc.name}`,
+		heartbeat: true,
+	})
+	await session.emit('tool_call', { id: tc.id, name: tc.name, arguments: tc.arguments })
+
+	// ── normal tool dispatch
+	return handleNormalToolCall(ctx, tc)
+}
+
+/** Refuse a call to a tool the run never offered, without running or queueing it. */
+export async function refuseUnofferedCall(session: Session, tc: PlannedToolCall): Promise<ToolHandlerOutcome> {
+	const resultStr = JSON.stringify({ error: notOfferedMessage(tc.name) })
+	const refused = { denied: true, reason: NOT_OFFERED_REASON }
+	await session.emit('tool_result', {
+		id: tc.id,
+		name: tc.name,
+		success: false,
+		executionMs: 0,
+		result: resultStr,
+	})
+	await session.pushBlock({
+		kind: 'tool',
+		name: tc.name,
+		arguments: tc.parsedArgs,
+		result: refused,
+		success: false,
+		executionMs: 0,
+	})
+	return {
+		toolResult: { call_id: tc.id, name: tc.name, result: resultStr },
+		allToolCallsEntry: { name: tc.name, arguments: tc.parsedArgs, result: refused, executionMs: 0 },
+	}
+}
 
 /**
  * If this tool requires approval (per-tool or wildcard), enqueue + await the decision.

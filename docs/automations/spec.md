@@ -271,7 +271,7 @@ The current implementation in `src/lib/automation/` is treated as Phase 0 compat
 - `engine.ts` becomes a thin scheduler adapter that enqueues jobs instead of running inline
 - `/automations` remains the management UI, but is expanded from prompt replay into full workflow definitions
 
-**What an agent can do in a `chat_followup` run today.** When an automation has an agent attached, the run goes through AgentStudio's older in-house loop, not the Claude Agent SDK that runs chats. Nobody watches it, so it is offered one tool, `web_search`; the agent's `allowedTools` list can take that away but cannot add others. It cannot read or change files or run commands. Until September 2026 it also had `run_code` and `search_tools`; both were removed (#69, #8). Moving these runs onto the chat engine is what will give them a chat's tools. See [../tools/tools.md](../tools/tools.md).
+**What an agent can do in a `chat_followup` run today.** When an automation has an agent attached, the run goes through AgentStudio's older in-house loop, not the Claude Agent SDK that runs chats. Nobody watches it, so it is offered one tool, `web_search`; the agent's `allowedTools` list can take that away but cannot add others. It cannot read or change files or run commands: a call to any tool it was not offered is refused before it runs. Until September 2026 it also had `run_code` and `search_tools`; both were removed (#69, #8). Moving these runs onto the chat engine is what will give them a chat's tools. See [../tools/tools.md](../tools/tools.md).
 
 ### Research scout pattern
 
