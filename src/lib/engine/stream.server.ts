@@ -34,6 +34,7 @@ import { bareToolName } from './tools.server'
 import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
+import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
@@ -618,12 +619,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				for (const block of msg.message?.content ?? []) {
 					if (block.type !== 'tool_result') continue
 					const id = String(block.tool_use_id)
-					const raw = block.content
-					const text = Array.isArray(raw)
-						? raw.map((c: { text?: string }) => c.text ?? '').join('')
-						: typeof raw === 'string'
-							? raw
-							: JSON.stringify(raw ?? null)
+					// Folds an image block (browser_screenshot) back into the JSON the card renders.
+					const text = toolResultText(block.content)
 					const toolName = toolNames.get(id) ?? 'unknown'
 					const toolArguments = toolInputs.get(id) ?? null
 					const details = toolResultDetails(toolName, structured, toolArguments)
