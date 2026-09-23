@@ -90,6 +90,23 @@ Every `logLlmUsage` call accepts optional `runId`, `taskId`, and `agentId`. Thes
 
 The `source` field remains as a finer-grained sub-label within a run (e.g. the planner call vs. the synthesis call).
 
+### What a chat turn records
+
+Each chat turn writes one `llm_usage` row, and the same figures go on the assistant message and into the conversation's totals. That row covers **this turn and everything it did**:
+
+- **Every model call counts.** The main agent's calls, the calls of any subagent it handed work to, and the calls the agent makes to compress a long conversation. Before 2026-09-23 only the main agent was counted, so a turn that delegated its heavy lifting looked almost free.
+- **Only this turn counts.** A conversation keeps one agent session across all its turns, and the agent reports usage as a running total for that whole session. The turn's figure is that running total minus the running total at the end of the previous turn, which is saved with the previous reply (`metadata.sessionUsage` on the assistant message). Before 2026-09-23 the running total itself was logged, so turn five recorded turns one to five again — and budget limits, which add these rows up, blocked users long before they had really spent the limit.
+- **Claude models** run on the Claude Code subscription: tokens are recorded and the cost is always zero. **Gateway models** record the agent's own cost estimate for the turn.
+
+Edge cases:
+
+| Situation | What is recorded |
+| --- | --- |
+| First turn of a conversation | The whole running total — it is all this turn |
+| No previous total to subtract (an older conversation's first turn after this change, or a session the agent forked) | Only the main agent's tokens; a gateway turn is priced from the model price table. Delegated work is undercounted once, rather than every earlier turn being counted again |
+| The running total went down (the session's history had no totals saved) | The reported figure, as this turn's own |
+| A turn that failed before its reply was saved | Nothing for that turn; its usage is included in the next turn's figure |
+
 ### Tool-call cost tracking
 
 When a tool call invokes a paid external service (web search, browser, code execution), the tool wrapper emits a `tool_usage` row with the estimated cost. Costs default to configured per-unit estimates and can be overridden by actual provider-returned cost if available.
@@ -154,6 +171,8 @@ A reconciliation job can import actual spend from OpenRouter (or other provider)
 | View another user's spend    | Admin only                |
 | Override or delete cost rows | Admin only (audit logged) |
 | Export cost data             | Any authenticated user    |
+
+What is enforced today: the cost summary and the day/month budget status require signing in. They report the whole instance's spend rather than one user's, on purpose — background work such as embeddings, title generation and memory mining records usage with no user attached, so a per-user filter would under-report the real bill, and AgentStudio has a single owner. Budget limits and alerts are per user.
 
 ## Rewrite Authority
 

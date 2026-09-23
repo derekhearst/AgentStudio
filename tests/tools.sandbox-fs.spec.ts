@@ -124,8 +124,11 @@ test.describe('tools/sandbox-fs — symlinks do not lead out of the workspace', 
 		await expect(inWorkspace(() => fileMove('root/secret.env', 'loot.env'))).rejects.toThrow(
 			/escapes sandbox workspace/,
 		)
+		await expect(inWorkspace(() => fileMove('src/a.ts', 'root/a.ts'))).rejects.toThrow(/escapes sandbox workspace/)
 		expect(existsSync(join(outside, 'planted.sh'))).toBe(false)
 		expect(existsSync(join(outside, 'secret.env'))).toBe(true)
+		expect(existsSync(join(outside, 'a.ts'))).toBe(false)
+		expect(existsSync(join(ws, 'src', 'a.ts'))).toBe(true)
 	})
 
 	test('list_files shows a link but never walks into it', async () => {

@@ -8,12 +8,18 @@ export type ServerTrimInput = Omit<TrimWithOffloadInput, 'offload'> & {
 	runId: string
 	persistentKey?: string | null
 	worktree?: { repoPath: string; baseBranch?: string } | null
+	/**
+	 * The conversation's project, when it has one. A project-bound run's tools work in the
+	 * project's checkout, and the elision marker points at a *relative* path — so the payload
+	 * has to land there too, or the marker names a file the model can never open.
+	 */
+	projectId?: string | null
 }
 
 /**
  * Server-side wrapper around `trimWithOffload`. Persists the full payload to
- * `<workspace>/.tool-outputs/<callId>.txt` inside the resolved per-run workspace so the model
- * can recover it via `Read` on `.tool-outputs/<callId>.txt`.
+ * `<workspace>/.tool-outputs/<callId>.txt` inside the workspace the run's tools resolve, so
+ * the model can recover it via `Read` on `.tool-outputs/<callId>.txt`.
  *
  * No-op offload when the content fits the per-tool limit (the file is never created in the
  * common small-output path).
@@ -35,6 +41,7 @@ export async function trimToolResultWithOffload(input: ServerTrimInput): Promise
 					runId: input.runId,
 					persistentKey: input.persistentKey,
 					worktree: input.worktree,
+					projectId: input.projectId,
 				},
 				handle,
 				fullContent,
@@ -50,6 +57,7 @@ async function materializeOutput(
 		runId: string
 		persistentKey?: string | null
 		worktree?: { repoPath: string; baseBranch?: string } | null
+		projectId?: string | null
 	},
 	handle: OffloadHandle,
 	fullContent: string,
@@ -59,6 +67,7 @@ async function materializeOutput(
 		runId: ctx.runId,
 		persistentKey: ctx.persistentKey ?? null,
 		worktree: ctx.worktree ?? null,
+		projectId: ctx.projectId ?? null,
 		sandboxRoot: process.env.SANDBOX_WORKSPACE,
 	})
 	const fullPath = safePathWithin(workspaceRoot, handle)

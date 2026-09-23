@@ -5,6 +5,7 @@ import {
 	AUTOMATION_MAX_BACKOFF_MS,
 	automationFailureDedupeKey,
 	automationRetryDedupeKey,
+	automationTriggerPolicy,
 	computeRetryBackoffMs,
 	describeRetryDecision,
 	nextRetryAt,
@@ -146,5 +147,34 @@ test.describe('automations/failure-policy — helpers', () => {
 		expect(excerpt!.length).toBe(100)
 		expect(excerpt!.endsWith('…')).toBe(true)
 		expect(toOutputExcerpt({ a: 1 })).toBe('{"a":1}')
+	})
+})
+
+test.describe('automations/failure-policy — who asked for the run', () => {
+	test('a scheduled tick moves the schedule, respects the off switch, and escalates', () => {
+		expect(automationTriggerPolicy('schedule')).toEqual({
+			preserveSchedule: false,
+			allowDisabled: false,
+			escalateFailures: true,
+		})
+	})
+
+	test('"Run now" leaves the schedule alone, may run a switched-off automation, and is not escalated', () => {
+		expect(automationTriggerPolicy('manual')).toEqual({
+			preserveSchedule: true,
+			allowDisabled: true,
+			escalateFailures: false,
+		})
+	})
+
+	test('a monitor-fired run leaves the schedule alone but is otherwise unattended like a tick', () => {
+		// Nobody watches a monitor-fired run. Treating it as "Run now" let a monitor run an
+		// automation its owner (or the auto-disable kill switch) had switched off, and its
+		// failures went unreported apart from the ledger row.
+		expect(automationTriggerPolicy('monitor')).toEqual({
+			preserveSchedule: true,
+			allowDisabled: false,
+			escalateFailures: true,
+		})
 	})
 })

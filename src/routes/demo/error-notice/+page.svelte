@@ -3,7 +3,7 @@
 <script lang="ts">
 	/**
 	 * Visual harness for ChatErrorNotice. `/demo` is already public (see
-	 * PUBLIC_PATH_PREFIXES in hooks.server.ts), so the notice can be eyeballed in every
+	 * PUBLIC_PATH_PREFIXES in src/lib/auth/gate.ts), so the notice can be eyeballed in every
 	 * cause and both themes without driving a real failing run.
 	 */
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';

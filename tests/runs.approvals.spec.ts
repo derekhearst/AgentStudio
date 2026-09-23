@@ -145,6 +145,40 @@ test.describe('runs/approvals — pending tool approvals are persistent', () => 
 		}
 	})
 
+	test('an answer that beats its approval being recorded still lands', async ({ context }) => {
+		// The card with the Allow button is sent from the engine's assistant branch, and the
+		// approval is recorded a moment later, when the SDK reaches canUseTool. An operator who
+		// clicked inside that gap got `resolved: false`, and the call timed out as a denial.
+		const prefix = uniquePrefix('runs-approvals-early')
+		await cleanupPrefixedRecords(prefix)
+		await authenticateContext(context)
+
+		const sql = getSql()
+		const seeded = await seedConversation(prefix)
+		const token = randomUUID()
+
+		try {
+			const answer = context.request.post(`/chat/${seeded.conversationId}/tool-approve`, {
+				data: { token, approved: true },
+			})
+			await new Promise((resolve) => setTimeout(resolve, 400))
+			await sql`
+				update chat_runs
+				set pending_approvals = ${sql.json([
+					{ token, toolName: 'Write', args: { file_path: 'a.md' }, requestedAt: new Date().toISOString() },
+				])}
+				where id = ${seeded.runId}
+			`
+
+			const response = await answer
+			expect(await response.json()).toEqual({ resolved: true })
+			const row = await readRun(seeded.runId)
+			expect(row!.pending_approvals.find((e) => e.token === token)?.decision).toBe('approved')
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
 	test('second approve on already-decided entry returns resolved=false', async ({ context }) => {
 		const prefix = uniquePrefix('runs-approvals-double')
 		await cleanupPrefixedRecords(prefix)

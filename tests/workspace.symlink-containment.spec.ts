@@ -228,10 +228,18 @@ test.describe('engine/workspace-guard — the SDK built-ins get the same rule', 
 		expect(g('Read', { file_path: 'root/secret.env' })).toBe('deny')
 		expect(g('Read', { file_path: join(ws, 'root', 'secret.env') })).toBe('deny')
 		expect(g('Write', { file_path: 'root/planted.sh', content: 'x' })).toBe('deny')
+		// Folders that do not exist yet under the link: the existing part is what gets followed.
+		expect(g('Write', { file_path: 'root/cron.d/new/job', content: 'x' })).toBe('deny')
 		expect(g('Grep', { path: 'root', pattern: 'DATABASE' })).toBe('deny')
+		expect(g('Glob', { path: 'root', pattern: '*' })).toBe('deny')
 
 		expect(g('Read', { file_path: 'alias/index.ts' })).toBe('allow')
+		expect(g('Read', { file_path: join(ws, 'src', 'index.ts') })).toBe('allow')
 		expect(g('Write', { file_path: 'src/new.ts', content: 'x' })).toBe('allow')
+		expect(g('Write', { file_path: 'brand/new/dir/file.md', content: 'x' })).toBe('allow')
+		// No path argument, nothing to follow; a sandboxed shell is the OS's to confine.
+		expect(g('Glob', { pattern: '**/*' })).toBe('allow')
+		expect(g('Bash', { command: 'cat root/secret.env' })).toBe('allow')
 	})
 
 	test('an injected resolver decides without the disk, and a resolver error denies', () => {

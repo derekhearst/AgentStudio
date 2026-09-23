@@ -105,6 +105,10 @@ export async function listActiveAgentRunsForUser(userId: string) {
  * `error=<reason>`, and clear `pendingApprovals` + `pendingQuestions` so the conversation
  * can be re-used cleanly. Returns the count for telemetry.
  *
+ * A live chat run keeps its `updatedAt` fresh through the heartbeat in
+ * `run-lifecycle.server.ts`, fed by its own frames. So a run is picked here only when nothing
+ * has come out of it for the whole threshold — not merely because it has been going that long.
+ *
  * Best-effort: a thrown error is caught at the scheduler boundary so a flaky DB doesn't
  * stop other maintenance ticks. Idempotent across ticks because the WHERE clause requires
  * `finishedAt IS NULL`.
@@ -186,4 +190,51 @@ export async function dismissStuckRun(
 	}
 
 	return { success: updated.length > 0 }
+}
+
+export type StopChatRunResult =
+	| { stopped: true }
+	| { stopped: false; reason: 'run_not_active' | 'not_reachable' }
+
+/**
+ * Stop a conversation's live run at its owner's request — the chat's Stop button.
+ *
+ * Stop used to be the browser dropping its connection: the stream's `cancel` interrupted the
+ * run. But a connection drops for plenty of reasons that are not "stop" — a reload, a network
+ * blip, a proxy's idle timeout — and a run is meant to outlive all of those and be picked up
+ * again through `stream/resume`. So stopping is its own request, and a disconnect only means
+ * nobody is watching.
+ *
+ * Unlike `dismissStuckRun` this does not touch the row. The interrupted turn ends with an
+ * ordinary result and is persisted and accounted like any other, partial as it is.
+ *
+ * `runId` narrows the stop to one run; without it, every live run in the conversation stops,
+ * which is what Stop means when the page has not yet learnt the run's id. Ownership is the
+ * WHERE clause — the registry is keyed by run id alone and must never be what decides it.
+ */
+export async function stopChatRun(input: {
+	userId: string
+	conversationId: string
+	runId?: string | null
+}): Promise<StopChatRunResult> {
+	const live = await db
+		.select({ id: chatRuns.id })
+		.from(chatRuns)
+		.where(
+			and(
+				eq(chatRuns.conversationId, input.conversationId),
+				eq(chatRuns.userId, input.userId),
+				isNull(chatRuns.finishedAt),
+				inArray(chatRuns.state, ACTIVE_CHAT_RUN_STATES),
+				input.runId ? eq(chatRuns.id, input.runId) : undefined,
+			),
+		)
+
+	if (live.length === 0) return { stopped: false, reason: 'run_not_active' }
+
+	let stopped = false
+	for (const { id } of live) {
+		if (await interruptRun(id, 'Stopped by the user')) stopped = true
+	}
+	return stopped ? { stopped: true } : { stopped: false, reason: 'not_reachable' }
 }

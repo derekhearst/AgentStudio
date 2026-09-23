@@ -8,7 +8,8 @@ import { logger } from '$lib/observability/logger'
 
 export type AgentStatus = (typeof agents.$inferSelect)['status']
 
-export async function listAgentsWithCounts() {
+/** Every agent, with usage aggregated over `userId`'s own conversations. */
+export async function listAgentsWithCounts(userId: string) {
 	const agentRows = await db.select().from(agents).orderBy(asc(agents.createdAt))
 	if (agentRows.length === 0) return []
 
@@ -21,7 +22,7 @@ export async function listAgentsWithCounts() {
 			lastActiveAt: sql<string | null>`MAX(${conversations.updatedAt})`,
 		})
 		.from(conversations)
-		.where(isNotNull(conversations.agentId))
+		.where(and(isNotNull(conversations.agentId), eq(conversations.userId, userId)))
 		.groupBy(conversations.agentId)
 
 	const aggMap = new Map(agg.map((row) => [row.agentId!, row]))
@@ -38,14 +39,18 @@ export async function listAgentsWithCounts() {
 	})
 }
 
-export async function getAgentDetail(agentId: string) {
+/**
+ * One agent, with the conversations, stats and automations that belong to `userId`. The
+ * agent row itself is shared; nothing else here is, the same rule the chat sidebar applies.
+ */
+export async function getAgentDetail(agentId: string, userId: string) {
 	const [agent] = await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
 	if (!agent) return null
 
 	const chats = await db
 		.select()
 		.from(conversations)
-		.where(eq(conversations.agentId, agentId))
+		.where(and(eq(conversations.agentId, agentId), eq(conversations.userId, userId)))
 		.orderBy(desc(conversations.updatedAt))
 		.limit(50)
 
@@ -73,7 +78,7 @@ export async function getAgentDetail(agentId: string) {
 			avgCostPerSession: sql<string>`COALESCE(AVG(${conversations.totalCost}), '0')`,
 		})
 		.from(conversations)
-		.where(eq(conversations.agentId, agentId))
+		.where(and(eq(conversations.agentId, agentId), eq(conversations.userId, userId)))
 
 	// Average first-token latency from assistant messages
 	let avgTtftMs: number | null = null
@@ -111,7 +116,7 @@ export async function getAgentDetail(agentId: string) {
 	const agentAutomations = await db
 		.select()
 		.from(automations)
-		.where(eq(automations.agentId, agentId))
+		.where(and(eq(automations.agentId, agentId), eq(automations.userId, userId)))
 		.orderBy(asc(automations.createdAt))
 
 	const conversationsWithStats = chats.map((c) => ({

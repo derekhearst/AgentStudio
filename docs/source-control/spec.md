@@ -230,6 +230,13 @@ points at the originating run, which points at the conversation — so the agent
 problem up with the branch, the plan and the reasoning it already had, rather than starting
 cold. If that conversation is gone, a new one is opened instead.
 
+Each failure gets exactly one fix run: pressing the button again on the same review item
+hands back the first run rather than starting another. So the button checks that the pull
+request belongs to the person pressing it *before* anything is queued — otherwise a press
+that was always going to be refused would use up the item's one run. And the message after
+a press says what really happened: a run was queued, an earlier run already finished (its
+reply is in the conversation), or an earlier run already failed (Settings → Jobs has why).
+
 This is deliberately a button and not an automatic response. Much of red CI is a flake, an
 outage, or a failure that was already on the base branch, and none of those are worth
 spending an agent run on unasked. The seeded prompt tells the agent to diagnose before
@@ -281,7 +288,8 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
 - Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
-- Connecting GitHub only ever sends the user back to a page inside the app. The connect link accepts an optional `return` page; anything that is not a plain path on the app (a full web address, `//other-site`, or a path with backslashes or hidden characters) is replaced with the Projects page, and the value is checked again before the final redirect. Without this, a crafted link could use the app to bounce a visitor, and whatever the link carried, to another site.
+- "Fix it" is refused, and queues nothing, unless the pull request's repository belongs to the person pressing it (repositories from before per-user ownership have no owner and stay fixable). The job checks ownership again when it runs.
+- The GitHub connect link can say where to land afterwards (`?return=`), but only a path on this site is accepted. A full URL, a `//host` shorthand or anything that normalises to one sends the user to `/projects` instead. The value is checked again when GitHub sends the user back, because it travels in a cookie the browser controls.
 
 ## Roles & Permissions
 

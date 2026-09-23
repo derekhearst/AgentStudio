@@ -6,6 +6,7 @@ import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
 import { buildFixPrompt } from './pr-checks'
+import { mayFixPullRequest } from './pr-fix'
 import { pullRequestChecks, pullRequests, repositories } from './source-control.schema'
 
 /**
@@ -37,6 +38,22 @@ export type StartPullRequestFixResult = {
 	error?: string
 }
 
+/**
+ * The pull request, if `userId` may start a fix run on it. Null for a missing PR and for
+ * someone else's alike. The command asks before it queues; the job asks again, because it
+ * runs later and has no request user to lean on.
+ */
+export async function findPullRequestForFix(userId: string, pullRequestId: string): Promise<{ id: string } | null> {
+	const [row] = await db
+		.select({ id: pullRequests.id, repositoryUserId: repositories.userId })
+		.from(pullRequests)
+		.innerJoin(repositories, eq(pullRequests.repositoryId, repositories.id))
+		.where(eq(pullRequests.id, pullRequestId))
+		.limit(1)
+	if (!row || !mayFixPullRequest(row.repositoryUserId, userId)) return null
+	return { id: row.id }
+}
+
 export async function startPullRequestFixRun(input: {
 	pullRequestId: string
 	userId: string
@@ -57,7 +74,7 @@ export async function startPullRequestFixRun(input: {
 
 	// Ownership is checked here rather than only at the remote-function boundary, because
 	// this also runs from the job queue where there is no request user to lean on.
-	if (repo.userId && repo.userId !== input.userId) {
+	if (!mayFixPullRequest(repo.userId, input.userId)) {
 		throw new Error('Pull request belongs to another user')
 	}
 

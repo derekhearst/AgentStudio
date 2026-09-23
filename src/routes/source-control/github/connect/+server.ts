@@ -7,7 +7,7 @@ import {
 	buildRedirectUri,
 	generateOAuthState,
 	getGithubOAuthCredentials,
-	safeReturnPath,
+	sanitizeOAuthReturnPath,
 } from '$lib/source-control/github-oauth.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
@@ -16,9 +16,8 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
  *
  * Generates a one-shot CSRF state, stores it in an HTTP-only cookie, and 302s the user
  * to GitHub. The callback handler verifies the state matches before exchanging the code.
- * Optional `?return=/path` param survives the round-trip via a second cookie. Only a path
- * on this app is kept (`safeReturnPath`); anything else, such as a full URL to another
- * site, falls back to /projects so the callback cannot be used as an open redirect.
+ * Optional `?return=/path` param survives the round-trip via a second cookie — a path on
+ * this site only; anything else is replaced with `/projects` (see `sanitizeOAuthReturnPath`).
  */
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -38,7 +37,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	const state = generateOAuthState()
-	const returnTo = safeReturnPath(url.searchParams.get('return'))
+	const returnTo = sanitizeOAuthReturnPath(url.searchParams.get('return'))
 	const redirectUri = buildRedirectUri(url.origin)
 
 	cookies.set(GITHUB_OAUTH_STATE_COOKIE, state, {

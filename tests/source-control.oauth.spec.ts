@@ -59,38 +59,64 @@ test.describe('source-control/github-oauth — pure helpers', () => {
 })
 
 /**
- * `?return=` on the connect route is attacker-controlled (anything can link to it, and a
- * model reply could load it as an image), and the callback redirects to it. Unchecked, the
- * pair was an open redirect that forwarded whatever the URL carried to another site.
+ * The `?return=` path is the one piece of the OAuth round trip that comes from a link, and it
+ * ends up in a `Location` header. It used to be copied verbatim, which made
+ * `/source-control/github/connect?return=https://evil.example` an open redirect: GitHub
+ * auto-approves an app the user already authorised, so one click took a signed-in user from
+ * this origin to an attacker's page.
  */
-test.describe('source-control/github-oauth — the return path cannot leave the app', () => {
-	test('safeReturnPath keeps a path on this app and nothing else', async () => {
-		const { safeReturnPath } = await import('../src/lib/source-control/github-oauth')
+test.describe('source-control/github-oauth — the return path stays on this site', () => {
+	const FALLBACK = '/projects'
 
-		expect(safeReturnPath('/projects/abc?tab=repos')).toBe('/projects/abc?tab=repos')
-		expect(safeReturnPath('/settings')).toBe('/settings')
-		expect(safeReturnPath('/a/../b')).toBe('/b')
-
-		for (const hostile of [
-			'https://attacker.example/SECRET',
-			'//attacker.example/SECRET',
-			'/\\attacker.example/SECRET',
-			'\\\\attacker.example/SECRET',
-			'/\t/attacker.example/SECRET',
-			'/\n/attacker.example',
-			'/.//attacker.example',
-			'/..//attacker.example',
-			'javascript:alert(1)',
-			'projects',
-			' /projects',
-			'',
-		]) {
-			expect(safeReturnPath(hostile), JSON.stringify(hostile)).toBe('/projects')
-		}
-		expect(safeReturnPath(null)).toBe('/projects')
-		expect(safeReturnPath('https://attacker.example', '/source-control')).toBe('/source-control')
+	test('same-origin paths survive with their query and fragment', async () => {
+		const { sanitizeOAuthReturnPath } = await import('../src/lib/source-control/github-oauth')
+		expect(sanitizeOAuthReturnPath('/projects')).toBe('/projects')
+		expect(sanitizeOAuthReturnPath('/projects/abc?tab=git#x')).toBe('/projects/abc?tab=git#x')
+		expect(sanitizeOAuthReturnPath('/source-control?x=1')).toBe('/source-control?x=1')
 	})
 
+	test('anything that leaves the origin falls back to /projects', async () => {
+		const { sanitizeOAuthReturnPath } = await import('../src/lib/source-control/github-oauth')
+		for (const hostile of [
+			'https://evil.example',
+			'http://evil.example/projects',
+			'//evil.example',
+			'//evil.example/projects',
+			'/\\evil.example',
+			'\\\\evil.example',
+			'javascript:alert(1)',
+			'evil.example',
+			// Dot segments normalise these into `//evil.example`, which a browser reads as a host.
+			'/..//evil.example',
+			'/.//evil.example',
+			'/%2e%2e//evil.example',
+			// Control characters: a raw CR/LF would split the Location header, and a tab is
+			// silently dropped by URL parsers, turning `/\t/evil` into `//evil`.
+			'/\r\nLocation: https://evil.example',
+			'/\t/evil.example',
+			'',
+			null,
+			undefined,
+		]) {
+			expect(sanitizeOAuthReturnPath(hostile), JSON.stringify(hostile)).toBe(FALLBACK)
+		}
+	})
+
+	test('a failed round trip reports back to the same path, with only the error in its query', async () => {
+		const { oauthFailureLocation } = await import('../src/lib/source-control/github-oauth')
+		expect(oauthFailureLocation('/projects/abc?tab=git#x', 'state_mismatch')).toBe('/projects/abc?error=state_mismatch')
+		expect(oauthFailureLocation('https://evil.example/phish', 'access_denied')).toBe('/projects?error=access_denied')
+		// The reason is GitHub's `?error=` value, so it is encoded rather than trusted.
+		expect(oauthFailureLocation('/projects', 'a b&next=//evil')).toBe('/projects?error=a+b%26next%3D%2F%2Fevil')
+	})
+})
+
+/**
+ * The same rule, end to end: the helper above is only as good as the two routes that use it.
+ * `?return=` arrives on a GET anything can link to (a model reply could even load it as an
+ * image), and the cookie that carries it back is the browser's to change.
+ */
+test.describe('source-control/github-oauth — the connect and callback routes apply it', () => {
 	test('the callback does not redirect off-site even when the cookie says to', async ({ page }) => {
 		await authenticateContext(page.context())
 		const { GITHUB_OAUTH_RETURN_COOKIE } = await import('../src/lib/source-control/github-oauth')

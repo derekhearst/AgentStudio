@@ -50,8 +50,10 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://agentstudio:agentstudio@127.0.0.1:5432/agentstudio_ci
-      # The app boots, migrates and seeds itself on first request, and `ensureSeededUser`
-      # in the test helpers hashes this into the singleton user.
+      # The app boots, migrates and seeds itself on first request, and creates the owner
+      # from this (src/lib/auth/provision.server.ts) before the health check answers — so
+      # no spec depends on another having seeded the owner first. `ensureSeededUser` in
+      # the test helpers remains the fallback.
       AUTH_PASSWORD: ci-test-password-not-a-secret
       APP_ENCRYPTION_KEY: ci-test-encryption-key-32-bytes-min
       # Required by global-setup. No live-model spec runs here (see tests/quarantine.ts),

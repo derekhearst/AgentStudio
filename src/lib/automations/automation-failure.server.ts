@@ -37,6 +37,11 @@ export async function recordTerminalAutomationFailure(args: {
 	attempts: number
 	jobId?: string | null
 	now?: Date
+	/**
+	 * Roll `nextRunAt` forward past the tick that gave up. True for a scheduled tick; false for
+	 * a run the schedule did not start (a monitor firing), which must not move it.
+	 */
+	advanceSchedule?: boolean
 }): Promise<AutomationFailureOutcome> {
 	const { automation, attempts } = args
 	const now = args.now ?? new Date()
@@ -49,7 +54,7 @@ export async function recordTerminalAutomationFailure(args: {
 	// the dispatcher would keep colliding with the same dedupe key — the automation would
 	// be wedged even after the underlying problem is fixed. Roll the schedule forward to
 	// the next slot: we are giving up on THIS tick, not on the automation.
-	await advanceScheduleAfterGivingUp(args.automation.id, now)
+	if (args.advanceSchedule ?? true) await advanceScheduleAfterGivingUp(args.automation.id, now)
 
 	if (disabled) {
 		try {

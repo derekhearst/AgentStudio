@@ -36,30 +36,46 @@ export function buildCallbackUriFromOrigin(origin: string): string {
 	return `${origin.replace(/\/$/, '')}/source-control/github/callback`
 }
 
-const RETURN_SENTINEL_ORIGIN = 'https://agentstudio.invalid'
+const RETURN_PATH_FALLBACK = '/projects'
+/** Any C0 control character or DEL. A CR/LF in a Location header is response splitting. */
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 
 /**
- * Where to send the user after the OAuth round-trip: a path on this app, or `fallback`.
+ * The `?return=` path the OAuth round trip lands on, reduced to a path on this site.
  *
- * `?return=` arrives on a GET that anything can link to, and the callback redirects to
- * it, so an unchecked value is an open redirect: `return=https://attacker.example/<data>`
- * turns the app into a bounce to any site. Only a same-origin path is accepted. It must
- * start with exactly one `/` (`//host` and `/\host` are other hosts to a browser), may
- * not contain a backslash or any control character or space (the URL parser drops tabs
- * and newlines, which can reassemble `//`), and must still be on our origin once parsed.
- * What is returned is the parsed path and query, so the redirect goes where the check
- * looked. A fragment is dropped: the callback appends `?error=` to the path.
+ * `/source-control/github/connect?return=https://evil.example` used to be an open redirect:
+ * the value went into a cookie verbatim and the callback redirected to it. GitHub
+ * auto-approves an app the user has already authorised, so one click on a crafted link sent
+ * a signed-in user straight to an attacker's page, from this origin's URL. Only same-origin
+ * paths survive; anything else falls back to `/projects`.
+ *
+ * Checked on the way in (connect) AND on the way out (callback): the cookie is
+ * client-controlled, and one set by an older deploy would otherwise still be honoured.
+ *
+ * `//host` and `/\host` are rejected outright because browsers read both as a new host. The
+ * final `new URL` resolution is the backstop: whatever the string looks like, if it does not
+ * resolve to the base origin it is not a path here — and the path it resolves to is checked
+ * again, because dot segments normalise `/..//evil.example` into `//evil.example`.
  */
-export function safeReturnPath(raw: string | null | undefined, fallback = '/projects'): string {
-	if (!raw || !raw.startsWith('/') || raw.startsWith('//')) return fallback
-	if (raw.includes('\\') || /[\x00-\x20\x7f]/.test(raw)) return fallback
-	let url: URL
+export function sanitizeOAuthReturnPath(value: string | null | undefined): string {
+	if (!value || !value.startsWith('/')) return RETURN_PATH_FALLBACK
+	if (value.startsWith('//') || value.includes('\\') || CONTROL_CHARACTERS.test(value)) return RETURN_PATH_FALLBACK
+	const base = 'http://return-path.invalid'
+	let resolved: URL
 	try {
-		url = new URL(raw, `${RETURN_SENTINEL_ORIGIN}/`)
+		resolved = new URL(value, base)
 	} catch {
-		return fallback
+		return RETURN_PATH_FALLBACK
 	}
-	// `/.//host` and `/..//host` pass the checks above and parse to the path `//host`.
-	if (url.origin !== RETURN_SENTINEL_ORIGIN || url.pathname.startsWith('//')) return fallback
-	return `${url.pathname}${url.search}`
+	if (resolved.origin !== base || resolved.pathname.startsWith('//')) return RETURN_PATH_FALLBACK
+	return `${resolved.pathname}${resolved.search}${resolved.hash}`
+}
+
+/** The return path with `?error=<reason>` in place of its own query — how a failed round trip reports back. */
+export function oauthFailureLocation(returnTo: string, reason: string): string {
+	const target = new URL(sanitizeOAuthReturnPath(returnTo), 'http://return-path.invalid')
+	target.search = ''
+	target.hash = ''
+	target.searchParams.set('error', reason)
+	return `${target.pathname}${target.search}`
 }
