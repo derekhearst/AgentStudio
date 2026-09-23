@@ -26,13 +26,15 @@ import {
 	MAX_DRAWER_CONTENT_CHARS,
 } from '$lib/memory/curation.server'
 import {
-	compileExclusionRules,
+	describeSavedRuleProblem,
 	ensureBuiltinExclusionRules,
-	findExclusionMatch,
+	exclusionRulesChanged,
 	MAX_PATTERN_LENGTH,
+	testExclusionRules,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions.server'
 import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
+import { releaseTimedOutTurns } from '$lib/memory/tombstones.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { jobs } from '$lib/jobs/jobs.schema'
 import { enqueueJobWithOutcome } from '$lib/jobs/jobs.server'
@@ -247,7 +249,7 @@ export const listDrawerRecallEventsQuery = query(drawerIdSchema, async ({ id }) 
 export const listMemoryExclusionRulesQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	await ensureBuiltinExclusionRules(user.id)
-	return db
+	const rows = await db
 		.select({
 			id: memoryExclusionRules.id,
 			name: memoryExclusionRules.name,
@@ -262,6 +264,9 @@ export const listMemoryExclusionRulesQuery = query(async () => {
 		.from(memoryExclusionRules)
 		.where(eq(memoryExclusionRules.userId, user.id))
 		.orderBy(desc(memoryExclusionRules.builtin), memoryExclusionRules.name)
+	// What the editor would refuse today: a rule saved before a validation change still runs,
+	// and the list says why it should be rewritten and what it does meanwhile.
+	return rows.map((row) => ({ ...row, problem: describeSavedRuleProblem(row.kind, row.pattern) }))
 })
 
 const saveExclusionRuleSchema = z.object({
@@ -270,9 +275,19 @@ const saveExclusionRuleSchema = z.object({
 	description: z.string().trim().max(240).optional(),
 	kind: z.enum(['regex', 'substring']),
 	pattern: z.string().trim().min(1).max(MAX_PATTERN_LENGTH),
-	enabled: z.boolean().default(true),
+	/**
+	 * A new rule starts enabled unless this says otherwise. An edit leaves the rule's switch
+	 * alone unless this is given — the editor has no switch, and always sending `true` turned
+	 * back on every disabled rule whose wording was touched.
+	 */
+	enabled: z.boolean().optional(),
 })
 
+/**
+ * Every change to a user's rules — here, on delete and on toggle — releases the turns set
+ * aside because their check ran out of time (`exclusionRulesChanged`), so a rule fixed after
+ * it choked on a paste does not keep that paste out of memory for good.
+ */
 export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const invalid = validateExclusionPattern(input.kind, input.pattern)
@@ -286,12 +301,13 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 				description: input.description ?? null,
 				kind: input.kind,
 				pattern: input.pattern,
-				enabled: input.enabled,
+				...(input.enabled === undefined ? {} : { enabled: input.enabled }),
 				updatedAt: new Date(),
 			})
 			.where(and(eq(memoryExclusionRules.id, input.id), eq(memoryExclusionRules.userId, user.id)))
 			.returning({ id: memoryExclusionRules.id })
 		if (!updated) return { ok: false as const, error: 'Rule not found.' }
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const, id: updated.id }
 	}
 
@@ -304,10 +320,11 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 				description: input.description ?? null,
 				kind: input.kind,
 				pattern: input.pattern,
-				enabled: input.enabled,
+				enabled: input.enabled ?? true,
 				builtin: false,
 			})
 			.returning({ id: memoryExclusionRules.id })
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const, id: created.id }
 	} catch {
 		return { ok: false as const, error: 'A rule with that name already exists.' }
@@ -329,6 +346,7 @@ export const deleteMemoryExclusionRuleCommand = command(exclusionRuleIdSchema, a
 	await db
 		.delete(memoryExclusionRules)
 		.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+	await exclusionRulesChanged(user.id)
 	return { ok: true as const }
 })
 
@@ -340,6 +358,7 @@ export const toggleMemoryExclusionRuleCommand = command(
 			.update(memoryExclusionRules)
 			.set({ enabled, updatedAt: new Date() })
 			.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const }
 	},
 )
@@ -347,25 +366,17 @@ export const toggleMemoryExclusionRuleCommand = command(
 /**
  * Dry-run the live rule set against sample text. Lets a user check a new pattern before
  * trusting it with their secrets — and check that an existing rule catches what they think.
+ *
+ * A command, not a query: the sample is often a real secret, and a query sends its argument
+ * in the URL of a GET, where proxy access logs keep it. A command sends it in a POST body.
+ * It stores and caches nothing, so there is nothing to refresh afterwards. One test per user
+ * runs at a time (`testExclusionRules`); another sent meanwhile comes back `busy`.
  */
-export const testMemoryExclusionRulesQuery = query(
+export const testMemoryExclusionRulesCommand = command(
 	z.object({ sample: z.string().max(4000) }),
 	async ({ sample }) => {
 		const user = requireAuthenticatedRequestUser()
-		if (sample.trim().length === 0) return { matched: false as const }
-		const rows = await db
-			.select({
-				id: memoryExclusionRules.id,
-				name: memoryExclusionRules.name,
-				kind: memoryExclusionRules.kind,
-				pattern: memoryExclusionRules.pattern,
-				enabled: memoryExclusionRules.enabled,
-			})
-			.from(memoryExclusionRules)
-			.where(and(eq(memoryExclusionRules.userId, user.id), eq(memoryExclusionRules.enabled, true)))
-		const match = findExclusionMatch(sample, compileExclusionRules(rows))
-		if (!match) return { matched: false as const }
-		return { matched: true as const, ruleName: match.ruleName, sample: match.sample }
+		return testExclusionRules(user.id, sample)
 	},
 )
 
@@ -377,9 +388,13 @@ export const testMemoryExclusionRulesQuery = query(
  *
  * `enqueued` counts jobs this call actually created; a conversation whose mining job was
  * already queued counts under `alreadyQueued`, not as new work.
+ *
+ * Turns set aside because their exclusion check ran out of time are released first, so this
+ * is also how a user retries them — a check that timed out on a busy machine may well finish.
  */
 export const mineAllPendingCommand = command(async () => {
 	const user = requireAuthenticatedRequestUser()
+	await releaseTimedOutTurns(user.id)
 
 	const [{ scanned }] = await db
 		.select({ scanned: countDistinct(conversations.id) })

@@ -1,5 +1,6 @@
 import { OpenRouter } from '@openrouter/sdk'
 import { requireOpenRouterApiKey } from '$lib/server/config'
+import { toOpenRouterModelId } from './openrouter-model'
 
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -173,7 +174,8 @@ async function chatViaFetch(
 export async function chat(messages: LlmMessage[], model = DEFAULT_MODEL, options: ChatOptions = {}) {
 	const chatMessages = toChatMessages(messages)
 	const chatRequest: Record<string, unknown> = {
-		model,
+		// Defaults and settings hold the Agent SDK's bare ids; OpenRouter rejects those.
+		model: toOpenRouterModelId(model),
 		messages: chatMessages,
 		stream: false,
 	}
@@ -226,7 +228,7 @@ export async function streamChat(
 	// this passthrough field; we mutate the request after construction so TypeScript still
 	// narrows to the streaming overload via the literal `stream: true`.
 	const chatRequest = {
-		model,
+		model: toOpenRouterModelId(model),
 		messages: chatMessages as never,
 		stream: true as const,
 		...(tools && tools.length > 0 ? { tools: tools as never } : {}),

@@ -35,15 +35,20 @@
 	let neverRecall = $state(false);
 	let flagBusy = $state(false);
 
+	// The drawer the edit state belongs to. Not reactive on purpose: the parent re-reads the drawer
+	// after every save, which hands this panel a new object for the same drawer — and resetting
+	// on that cleared the "re-embedding failed" warning a moment after it appeared.
+	let shownDrawerId: string | null = null;
+
 	$effect(() => {
-		// Reset local state whenever a different drawer is shown.
-		const id = drawer.id;
-		void id;
+		pinned = drawer.pinned;
+		neverRecall = drawer.neverRecall;
+		// Reset the edit state only when a different drawer is shown.
+		if (drawer.id === shownDrawerId) return;
+		shownDrawerId = drawer.id;
 		editing = false;
 		saveError = null;
 		embedWarning = null;
-		pinned = drawer.pinned;
-		neverRecall = drawer.neverRecall;
 	});
 
 	function startEdit() {

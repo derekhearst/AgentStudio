@@ -38,12 +38,14 @@ export const VOLATILE_SLOT_NAMES = new Set(['memory', 'skills', 'companion_skill
  * Returns `undefined` when no skills exist so callers can omit the slot.
  */
 export async function buildSkillSummariesText(input: {
+	/** Whose exclusion rules the query is held to before it is embedded. */
+	userId: string
 	userQuery: string | undefined
 	skillTopK: number
 }): Promise<string | undefined> {
 	const trimmed = input.userQuery?.trim() ?? ''
 	const skillSummaries = trimmed.length > 0
-		? await listRelevantSkillSummaries(trimmed, input.skillTopK)
+		? await listRelevantSkillSummaries(trimmed, input.skillTopK, { userId: input.userId })
 		: await listSkillSummaries()
 	if (skillSummaries.length === 0) return undefined
 	return skillSummaries

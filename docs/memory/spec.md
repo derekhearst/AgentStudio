@@ -112,7 +112,7 @@ Temporal relations between entities.
 When a chat session ends (run reaches `completed`), the `after_run` built-in hook enqueues a `memory_mine` job. The job:
 
 1. Loads the completed session's messages
-2. Calls a small LLM (gpt-4o-mini) to extract entities, relations, and topics from the conversation
+2. Calls the app's default model (via OpenRouter, under its OpenRouter name) to extract entities, relations, and topics from the conversation
 3. Upserts `memoryWings`, `memoryRooms`, and `memoryClosets` (matching by slug/alias)
 4. Creates `memoryDrawers` with verbatim content + embeddings + AAAK indexes
 5. Updates the temporal knowledge graph with new or superseded relations
@@ -139,9 +139,11 @@ When the agent needs to recall context, `recall(userId, query, opts)` runs a fou
 | Stage 3 | Temporal proximity boost: drawers closer in time to `question_date` score higher      |
 | Stage 4 | Preference pattern boost: drawers matching the user's detected preference patterns    |
 
+Stage 1 picks its search by palace size: up to 2,000 recallable drawers (counted with a capped count) it compares the query with each one directly; above that it uses the HNSW index with `hnsw.iterative_scan` (pgvector 0.8+) so the scan keeps going past drawers recall must skip, and falls back to the direct comparison when the index still returns fewer than the pool size.
+
 ### LLM reranking (optional)
 
-Top-20 candidates from the hybrid pipeline can be passed to a reader model (default: `anthropic/claude-haiku`) that re-ranks them by relevance to the specific query. Controlled by `appSettings.memoryRerank`. Adds latency but improves recall precision significantly.
+Top-20 candidates from the hybrid pipeline can be passed to a reader model (default: Claude Haiku 4.5, sent to OpenRouter as `anthropic/claude-haiku-4.5`) that re-ranks them by relevance to the specific query. Controlled by `appSettings.memoryRerank`. Adds latency but improves recall precision significantly.
 
 ### Recall injection
 
