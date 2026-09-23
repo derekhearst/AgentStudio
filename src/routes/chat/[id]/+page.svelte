@@ -2,9 +2,9 @@
 
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import {
 		deleteMessagesAfter,
 		editMessage,
@@ -84,6 +84,7 @@
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
 	import { approvalAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
+	import { takeHandedOffAttachments, withoutPromptParam } from '$lib/chat/new-chat-handoff';
 
 	type ChatAttachment = {
 		id: string;
@@ -338,10 +339,11 @@
 	// getSerializableBlocksForMetadata / getCompletedToolCalls. Each takes streamingBlocks
 	// as an argument instead of closing over it.
 
-	async function persistPartialIfIncomplete() {
+	async function persistPartialIfIncomplete(runConversationId: string) {
 		// Persist any visible partial whenever the stream didn't complete with a `done` event
 		// (i.e., `pendingMessageId` was never assigned). Covers user-stop AND error paths —
 		// without this, the finally block wipes streamingBlocks and the partial vanishes.
+		// Into the conversation the stream belongs to, which the caller captured when it began.
 		if (pendingMessageId) return;
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
@@ -352,7 +354,7 @@
 		if (!contentToPersist) return;
 
 		await savePartialAssistant({
-			conversationId,
+			conversationId: runConversationId,
 			content: contentToPersist,
 			model,
 			toolCalls: getCompletedToolCalls(streamingBlocks),
@@ -386,6 +388,18 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 		};
+	});
+
+	/**
+	 * True once this page has gone — another conversation opened (the chat/[id] layout
+	 * remounts the page per id, #74) or another page entirely. Leaving is not a Stop: the run
+	 * carries on and saves its own reply, and coming back re-attaches to it. So the stream is
+	 * let go of, and nothing it was doing may still write a partial, refresh or navigate.
+	 */
+	let leftPage = false;
+	onDestroy(() => {
+		leftPage = true;
+		streamAbortController?.abort();
 	});
 
 	$effect(() => {
@@ -496,22 +510,24 @@
 		}
 	});
 
+	/*
+	 * The first message handed over by the page that created this conversation (#75, #59).
+	 * Only once the conversation has loaded — `messages` is empty until then, so the "already
+	 * sent" check never fired and a reload sent the prompt again. And the prompt leaves the
+	 * URL before it is sent, not after the reply ends: a reload or a restored tab mid-reply
+	 * must not repeat it, and a navigation at the end of the reply pulled the user off
+	 * whatever page they had moved on to.
+	 */
 	$effect(() => {
 		const prompt = initialPrompt;
-		if (!prompt || consumedInitialPrompt || !conversationId || streaming) return;
-		if (messages.length > 0 || pendingUserMessages.length > 0) {
-			consumedInitialPrompt = true;
-			return;
-		}
-
+		if (!prompt || consumedInitialPrompt || !conversationId || !conversationData) return;
 		consumedInitialPrompt = true;
-		void streamMessage(prompt, false).finally(() => {
-			void goto(`/chat/${conversationId}`, {
-				replaceState: true,
-				noScroll: true,
-				keepFocus: true
-			});
-		});
+		replaceState(withoutPromptParam(page.url), page.state);
+		const attachments = takeHandedOffAttachments(conversationId);
+		// Already sent: the conversation has messages, or a turn is running (re-attached to below).
+		if (messages.length > 0 || pendingUserMessages.length > 0) return;
+		if (streaming || conversationData.liveRunId) return;
+		void streamMessage(prompt, false, attachments);
 	});
 
 	$effect(() => {
@@ -823,6 +839,7 @@
 		attachRunId: string | null = null,
 	) {
 		if (!conversationId || streaming) return;
+		const runConversationId = conversationId;
 
 		const abortController = new AbortController();
 		const startedAt = new Date();
@@ -911,7 +928,7 @@
 			for await (const sseEvent of consumeSseStream({
 				initialResponse: response,
 				fetchResume: (since) => fetch(resumeUrl(since), { signal: abortController.signal }),
-				shouldStop: () => doneReceived || stoppedByUser,
+				shouldStop: () => doneReceived || stoppedByUser || leftPage,
 				onResumeAttempt: (info) => logChatUi('info', 'Attempting stream resume', info),
 				onResumeRejected: (info) => logChatUi('warn', 'Resume rejected', info),
 				onResumeError: (err) =>
@@ -1109,8 +1126,12 @@
 								retryIntentFor(),
 								{ eventName: 'done', regenerate, streamHandshakeSucceeded }
 							);
-						} else if (payload.messageId) {
-							clearRecoverableError();
+						}
+						// A saved reply, even one that ended in an error (max turns, an overloaded
+						// API): its id is what stops the finally block saving a partial copy of it
+						// as a second assistant message (#76).
+						if (payload.messageId) {
+							if (!payload.error) clearRecoverableError();
 							finalizeCurrentThinkingBlock();
 							finalizeCurrentTextBlock();
 							// Keep content visible until refreshAll() confirms DB message
@@ -1139,7 +1160,7 @@
 			// Successful stream end — don't call refreshAll here; finally handles it
 		} catch (error) {
 			if (error instanceof DOMException && error.name === 'AbortError') {
-				if (!stoppedByUser) {
+				if (!stoppedByUser && !leftPage) {
 					setRecoverableError(
 						'Stream interrupted',
 						retryIntentFor(),
@@ -1158,18 +1179,21 @@
 				);
 			}
 		} finally {
-			await persistPartialIfIncomplete().catch((error) => {
-				logChatUi('warn', 'Failed to persist partial assistant message', {
-					error: error instanceof Error ? error.message : String(error),
+			// The page is gone (#74): the run saves its own reply, and there is nothing to show.
+			if (!leftPage) {
+				await persistPartialIfIncomplete(runConversationId).catch((error) => {
+					logChatUi('warn', 'Failed to persist partial assistant message', {
+						error: error instanceof Error ? error.message : String(error),
+					});
 				});
-			});
 
-			// Always reload messages so user & assistant messages show even after an error
-			await refreshAll().catch((error) => {
-				logChatUi('warn', 'Failed to refresh chat state after stream', {
-					error: error instanceof Error ? error.message : String(error),
+				// Always reload messages so user & assistant messages show even after an error
+				await refreshAll().catch((error) => {
+					logChatUi('warn', 'Failed to refresh chat state after stream', {
+						error: error instanceof Error ? error.message : String(error),
+					});
 				});
-			});
+			}
 			// ask_user optimistic user bubbles are disabled, so no ask_user cleanup needed here.
 			if (pendingMessageId && messages.some((message) => message.id === pendingMessageId)) {
 				streamingBlocks = [];
@@ -1191,7 +1215,7 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 			attachedRunId = null;
-			if (busyRunId) attachToRun(busyRunId);
+			if (busyRunId && !leftPage) attachToRun(busyRunId);
 		}
 	}
 

@@ -4,6 +4,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import { handOffAttachments, type HandoffAttachment } from '$lib/chat/new-chat-handoff';
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
@@ -204,13 +205,15 @@
 		search = '';
 	}
 
-	async function handleNewChat(initialPrompt?: string) {
+	async function handleNewChat(initialPrompt?: string, attachments: HandoffAttachment[] = []) {
 		if (busy) return;
 		busy = true;
 		try {
 			const trimmedPrompt = initialPrompt?.trim() ?? '';
 			const title = trimmedPrompt.slice(0, 80) || 'New conversation';
 			const created = await createConversation({ title, model, agentId: agentId ?? undefined });
+			// The conversation's page sends them with the prompt (#59); the URL can only carry text.
+			handOffAttachments(created.id, attachments);
 			if (trimmedPrompt) {
 				await goto(`/chat/${created.id}?prompt=${encodeURIComponent(trimmedPrompt)}`);
 			} else {
@@ -221,11 +224,11 @@
 		}
 	}
 
-	async function handleComposerSubmit(content: string) {
+	async function handleComposerSubmit(content: string, attachments: HandoffAttachment[]) {
 		// All agents — including Research — go through handleNewChat. The Research agent
 		// writes a plan file and hands off via request_plan_approval to a research-runner
 		// agent on approval.
-		await handleNewChat(content);
+		await handleNewChat(content, attachments);
 	}
 </script>
 
@@ -251,7 +254,7 @@
 				{agentChoices}
 				reasoningEffort={reasoningEffort}
 				placeholder="Start a new conversation..."
-				onSubmit={(content) => handleComposerSubmit(content)}
+				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				onModelChange={(id) => {
 					model = id;
 				}}
