@@ -24,13 +24,18 @@
 	// once per opening. Keyed on "no plan and not loading" instead, a failed analysis — which
 	// leaves no plan — retried in a loop, and the error flickered without ever staying up.
 	let requested = false;
+	// Moves on at every close, so an analysis that lands after the panel closed — or closed and
+	// opened again — writes nothing. Not reactive either.
+	let opening = 0;
 
 	$effect(() => {
 		if (!open) {
 			requested = false;
+			opening += 1;
 			plan = null;
 			result = null;
 			error = null;
+			loading = false;
 			return;
 		}
 		if (requested) return;
@@ -40,15 +45,17 @@
 	});
 
 	async function load(opts: { force?: boolean } = {}) {
+		const current = opening;
 		loading = true;
 		error = null;
 		try {
 			if (opts.force) await analyzeMemoryReorganizationQuery().refresh();
-			plan = (await analyzeMemoryReorganizationQuery()) as MemoryReorganizePlan;
+			const next = (await analyzeMemoryReorganizationQuery()) as MemoryReorganizePlan;
+			if (current === opening) plan = next;
 		} catch (e) {
-			error = (e as Error).message ?? 'Failed to analyze';
+			if (current === opening) error = (e as Error).message ?? 'Failed to analyze';
 		} finally {
-			loading = false;
+			if (current === opening) loading = false;
 		}
 	}
 

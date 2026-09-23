@@ -145,11 +145,22 @@
 		let ticks = 0;
 		const timer = setInterval(async () => {
 			ticks += 1;
-			await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
-			// Stopped (or replaced) while that was in flight.
+			let nextStats: MemoryStats;
+			let nextWings: MemoryWingRow[];
+			try {
+				await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
+				nextStats = (await getMemoryStatsQuery()) as MemoryStats;
+				nextWings = (await listMemoryWingsQuery()) as MemoryWingRow[];
+			} catch {
+				// A failed tick changes nothing; the next one asks again, and the tick cap still ends it.
+				if (pollTimer === timer && ticks >= 15) stopMinePolling();
+				return;
+			}
+			// Stopped (or replaced) while those were in flight: write nothing, and above all do
+			// not stop the poller that replaced this one.
 			if (pollTimer !== timer) return;
-			stats = (await getMemoryStatsQuery()) as MemoryStats;
-			wings = (await listMemoryWingsQuery()) as MemoryWingRow[];
+			stats = nextStats;
+			wings = nextWings;
 			if (ticks >= 15 || stats.pendingMineJobs === 0) stopMinePolling();
 		}, 2000);
 		pollTimer = timer;

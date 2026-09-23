@@ -28,6 +28,9 @@
 	let selectedClosetId = $state<string | null>(null);
 	let loading = $state(false);
 	let loadError = $state<string | null>(null);
+	// Its own: a closet's drawers failing to load says so under the closet tabs, where the
+	// room's error (shown only while there are no closets) never would.
+	let drawersError = $state<string | null>(null);
 	// The room whose closets were asked for. Not reactive on purpose: the effect below loads once
 	// per room when it is expanded, and must not re-run because a load finished. Keyed on
 	// "no closets yet" instead, a room with none (a failed mine used to leave them) reloaded
@@ -61,9 +64,21 @@
 		}
 	}
 
+	/**
+	 * Picking the closet's tab again asks once more after a failure. An answer for a closet that
+	 * is no longer the one picked is dropped, so a slow load cannot fill another closet's tab.
+	 */
 	async function loadDrawers(closetId: string) {
-		const result = (await listMemoryDrawersQuery({ closetId })) as MemoryDrawerRow[];
-		drawers = result;
+		drawersError = null;
+		try {
+			const result = (await listMemoryDrawersQuery({ closetId })) as MemoryDrawerRow[];
+			if (selectedClosetId !== closetId) return;
+			drawers = result;
+		} catch (err) {
+			if (selectedClosetId !== closetId) return;
+			drawers = [];
+			drawersError = err instanceof Error ? err.message : 'Could not load drawers.';
+		}
 	}
 
 	async function pickCloset(id: string) {
@@ -121,15 +136,19 @@
 				</div>
 
 				<div class="room-block__drawers">
-					{#each drawers as drawer (drawer.id)}
-						<DrawerCard
-							{drawer}
-							selected={selectedDrawerId === drawer.id}
-							onSelect={(id) => onSelectDrawer?.(id)}
-						/>
+					{#if drawersError}
+						<div class="room-block__empty">Could not load drawers: {drawersError}</div>
 					{:else}
-						<div class="room-block__empty">No drawers in this closet.</div>
-					{/each}
+						{#each drawers as drawer (drawer.id)}
+							<DrawerCard
+								{drawer}
+								selected={selectedDrawerId === drawer.id}
+								onSelect={(id) => onSelectDrawer?.(id)}
+							/>
+						{:else}
+							<div class="room-block__empty">No drawers in this closet.</div>
+						{/each}
+					{/if}
 				</div>
 			{/if}
 		</div>
