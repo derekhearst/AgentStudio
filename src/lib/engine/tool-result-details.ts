@@ -113,7 +113,11 @@ export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails
 /** Built-ins whose output this module knows how to distil. */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit'])
 const FILE_WRITE_TOOLS = new Set(['Write'])
-const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+/**
+ * Only `Bash`. `BashOutput` and `TaskOutput` were removed from the CLI, and `TaskStop` (the
+ * old `KillShell`) answers with `{ message, task_id, task_type }` — no streams to render.
+ */
+const SHELL_TOOLS = new Set(['Bash'])
 
 export function hasToolResultDetails(toolName: string): boolean {
 	return (

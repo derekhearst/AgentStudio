@@ -175,6 +175,14 @@ test.describe('shell', () => {
 		// Something else wearing the name is not a shell result.
 		expect(toolResultDetails('Bash', { somethingElse: true })).toBeNull()
 	})
+
+	test('only Bash is a terminal: the removed polling tools and TaskStop are not (#35)', () => {
+		const streams = { stdout: 'x', stderr: '', interrupted: false }
+		expect(toolResultDetails('BashOutput', streams)).toBeNull()
+		expect(toolResultDetails('KillShell', streams)).toBeNull()
+		// TaskStop's own output has no streams to show.
+		expect(toolResultDetails('TaskStop', { message: 'Stopped', task_id: 'b1', task_type: 'local_bash' })).toBeNull()
+	})
 })
 
 test.describe('todos', () => {
