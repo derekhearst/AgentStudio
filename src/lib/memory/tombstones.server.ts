@@ -2,6 +2,9 @@ import { inArray } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { memoryMessageTombstones, type MemoryTombstoneReason } from '$lib/memory/memory.schema'
 
+/** Rows per tombstone insert; see `tombstoneMessages`. */
+const TOMBSTONE_BATCH = 5_000
+
 /**
  * Tombstones: messages the miner must not mine again (see `memoryMessageTombstones`).
  *
@@ -14,11 +17,14 @@ export async function tombstoneMessages(
 	reason: MemoryTombstoneReason,
 ): Promise<void> {
 	const unique = [...new Set(messageIds)]
-	if (unique.length === 0) return
-	await db
-		.insert(memoryMessageTombstones)
-		.values(unique.map((messageId) => ({ messageId, userId, reason })))
-		.onConflictDoNothing()
+	// In batches: each row is three bind parameters, and Postgres takes at most 65,535 per
+	// statement — forgetting a long conversation in one insert would fail outright.
+	for (let start = 0; start < unique.length; start += TOMBSTONE_BATCH) {
+		await db
+			.insert(memoryMessageTombstones)
+			.values(unique.slice(start, start + TOMBSTONE_BATCH).map((messageId) => ({ messageId, userId, reason })))
+			.onConflictDoNothing()
+	}
 }
 
 /** Which of these messages are tombstoned. */

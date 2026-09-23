@@ -184,3 +184,35 @@ test.describe('memory/re-mine — what "Mine pending" sweeps', () => {
 		}
 	})
 })
+
+test.describe('memory/re-mine — tombstoning a long conversation', () => {
+	test('more messages than one statement can carry are all tombstoned', async () => {
+		// One insert of every id passed three bind parameters per message, and Postgres takes
+		// at most 65,535 per statement: forgetting a conversation of ~22k messages failed.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('remine-long')
+		const sql = getSql()
+		try {
+			const fixture = await makeConversation(prefix)
+			const rows = await sql<{ id: string }[]>`
+				insert into messages (conversation_id, role, content, sequence)
+				select ${fixture.conversationId}, 'user'::message_role, 'turn', g from generate_series(1, 22000) g
+				returning id
+			`
+			const { tombstoneMessages } = await import('../src/lib/memory/tombstones.server')
+			await tombstoneMessages(
+				fixture.userId,
+				rows.map((row) => row.id),
+				'conversation_forgotten',
+			)
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from memory_message_tombstones t
+				join messages m on m.id = t.message_id
+				where m.conversation_id = ${fixture.conversationId}
+			`
+			expect(count).toBe(22000)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+})
