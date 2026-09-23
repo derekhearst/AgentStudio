@@ -326,12 +326,19 @@ export type UsageDigest = {
 
 /* ── Formatting ─────────────────────────────────────────────────────────── */
 
+const TOKEN_UNITS = ['K', 'M', 'B'] as const
+
 export function formatDigestTokens(n: number): string {
 	if (!n) return '0'
-	if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-	return String(Math.round(n))
+	if (Math.round(n) < 1_000) return String(Math.round(n))
+	// Step up a unit when rounding would print "1000.0": 999,999 is 1.0M, not 1000.0K.
+	let value = n / 1_000
+	let unit = 0
+	while (unit < TOKEN_UNITS.length - 1 && Number(value.toFixed(1)) >= 1_000) {
+		value /= 1_000
+		unit++
+	}
+	return `${value.toFixed(1)}${TOKEN_UNITS[unit]}`
 }
 
 export function formatDigestUsd(n: number): string {
@@ -636,8 +643,12 @@ export function renderDigestMarkdown(digest: UsageDigest): string {
 	const list = <T>(title: string, rows: T[], describe: (row: T) => string) => {
 		if (rows.length > 0) lines.push(`- **${title}:** ${rows.map(describe).join('; ')}`)
 	}
-	list('Top models', digest.models, (m) => `${oneLine(m.model, 48)} ${formatDigestTokens(m.tokensIn + m.tokensOut)}`)
-	list('Top agents', digest.agents, (a) => `${oneLine(a.name ?? 'Deleted agent', 40)} ${formatDigestTokens(a.tokensIn + a.tokensOut)}`)
+	// Tokens, then metered dollars when there were any — for a gateway or OpenRouter model
+	// the dollars are the number that matters.
+	const usage = (row: { tokensIn: number; tokensOut: number; costUsd: number }) =>
+		formatDigestTokens(row.tokensIn + row.tokensOut) + (row.costUsd > 0 ? ` (${formatDigestUsd(row.costUsd)})` : '')
+	list('Top models', digest.models, (m) => `${oneLine(m.model, 48)} ${usage(m)}`)
+	list('Top agents', digest.agents, (a) => `${oneLine(a.name ?? 'Deleted agent', 40)} ${usage(a)}`)
 	list(
 		'Busiest automations',
 		automations.items,

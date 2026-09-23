@@ -33,8 +33,15 @@
 
 	const windowLabels: Record<UsageDigestWindowDays, string> = { 1: '24h', 7: '7d', 30: '30d' };
 
-	const failingAutomations = $derived(digest?.automations.items.filter((a) => a.failed > 0).slice(0, 2) ?? []);
+	// Already ranked failures first, then spend, then runs.
+	const topAutomations = $derived(digest?.automations.items.slice(0, 2) ?? []);
 	const tightest = $derived(digest?.budget.tightest ?? null);
+
+	function automationUsage(automation: UsageDigest['automations']['items'][number]): string {
+		const count =
+			automation.failed > 0 ? `${automation.failed} failed` : `${automation.runs} run${automation.runs === 1 ? '' : 's'}`;
+		return automation.costUsd > 0 ? `${count} · ${formatDigestUsd(automation.costUsd)}` : count;
+	}
 
 	function limitLabel(limit: NonNullable<UsageDigest['budget']['tightest']>): string {
 		const scope = limit.scope === 'global' ? 'Global' : (limit.scopeLabel ?? limit.scope);
@@ -45,6 +52,16 @@
 		return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 	}
 </script>
+
+<!--
+	Tokens, then the metered dollars when there were any: for a gateway or OpenRouter model
+	the dollars are what matters, and a subscription model's $0 would only be noise.
+-->
+{#snippet usage(row: { tokensIn: number; tokensOut: number; costUsd: number })}
+	<span class="shrink-0 tabular-nums text-base-content/60" data-testid="usage-row-value">
+		{formatDigestTokens(row.tokensIn + row.tokensOut)}{#if row.costUsd > 0}<span class="text-base-content/45">{` · ${formatDigestUsd(row.costUsd)}`}</span>{/if}
+	</span>
+{/snippet}
 
 <section class="space-y-2" data-testid="usage-strip" aria-label="Usage summary" aria-busy={loading}>
 	<!--
@@ -159,11 +176,23 @@
 					<span class:text-error={digest.automations.failed > 0}>{digest.automations.failed} failed</span>
 					{#if digest.automations.costUsd > 0}· {formatDigestUsd(digest.automations.costUsd)}{/if}
 				</p>
-				{#each failingAutomations as automation (automation.automationId)}
-					<a href="/automations" class="link-hover block truncate text-[11px] text-error" title={automation.description}>
-						{automation.description}
-					</a>
-				{/each}
+				{#if topAutomations.length > 0}
+					<ul class="mt-1 space-y-0.5">
+						{#each topAutomations as automation (automation.automationId)}
+							<li class="flex items-baseline justify-between gap-2 text-[11px]" data-testid="usage-automation">
+								<a
+									href="/automations"
+									class="link-hover min-w-0 truncate"
+									class:text-error={automation.failed > 0}
+									title={automation.description}
+								>
+									{automation.description}
+								</a>
+								<span class="shrink-0 tabular-nums text-base-content/60">{automationUsage(automation)}</span>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			</div>
 
 			<!-- Review inbox -->
@@ -211,7 +240,7 @@
 						{#each digest.models.slice(0, 3) as model (model.model)}
 							<li class="flex items-baseline justify-between gap-2 text-[11px]">
 								<span class="min-w-0 truncate font-mono" title={model.model}>{model.model.split('/').pop()}</span>
-								<span class="shrink-0 tabular-nums text-base-content/60">{formatDigestTokens(model.tokensIn + model.tokensOut)}</span>
+								{@render usage(model)}
 							</li>
 						{/each}
 					</ul>
@@ -228,7 +257,7 @@
 						{#each digest.agents.slice(0, 3) as agent (agent.agentId)}
 							<li class="flex items-baseline justify-between gap-2 text-[11px]">
 								<a href="/agents/{agent.agentId}" class="link-hover min-w-0 truncate">{agent.name ?? 'Deleted agent'}</a>
-								<span class="shrink-0 tabular-nums text-base-content/60">{formatDigestTokens(agent.tokensIn + agent.tokensOut)}</span>
+								{@render usage(agent)}
 							</li>
 						{/each}
 					</ul>

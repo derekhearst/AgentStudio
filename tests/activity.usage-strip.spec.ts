@@ -29,6 +29,14 @@ test.describe('activity/usage-strip', () => {
 		// Budget headroom is a percentage or says there is nothing to measure against.
 		await expect(strip.getByTestId('usage-budget')).toContainText(/%|No limits set/)
 		await expect(strip.getByTestId('weekly-digest')).toBeVisible()
+		// Model and agent rows read "tokens", or "tokens · $metered" when there was any spend.
+		for (const value of await strip.getByTestId('usage-row-value').allTextContents()) {
+			expect(value.replace(/\s+/g, ' ').trim()).toMatch(/^\d+(\.\d)?[KMB]?( · \$\d+\.\d{2,4})?$/)
+		}
+		// Named automations carry their runs or failures, and their dollars when they cost any.
+		for (const value of await strip.getByTestId('usage-automation').allTextContents()) {
+			expect(value.replace(/\s+/g, ' ').trim()).toMatch(/(^| )\d+ (runs?|failed)( · \$\d+\.\d{2,4})?$/)
+		}
 
 		// The strip sits above the feed's filters, not below 100 events.
 		const stripBox = await strip.boundingBox()

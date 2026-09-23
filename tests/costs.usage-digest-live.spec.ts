@@ -190,6 +190,11 @@ test.describe('costs/usage-digest live — aggregation', () => {
 			const markdown = renderDigestMarkdown(digest)
 			expect(markdown).toContain('## Usage digest: last 7 days')
 			expect(markdown).toContain('- **Tool calls:** 4 (1 failed)')
+			// Spend by model and by agent, next to the tokens.
+			expect(digest.models[0].costUsd).toBeCloseTo(0.75)
+			expect(digest.agents[0].costUsd).toBeCloseTo(0.75)
+			expect(markdown).toContain(`- **Top models:** ${model} 3.3K ($0.75)`)
+			expect(markdown).toMatch(/- \*\*Top agents:\*\* .+ 3\.3K \(\$0\.75\)/)
 		} finally {
 			await cleanupLedger(prefix)
 		}

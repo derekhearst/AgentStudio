@@ -56,10 +56,10 @@ The strip covers a rolling window — the last 24 hours, 7 days (the default) or
 | --- | --- |
 | Runs | Chat and agent runs started in the window, how many failed, and the failure rate. The rate leaves out runs the owner stopped and runs still going, and is not shown until at least 4 runs have finished. The failed count links to `/review`, which lists recent failures. |
 | Tokens | Input + output tokens across every model call, with input, output and cache reads shown separately. Underneath: **metered** dollars. |
-| Automation runs | Scheduled, manual and monitor-fired automation runs, how many failed, and what they cost. Failing automations are named and link to `/automations`. |
+| Automation runs | Scheduled, manual and monitor-fired automation runs, how many failed, and what they cost. The two busiest automations are named (failing ones first, in red) with their runs or failures and their metered dollars, and link to `/automations`. |
 | Review inbox | Items waiting on a person right now, with how many are critical or warning. Not limited to the window: it is a to-do count. |
 | Budget | How much of the tightest budget limit is spent, or **No limits set**. |
-| Top models, Top agents | The three that used the most tokens. |
+| Top models, Top agents | The three that used the most tokens, each with its metered dollars next to the tokens when it had any. For gateway and OpenRouter models the dollars are the number to watch; a Claude subscription model shows tokens only. |
 | Tool calls | Total calls and failures, and the five most-used tools. |
 
 **Why tokens come first.** Claude models run on the Claude Code subscription and are recorded at $0 per turn. A dollar-first strip would make a busy week look free. Tokens are the real measure; dollars are labelled *metered* — what gateway models, OpenRouter calls and paid tools such as image and video generation actually charged. When any usage in the window came from the subscription, the strip marks the dollar figure and says so.

@@ -15,6 +15,7 @@ import {
 	automationHistoryCoversPreviousWindow,
 	detectAnomalies,
 	failureRate,
+	formatDigestTokens,
 	parseUsageDigestPrompt,
 	renderDigestMarkdown,
 	resolveDigestWindow,
@@ -415,6 +416,40 @@ test.describe('costs/usage-digest — markdown', () => {
 		expect(markdown).toContain('- **Top models:** claude-sonnet-5 1.5M')
 		expect(markdown).toContain('- **Most-used tools:** Read 20')
 		expect(markdown.indexOf('**Tokens:**')).toBeLessThan(markdown.indexOf('**Metered spend:**'))
+	})
+
+	test('models, agents and automations carry their metered dollars when they have any', () => {
+		const row = { tokensCacheRead: 0, tokensCacheWrite: 0, calls: 1 }
+		const markdown = renderDigestMarkdown(
+			assembleUsageDigest(
+				baseInput({
+					models: [
+						{ ...row, model: 'openrouter/gpt-9', tokensIn: 900_000, tokensOut: 100_000, costUsd: 4.2, subscription: false },
+						{ ...row, model: 'claude-sonnet-5', tokensIn: 400_000, tokensOut: 0, costUsd: 0, subscription: true },
+					],
+					agents: [
+						{ agentId: 'g1', name: 'Researcher', tokensIn: 900_000, tokensOut: 100_000, costUsd: 4.2, calls: 3 },
+						{ agentId: 'g2', name: 'Coder', tokensIn: 400_000, tokensOut: 0, costUsd: 0, calls: 2 },
+					],
+					automations: [automation({ description: 'Nightly triage', runs: 7, completed: 7, costUsd: 0.35 })],
+				}),
+			),
+		)
+		// $0 is left off: for a subscription model it would read as "free".
+		expect(markdown).toContain('- **Top models:** openrouter/gpt-9 1.0M ($4.20); claude-sonnet-5 400.0K\n')
+		expect(markdown).toContain('- **Top agents:** Researcher 1.0M ($4.20); Coder 400.0K\n')
+		expect(markdown).toContain('- **Busiest automations:** “Nightly triage” 7 runs, $0.35')
+	})
+
+	test('token counts step up a unit instead of printing 1000.0K', () => {
+		expect(formatDigestTokens(0)).toBe('0')
+		expect(formatDigestTokens(999)).toBe('999')
+		expect(formatDigestTokens(999.6)).toBe('1.0K')
+		expect(formatDigestTokens(1_500)).toBe('1.5K')
+		expect(formatDigestTokens(999_949)).toBe('999.9K')
+		expect(formatDigestTokens(999_999)).toBe('1.0M')
+		expect(formatDigestTokens(999_999_999)).toBe('1.0B')
+		expect(formatDigestTokens(2_500_000_000_000)).toBe('2500.0B')
 	})
 
 	test('a quiet window says so, and a busy one caps the list well under the inbox limit', () => {
