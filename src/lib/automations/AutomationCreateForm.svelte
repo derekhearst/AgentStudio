@@ -2,6 +2,7 @@
 	import { createAutomationCommand } from '$lib/automations'
 	import { COMMON_TIME_ZONES, DEFAULT_TIMEZONE, isValidTimeZone } from '$lib/automations/cron'
 	import { getAgentChoices } from '$lib/agents'
+	import { describeError } from '$lib/ui/error-message'
 
 	type AutomationMode = 'chat_followup' | 'research' | 'maintenance'
 	type AutomationOutputTarget = 'chat_session' | 'review_inbox'
@@ -122,8 +123,9 @@
 			})
 			description = ''
 			onCreated('Automation created successfully.')
-		} catch {
-			onError('Failed to create automation. Check values and try again.')
+		} catch (err) {
+			// A bad schedule comes back naming the field and the reason; show that.
+			onError(describeError(err, 'Failed to create automation. Check values and try again.'))
 		} finally {
 			saving = false
 		}

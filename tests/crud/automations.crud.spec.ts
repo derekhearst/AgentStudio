@@ -99,6 +99,36 @@ test.describe('/automations — CRUD lifecycle', () => {
 		}
 	})
 
+	test('an impossible schedule is refused with the reason, not a generic failure', async ({ page, context }) => {
+		// The server's cron error used to come back as a 500 and the form said only "Failed to
+		// create automation. Check values and try again."
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('crud-autom-badcron')
+		await cleanupExtendedPrefix(prefix)
+		await authenticateContext(context)
+		const sql = getSql()
+		const promptText = `${prefix} never scheduled`
+
+		try {
+			await withErrorCapture(page, async () => {
+				await page.goto('/automations')
+				await waitForHydration(page)
+				await page.getByPlaceholder('Daily customer sentiment scan').fill(`${prefix} bad hour`)
+				await page.getByPlaceholder('0 9 * * *').fill('0 25 * * *')
+				await page.getByPlaceholder('What should this automation do every run?').fill(promptText)
+				await page.getByRole('button', { name: /^Create automation$/ }).click()
+
+				await expect(page.locator('.alert-error')).toContainText('Invalid cron hour field "25"')
+				const [row] = await sql<{ count: number }[]>`
+					select count(*)::int as count from automations where prompt = ${promptText}
+				`
+				expect(row.count).toBe(0)
+			})
+		} finally {
+			await cleanupExtendedPrefix(prefix)
+		}
+	})
+
 	test('Duplicate copies the execution mode and output target', async ({ page, context }) => {
 		// The seed used to carry everything but these two, so the form kept whatever mode it
 		// last had (chat_followup by default) and a copied maintenance automation was created

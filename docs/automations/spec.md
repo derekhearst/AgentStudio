@@ -119,7 +119,9 @@ match. That is what makes `0 9 * * 1-5` mean "weekdays at 9" rather than "never"
 
 `@reboot` is rejected: automations have no boot event to hang a schedule on. Anything the
 parser cannot read is rejected with a message naming the field and the reason, for example
-`Invalid cron day-of-week field "FUNDAY": unrecognized value "FUNDAY"`.
+`Invalid cron day-of-week field "FUNDAY": unrecognized value "FUNDAY"`. That message is what
+the creation form shows, so a typo in the schedule says which field is wrong and why rather
+than "Failed to create automation".
 
 **Daylight saving.** Schedules keep their wall-clock time across a transition, so a 9am
 automation is 9am in both winter and summer. In the two edge hours:

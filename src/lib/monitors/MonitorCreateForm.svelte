@@ -9,6 +9,7 @@
 		type MonitorObservableTool
 	} from '$lib/monitors/condition';
 	import { createMonitorCommand } from '$lib/monitors/monitors.remote';
+	import { describeError } from '$lib/ui/error-message';
 
 	let { onCreated }: { onCreated: (message: string) => void } = $props();
 
@@ -168,7 +169,7 @@
 			prompt = '';
 			compareValue = '';
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Unable to create the monitor.';
+			error = describeError(err, 'Unable to create the monitor.');
 		} finally {
 			submitting = false;
 		}

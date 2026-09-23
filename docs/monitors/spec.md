@@ -84,6 +84,8 @@ Anything that writes — `Bash`, `Write`, `push_branch` — is absent by constru
 2. The caps are applied at creation: the interval is clamped, the deadline is clamped to at most 30 days from now, and the check budget is clamped. There is no way to ask for "forever" — omitting the deadline yields the maximum, not the absence of one.
 3. `nextCheckAt` is set to now, so the first check lands on the next dispatch tick and the baseline is recorded immediately.
 
+If the monitor cannot be created, the form says why in plain words — the 50-monitor ceiling has been reached, an action is missing its setting (a prompt, an automation), or a tool argument is wrong — rather than a generic failure. The same goes for Extend on a canceled monitor and Check now on one that is not active.
+
 ### Each check
 
 1. A scheduled job, `monitors_dispatch`, runs every 60 seconds. It first retires anything past its deadline, then finds monitors whose next check is due.
