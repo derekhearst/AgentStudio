@@ -59,6 +59,8 @@ const wavAnswer = (seconds: number) => (route: Route) =>
 type AudioProbe = {
 	/** Every `play()` the page made, by what the element was playing. */
 	plays: string[]
+	/** How many `play()`s of a reply chunk were refused. */
+	refused: number
 	/** Each `/api/tts` fetch, and whether it was cancelled before its answer arrived. */
 	tts: Array<{ abortedWhilePending: boolean }>
 }
@@ -66,21 +68,26 @@ type AudioProbe = {
 /**
  * Watch the page's audio and its `/api/tts` fetches. With `blockReplyAudio`, `play()` of a
  * reply chunk (a blob: URL) is refused the way an autoplay policy refuses it; priming with the
- * silent data: WAV still plays.
+ * silent data: WAV still plays. With `requirePrime`, it is refused only on an element that has
+ * not played the silent WAV yet — the way iOS Safari treats an element no tap has started.
  */
-async function probeAudio(page: Page, options: { blockReplyAudio?: boolean } = {}) {
-	await page.addInitScript((blockReplyAudio) => {
-		const probe = { plays: [] as string[], tts: [] as Array<{ abortedWhilePending: boolean }> }
+async function probeAudio(page: Page, options: { blockReplyAudio?: boolean; requirePrime?: boolean } = {}) {
+	await page.addInitScript(({ blockReplyAudio, requirePrime }) => {
+		const probe = { plays: [] as string[], refused: 0, tts: [] as Array<{ abortedWhilePending: boolean }> }
 		const w = window as unknown as { __audioProbe: typeof probe; __speechAudio?: HTMLMediaElement }
 		w.__audioProbe = probe
+		const primed = new WeakSet<HTMLMediaElement>()
 		const realPlay = HTMLMediaElement.prototype.play
 		HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
 			w.__speechAudio = this
 			probe.plays.push(this.src)
-			if (blockReplyAudio && this.src.startsWith('blob:')) {
+			if (this.src.startsWith('blob:') && (blockReplyAudio || (requirePrime && !primed.has(this)))) {
+				probe.refused += 1
 				return Promise.reject(new DOMException('play() is not allowed without a user gesture.', 'NotAllowedError'))
 			}
-			return realPlay.call(this)
+			const playing = realPlay.call(this)
+			if (this.src.startsWith('data:')) playing.then(() => primed.add(this), () => undefined)
+			return playing
 		}
 		const realFetch = window.fetch
 		window.fetch = async function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
@@ -98,7 +105,7 @@ async function probeAudio(page: Page, options: { blockReplyAudio?: boolean } = {
 				answered = true
 			}
 		}
-	}, options.blockReplyAudio ?? false)
+	}, { blockReplyAudio: options.blockReplyAudio ?? false, requirePrime: options.requirePrime ?? false })
 	return {
 		read: () => page.evaluate(() => (window as unknown as { __audioProbe: AudioProbe }).__audioProbe),
 		/** Make the element fail mid-chunk, as a decode error would. */
@@ -582,6 +589,74 @@ test('with auto-read on, the first tap after a reload primes audio again', async
 		await expect.poll(primes, { timeout: 5_000 }).toBeGreaterThan(0)
 	} finally {
 		await page.evaluate(() => localStorage.removeItem('agentstudio:speech:auto-read')).catch(() => undefined)
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('with auto-read on, the send on the new-chat page lets the new conversation read its first reply', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-auto-read-home')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const sql = getSql()
+	// Reply audio plays only on an element a tap has primed, as on an iPhone. Nothing is tapped
+	// on the chat page: the send on the new-chat page is the only gesture there is.
+	const probe = await probeAudio(page, { requirePrime: true })
+	const requests = await scriptSpeech(page, wavAnswer(0.2))
+	let conversationId: string | null = null
+
+	// The new conversation's first turn, saved and streamed the way the stream route would.
+	await page.route(
+		(url) => /^\/chat\/[0-9a-f-]+\/stream$/.test(url.pathname),
+		async (route) => {
+			conversationId = new URL(route.request().url()).pathname.split('/')[2]
+			const sent = (route.request().postDataJSON() as { content?: string } | null)?.content ?? ''
+			const reply = `${prefix} the first reply.`
+			const [{ id }] = await sql<{ id: string }[]>`
+				with u as (
+					insert into messages (conversation_id, role, content, sequence)
+					values (${conversationId}, 'user', ${sent}, 1)
+				)
+				insert into messages (conversation_id, role, content, sequence)
+				values (${conversationId}, 'assistant', ${reply}, 2)
+				returning id
+			`
+			await route.fulfill({
+				status: 200,
+				headers: { 'content-type': 'text/event-stream' },
+				body: sse([
+					{ id: 1, event: 'delta', data: { content: reply } },
+					{ id: 2, event: 'done', data: { messageId: id } },
+				]),
+			})
+		},
+	)
+
+	try {
+		await page.goto('/', { waitUntil: 'domcontentloaded' })
+		await page.evaluate(() => localStorage.setItem('agentstudio:speech:auto-read', '1'))
+		await page.reload({ waitUntil: 'domcontentloaded' })
+		const composer = page.getByPlaceholder('Start a new conversation...').first()
+		await composer.waitFor({ state: 'visible', timeout: 15_000 })
+		await composer.fill(`${prefix} hello`)
+		await page.getByRole('button', { name: /^Send message$/i }).first().click()
+		await expect(page).toHaveURL(/\/chat\/[0-9a-f-]+/, { timeout: 15_000 })
+
+		await expect.poll(() => requests.length, { timeout: 30_000 }).toBe(1)
+		expect(requests[0].purpose).toBe('autoplay')
+		expect(requests[0].text).toContain('the first reply.')
+		await expect
+			.poll(async () => (await probe.read()).plays.some((src) => src.startsWith('blob:')), { timeout: 15_000 })
+			.toBe(true)
+		expect((await probe.read()).refused).toBe(0)
+		await expect(page.getByTestId('auto-read-error')).toHaveCount(0)
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await page.evaluate(() => localStorage.removeItem('agentstudio:speech:auto-read')).catch(() => undefined)
+		if (conversationId) {
+			await sql`delete from messages where conversation_id = ${conversationId}`
+			await sql`delete from conversations where id = ${conversationId}`
+		}
 		await cleanupPrefixedRecords(prefix)
 	}
 })

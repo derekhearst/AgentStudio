@@ -13,7 +13,7 @@
  * after the user has interacted with it, and iOS Safari only on an element that was first
  * played from a tap. `play()` primes the element synchronously while it is still inside the
  * click; turning auto-read on, or the first tap or key press after a reload with it on (see
- * AutoRead), does the same, so a reply that finishes later can speak.
+ * `primeOnNextGesture`), does the same, so a reply that finishes later can speak.
  */
 
 import {
@@ -259,3 +259,30 @@ class AutoReadPreference {
 }
 
 export const autoRead = new AutoReadPreference()
+
+/**
+ * While auto-read is on, prime the element from the next tap or key press anywhere on the
+ * page, until one succeeds. Returns the function that stops listening.
+ *
+ * The switch survives a reload and the primed element does not, so the chat page does this on
+ * every load (see AutoRead). The new-chat page does it too: a conversation started there sends
+ * its first message from the new-chat composer, and that tap is the last one before the reply
+ * to it wants to talk. The element outlives the navigation between the two.
+ *
+ * iOS counts the end of a touch as the tap, not its start, so every event that may carry the
+ * gesture is listened to.
+ */
+export function primeOnNextGesture(): () => void {
+	const events = ['pointerup', 'touchend', 'keydown'] as const
+	const stopListening = () => {
+		for (const type of events) window.removeEventListener(type, prime, true)
+	}
+	function prime() {
+		if (!autoRead.enabled) return
+		void speechPlayer.unlock().then((primed) => {
+			if (primed) stopListening()
+		})
+	}
+	for (const type of events) window.addEventListener(type, prime, true)
+	return stopListening
+}

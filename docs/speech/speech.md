@@ -109,7 +109,7 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
 | No API key on the server | That read-aloud needs `OPENROUTER_API_KEY` |
 | The browser blocks playback | To press play on the reply |
 
-- **Browser playback rules.** Browsers only let a page start sound after the user has interacted with it, and iPhones only on audio that was first started by a tap. Turning on Auto-read and pressing any speaker button both count. This permission lasts only until the page is reloaded, but the Auto-read switch is remembered. So while Auto-read is on, the first tap or key press on the page after a reload (typically sending the next message) gives permission again, and the reply to that message can be read. If a browser still blocks it, the reason is shown next to the switch.
+- **Browser playback rules.** Browsers only let a page start sound after the user has interacted with it, and iPhones only on audio that was first started by a tap. Turning on Auto-read and pressing any speaker button both count. This permission lasts only until the page is reloaded, but the Auto-read switch is remembered. So while Auto-read is on, the first tap or key press on the page after a reload (typically sending the next message) gives permission again, and the reply to that message can be read. The new-chat page does the same: a conversation started there is read from its first reply, because the tap that sent that first message counts. If a browser still blocks it, the reason is shown next to the switch.
 
 ## Where it lives
 
@@ -118,6 +118,7 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
 | Speaker button | `src/lib/speech/SpeakButton.svelte`, shown by `MessageBubble` |
 | Auto-read switch | `src/lib/speech/AutoRead.svelte`, shown above the message box on the chat page |
 | Playback, chunking and the auto-read preference | `src/lib/speech/speech-player.svelte.ts`, `src/lib/speech/speech.ts` |
+| Getting playback permission from the next tap | `primeOnNextGesture` in `speech-player.svelte.ts`, used by the Auto-read switch and the new-chat page (`src/routes/+page.svelte`) |
 | Settings pickers | `src/lib/speech/SpeechVoicePicker.svelte`, inside the Model & AI panel |
 | Endpoint | `POST /api/tts` (`src/routes/api/tts/+server.ts`) |
 | Noticing that the listener has gone | `src/lib/server/client-disconnect.ts` |

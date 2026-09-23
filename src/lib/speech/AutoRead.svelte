@@ -27,7 +27,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { noteStop, repliesToSpeak, startTurn, type TurnStart } from './speech';
-	import { autoRead, speechPlayer } from './speech-player.svelte';
+	import { autoRead, primeOnNextGesture, speechPlayer } from './speech-player.svelte';
 
 	type Reply = {
 		id: string;
@@ -95,21 +95,10 @@
 		});
 	});
 
-	// Re-prime after a reload (see the header). iOS counts the end of a touch as the tap, not
-	// its start, so every event that may carry the gesture is listened to until one primes it.
+	// Re-prime after a reload (see the header).
 	$effect(() => {
 		if (!enabled) return;
-		const events = ['pointerup', 'touchend', 'keydown'] as const;
-		const stopListening = () => {
-			for (const type of events) window.removeEventListener(type, prime, true);
-		};
-		function prime() {
-			void speechPlayer.unlock().then((primed) => {
-				if (primed) stopListening();
-			});
-		}
-		for (const type of events) window.addEventListener(type, prime, true);
-		return stopListening;
+		return primeOnNextGesture();
 	});
 
 	// Leaving the conversation, for another one or another page, stops a reply being read
