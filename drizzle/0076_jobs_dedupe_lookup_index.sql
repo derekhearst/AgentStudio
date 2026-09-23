@@ -1,0 +1,1 @@
+CREATE INDEX "jobs_type_dedupe_idx" ON "jobs" USING btree ("type","dedupe_key");

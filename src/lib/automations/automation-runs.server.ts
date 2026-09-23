@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, lt, sql as drizzleSql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, lt, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import {
 	automationRuns,
@@ -140,44 +140,60 @@ export type AutomationRunSummary = {
 }
 
 /**
- * Latest run per automation plus a 24h failure count, in one round trip. Feeds the status
- * strip on each card so the list page doesn't need a query per row.
+ * Latest run per automation plus a 24h failure count, in two queries whatever the number of
+ * automations. Feeds the status strip on each card so the list page doesn't need a query
+ * per row.
+ *
+ * Both are computed per automation in the database. They used to be derived from the 500
+ * newest runs across ALL of the user's automations, so one automation running every minute
+ * filled that slice within hours and every other card lost its last-run badge and its
+ * failures — the daily job that failed this morning looked fine by the evening.
  */
-export async function getLatestRunSummaries(automationIds: string[]): Promise<Map<string, AutomationRunSummary>> {
+export async function getLatestRunSummaries(
+	automationIds: string[],
+	now = new Date(),
+): Promise<Map<string, AutomationRunSummary>> {
 	const summaries = new Map<string, AutomationRunSummary>()
 	if (automationIds.length === 0) return summaries
 
 	try {
-		const rows = await db
-			.select()
-			.from(automationRuns)
-			.where(inArray(automationRuns.automationId, automationIds))
-			.orderBy(desc(automationRuns.startedAt))
-			.limit(500)
-
-		const cutoff = Date.now() - 24 * 60 * 60 * 1000
-		const failures = new Map<string, number>()
-		for (const row of rows) {
-			if (row.status === 'failed' && row.startedAt.getTime() >= cutoff) {
-				failures.set(row.automationId, (failures.get(row.automationId) ?? 0) + 1)
-			}
-			if (!summaries.has(row.automationId)) {
-				summaries.set(row.automationId, {
-					automationId: row.automationId,
-					status: row.status,
-					trigger: row.trigger,
-					startedAt: row.startedAt,
-					finishedAt: row.finishedAt,
-					error: row.error,
-					conversationId: row.conversationId,
-					researchId: row.researchId,
-					failures24h: 0,
+		const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+		const [latest, failures] = await Promise.all([
+			// One row per automation: its newest run (served by automation_runs_automation_idx).
+			db
+				.selectDistinctOn([automationRuns.automationId])
+				.from(automationRuns)
+				.where(inArray(automationRuns.automationId, automationIds))
+				.orderBy(automationRuns.automationId, desc(automationRuns.startedAt)),
+			db
+				.select({
+					automationId: automationRuns.automationId,
+					count: drizzleSql<number>`count(*)::int`,
 				})
-			}
-		}
-		for (const [automationId, count] of failures) {
-			const summary = summaries.get(automationId)
-			if (summary) summary.failures24h = count
+				.from(automationRuns)
+				.where(
+					and(
+						inArray(automationRuns.automationId, automationIds),
+						eq(automationRuns.status, 'failed'),
+						gte(automationRuns.startedAt, cutoff),
+					),
+				)
+				.groupBy(automationRuns.automationId),
+		])
+
+		const failureCounts = new Map(failures.map((row) => [row.automationId, Number(row.count)]))
+		for (const row of latest) {
+			summaries.set(row.automationId, {
+				automationId: row.automationId,
+				status: row.status,
+				trigger: row.trigger,
+				startedAt: row.startedAt,
+				finishedAt: row.finishedAt,
+				error: row.error,
+				conversationId: row.conversationId,
+				researchId: row.researchId,
+				failures24h: failureCounts.get(row.automationId) ?? 0,
+			})
 		}
 	} catch (err) {
 		logger.warn('[automations] getLatestRunSummaries failed (non-fatal)', { err })

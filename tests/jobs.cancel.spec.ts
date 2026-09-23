@@ -77,13 +77,14 @@ test.describe('jobs/cancel — durable cancellation contract', () => {
 				values ('research_run', 'pending'::job_status, ${sql.json({ researchId: randomUUID() })}, ${userId})
 				returning id
 			`
-			// Claim path: status in ('pending', 'retry_wait') — canceled is excluded.
+			// Claim path: status in ('pending', 'retry_wait'), or a lapsed lease on a leased or
+			// running job — canceled is excluded either way.
 			const eligible = await sql<{ id: string }[]>`
 				select id from jobs
 				where type = 'research_run'
 				  and (
 				    (status in ('pending', 'retry_wait') and scheduled_at <= now())
-				    or (status = 'leased' and lease_expires_at < now())
+				    or (status in ('leased', 'running') and lease_expires_at < now())
 				  )
 				  and user_id = ${userId}
 				  and id in (${canceled.id}, ${pending.id})

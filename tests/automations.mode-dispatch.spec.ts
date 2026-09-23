@@ -51,7 +51,9 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string; conversation_id: string | null }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
 				values (
@@ -60,7 +62,7 @@ test.describe('automations/mode-dispatch — research mode', () => {
 					'0 9 * * *',
 					${`${prefix} What changed in the project this week?`},
 					'research'::automation_mode,
-					${past}
+					${notDue}
 				)
 				returning id, conversation_id
 			`
@@ -124,6 +126,54 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		}
 	})
 
+	test('"Run now" and the next scheduled run each start their own research', async () => {
+		// The research_run key used to be derived from `nextRunAt`. "Run now" leaves
+		// `nextRunAt` alone, so the manual run and the scheduled tick for the same slot built
+		// the same key; the tick got the manual run's (finished) job back, linked its fresh
+		// research row to it, and that row sat in `planning` forever while the ledger said
+		// the tick completed.
+		const prefix = uniquePrefix('automation-research-run-now')
+		const sql = getSql()
+		const userId = await getActiveUserId()
+		await sql`delete from budget_limits where user_id = ${userId}`
+		await sql`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
+
+		try {
+			// A slot tomorrow, so no dispatcher runs this automation behind the test's back.
+			const slot = new Date(Date.now() + 24 * 60 * 60_000)
+			const [automation] = await sql<{ id: string }[]>`
+				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
+				values (
+					${userId}, ${`${prefix} research`}, '0 9 * * *', ${`${prefix} What changed?`},
+					'research'::automation_mode, ${slot}
+				)
+				returning id
+			`
+
+			const { runAutomationById } = await import('../src/lib/automations/engine')
+			type ResearchResult = { researchId?: string; jobId?: string }
+			const manual = (await runAutomationById(automation.id, new Date(), { trigger: 'manual' })) as ResearchResult
+			const scheduled = (await runAutomationById(automation.id, new Date(), { trigger: 'schedule' })) as ResearchResult
+
+			expect(scheduled.researchId).not.toBe(manual.researchId)
+			expect(scheduled.jobId, "the tick must not be handed the manual run's job").not.toBe(manual.jobId)
+
+			const rows = await sql<{ research_id: string; job_research_id: string | null }[]>`
+				select r.id as research_id, j.payload->>'researchId' as job_research_id
+				from research r
+				left join jobs j on j.id = r.job_id
+				where r.query like ${`${prefix}%`}
+			`
+			expect(rows).toHaveLength(2)
+			for (const row of rows) {
+				expect(row.job_research_id, 'each research row points at the job that runs it').toBe(row.research_id)
+			}
+		} finally {
+			await sql`delete from jobs where payload->>'researchId' in (select id::text from research where query like ${`${prefix}%`})`
+			await clearTestAutomations(prefix)
+		}
+	})
+
 	test('research lifecycle metric emits with mode=research dimension', async () => {
 		const prefix = uniquePrefix('automation-research-metric')
 		const sql = getSql()
@@ -134,10 +184,12 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
-				values (${userId}, ${`${prefix} M1`}, '0 9 * * *', ${`${prefix} Q1`}, 'research'::automation_mode, ${past})
+				values (${userId}, ${`${prefix} M1`}, '0 9 * * *', ${`${prefix} Q1`}, 'research'::automation_mode, ${notDue})
 				returning id
 			`
 

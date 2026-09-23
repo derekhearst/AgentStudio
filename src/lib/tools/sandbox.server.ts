@@ -8,7 +8,7 @@ import { resolveWorkspaceRoot, safePathWithin, ensureWorkspace } from '$lib/work
 /**
  * Sandbox primitives — workspace + shell. The filesystem ops live in `sandbox-fs.server.ts`
  * and the headless-browser ops in `sandbox-browser.server.ts`. They are re-exported below so
- * existing `import { fileRead, getPage, ... } from './sandbox.server'` callers keep working.
+ * existing `import { fileRead, withBrowserPage, ... } from './sandbox.server'` callers keep working.
  *
  * Key invariants:
  *   - Every entry point reads `toolUserContext` (an AsyncLocalStorage) to resolve the per-
@@ -191,9 +191,4 @@ export {
 	type FileReplaceOpts,
 } from './sandbox-fs.server'
 
-export {
-	getPage,
-	sandboxBrowserNavigate,
-	sandboxBrowserScreenshot,
-	browserClose,
-} from './sandbox-browser.server'
+export { withBrowserPage, gotoGuarded, readPageText, browserScreenshot, browserClose } from './sandbox-browser.server'

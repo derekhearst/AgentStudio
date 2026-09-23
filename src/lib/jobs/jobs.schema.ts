@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
 	index,
 	integer,
@@ -6,7 +7,7 @@ import {
 	pgTable,
 	text,
 	timestamp,
-	unique,
+	uniqueIndex,
 	uuid,
 } from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
@@ -27,9 +28,12 @@ import { users } from '$lib/auth/auth.schema'
  * `type` is text (not enum) so new job kinds can land without migrations. `status` IS an
  * enum because it's a small fixed lifecycle and the worker's claim query relies on it.
  *
- * `dedupeKey` provides idempotent enqueue — `(type, dedupeKey)` is unique when both are set,
- * so re-enqueueing the same logical work returns the existing row instead of creating a
- * duplicate. The application is responsible for choosing keys (e.g. `mine:conv:${id}`).
+ * `dedupeKey` provides idempotent enqueue — `(type, dedupeKey)` is unique among ACTIVE jobs
+ * (pending, leased, running, retry_wait), so re-enqueueing work that is still queued or in
+ * flight returns the existing row instead of creating a duplicate. Once that job finishes the
+ * key is free again, which is what lets a recurring enqueue with a fixed key
+ * (`automations:dispatch`, `mine:<conversationId>`) run more than once. Work that must happen
+ * at most once EVER asks for that explicitly with `enqueueJob({ dedupeScope: 'forever' })`.
  *
  * Foreign keys to runs/sessions/projects are deliberately omitted at the schema level
  * to avoid cycles — these columns are pointers + the application keeps them consistent.
@@ -84,9 +88,20 @@ export const jobs = pgTable(
 		typeIdx: index('jobs_type_idx').on(t.type, t.status),
 		runIdx: index('jobs_run_idx').on(t.runId),
 		userIdx: index('jobs_user_idx').on(t.userId),
-		// Idempotency — `(type, dedupeKey)` is the natural unique key for enqueue dedupe. NULL
-		// dedupeKey is allowed (multiple times) since most ad-hoc jobs don't need it.
-		dedupeUnique: unique('jobs_type_dedupe_unique').on(t.type, t.dedupeKey),
+		// Idempotency — `(type, dedupeKey)` collapses a re-enqueue onto a job that is still
+		// queued or in flight. Partial on purpose: a plain unique over every row made each fixed
+		// key single-use for the life of the database, because nothing deletes finished jobs,
+		// so the first completed `automations:dispatch` swallowed every later tick. NULL
+		// dedupeKey is allowed (multiple times) since most ad-hoc jobs don't need it. The status
+		// list must match ACTIVE_JOB_STATUSES in jobs.server.ts.
+		dedupeActiveUnique: uniqueIndex('jobs_type_dedupe_active_uidx')
+			.on(t.type, t.dedupeKey)
+			.where(sql`${t.status} in ('pending', 'leased', 'running', 'retry_wait')`),
+		// The same columns over EVERY row, for lookups the partial index cannot answer: a
+		// `dedupeScope: 'forever'` enqueue asks for the newest job with a key whatever its
+		// status. That runs on hot paths — each due automation on every dispatch tick, each
+		// chat run's evaluation — and without this it scans every historical job of the type.
+		dedupeLookupIdx: index('jobs_type_dedupe_idx').on(t.type, t.dedupeKey),
 	}),
 )
 

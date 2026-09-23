@@ -22,7 +22,7 @@ import { db } from '$lib/db.server'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { agents as agentsTable } from '$lib/agents/agents.schema'
-import { emitActivity } from '$lib/activity/activity.server'
+import { emitActivityInBackground } from '$lib/activity/activity.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { persistRunBlocks } from '$lib/runs/blocks.server'
 import { appendRunEvent } from '$lib/runs/events.server'
@@ -130,7 +130,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// engine is concerned, which is also when the title gets generated.
 	const isFirstExchange = !conversation.sdkSessionId && !body.regenerate
 	if (isFirstExchange) {
-		void emitActivity('chat_started', `Chat started: ${conversation.title}`, {
+		emitActivityInBackground('chat_started', `Chat started: ${conversation.title}`, {
 			entityId: body.conversationId,
 			entityType: 'conversation',
 		})

@@ -17,7 +17,8 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { embedOne } from '$lib/memory/embeddings.server'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
-import { conversations } from '$lib/sessions/sessions.schema'
+import { conversations, messages } from '$lib/sessions/sessions.schema'
+import { tombstoneMessages } from '$lib/memory/tombstones.server'
 import { logger } from '$lib/observability/logger'
 
 export const MAX_DRAWER_CONTENT_CHARS = 20_000
@@ -126,6 +127,29 @@ export async function setDrawerFlags(input: {
 	return { ok: true, pinned: row.pinned, neverRecall: row.neverRecall }
 }
 
+/**
+ * Delete one drawer, and keep it deleted. The conversation it came from is mined again after
+ * every exchange, and the miner re-mines any message without a drawer — so the message is
+ * tombstoned first. Returns false when the drawer is not this user's.
+ */
+export async function deleteDrawer(input: { userId: string; drawerId: string }): Promise<boolean> {
+	const [drawer] = await db
+		.select({ sourceMessageId: memoryDrawers.sourceMessageId })
+		.from(memoryDrawers)
+		.where(and(eq(memoryDrawers.id, input.drawerId), eq(memoryDrawers.userId, input.userId)))
+		.limit(1)
+	if (!drawer) return false
+	// Tombstone before deleting: if the delete then fails, the drawer is still there and
+	// nothing is lost; the other order could leave a deleted drawer free to be re-mined.
+	if (drawer.sourceMessageId) {
+		await tombstoneMessages(input.userId, [drawer.sourceMessageId], 'drawer_deleted')
+	}
+	await db
+		.delete(memoryDrawers)
+		.where(and(eq(memoryDrawers.id, input.drawerId), eq(memoryDrawers.userId, input.userId)))
+	return true
+}
+
 export type ForgetConversationResult = {
 	conversationId: string
 	drawersDeleted: number
@@ -138,11 +162,25 @@ export type ForgetConversationResult = {
  * Delete everything mined from one conversation: every room tied to it, which cascades
  * through closets to drawers. Wings left with no rooms are removed too, so "forget this
  * conversation" does not leave an empty wing on the map.
+ *
+ * Every message the conversation holds right now is tombstoned first, so the next exchange's
+ * mining run does not memorize it all again. Messages sent after this are mined as usual.
  */
 export async function forgetConversationMemories(input: {
 	userId: string
 	conversationId: string
 }): Promise<ForgetConversationResult> {
+	const owned = await db
+		.select({ id: messages.id })
+		.from(messages)
+		.innerJoin(conversations, eq(conversations.id, messages.conversationId))
+		.where(and(eq(messages.conversationId, input.conversationId), eq(conversations.userId, input.userId)))
+	await tombstoneMessages(
+		input.userId,
+		owned.map((row) => row.id),
+		'conversation_forgotten',
+	)
+
 	const rooms = await db
 		.select({ id: memoryRooms.id, wingId: memoryRooms.wingId })
 		.from(memoryRooms)

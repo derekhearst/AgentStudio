@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { automations } from '$lib/automations/automation.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
@@ -28,12 +28,8 @@ export async function runChatFollowupAutomation(
 	const settings = await getOrCreateSettings(automation.userId)
 	const model = agent?.model ?? settings.defaultModel
 
-	const history = await db
-		.select({ role: messages.role, content: messages.content })
-		.from(messages)
-		.where(eq(messages.conversationId, conversation.id))
-		.orderBy(asc(messages.sequence))
-		.limit(12)
+	// Read before this tick's prompt is inserted, or the prompt would be sent twice.
+	const history = await loadRecentAutomationHistory(conversation.id)
 
 	const prompt = `Automation run at ${now.toISOString()}\n\n${automation.prompt}`
 	await insertMessageWithSequence({
@@ -47,6 +43,37 @@ export async function runChatFollowupAutomation(
 		return runAutomationWithAgent({ automation, conversation, agent, history, prompt, model, now })
 	}
 	return runAutomationSynthesis({ automation, conversation, history, prompt, model, now })
+}
+
+/** How many earlier messages of the bound conversation a tick sees as context. */
+export const AUTOMATION_HISTORY_MESSAGES = 12
+
+/**
+ * The most recent messages of the automation's conversation, oldest first.
+ *
+ * In `reuse` mode the conversation grows by a prompt and a reply every tick, so it is the
+ * END of it that says what happened "since the last run". Taking the first N froze the
+ * context at the automation's first few runs forever.
+ *
+ * Tool rows do not count toward the window — neither path sends them — and a window that
+ * opens on an assistant reply, the cut landing between a prompt and its answer, drops that
+ * orphan so the history starts on a user turn.
+ */
+export async function loadRecentAutomationHistory(
+	conversationId: string,
+	limit = AUTOMATION_HISTORY_MESSAGES,
+): Promise<Array<{ role: 'user' | 'assistant' | 'system'; content: string }>> {
+	const newestFirst = await db
+		.select({ role: messages.role, content: messages.content })
+		.from(messages)
+		.where(
+			and(eq(messages.conversationId, conversationId), inArray(messages.role, ['user', 'assistant', 'system'])),
+		)
+		.orderBy(desc(messages.sequence))
+		.limit(limit)
+	const history = newestFirst.reverse() as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+	while (history[0]?.role === 'assistant') history.shift()
+	return history
 }
 
 /** Single-shot LLM synthesis — used when no agent is attached. */

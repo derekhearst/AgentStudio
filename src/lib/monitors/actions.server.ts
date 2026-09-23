@@ -171,8 +171,9 @@ async function fireAutomation(monitor: MonitorRow, observation: MonitorObservati
 		throw new Error(`automation ${automationId} not found for this monitor's owner`)
 	}
 	// Switched off by its owner, or by the failure policy after repeated failures: either way
-	// it must not run unattended. Refusing here (rather than letting the job fail) turns it into
-	// one review item for this firing instead of a retry chain against a disabled automation.
+	// it must not run unattended. Refused here, where a throw still reaches the review-item
+	// fallback: the job itself would only skip a missing or switched-off automation, and the
+	// observation would reach nobody.
 	if (!automation.enabled) {
 		throw new Error(`automation ${automationId} is switched off, so the monitor did not run it`)
 	}

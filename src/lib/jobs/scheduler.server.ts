@@ -9,9 +9,11 @@ import { logger } from '$lib/observability/logger'
  * fires a `setInterval` per registered schedule that calls `enqueueJob` on tick.
  *
  * Idempotency comes from `dedupeKey` on the enqueue: if the previous tick's job is still
- * pending (worker hasn't claimed it yet), the next tick's enqueue collides on the
- * `(type, dedupe_key)` unique index and returns the existing row instead of stacking up
- * duplicate work.
+ * queued or running, the next tick's enqueue collides on the `(type, dedupe_key)` index —
+ * which only covers active jobs — and returns the existing row instead of stacking up
+ * duplicate work. Once that job finishes the key is free, so a fixed key gets one job per
+ * tick. A schedule that must run at most once per window puts the window in the key and asks
+ * for `dedupeScope: 'forever'` instead (metrics_sample, runs_reap, app_logs_purge).
  *
  * V1 scope: simple intervalMs (not full cron). Full cron parsing can land later when a real
  * use case needs hour-of-day specificity. Workspace GC + memory mining backfills are fine
@@ -24,7 +26,7 @@ import { logger } from '$lib/observability/logger'
  */
 
 export type ScheduledJob = {
-	/** Human-readable name for logging. Also used as the dedupeKey suffix. */
+	/** Human-readable name for logging and the registry key. Not part of any dedupeKey. */
 	name: string
 	/** Interval between enqueues, in milliseconds. */
 	intervalMs: number

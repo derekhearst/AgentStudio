@@ -1,5 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { ownerExists } from '$lib/auth/auth.server'
+import { getJobWorkerStatus } from '$lib/db/bootstrap.server'
 import { getMigrationStatus } from '$lib/db/migration-status.server'
 
 /**
@@ -19,11 +20,17 @@ import { getMigrationStatus } from '$lib/db/migration-status.server'
  * shipped a migration that has not run. `appliedMigrations > bundledMigrations` means the
  * image is older than the database — the exact failure this endpoint was written for.
  *
+ * It also reports `jobWorker`. A process whose worker failed to start still serves every
+ * page, while memory mining, evaluations and automations pile up in `pending`; `failed`
+ * marks the deploy degraded so that shows up somewhere. (A failed database bootstrap never
+ * reaches this handler at all — `ensureDatabaseReady()` in hooks.server.ts rejects, and
+ * every request, this one included, is a 500.)
+ *
  * Deliberately unauthenticated (see PUBLIC_PATH_PREFIXES in src/lib/auth/gate.ts) so it can
  * be polled by a uptime check that has no session — including before the instance has an
- * owner, when every other path redirects to /setup. It exposes counts, a commit SHA and
- * whether an owner exists (which /setup already reveals), never row contents, connection
- * strings or environment values.
+ * owner, when every other path redirects to /setup. It exposes counts, statuses, a commit
+ * SHA and whether an owner exists (which /setup already reveals), never row contents,
+ * connection strings, database names or environment values.
  *
  * `ownerProvisioned` is reported but is not part of `healthy`: a fresh instance waiting for
  * setup is up and working, and a deploy probe should not call it an outage.
@@ -36,7 +43,9 @@ export const GET: RequestHandler = async () => {
 	// Stamped into the image at build time by the publish workflow.
 	const commit = process.env.GIT_SHA ?? null
 
-	const healthy = databaseReachable && migrationsInSync
+	const jobWorker = getJobWorkerStatus()
+
+	const healthy = databaseReachable && migrationsInSync && jobWorker !== 'failed'
 
 	return json(
 		{
@@ -46,6 +55,7 @@ export const GET: RequestHandler = async () => {
 			bundledMigrations,
 			appliedMigrations,
 			ownerProvisioned,
+			jobWorker,
 			commit,
 			checkedAt: new Date().toISOString(),
 		},
