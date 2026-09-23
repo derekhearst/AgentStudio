@@ -38,6 +38,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
 import { resolveBashPolicy, type BashPolicy } from './workspace-guard'
+import { realPathEscape } from './workspace-realpath.server'
 import type { ConversationPermissionMode } from './permission-mode'
 import { decideToolCall, type ToolDecisionContext } from './tool-decision'
 import type { ToolScope } from './tool-scope'
@@ -365,6 +366,19 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		projectConfigLoaded: (input.options.settingSources ?? []).includes('project'),
 	}
 	const decide = (name: string, args: unknown) => decideToolCall(decisionContext, name, args)
+	/**
+	 * `decide`, plus the one check that needs the filesystem: whether a path the lexical guard
+	 * allowed really leads out of the workspace through a link. Used wherever a call is about
+	 * to be let through, not for the frame the assistant branch sends.
+	 */
+	const decideBeforeRunning = async (name: string, args: unknown) => {
+		const decision = decide(name, args)
+		if (decision.gate === 'deny' || !workspaceRoot) return decision
+		const escape = await realPathEscape(name, args, workspaceRoot)
+		return escape
+			? { gate: 'deny' as const, reason: `Path leads outside this run's workspace through a link: ${escape}` }
+			: decision
+	}
 
 	// Tools whose `tool_call` frame has already gone out, so the approval path
 	// doesn't emit a second one.
@@ -439,7 +453,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		// The host owns ask_user end to end (see the assistant branch below).
 		if (HOST_OWNED_TOOLS.has(name)) return {}
 
-		const decision = decide(name, hookInput.tool_input)
+		const decision = await decideBeforeRunning(name, hookInput.tool_input)
 		if (decision.gate === 'allow') return {}
 
 		if (decision.gate === 'deny') {
@@ -482,7 +496,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
 
-			const gate = decide(name, toolInput)
+			const gate = await decideBeforeRunning(name, toolInput)
 
 			/** Moves the UI's pending block to "executing" using the same id. */
 			const allow = async (): Promise<PermissionResult> => {

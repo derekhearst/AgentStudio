@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import type { HookCallbackMatcher, Options, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { runEngineStream, type EngineRunInput, type EngineQuerySource } from '../src/lib/engine/stream.server'
@@ -322,4 +325,23 @@ test('the trusted project tier makes CLAUDE.md an approval, read off the options
 		{ id: 't1', name: 'Write', input: { file_path: 'CLAUDE.md', content: 'notes' } },
 	])
 	expect(untrusted.outcomes[0].hook).toBe('none')
+})
+
+test('a write that leaves the workspace through a link is refused before it runs', async () => {
+	// Lexically inside, really outside: a link a sandboxed shell could have made.
+	const base = await mkdtemp(resolve(tmpdir(), 'agentstudio-link-'))
+	try {
+		const ws = join(base, 'ws')
+		const outside = join(base, 'outside')
+		await mkdir(ws, { recursive: true })
+		await mkdir(outside, { recursive: true })
+		await symlink(outside, join(ws, 'x'), 'junction')
+		const { outcomes, frames } = await drive({ workspaceRoot: ws }, [
+			{ id: 't1', name: 'Write', input: { file_path: 'x/cron.d/job', content: '* * * * * sh' } },
+		])
+		expect(outcomes[0].hook).toBe('deny')
+		expect(events(frames, 't1')).toContain('tool_denied')
+	} finally {
+		await rm(base, { recursive: true, force: true })
+	}
 })

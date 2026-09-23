@@ -36,7 +36,9 @@
  *     'deny' express those. What this module will not do is pretend.
  *
  * Pure: no DB, no SvelteKit, no `node:fs`. `node:path` only, so it unit-tests without a
- * filesystem and cannot be defeated by a race between the check and the read.
+ * filesystem and cannot be defeated by a race between the check and the read. The one thing
+ * a lexical check cannot see is a link that points out of the workspace;
+ * `./workspace-realpath.server` covers that, and the engine asks both.
  */
 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
@@ -136,6 +138,19 @@ function pathArgumentsFor(toolName: string, toolInput: unknown, table = PATH_ARG
 		if (typeof value === 'string' && value.length > 0) found.push(value)
 	}
 	return found
+}
+
+/**
+ * Every path a call names — the built-ins' arguments and our own file movers' — resolved
+ * against the workspace the way the guard resolves them. For `./workspace-realpath.server`,
+ * which checks where those paths really lead once links are followed.
+ */
+export function filesystemPathsFor(toolName: string, toolInput: unknown, workspaceRoot: string): string[] {
+	const raw = new Set([
+		...pathArgumentsFor(toolName, toolInput),
+		...pathArgumentsFor(toolName, toolInput, CONFIG_WRITE_ARGS),
+	])
+	return [...raw].map((candidate) => (isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate)))
 }
 
 /**
