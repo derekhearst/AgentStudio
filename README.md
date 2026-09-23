@@ -76,7 +76,7 @@ cp .env.example .env
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
-- `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
+- `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub from the Connections panel at `/projects` for repo sync, clone, push, and PR creation). Server-side git ignores the host's own git configuration — credential managers, URL rewrites, a global identity — so nothing needs setting up there; see [docs/source-control/spec.md](docs/source-control/spec.md#running-git-safely).
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
 
 Database note:

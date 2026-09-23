@@ -59,6 +59,14 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 2. In chat, bind the conversation to the project (or let the agent call `set_project_context`). From then on the agent's system prompt names the project, and it writes files into that working directory rather than anywhere else.
 3. History and diffs come from git — `git_status`, `git_log`, `git_diff`, `prepare_commit`, and, with explicit operator approval, `push_branch` and `create_pull_request`.
 
+### Pull and push from the Repo tab
+
+1. **Pull latest** fetches every branch from the remote and fast-forwards the checked-out branch when it is behind. If it cannot move the branch without losing something — local commits the remote does not have, edits the update would overwrite — it leaves the branch alone and the message under the buttons says why. The remote's branches are recorded either way.
+2. **Push** sends a branch to GitHub under the same name. The **--force-with-lease** box replaces the branch on GitHub only if nobody else has pushed to it since AgentStudio last pulled or pushed it; if someone has, the push is refused with a hint to pull first.
+3. **Commit** uses the repository's own name and email, or `AgentStudio <agentstudio@local>` when the repository has none — the server's own git settings are never used.
+
+All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder that would run a program or send the GitHub token elsewhere are switched off rather than obeyed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
+
 ### Delete a project
 
 Delete from the `/projects` list. Deleting removes the database row, and for `local` / `imported` projects the sandbox directory with it. There is no soft delete for projects.
@@ -90,6 +98,7 @@ Everything else the agent does inside a project goes through the ordinary filesy
 - **Filesystem after commit** — repo creation never happens inside the database transaction. A failure compensates by deleting the row and the directory.
 - **Imports need a source** — `repoMode: 'imported'` without a `source` is rejected outright rather than leaving a half-made project.
 - **Slug stability** — a project's slug is fixed at creation.
+- **Git is hardened** — every git command the server runs in a project folder switches off the settings in that folder that could run a program or redirect the GitHub token. The agent can write to `.git`; the server does not trust it.
 
 ## Edge cases
 

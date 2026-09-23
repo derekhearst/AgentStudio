@@ -138,6 +138,58 @@ Pull request bodies include:
 - Validation summary
 - Reviewer notes and known risks
 
+**Force-pushing.** Push offers one kind of force: `--force-with-lease`, the "only if nobody
+else has pushed" option. The push is allowed when the branch on GitHub is still exactly where
+AgentStudio last saw it, and refused otherwise, so an agent that rebased its branch can
+replace it, but never over someone else's commits it has not seen.
+
+"Where AgentStudio last saw it" is the clone's `origin/<branch>`. It is written when the repo
+is cloned, every time it is refreshed (Pull latest, `clone_repository`), and after every
+successful push. A branch that has never been fetched or pushed is expected not to exist yet.
+When a force-push is refused this way, the message says the remote branch has commits
+AgentStudio has not fetched: pull, look at what changed, and push again.
+
+### Running git safely
+
+Git runs in two places. The agent runs it in its own shell, inside the operating-system
+sandbox. The server runs it for the Repo tab, for the agent's git tools (`git_status`,
+`git_log`, `git_diff`, `prepare_commit`), for clone, pull and push, and to create worktrees.
+The server's git runs outside the sandbox, in folders the agent can write to.
+
+That matters because git reads settings from the repository itself (`.git/config`,
+`.gitattributes`, `.git/hooks`), and several of those settings name a program for git to run.
+If git followed them, an agent could plant a setting and have the server run a program of the
+agent's choosing, as the app, the next time anyone opened the Repo tab. Other settings can
+redirect where git sends the GitHub token.
+
+So every git command the server runs goes through one hardened runner that:
+
+| Measure | What it prevents |
+| ------- | ---------------- |
+| Ignores the host machine's own git settings | A credential manager or URL rewrite on the server quietly taking part |
+| Starts git with a short list of environment variables, not the server's | A program that did run finding database passwords or encryption keys |
+| Switches off every repository setting that names a program: hooks, file-system monitors, filter and diff drivers, password prompts, commit signing, credential helpers | The repository running anything |
+| Never descends into submodules on its own | A submodule's settings, which were not checked, taking effect |
+| Pins git to the repository's own folder | A setting pointing a status or diff at files outside the workspace |
+| Only speaks HTTPS (and plain HTTP when that is the clone URL) | A setting swapping in another transport, such as one that runs a command |
+| Sends the GitHub token only as a header for the one exact URL being fetched or pushed | A rewritten URL or a repository-chosen proxy receiving the token |
+
+Consequences worth knowing:
+
+- Server-side git does not use the host's git configuration at all. A commit made from the
+  Repo tab uses the repository's own name and email, or `AgentStudio <agentstudio@local>` if
+  the repository has none.
+- Git LFS content is not downloaded by server-side clones; LFS files arrive as pointers.
+- The token is never on a command line, never in a file, and never given to a credential
+  helper.
+- References the agent passes to `git_diff` must look like a branch, tag, commit or `HEAD~N`.
+  Anything starting with `-` is refused, because git would read it as an option.
+
+One gap remains: git has no way to ignore a repository's settings wholesale, so filter drivers
+are switched off by name after reading which ones the repository defines. An agent that
+rewrites its settings in the instant between that read and the command could slip a new one
+in. Running server-side git inside the same sandbox as the agent's shell would close it.
+
 ### Pull request status sync
 
 AgentStudio synchronizes provider state back into its own DB:
@@ -147,6 +199,42 @@ AgentStudio synchronizes provider state back into its own DB:
 - Reviewer comments count
 - Merge conflict state
 - Whether the branch is behind base
+
+**What a webhook delivery changes.** GitHub sends a `pull_request` event for many actions.
+Only some of them say anything about the PR's status:
+
+| Action | Effect on a PR AgentStudio already knows |
+| ------ | ---------------------------------------- |
+| `opened`, `reopened`, `ready_for_review` | Status becomes `open` (or `draft` for a draft PR) |
+| `converted_to_draft` | Status becomes `draft` |
+| `closed` | Status becomes `merged` or `closed` |
+| Anything else (`synchronize`, `edited`, `labeled`, `review_requested`, ...) | Status is left as it is; title, body and link are refreshed |
+
+A PR AgentStudio has never seen is recorded with the state GitHub reports for it, whatever the
+action. Extra details on the PR (the commit last polled, when it was polled, what the webhook
+last said) are merged, never replaced, so the poller and the webhook do not erase each other.
+The record of who first recorded the PR — the agent or a webhook — is kept.
+
+**Which repositories a delivery reaches.** Every user who connected the repository gets the
+update. The match ignores letter case, because GitHub does and a repository imported from a
+pasted URL keeps the casing the user typed. It only considers GitHub repositories, so a
+same-named repository on another host is never touched. A repository synced from GitHub also
+matches by GitHub's own repository number, which survives a rename.
+
+**Connection health.** A GitHub connection is taken out of service — marked `error`, so every
+push, PR, clone and poll stops until the user reconnects — only when GitHub says the token
+itself is no good:
+
+| Failure | Connection |
+| ------- | ---------- |
+| 401 from any call | Marked `error` |
+| 403 on the repository listing, not a rate limit | Marked `error` |
+| 403 on one PR (single sign-on, an organisation's app restrictions) | Stays active |
+| Rate limit (429, or 403 with GitHub's rate-limit headers) | Stays active |
+| Timeout, network error, 5xx | Stays active |
+
+A failure that leaves the connection active is still reported to whoever asked, and the next
+attempt simply tries again.
 
 ### Pull request review handoff
 
@@ -250,6 +338,30 @@ The initial repo onboarding flow supports:
 - Read repository metadata (default branch, provider slug)
 - Optionally clone a persistent local mirror used for future worktrees
 
+GitHub is connected, and reconnected, from the Connections panel on `/projects`. Every "no
+GitHub connection" message — including the ones the agent relays — points there.
+
+**Refreshing a clone.** "Pull latest" on a project, re-importing a repository, and
+`clone_repository` on a repo that is already cloned all do the same thing:
+
+1. Fetch every branch from the remote into the clone's `origin/*`, and drop the ones the
+   remote has deleted.
+2. If the checked-out branch has a counterpart on the remote and is strictly behind it,
+   fast-forward it.
+3. Otherwise leave it exactly as it is, and say why:
+
+| Situation | What happens |
+| --------- | ------------ |
+| Branch is behind the remote | Fast-forwarded |
+| Branch already matches, or is ahead | Reported as up to date |
+| Branch and remote have both moved | Left alone ("has commits the remote does not") |
+| Uncommitted edits the update would touch | Left alone ("has uncommitted changes") |
+| Branch was never pushed | Left alone ("has no counterpart on the remote") |
+| HEAD is detached | Left alone |
+
+In every case the remote's branches are recorded, so new worktrees and branches are cut from
+the current state of the remote rather than from the day the repo was first cloned.
+
 ### Git-aware tools
 
 A new `source_control` capability group exposes:
@@ -281,6 +393,13 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
 - Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
+- The server never spawns git except through the hardened runner. No repository setting can make server-side git run a program, and the host's own git configuration plays no part.
+- The GitHub token reaches git only as a header scoped to the exact remote URL. It is never in argv, a file, or a credential helper, and a rewritten URL does not receive it.
+- A model-supplied ref or branch name that starts with `-` is refused before git runs.
+- A refresh records every remote branch and moves the checked-out branch only by fast-forward.
+- A force-push is always a lease against the last state AgentStudio fetched or pushed; plain `--force` is never used.
+- A webhook action that says nothing about status never changes a PR's status, and never replaces its metadata.
+- Only a credential failure (401, or a non-rate-limit 403 on a token-level call) takes a GitHub connection out of service.
 
 ## Roles & Permissions
 
