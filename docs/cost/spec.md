@@ -149,7 +149,7 @@ Before starting a new run (or before a new LLM call inside a run), the system ch
 
 **Limits from Settings → Budget** — the daily and monthly limits on the Settings page are budget limits like any other. Each becomes a global `block` limit for its period with a warning at 80% of the limit. The server keeps these rows in step with the Settings fields whenever settings are saved or reset, and before every budget check. It only touches the rows it created (their ids are kept in the settings' `budgetConfig.limitIds`). Clearing a limit in Settings switches its row off instead of deleting it, so the alert history stays. A settings save waits while the server is recording a new limit row, so saving settings at the same moment a chat checks its budget never loses track of that row. A lost row would go on blocking at its old amount after the limit was raised or cleared. Before 2026-09-23 the Settings limits were only drawn as progress bars in /review, and nothing enforced them.
 
-Enforcement order: `run` → `agent` → `project` → `global`. The most restrictive blocking limit among all active limits wins. Warn thresholds are evaluated independently and can fire multiple times per period.
+Enforcement order: `run` → `agent` → `project` → `global`. The most restrictive blocking limit among all active limits wins. Warn thresholds are evaluated independently, so several limits can warn at the same check. Each one still alerts only once per period (see below).
 
 A hard limit with `action = 'block'` **does not interrupt a run already in progress** — the check happens at run-start and at each new LLM call initiation. If the limit is crossed mid-run, no new LLM calls are made after the threshold is detected, and the run fails with a `budget_exceeded` error.
 
