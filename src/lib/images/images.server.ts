@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { images, type ImageRow } from './images.schema'
 
@@ -55,14 +55,5 @@ export async function listImagesForUser(
 
 export async function getImageById(imageId: string): Promise<ImageRow | null> {
 	const [row] = await db.select().from(images).where(eq(images.id, imageId)).limit(1)
-	return row ?? null
-}
-
-export async function getImageForUser(userId: string, imageId: string): Promise<ImageRow | null> {
-	const [row] = await db
-		.select()
-		.from(images)
-		.where(and(eq(images.id, imageId), eq(images.userId, userId)))
-		.limit(1)
 	return row ?? null
 }

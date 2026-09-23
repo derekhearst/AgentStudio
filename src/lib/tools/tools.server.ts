@@ -21,8 +21,6 @@ import {
 	type ToolName,
 } from './tool-schemas'
 import { toolUserContext, type WorktreeStoreConfig } from './sandbox.server'
-import { stat } from 'node:fs/promises'
-import { getSandboxRoot } from '$lib/server/config'
 import { TOOL_HANDLERS } from './handlers'
 import type { ToolCall, ToolCallWithContext } from './tool-call'
 
@@ -35,27 +33,6 @@ export { browserClose } from './sandbox-browser.server'
 export { toolSchemas, allToolNames, type ToolName } from './tool-schemas'
 export type { ToolCall, ToolCallWithContext } from './tool-call'
 export { normalizeToolName }
-
-/** Read the sandbox root and verify it's a directory. Surfaced via /settings. */
-export async function getSandboxStatus() {
-	const workspace = getSandboxRoot()
-	try {
-		const s = await stat(workspace)
-		return {
-			success: s.isDirectory(),
-			message: s.isDirectory()
-				? 'Sandbox workspace accessible'
-				: 'Sandbox workspace path is not a directory',
-			stats: { workspace, isDirectory: s.isDirectory() },
-		}
-	} catch {
-		return {
-			success: false,
-			message: `Sandbox workspace not found: ${workspace}`,
-			stats: null,
-		}
-	}
-}
 
 function zodToJsonSchema(schema: z.ZodType): Record<string, unknown> {
 	return z.toJSONSchema(schema) as Record<string, unknown>

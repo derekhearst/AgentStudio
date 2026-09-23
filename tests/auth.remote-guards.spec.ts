@@ -68,7 +68,9 @@ test.describe('auth/remote-guards — each remote function checks the session fi
 	})
 
 	test('an alias points at a guarded export', () => {
-		// `export const getStatus = getSandboxStatus` is served under both names.
+		// `export const getStatus = getSandboxStatus` is served under both names. None exists
+		// today — the one there was went with tools.remote.ts, which nothing called (#8) — so
+		// this holds the next one to the same rule rather than checking a current export.
 		const aliases = remotes.filter((fn) => fn.aliasOf)
 		for (const alias of aliases) {
 			const target = remotes.find((fn) => fn.file === alias.file && fn.name === alias.aliasOf && !fn.aliasOf)
