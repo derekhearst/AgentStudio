@@ -8,7 +8,6 @@ import {
 	uniquePrefix,
 	withErrorCapture,
 } from '../helpers'
-import { DEFAULT_SETTINGS } from '../../src/lib/settings/settings-defaults'
 
 /**
  * /settings — read defaults, update budget + memory + tool config, reset.
@@ -87,6 +86,10 @@ test.describe('/settings — CRUD lifecycle', () => {
 				// A non-default transcription model, set behind the page's back. Reset used to
 				// name the fields it reset one by one and skipped this one.
 				const sentinelTranscriptionModel = `${prefix}/audio-model`
+				// DEFAULT_SETTINGS.transcriptionModel. Written out rather than imported: the
+				// defaults live in settings.server.ts, and importing that module from this worker
+				// would open a database pool and run the bootstrap.
+				const defaultTranscriptionModel = 'google/gemini-2.5-flash'
 				await sql`
 					update app_settings set transcription_model = ${sentinelTranscriptionModel}
 					where user_id = ${userId}
@@ -100,7 +103,7 @@ test.describe('/settings — CRUD lifecycle', () => {
 					`,
 					(rows) =>
 						rows[0]?.budget_config?.dailyLimit !== sentinelDaily &&
-						rows[0]?.transcription_model === DEFAULT_SETTINGS.transcriptionModel,
+						rows[0]?.transcription_model === defaultTranscriptionModel,
 					{ description: 'reset wiped the sentinel daily limit and transcription model' },
 				)
 
