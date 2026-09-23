@@ -143,6 +143,35 @@ export async function matchExclusionRules(userId: string, content: string): Prom
 	return scanForExclusion(content, rules)
 }
 
+export type ExclusionTestResult =
+	| { matched: false; busy?: false }
+	/** A check of this user's was still running, so this one was not started. */
+	| { matched: false; busy: true }
+	| { matched: true; ruleName: string; sample: string; timedOut: boolean }
+
+/** Users with a deny-list test under way. */
+const testsInFlight = new Set<string>()
+
+/**
+ * The deny-list tester: the user's enabled rules against a sample, through the same
+ * time-limited scanner the miner uses, so a slow rule cannot freeze the server from here
+ * either. One test per user at a time — the tester is a POST anyone signed in can repeat as
+ * fast as they like, and each test of a slow rule holds a scanner thread for its full time
+ * limit; a second one while the first runs gets `busy` instead of a place in the queue.
+ */
+export async function testExclusionRules(userId: string, sample: string): Promise<ExclusionTestResult> {
+	if (sample.trim().length === 0) return { matched: false }
+	if (testsInFlight.has(userId)) return { matched: false, busy: true }
+	testsInFlight.add(userId)
+	try {
+		const match = await scanForExclusion(sample, await loadCompiledExclusionRules(userId))
+		if (!match) return { matched: false }
+		return { matched: true, ruleName: match.ruleName, sample: match.sample, timedOut: match.timedOut }
+	} finally {
+		testsInFlight.delete(userId)
+	}
+}
+
 /**
  * Bump hit counters after a mine pass so the rules list shows what is actually firing.
  * Accepts the raw (possibly repeated) list of rule ids that matched.

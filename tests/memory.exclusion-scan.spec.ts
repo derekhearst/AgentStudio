@@ -8,7 +8,12 @@ import {
 	compileExclusionRules,
 	findExclusionMatch,
 } from '../src/lib/memory/exclusions'
-import { scanForExclusion, scanForExclusions } from '../src/lib/memory/exclusion-scan.server'
+import {
+	EXCLUSION_SCAN_CONCURRENCY,
+	exclusionScanLoad,
+	scanForExclusion,
+	scanForExclusions,
+} from '../src/lib/memory/exclusion-scan.server'
 
 /**
  * Exclusion rules are user-written regular expressions, matched against every turn the miner
@@ -22,7 +27,8 @@ import { scanForExclusion, scanForExclusions } from '../src/lib/memory/exclusion
  *     was still sent to the extractor, embedded and stored.
  *
  * Matching now runs on a worker thread with a time limit, over the whole content, and a check
- * that runs out of time counts as a match.
+ * that runs out of time counts as a match. The threads are a pool capped for the process: one
+ * thread per check let a burst of tester requests against `(a|aa)+$` start hundreds at once.
  */
 
 const builtins = compileBuiltinExclusionRules()
@@ -124,6 +130,82 @@ test.describe('memory/exclusion-scan — bounded', () => {
 			expect(await scanForExclusion(text, builtins), text.slice(0, 8)).toBeNull()
 			expect(Date.now() - startedAt, text.slice(0, 8)).toBeLessThan(500)
 		}
+	})
+})
+
+test.describe('memory/exclusion-scan — a capped pool of threads', () => {
+	const slow = compileExclusionRules([{ id: 'slow', name: 'Slow rule', kind: 'regex', pattern: '(a|aa)+$' }])
+	const codename = compileExclusionRules([{ id: 'sub', name: 'Codename', kind: 'substring', pattern: 'bluebird' }])
+
+	test('a burst of slow checks never runs more than the cap at once, and each gets its whole time limit', async () => {
+		// `(a|aa)+$` gets past the editor's check, and every check used to start a thread of its
+		// own: 200 at once took a server from 22 MB to 1.78 GB with every core busy.
+		const timeoutMs = 200
+		const rounds = 3
+		const burst = EXCLUSION_SCAN_CONCURRENCY * rounds
+		const peak = { scanning: 0, threads: 0 }
+		const sample = () => {
+			const load = exclusionScanLoad()
+			peak.scanning = Math.max(peak.scanning, load.scanning)
+			peak.threads = Math.max(peak.threads, load.threads)
+			return load
+		}
+		const sampler = setInterval(sample, 1)
+		const startedAt = Date.now()
+		try {
+			const slowChecks = Array.from({ length: burst }, () =>
+				scanForExclusion(`${'a'.repeat(60)}!`, slow, { timeoutMs }),
+			)
+			// Last in line: it waits through every round of the burst before it has a thread.
+			const quick = scanForExclusion('project bluebird ships friday', codename, { timeoutMs })
+
+			const queued = sample()
+			expect(queued.scanning).toBe(EXCLUSION_SCAN_CONCURRENCY)
+			expect(queued.waiting, 'the rest wait their turn').toBe(burst + 1 - EXCLUSION_SCAN_CONCURRENCY)
+
+			const results = await Promise.all(slowChecks)
+			const quickResult = await quick
+			const elapsed = Date.now() - startedAt
+
+			expect(results.every((result) => result?.timedOut === true)).toBe(true)
+			// Its limit started when it got a thread, not when it joined the queue — or waiting
+			// through the burst would have used it up.
+			expect(quickResult).toMatchObject({ ruleName: 'Codename', timedOut: false })
+			expect(peak.scanning).toBeLessThanOrEqual(EXCLUSION_SCAN_CONCURRENCY)
+			expect(peak.threads).toBeLessThanOrEqual(EXCLUSION_SCAN_CONCURRENCY)
+			expect(elapsed, 'one round per cap-full of checks, not all at once').toBeGreaterThanOrEqual(
+				rounds * timeoutMs * 0.9,
+			)
+			expect(exclusionScanLoad()).toMatchObject({ scanning: 0, waiting: 0 })
+		} finally {
+			clearInterval(sampler)
+		}
+	})
+
+	test('a thread that answered in time is kept for the next check, not replaced', async () => {
+		const before = exclusionScanLoad().threads
+		for (let i = 0; i < 20; i += 1) {
+			expect(await scanForExclusion('nothing to see here', builtins)).toBeNull()
+		}
+		expect(exclusionScanLoad().threads).toBeLessThanOrEqual(Math.max(before, 1))
+	})
+})
+
+test.describe('memory/exclusion-scan — the deny-list tester', () => {
+	test('one test per user at a time: another sent meanwhile is turned away, not queued', async () => {
+		// Each test of a slow rule holds a thread for its whole limit, and the tester is a POST
+		// that can be repeated as fast as a script can send it.
+		const userId = await getActiveUserId()
+		const { testExclusionRules } = await import('../src/lib/memory/exclusions.server')
+
+		const [first, second] = await Promise.all([
+			testExclusionRules(userId, 'DATABASE_URL=postgres://app:hunter2@db:5432/app'),
+			testExclusionRules(userId, 'the van battery is 48V'),
+		])
+		expect(first).not.toHaveProperty('busy', true)
+		expect(second).toEqual({ matched: false, busy: true })
+		// Once the first is answered the next is served.
+		expect(await testExclusionRules(userId, 'the van battery is 48V')).not.toHaveProperty('busy', true)
 	})
 })
 

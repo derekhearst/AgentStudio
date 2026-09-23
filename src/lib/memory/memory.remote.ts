@@ -26,12 +26,11 @@ import {
 	MAX_DRAWER_CONTENT_CHARS,
 } from '$lib/memory/curation.server'
 import {
-	compileExclusionRules,
 	describeSavedRuleProblem,
 	ensureBuiltinExclusionRules,
 	exclusionRulesChanged,
 	MAX_PATTERN_LENGTH,
-	scanForExclusion,
+	testExclusionRules,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions.server'
 import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
@@ -370,28 +369,14 @@ export const toggleMemoryExclusionRuleCommand = command(
  *
  * A command, not a query: the sample is often a real secret, and a query sends its argument
  * in the URL of a GET, where proxy access logs keep it. A command sends it in a POST body.
- * It stores and caches nothing, so there is nothing to refresh afterwards.
+ * It stores and caches nothing, so there is nothing to refresh afterwards. One test per user
+ * runs at a time (`testExclusionRules`); another sent meanwhile comes back `busy`.
  */
 export const testMemoryExclusionRulesCommand = command(
 	z.object({ sample: z.string().max(4000) }),
 	async ({ sample }) => {
 		const user = requireAuthenticatedRequestUser()
-		if (sample.trim().length === 0) return { matched: false as const }
-		const rows = await db
-			.select({
-				id: memoryExclusionRules.id,
-				name: memoryExclusionRules.name,
-				kind: memoryExclusionRules.kind,
-				pattern: memoryExclusionRules.pattern,
-				enabled: memoryExclusionRules.enabled,
-			})
-			.from(memoryExclusionRules)
-			.where(and(eq(memoryExclusionRules.userId, user.id), eq(memoryExclusionRules.enabled, true)))
-		// The same time-limited matcher the miner uses, so a slow rule cannot freeze the server
-		// from here either.
-		const match = await scanForExclusion(sample, compileExclusionRules(rows))
-		if (!match) return { matched: false as const }
-		return { matched: true as const, ruleName: match.ruleName, sample: match.sample, timedOut: match.timedOut }
+		return testExclusionRules(user.id, sample)
 	},
 )
 

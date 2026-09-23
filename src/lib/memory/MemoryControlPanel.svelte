@@ -43,7 +43,13 @@
 
 	// --- rule tester -----------------------------------------------------------
 	let sample = $state('');
-	let testResult = $state<{ matched: boolean; ruleName?: string; sample?: string; timedOut?: boolean } | null>(null);
+	let testResult = $state<{
+		matched: boolean;
+		ruleName?: string;
+		sample?: string;
+		timedOut?: boolean;
+		busy?: boolean;
+	} | null>(null);
 	let testing = $state(false);
 
 	let busyConversationId = $state<string | null>(null);
@@ -317,6 +323,8 @@
 								>
 							{:else if testResult.matched}
 								<span class="rule-test__hit">Blocked by “{testResult.ruleName}” (matched {testResult.sample})</span>
+							{:else if testResult.busy}
+								<span class="rule-test__miss">Another check is still running. Try again in a moment.</span>
 							{:else}
 								<span class="rule-test__miss">No rule matches — this would be mined.</span>
 							{/if}
