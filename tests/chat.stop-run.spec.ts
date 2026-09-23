@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, seedConversation, uniquePrefix } from './helpers'
-import { openAndSend, scriptDroppedRun } from './chat-stream-script'
+import { openAndSend, scriptBusyRun, scriptDroppedRun } from './chat-stream-script'
 import { approvalAnswerProblem } from '../src/lib/chat/run-controls'
 
 /**
@@ -32,6 +32,37 @@ test('a dropped stream resumes without stopping the run; Stop asks the server to
 		await page.getByRole('button', { name: 'Stop generating' }).filter({ visible: true }).first().click()
 		await expect.poll(() => seen.stops.length).toBe(1)
 		// The run the stream named in its first frame.
+		expect(seen.stops[0]).toEqual({ runId })
+	} finally {
+		release()
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('a send refused because a turn is running attaches to that turn, and Stop names it', async ({ page }) => {
+	// A turn now outlives the page that started it. A second one on the same SDK session would
+	// run beside it, so the server refuses the send (409 with the live run's id); the page
+	// follows the live turn from its first frame instead, with its Stop button.
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-busy-run')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const conv = await seedConversation(prefix, { userId: await getActiveUserId() })
+	const runId = randomUUID()
+	const { seen, release } = await scriptBusyRun(page, conv.id, runId)
+
+	try {
+		await openAndSend(page, conv.id, `${prefix} one more thing`)
+
+		await expect.poll(() => seen.resumes.length, { timeout: 30_000 }).toBe(1)
+		expect(seen.sends).toBe(1)
+		// From the start of that run, not wherever the latest run in the conversation is.
+		expect(seen.resumes[0]).toEqual({ since: '0', runId })
+		await expect(page.getByText(/already running in this conversation/).first()).toBeVisible()
+
+		await page.getByRole('button', { name: 'Stop generating' }).filter({ visible: true }).first().click()
+		await expect.poll(() => seen.stops.length).toBe(1)
 		expect(seen.stops[0]).toEqual({ runId })
 	} finally {
 		release()

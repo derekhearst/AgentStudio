@@ -7,6 +7,8 @@ import { createRunReplayStream } from '$lib/runs/run-replay-stream'
 import { POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export const GET: RequestHandler = async ({ params, url, locals, request }) => {
 	if (!locals.user) {
 		return json({ error: 'Unauthorized' }, { status: 401 })
@@ -21,13 +23,23 @@ export const GET: RequestHandler = async ({ params, url, locals, request }) => {
 		return json({ error: 'since must be a non-negative integer' }, { status: 400 })
 	}
 
-	// Find the most recent run for this conversation owned by this user.
-	// Prefer an active one, otherwise fall back to the latest finished one
-	// so a client can still backfill the events it missed before the run ended.
+	// `runId` names the run to follow — a page attaching to a live turn after a reload knows
+	// which one it wants. Without it, the most recently updated run in the conversation that
+	// belongs to this user, finished or not, so a client can still backfill what it missed.
+	const requestedRunId = url.searchParams.get('runId')
+	if (requestedRunId !== null && !UUID.test(requestedRunId)) {
+		return json({ error: 'runId must be a uuid' }, { status: 400 })
+	}
 	const [run] = await db
 		.select({ id: chatRuns.id, state: chatRuns.state, finishedAt: chatRuns.finishedAt })
 		.from(chatRuns)
-		.where(and(eq(chatRuns.conversationId, params.id), eq(chatRuns.userId, locals.user.id)))
+		.where(
+			and(
+				eq(chatRuns.conversationId, params.id),
+				eq(chatRuns.userId, locals.user.id),
+				requestedRunId ? eq(chatRuns.id, requestedRunId) : undefined,
+			),
+		)
 		.orderBy(desc(chatRuns.updatedAt))
 		.limit(1)
 

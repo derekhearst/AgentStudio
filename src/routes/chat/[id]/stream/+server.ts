@@ -64,7 +64,8 @@ import {
 } from '$lib/engine/options.server'
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
-import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { claimRun, registerRunHandle } from '$lib/engine/run-registry.server'
+import { turnInProgress } from '$lib/runs/live-chat-run.server'
 import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
@@ -103,6 +104,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		.limit(1)
 
 	if (!conversation) return json({ error: 'Conversation not found' }, { status: 404 })
+
+	// One turn at a time: a turn outlives the page that started it, and a second one would
+	// resume the same SDK session alongside it. The page attaches to the live one instead.
+	const liveRunId = await turnInProgress(body.conversationId, user.id)
+	if (liveRunId) {
+		return json({ error: 'This conversation already has a turn in progress.', runId: liveRunId }, { status: 409 })
+	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
 	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
@@ -228,6 +236,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			lastHeartbeatAt: new Date(),
 		})
 		.returning({ id: chatRuns.id, evalRequired: chatRuns.evalRequired })
+	// Until the turn ends, on every path: what marks this row as really being run.
+	const releaseClaim = claimRun(run.id)
+	/** For a setup step that throws: end the row and the claim, or the conversation stays blocked. */
+	const abandonSetup = async (error: unknown): Promise<never> => {
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: 'Could not start this turn.' }).catch(() => {})
+		releaseClaim()
+		throw error
+	}
 
 	const startedAt = Date.now()
 	// An agent can narrow the tool surface two ways: an explicit scoped list on a
@@ -256,9 +272,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			projectId: conversation.projectId ?? null,
 		})
 	} catch (error) {
-		logger.error('[chat/stream] workspace preparation failed', { runId: run.id, error: String(error) })
+		logger.error('[chat/stream] workspace preparation failed', {
+			runId: run.id,
+			// Usually SANDBOX_WORKSPACE pointing somewhere this process cannot write.
+			sandboxRoot: process.env.SANDBOX_WORKSPACE ?? null,
+			error: String(error),
+		})
 		const message = 'Could not prepare the workspace for this run.'
-		await db.update(chatRuns).set({ state: 'failed', label: 'Failed', error: message }).where(eq(chatRuns.id, run.id))
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: message })
+		releaseClaim()
 		return json({ error: message }, { status: 500 })
 	}
 
@@ -308,8 +330,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	/*
 	 * Set while the SDK session is live. The handle is published in the run registry, which
-	 * is how Stop (`/chat/[id]/stop`), the dock's dismiss and the reaper reach this run from
-	 * a different request.
+	 * is how Stop (`/chat/[id]/stop`), a dismiss and the reaper reach this run from a
+	 * different request.
 	 */
 	let releaseRunHandle: (() => void) | null = null
 
@@ -341,7 +363,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		attachments: body.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
 		io: createAttachmentIo(workspace.context),
-	})
+	}).catch(abandonSetup)
 	const attachmentNotice = formatAttachmentWarnings(preparedPrompt.warnings)
 	if (preparedPrompt.warnings.length > 0) {
 		logger.warn('[chat/stream] attachments not fully delivered', {
@@ -363,6 +385,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					.from(projects)
 					.where(eq(projects.id, conversation.projectId))
 					.limit(1)
+					.catch(abandonSetup)
 			)[0]?.trusted ?? false)
 		: false
 
@@ -374,7 +397,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		parentAgentId: agent.id,
 		parentIsOrchestrator: isOrchestrator,
 		parentIsClaude: isClaudeModel(routedModel),
-	})
+	}).catch(abandonSetup)
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
 
 	let engineOptions
@@ -403,7 +426,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	} catch (error) {
 		const message = error instanceof GatewayNotConfiguredError ? error.message : 'Failed to configure model'
-		await db.update(chatRuns).set({ state: 'failed', label: 'Failed', error: message }).where(eq(chatRuns.id, run.id))
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: message })
+		releaseClaim()
 		return json({ error: message }, { status: 400 })
 	}
 
@@ -553,8 +577,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							)
 						},
 						onHandle: (handle) => {
-							// Published under the run id so a different request — Stop, the
-							// dock's dismiss — can reach this run. The connection cannot.
+							// Published under the run id so a different request — Stop, a
+							// dismiss — can reach this run. The connection cannot.
 							releaseRunHandle = registerRunHandle(run.id, handle)
 						},
 						onSessionId: (sessionId) => {
@@ -729,6 +753,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// later dismiss write to a CLI that has already exited.
 				releaseRunHandle?.()
 				releaseRunHandle = null
+				releaseClaim()
 			}
 		},
 

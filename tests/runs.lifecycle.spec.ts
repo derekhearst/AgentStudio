@@ -8,7 +8,9 @@ import {
 	seedConversation,
 	uniquePrefix,
 } from './helpers'
-import { registerRunHandle, type EngineQueryHandle } from '../src/lib/engine/run-registry.server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { claimRun, interruptRun, registerRunHandle, type EngineQueryHandle } from '../src/lib/engine/run-registry.server'
 
 /**
  * A live chat run's own writes to its row, and how it is stopped.
@@ -21,9 +23,15 @@ import { registerRunHandle, type EngineQueryHandle } from '../src/lib/engine/run
  *     canceled, turning it back into "completed".
  *   - Stop (#129). A dropped connection used to interrupt the run, which contradicted the
  *     resume contract; Stop is now its own request, reaching the run through the registry.
+ *   - One turn at a time (#129). Once a turn outlived a reload, a second message could start
+ *     a second CLI on the same SDK session; the stream now refuses one while a turn is live,
+ *     and a reloaded page re-attaches to the live turn instead.
  */
 
-async function seedRun(conversationId: string, opts: { minutesAgo?: number; finished?: boolean } = {}) {
+async function seedRun(
+	conversationId: string,
+	opts: { minutesAgo?: number; finished?: boolean; source?: 'chat_stream' | 'automation' } = {},
+) {
 	const sql = getSql()
 	const userId = await getActiveUserId()
 	const at = new Date(Date.now() - (opts.minutesAgo ?? 0) * 60_000)
@@ -33,7 +41,7 @@ async function seedRun(conversationId: string, opts: { minutesAgo?: number; fini
 			${conversationId},
 			${userId},
 			${opts.finished ? 'completed' : 'running'},
-			'chat_stream',
+			${opts.source ?? 'chat_stream'},
 			${at},
 			${at},
 			${opts.finished ? sql`now()` : null}
@@ -297,5 +305,110 @@ test.describe('runs/stop — Stop is a request, not a dropped connection', () =>
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}
+	})
+})
+
+test.describe('runs/one turn at a time — a live turn blocks a second, an abandoned one does not', () => {
+	test('a turn this process is running blocks the next, and is what a reloaded page attaches to', async () => {
+		const prefix = uniquePrefix('runs-turn-live')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const userId = await getActiveUserId()
+			const conv = await seedConversation(prefix, { userId })
+			const runId = await seedRun(conv.id)
+			const release = claimRun(runId)
+			try {
+				const { findLiveChatRun, turnInProgress } = await import('../src/lib/runs/live-chat-run.server')
+				expect(await turnInProgress(conv.id, userId)).toBe(runId)
+				expect(await findLiveChatRun(conv.id, userId)).toBe(runId)
+				// Someone else's conversation view never sees it.
+				expect(await findLiveChatRun(conv.id, randomUUID())).toBeNull()
+				expect((await readRun(runId)).state).toBe('running')
+			} finally {
+				release()
+			}
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test("an open turn nothing is running — a restart's leftover — is canceled, not waited out", async () => {
+		const prefix = uniquePrefix('runs-turn-abandoned')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const userId = await getActiveUserId()
+			const conv = await seedConversation(prefix, { userId })
+			const abandoned = await seedRun(conv.id, { minutesAgo: 10 })
+			// Automation runs execute in the jobs worker; this process holds no claim on them.
+			const automation = await seedRun(conv.id, { source: 'automation' })
+
+			const { findLiveChatRun, turnInProgress, ABANDONED_RUN_REASON } = await import(
+				'../src/lib/runs/live-chat-run.server'
+			)
+			// The page's read leaves it alone, and does not offer it to attach to.
+			expect(await findLiveChatRun(conv.id, userId)).toBeNull()
+			expect((await readRun(abandoned)).state).toBe('running')
+
+			// A new turn clears it and goes ahead.
+			expect(await turnInProgress(conv.id, userId)).toBeNull()
+			const after = await readRun(abandoned)
+			expect(after.state).toBe('canceled')
+			expect(after.finished_at).not.toBeNull()
+			expect(after.error).toBe(ABANDONED_RUN_REASON)
+			expect((await readRun(automation)).state).toBe('running')
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+})
+
+test.describe('runs/registry — a Stop that arrives before the session exists', () => {
+	test('is kept on the claim and applied when the handle is published', async () => {
+		const runId = randomUUID()
+		const releaseClaim = claimRun(runId)
+		try {
+			// Still preparing its workspace: no handle yet, but it is this process's run.
+			expect(await interruptRun(runId, 'Stopped by the user')).toBe(true)
+			let interrupted = 0
+			const release = registerRunHandle(runId, fakeHandle(() => interrupted++))
+			await expect.poll(() => interrupted).toBe(1)
+			release()
+		} finally {
+			releaseClaim()
+		}
+		// Released: nothing here is running it any more.
+		expect(await interruptRun(runId, 'Stopped by the user')).toBe(false)
+	})
+})
+
+test.describe('chat stream route — the server half of #129', () => {
+	/*
+	 * Read as source: the route's POST runs a real engine. What each piece does is pinned
+	 * above; this pins that the route uses them the way the contract says.
+	 */
+	const source = readFileSync(resolve('src/routes/chat/[id]/stream/+server.ts'), 'utf8')
+
+	test('a dropped connection does not interrupt the run', () => {
+		const cancel = /\n\t\tcancel\(\)\s*\{([\s\S]*?)\n\t\t\},/.exec(source)
+		expect(cancel, 'the stream has a cancel handler').not.toBeNull()
+		expect(cancel![1]).toContain('clientGone = true')
+		expect(cancel![1]).not.toMatch(/interrupt|abort|releaseRunHandle/)
+	})
+
+	test('a send while a turn is live is refused before anything is written', () => {
+		const check = source.indexOf('await turnInProgress(')
+		expect(check).toBeGreaterThan(-1)
+		expect(source).toMatch(/status:\s*409/)
+		// Before the user's message is saved and before the run row exists.
+		expect(check).toBeLessThan(source.indexOf('resolveParentMessage('))
+		expect(check).toBeLessThan(source.indexOf('.insert(chatRuns)'))
+	})
+
+	test('the run is claimed as soon as its row exists, and released on every way out', () => {
+		expect(source.indexOf('claimRun(run.id)')).toBeGreaterThan(source.indexOf('.insert(chatRuns)'))
+		// Workspace failure, options failure, a setup step that throws, and the turn's own end.
+		expect(source.match(/releaseClaim\(\)/g)?.length).toBeGreaterThanOrEqual(4)
+		// A failed start is a finished run, not an open one the page would wait on.
+		expect(source).not.toMatch(/set\(\{\s*state:\s*'failed'/)
 	})
 })

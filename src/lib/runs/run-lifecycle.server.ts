@@ -13,7 +13,7 @@
  *    a `tool_progress` heartbeat for every call in flight, so a working run always has
  *    frames, and a session that goes silent for an hour is exactly what the reaper is for.
  *
- * 2. **A run that something else ended stays ended.** The reaper and the dock's dismiss both
+ * 2. **A run that something else ended stays ended.** The reaper and a dismiss both
  *    mark the row canceled and interrupt the session; the turn then winds down and reaches
  *    its own final write, which used to turn the canceled run back into "completed". Every
  *    write here is conditional on `finishedAt IS NULL`.

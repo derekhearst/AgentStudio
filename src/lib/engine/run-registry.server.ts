@@ -9,7 +9,7 @@
  *
  * A registry is what makes the handle reachable from a *different* request than the one
  * that started the run. That is the whole point: "stop" arrives as a separate HTTP call
- * (`/chat/[id]/stop`, the dock's dismiss), not as a return value from the loop that is still
+ * (`/chat/[id]/stop`, a dismiss), not as a return value from the loop that is still
  * running. A dropped connection is deliberately not one — the run outlives it.
  *
  * ## What this deliberately is not
@@ -23,6 +23,18 @@
  *
  * So every caller treats a `false` as "not stoppable from here", never as "no such run".
  * The database stays authoritative for run *state*; this only ever carries the live handle.
+ *
+ * ## Claims
+ *
+ * A handle exists only once the SDK session does, which is some way into a turn: the
+ * workspace is prepared and the options are built first. A chat run is *claimed* from the
+ * moment its row is inserted until its turn has ended, so this process can answer two
+ * questions a handle cannot:
+ *
+ * - Is an open `chat_stream` row actually being run? Only this process starts them, so a
+ *   row it has no claim on was left behind by a restart (`$lib/runs/live-chat-run.server`).
+ * - What happens to a Stop that arrives before the session exists? It is remembered on the
+ *   claim, and the handle is interrupted the moment it is published.
  *
  * Deployment note: chat runs execute in the web process, which is a single container here,
  * so in practice the stop button and the run share one. If that ever stops being true, this
@@ -54,9 +66,41 @@ export type EngineQueryHandle = {
 
 const liveRuns = new Map<string, EngineQueryHandle>()
 
+type RunClaim = {
+	/** Why a stop was asked for before the run had a handle to stop, if one was. */
+	stopReason: string | null
+}
+
+const claimedRuns = new Map<string, RunClaim>()
+
+/**
+ * Note that this process is running `runId`. Call it as soon as the row exists, and the
+ * release function once the turn has ended — every path, failures included.
+ */
+export function claimRun(runId: string): () => void {
+	const claim: RunClaim = { stopReason: null }
+	claimedRuns.set(runId, claim)
+	return () => {
+		if (claimedRuns.get(runId) === claim) claimedRuns.delete(runId)
+	}
+}
+
+/** Whether this process is running `runId` — handle or not yet. */
+export function isRunClaimedHere(runId: string): boolean {
+	return claimedRuns.has(runId)
+}
+
 /** Publish a run's handle. Returns a release function; call it in a `finally`. */
 export function registerRunHandle(runId: string, handle: EngineQueryHandle): () => void {
 	liveRuns.set(runId, handle)
+	// Stop was pressed while the run was still being set up: honour it now.
+	const pendingStop = claimedRuns.get(runId)?.stopReason
+	if (pendingStop) {
+		void handle.interrupt().then(
+			() => logger.info('[engine] interrupted run on start', { runId, reason: pendingStop }),
+			(error) => logger.warn('[engine] interrupt on start failed', { runId, error: String(error) }),
+		)
+	}
 	return () => {
 		// Only delete our own entry. A retried run that reuses the id would otherwise have
 		// its live handle removed by the previous attempt's teardown.
@@ -77,12 +121,19 @@ export function liveRunCount(): number {
  * Interrupt a run if this process is the one running it.
  *
  * `false` means "not reachable from here", which is not the same as "not running" — see the
- * module note. Never throws: a stop path that fails because stopping failed is worse than
- * one that reports it could not.
+ * module note. A run this process has claimed but not yet started counts as reachable: the
+ * stop is kept and applied when its handle is published. Never throws: a stop path that
+ * fails because stopping failed is worse than one that reports it could not.
  */
 export async function interruptRun(runId: string, reason: string): Promise<boolean> {
 	const handle = liveRuns.get(runId)
-	if (!handle) return false
+	if (!handle) {
+		const claim = claimedRuns.get(runId)
+		if (!claim) return false
+		claim.stopReason = reason
+		logger.info('[engine] stop noted for a run still starting', { runId, reason })
+		return true
+	}
 
 	try {
 		await handle.interrupt()

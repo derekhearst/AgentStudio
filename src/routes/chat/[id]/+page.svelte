@@ -603,7 +603,7 @@
 		finalizeCurrentTextBlock();
 		stoppedByUser = true;
 		// Dropping the connection alone no longer stops the run (a reload must not), so say so.
-		void requestRunStop(conversationId, liveContextStats?.runId ?? null);
+		void requestRunStop(conversationId, liveContextStats?.runId ?? attachedRunId);
 		streamAbortController.abort();
 	}
 
@@ -809,13 +809,28 @@
 		}
 	}
 
-	async function streamMessage(content: string, regenerate = false, attachments: ChatAttachment[] = []) {
+	/**
+	 * Run one turn and stream it — or, with `attachRunId`, follow a turn already running (#129):
+	 * a reloaded page, or a send refused because a turn was in progress. Attaching replays the
+	 * run's saved frames from the start through `stream/resume` and then follows it live, so
+	 * its tool cards, approvals and Stop button are back. Text written before the attach is
+	 * not in the replay; it arrives with the saved reply when the turn ends.
+	 */
+	async function streamMessage(
+		content: string,
+		regenerate = false,
+		attachments: ChatAttachment[] = [],
+		attachRunId: string | null = null,
+	) {
 		if (!conversationId || streaming) return;
 
 		const abortController = new AbortController();
 		const startedAt = new Date();
 		const optimisticUserId = `pending-user-${startedAt.getTime()}`;
-		if (!regenerate) {
+		/** Set when the send was refused because this turn is already running. */
+		let busyRunId: string | null = null;
+		attachedRunId = attachRunId;
+		if (!regenerate && !attachRunId) {
 			pendingUserMessages = [
 				...pendingUserMessages,
 				{ id: optimisticUserId, content: content.trim(), createdAt: startedAt }
@@ -823,7 +838,8 @@
 		}
 
 		streaming = true;
-		clearRecoverableError();
+		// An attach is automatic; it must not hide why the user's own send was refused.
+		if (!attachRunId) clearRecoverableError();
 		streamingBlocks = [];
 		currentTextTarget = '';
 		currentThinkingTarget = '';
@@ -836,25 +852,50 @@
 		backgroundTasks = [];
 		liveContextStats = null;
 		let streamHandshakeSucceeded = false;
+		/** What Retry does after a failure. Nothing, for an attach: there is no send to repeat. */
+		const retryIntentFor = (): RetryIntent | null =>
+			attachRunId
+				? null
+				: {
+						kind: 'stream',
+						content,
+						regenerate: regenerate || streamHandshakeSucceeded,
+						attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
+					};
 		try {
-			logChatUi('info', 'Opening stream', {
+			logChatUi('info', attachRunId ? 'Attaching to a running turn' : 'Opening stream', {
+				attachRunId,
 				regenerate,
 				attachmentCount: attachments.length,
 				reasoningEffort,
 			});
-			const response = await fetch(`/chat/${conversationId}/stream`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					conversationId,
-					content,
-					model,
-					reasoningEffort,
-					regenerate,
-					attachments,
-				}),
-				signal: abortController.signal
-			});
+			const resumeUrl = (since: number) => {
+				const runId = attachRunId ?? liveContextStats?.runId ?? null;
+				return `/chat/${conversationId}/stream/resume?since=${since}${runId ? `&runId=${runId}` : ''}`;
+			};
+			const response = attachRunId
+				? await fetch(resumeUrl(0), { signal: abortController.signal })
+				: await fetch(`/chat/${conversationId}/stream`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							conversationId,
+							content,
+							model,
+							reasoningEffort,
+							regenerate,
+							attachments,
+						}),
+						signal: abortController.signal
+					});
+
+			if (response.status === 409) {
+				// A turn is already running here — started in another tab, or before a reload.
+				const conflict = await response.json().catch(() => null);
+				busyRunId = typeof conflict?.runId === 'string' ? conflict.runId : null;
+				pendingUserMessages = pendingUserMessages.filter((message) => message.id !== optimisticUserId);
+				throw new Error('A turn is already running in this conversation, so this message was not sent. Send it again once that turn finishes.');
+			}
 
 			if (!response.ok || !response.body) {
 				const responseText = await response.text().catch(() => '');
@@ -869,10 +910,7 @@
 
 			for await (const sseEvent of consumeSseStream({
 				initialResponse: response,
-				fetchResume: (since) =>
-					fetch(`/chat/${conversationId}/stream/resume?since=${since}`, {
-						signal: abortController.signal,
-					}),
+				fetchResume: (since) => fetch(resumeUrl(since), { signal: abortController.signal }),
 				shouldStop: () => doneReceived || stoppedByUser,
 				onResumeAttempt: (info) => logChatUi('info', 'Attempting stream resume', info),
 				onResumeRejected: (info) => logChatUi('warn', 'Resume rejected', info),
@@ -1047,6 +1085,7 @@
 					}
 
 					if (eventName === 'context_stats') {
+						if (typeof payload.runId === 'string') watchedRunIds.add(payload.runId);
 						liveContextStats = {
 							runId: typeof payload.runId === 'string' ? payload.runId : null,
 							tokenEstimate: typeof payload.tokenEstimate === 'number' ? payload.tokenEstimate : null,
@@ -1067,12 +1106,7 @@
 							const message = String(payload.error);
 							setRecoverableError(
 								message,
-								{
-									kind: 'stream',
-									content,
-									regenerate: regenerate || streamHandshakeSucceeded,
-									attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-								},
+								retryIntentFor(),
 								{ eventName: 'done', regenerate, streamHandshakeSucceeded }
 							);
 						} else if (payload.messageId) {
@@ -1108,24 +1142,14 @@
 				if (!stoppedByUser) {
 					setRecoverableError(
 						'Stream interrupted',
-						{
-							kind: 'stream',
-							content,
-							regenerate: regenerate || streamHandshakeSucceeded,
-							attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-						},
+						retryIntentFor(),
 						{ regenerate, streamHandshakeSucceeded, reason: 'abort' }
 					);
 				}
 			} else {
 				setRecoverableError(
 					error instanceof Error ? error.message : 'Streaming error',
-					{
-						kind: 'stream',
-						content,
-						regenerate: regenerate || streamHandshakeSucceeded,
-						attachments: regenerate || streamHandshakeSucceeded ? [] : attachments,
-					},
+					retryIntentFor(),
 					{
 						regenerate,
 						streamHandshakeSucceeded,
@@ -1166,8 +1190,28 @@
 			currentThinkingTarget = '';
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
+			attachedRunId = null;
+			if (busyRunId) attachToRun(busyRunId);
 		}
 	}
+
+	/** Runs this page has streamed or attached to — each is attached at most once. */
+	const watchedRunIds = new Set<string>();
+	/** The run an attach is following, so Stop can name it before its first frame arrives. */
+	let attachedRunId: string | null = null;
+
+	/** Follow a turn that is running without this page watching it (#129). */
+	function attachToRun(runId: string) {
+		if (streaming || watchedRunIds.has(runId)) return;
+		watchedRunIds.add(runId);
+		void streamMessage('', false, [], runId);
+	}
+
+	// A turn still running when the page loads — a reload, or a return to the conversation.
+	$effect(() => {
+		const runId = conversationData?.liveRunId ?? null;
+		if (runId && !streaming) attachToRun(runId);
+	});
 
 	async function handleEdit(messageId: string, content: string) {
 		try {
