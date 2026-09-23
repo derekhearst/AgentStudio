@@ -216,6 +216,12 @@ Users can intervene mid-run from chat:
 - Convert current conversation into a formal task
 - Spawn follow-up research or evaluator pass
 
+How the controls that exist today behave:
+
+- **Stop** ends the current turn. The page asks the server to stop the run, and what the agent produced so far is kept as its reply. Reloading the page or losing the connection does **not** stop a run; it keeps working and the page reconnects on its own. See [../runs/spec.md](../runs/spec.md#stopping-a-run).
+- **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it. The chips go away when the turn's stream ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
+- **Pinned checklist.** The panel above the composer shows the main agent's latest plan. When the agent hands a step to a subagent, the subagent's own checklist does not replace it.
+
 ### Mobile and compact layout
 
 On mobile, the right panel collapses into a bottom sheet or tab drawer. The workbench preserves the same actions, but prioritizes the thread and current blocker state.

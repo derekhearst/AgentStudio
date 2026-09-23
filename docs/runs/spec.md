@@ -26,7 +26,7 @@ A run is the durable, resumable record of one agent execution attempt. Every mes
 | `currentRound`     | integer    | Tool loop round counter for resume                                                              |
 | `cursor`           | jsonb      | Loop resume pointer (last persisted message index, last tool call)                              |
 | `costUsd`          | numeric    | Cumulative cost as of last update                                                               |
-| `lastHeartbeatAt`  | timestamp  | Updated every round to detect stale runs                                                        |
+| `lastHeartbeatAt`  | timestamp  | Refreshed (with `updatedAt`) at most every 30 seconds while the run produces output             |
 | `finishedAt`       | timestamp? | When the run entered a terminal state                                                           |
 | `error`            | jsonb?     | Error details if state = `failed`                                                               |
 | `evalRequired`     | boolean    | Whether an evaluator pass is required before marking completed                                  |
@@ -63,7 +63,27 @@ Every event the runtime emits is written to `run_events` in the same transaction
 
 ### Resumable streaming
 
-A client that disconnects from a run's SSE stream can reconnect via `GET /chat/[id]/stream/resume?since=<seq>`. The server replays all `run_events` with `seq > since` and then attaches to live updates. The client does not need to reload the page.
+A chat run does not depend on the browser staying connected. If the page reloads, the network drops for a moment, or a proxy closes an idle connection, the run keeps working on the server and keeps writing its events.
+
+A client that disconnects from a run's SSE stream can reconnect via `GET /chat/[id]/stream/resume?since=<seq>`, and the chat page does so on its own (up to three attempts). The server replays all `run_events` with `seq > since` and then follows the run until it ends. The client does not need to reload the page. When the reader of a resumed stream goes away, the server stops following at once instead of checking the database until the run ends.
+
+Reloading the page does not yet re-attach the live view to a run still in progress. The run still finishes and its reply is saved to the conversation.
+
+### Stopping a run
+
+The chat's **Stop** button sends its own request, `POST /chat/[id]/stop`. Losing the connection is not a stop — until 2026-09-23 it was, so a reload or a network blip cut the turn short and the automatic reconnect could only replay what was left.
+
+1. The server looks up the live runs in that conversation that belong to the person asking — or only the one run the request names.
+2. It interrupts each one it is running.
+3. The turn ends the ordinary way: whatever the agent produced so far is saved as its reply, and its usage is recorded.
+
+The answer is `stopped: true`, or `stopped: false` with a reason: `run_not_active` when the turn had already finished, `not_reachable` when no process on this server is running it.
+
+Dismissing a run from the running-sessions dock is different: it marks the run canceled straight away (and interrupts it too).
+
+### Why a run failed
+
+A failed run's `error` holds the reason the agent gave — for example that it reached its limit of turns, or the text of a startup failure — rather than a generic "Run failed". The same text reaches the chat.
 
 ### Pending approvals
 
@@ -88,7 +108,11 @@ A sub-agent run is a `runs` row with `parentRunId` set. Its events forward to th
 
 ### Stale run detection
 
-`lastHeartbeatAt` is updated every loop round. An external monitor (a job or admin tool) marks runs stale if `lastHeartbeatAt` is older than a threshold (default 2 minutes) while `state = 'running'`. Stale runs can be manually restarted or canceled.
+While a chat run is producing anything — text, tool calls, or the progress pings the agent sends while a long command runs — it refreshes its record (`updatedAt` and `lastHeartbeatAt`) at most every 30 seconds.
+
+A maintenance job (`runs_reap.5min`) cancels any run that is still marked active but has not been refreshed for an hour. It records the reason, clears pending approvals and questions, and interrupts the run if this server is still running it. So a run is only reaped when nothing has come out of it for an hour — a crashed process, or a session that is truly stuck — never just because it has been working for a long time. Until 2026-09-23 chat runs never refreshed their record, so every turn longer than an hour was cancelled mid-work.
+
+A user can also dismiss a run from the running-sessions dock. A run that was reaped or dismissed **stays canceled**: when the interrupted turn winds down, its own final save no longer overwrites that with "completed".
 
 ### Evaluator gating
 
@@ -133,4 +157,4 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — stateful session as independent primitive
 - [Honcho](https://github.com/plastic-labs/honcho) — agent state memory library
 - [Zylos](https://github.com/zylos-ai/zylos-core) — persistent agent harness with tiered state
-- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/sessions/sessions.schema.ts` (conversation/message owner)
+- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/runs/run-lifecycle.server.ts` (heartbeat, final save), `src/lib/runs/run-replay-stream.ts` (resume), `src/lib/runs/runs.server.ts` (reaper, dismiss, stop), `src/lib/sessions/sessions.schema.ts` (conversation/message owner)
