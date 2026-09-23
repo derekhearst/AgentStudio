@@ -48,6 +48,7 @@
 	import {
 		appendThinking,
 		applyAskUser,
+		applyAskUserAnswered,
 		applyDeltaStart,
 		applySubagentDelta,
 		applySubagentDone,
@@ -82,7 +83,7 @@
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
-	import { approvalAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
+	import { approvalAnswerProblem, askUserAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 	import { takeHandedOffAttachments, withoutPromptParam } from '$lib/chat/new-chat-handoff';
 
@@ -753,14 +754,22 @@
 				body: JSON.stringify({ token, answers }),
 			});
 
-			if (!response.ok) {
-				throw new Error(`Failed to submit ask_user answers (status ${response.status})`);
+			// #83 — a 200 is not an answer: `resolved: false` means it went nowhere.
+			const problem = askUserAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem?.gone) {
+				// Nothing to retry. Say so, and let the server's view replace the stale question.
+				setRecoverableError(problem.message, null, { token, action: 'resolveAskUser' });
+				if (!streaming) await refreshAll();
+				return;
 			}
+			if (problem) throw new Error(problem.message);
 
 			clearRecoverableError();
 
 			// ask_user answers should come from streamed/persisted assistant blocks only.
 			// Do not create optimistic user bubbles for ask_user to avoid ordering/race issues.
+			// The card itself shows the recorded answers (#81).
+			streamingBlocks = applyAskUserAnswered(streamingBlocks, token, answers);
 
 			pendingAskUser = null;
 			askUserModalOpen = false;

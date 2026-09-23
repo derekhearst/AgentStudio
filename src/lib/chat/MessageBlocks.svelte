@@ -67,7 +67,7 @@
 						<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
 					</div>
 				{/if}
-				{@const answer = getAskUserAnswer(block.result, q.header)}
+				{@const answer = getAskUserAnswer(block.result, q.header, askQuestions.map((question) => question.header))}
 				{#if answer}
 					<div class="mb-2 ml-auto w-fit max-w-[85%]">
 						<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
