@@ -25,7 +25,10 @@ test.beforeEach(async () => {
 	releases = [await acquireGlobalStateLock('budget-state'), await acquireGlobalStateLock('settings-state')]
 	const { getOrCreateSettings } = await import('../src/lib/settings/settings.server')
 	originalConfig = (await getOrCreateSettings(await getActiveUserId())).budgetConfig as BudgetConfig
-	startedAt = new Date()
+	// The database's clock, not this machine's: rows are stamped by the server, which may run
+	// a few seconds behind.
+	const [{ now }] = await getSql()<{ now: Date }[]>`select now() as now`
+	startedAt = now
 })
 
 test.afterEach(async () => {
