@@ -78,5 +78,7 @@ test('no arbitrary grid template in src/ uses a top-level comma', () => {
 			if (hasTopLevelComma(match[1])) offenders.push(`${relative(process.cwd(), file)}: ${match[0]}`)
 		}
 	}
-	expect(offenders, 'use `_` between tracks, e.g. grid-cols-[1.2fr_0.8fr]').toEqual([])
+	// The hint names the tracks without the class prefix, for the same reason as above:
+	// a complete class here would add an unused rule to the built CSS.
+	expect(offenders, 'separate tracks with `_`, e.g. [1.2fr_0.8fr] rather than [1.2fr,0.8fr]').toEqual([])
 })
