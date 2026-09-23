@@ -427,9 +427,11 @@ async function startWorkerAndScheduler(generation: number): Promise<void> {
 }
 
 /**
- * Skill-embedding backfill — best-effort, runs once at boot. Non-blocking; the
- * logger's relevance filter falls back to listing every skill if embeddings
- * aren't ready yet.
+ * Background backfills — best-effort, run once at boot, never block it.
+ *
+ * Skill embeddings: the logger's relevance filter falls back to listing every
+ * skill if embeddings aren't ready yet. Conversation search: messages without a
+ * search row are indexed; search simply finds less until it finishes.
  */
 function kickoffBackgroundBackfills(): void {
 	void (async () => {
@@ -441,6 +443,20 @@ function kickoffBackgroundBackfills(): void {
 			}
 		} catch (err) {
 			console.warn('[db] Skill embedding backfill failed (non-fatal):', err)
+		}
+	})()
+	// #18 — index messages for conversation search that are not indexed yet (history from
+	// before search existed, a write whose indexing failed) or were indexed by an older
+	// version of the rules. Batched, in the background; search works on whatever is done.
+	void (async () => {
+		try {
+			const { backfillMessageSearch } = await import('$lib/chat/message-search.server')
+			const result = await backfillMessageSearch()
+			if (result.indexed > 0) {
+				console.log(`[db] Indexed ${result.indexed} message(s) for conversation search`)
+			}
+		} catch (err) {
+			console.warn('[db] Conversation search backfill failed (non-fatal):', err)
 		}
 	})()
 }
