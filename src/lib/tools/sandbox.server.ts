@@ -191,4 +191,4 @@ export {
 	type FileReplaceOpts,
 } from './sandbox-fs.server'
 
-export { withBrowserPage, gotoGuarded, browserScreenshot, browserClose } from './sandbox-browser.server'
+export { withBrowserPage, gotoGuarded, readPageText, browserScreenshot, browserClose } from './sandbox-browser.server'

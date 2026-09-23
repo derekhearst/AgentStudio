@@ -32,9 +32,10 @@ export function truncateAtParagraph(text: string, maxChars: number = DEFAULT_MAX
 }
 
 /**
- * Strip common boilerplate elements from raw HTML text. The Playwright fetch returns
- * `page.textContent('body')` which already drops scripts/styles, but headers/footers/nav still
- * leak through; we collapse them via line-based heuristics here.
+ * Strip common boilerplate elements from raw HTML text. The Playwright fetch returns the
+ * start of the body's `textContent` (`readPageText`, cut to size inside the browser), which
+ * already drops markup, but headers/footers/nav still leak through; we collapse them via
+ * line-based heuristics here.
  *
  * Pure string transformation so tests can pin the cleanup behavior.
  */

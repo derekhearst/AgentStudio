@@ -29,6 +29,8 @@ export function browserLaunchOptions(proxyUrl: string): LaunchOptions {
 		executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
 		// `<-loopback>` removes Chromium's built-in proxy exemption for localhost, so loopback
 		// requests go through the proxy — and are refused there — like everything else.
+		// Playwright adds it too, unless PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK is
+		// set; naming it here keeps the guard from depending on that variable.
 		proxy: { server: proxyUrl, bypass: '<-loopback>' },
 		args: [
 			'--no-sandbox',
@@ -102,12 +104,70 @@ export async function gotoGuarded(page: Page, rawUrl: string, lookup: LookupFunc
 	if (refused) throw new EgressBlockedError(`could not load ${url.href}: ${refused}`)
 }
 
+const PAGE_READ_TIMEOUT_MS = 10_000
+/** A title is a line of text; anything longer than this is a page playing games. */
+const TITLE_MAX_CHARS = 1_000
+
+export type PageText = {
+	title: string
+	/** The first `maxChars` of the body's text. */
+	text: string
+	/** The body text's full length, of which `text` is the start. */
+	totalChars: number
+}
+
+/**
+ * The page's title and the start of its body text, cut to size inside the browser.
+ *
+ * `page.textContent('body')` and `page.title()` copy the whole string over CDP into the
+ * server's heap before anything can trim it, and a page — or a script on it — can make either
+ * one hundreds of megabytes. Here only the slice leaves the browser.
+ *
+ * The read runs in an isolated world: its own JavaScript realm over the same DOM. The page's
+ * scripts cannot reach into it, so they cannot replace `String.prototype.slice` or the
+ * `textContent` getter to send the whole string after all — which they can do to anything
+ * `page.evaluate` runs.
+ */
+export async function readPageText(page: Page, maxChars: number): Promise<PageText> {
+	const cdp = await page.context().newCDPSession(page)
+	let timer: ReturnType<typeof setTimeout> | undefined
+	try {
+		const read = (async () => {
+			const { frameTree } = await cdp.send('Page.getFrameTree')
+			const { executionContextId } = await cdp.send('Page.createIsolatedWorld', {
+				frameId: frameTree.frame.id,
+				worldName: 'agentstudio-read',
+			})
+			const { result, exceptionDetails } = await cdp.send('Runtime.callFunctionOn', {
+				executionContextId,
+				functionDeclaration: `function (maxChars, titleMax) {
+					const text = (document.body && document.body.textContent) || ''
+					return { title: String(document.title).slice(0, titleMax), text: text.slice(0, maxChars), totalChars: text.length }
+				}`,
+				arguments: [{ value: Math.max(0, Math.floor(maxChars)) }, { value: TITLE_MAX_CHARS }],
+				returnByValue: true,
+			})
+			if (exceptionDetails) throw new Error(`could not read the page: ${exceptionDetails.text}`)
+			return result.value as PageText
+		})()
+		// A page stuck in a script loop never answers; the context closing afterwards ends it.
+		const deadline = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`reading the page timed out after ${PAGE_READ_TIMEOUT_MS / 1000}s`)), PAGE_READ_TIMEOUT_MS)
+		})
+		return await Promise.race([read, deadline])
+	} finally {
+		clearTimeout(timer)
+		await cdp.detach().catch(() => undefined)
+	}
+}
+
 /** Load `url` in a throwaway context and capture the viewport as a PNG. */
 export async function browserScreenshot(rawUrl: string): Promise<{ url: string; title: string; image: Buffer }> {
 	return withBrowserPage(async (page) => {
 		await gotoGuarded(page, rawUrl)
 		const image = await page.screenshot({ type: 'png', fullPage: false })
-		return { url: page.url(), title: await page.title().catch(() => ''), image }
+		const { title } = await readPageText(page, 0).catch(() => ({ title: '' }))
+		return { url: page.url(), title, image }
 	})
 }
 

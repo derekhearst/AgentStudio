@@ -14,10 +14,11 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import type { Page } from 'playwright'
 import { cleanupExtractedText, truncateAtParagraph } from '$lib/research/web-fetch'
 import { safePathWithin } from '$lib/workspace/workspace.server'
 import { guardedDownload } from './egress.server'
-import { ensureWorkspaceDir, getWorkspace, gotoGuarded, toolUserContext, withBrowserPage } from './sandbox.server'
+import { ensureWorkspaceDir, getWorkspace, gotoGuarded, readPageText, toolUserContext, withBrowserPage } from './sandbox.server'
 
 /**
  * Wave 4 #18 phase 1 — `web_fetch` tool implementation.
@@ -37,22 +38,38 @@ export async function webFetch(rawUrl: string, maxChars = 50_000) {
 		await gotoGuarded(p, rawUrl)
 		// Best-effort: also wait for network to settle briefly so SPA pages have time to render.
 		await p.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined)
-
-		const title = await p.title().catch(() => '')
-		const finalUrl = p.url()
-		const rawText = (await p.textContent('body').catch(() => '')) ?? ''
-		const cleaned = cleanupExtractedText(rawText)
-		const text = truncateAtParagraph(cleaned, maxChars)
-
-		return {
-			title,
-			url: finalUrl,
-			text,
-			fetchedAt: new Date().toISOString(),
-			fullCharCount: cleaned.length,
-			truncated: cleaned.length > maxChars,
-		}
+		return pageTextResult(p, maxChars)
 	})
+}
+
+/**
+ * How much raw body text is read for each character `web_fetch` returns. Raw text is full of
+ * indentation and blank lines that the cleanup collapses, so reading exactly `maxChars` would
+ * come up short; ten times over leaves room for that and still bounds what reaches the server
+ * (a million characters at the largest `maxChars`).
+ */
+export const RAW_TEXT_FACTOR = 10
+
+/**
+ * `web_fetch`'s result for a page that has already loaded. Only a bounded slice of the body
+ * text ever leaves the browser (`readPageText`), however large the page is.
+ */
+export async function pageTextResult(page: Page, maxChars: number) {
+	const url = page.url()
+	const read = await readPageText(page, maxChars * RAW_TEXT_FACTOR).catch(() => ({ title: '', text: '', totalChars: 0 }))
+	const cleaned = cleanupExtractedText(read.text)
+	const readAll = read.totalChars <= read.text.length
+
+	return {
+		title: read.title,
+		url,
+		text: truncateAtParagraph(cleaned, maxChars),
+		fetchedAt: new Date().toISOString(),
+		// When the read stopped short, the rest was never cleaned, so the raw length is the
+		// honest figure for how much there was.
+		fullCharCount: readAll ? cleaned.length : read.totalChars,
+		truncated: !readAll || cleaned.length > maxChars,
+	}
 }
 
 /** Largest PDF `pdf_read` will download. Anything bigger is refused before or while reading. */
