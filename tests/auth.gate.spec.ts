@@ -336,7 +336,7 @@ test.describe('auth/provision — against an empty users table', () => {
 				AUTH_OWNER_NAME: 'Deploy Owner',
 			}
 			expect(await provisionOwnerFromEnv(db, env)).toMatchObject({ status: 'created', username: 'owner' })
-			expect(env.AUTH_PASSWORD, 'agent subprocesses inherit process.env; the password must not').toBeUndefined()
+			expect(env.AUTH_PASSWORD, 'child processes inherit process.env; the password must not').toBeUndefined()
 			const [owner] = await ownerRows(db)
 			expect(owner.name).toBe('Deploy Owner')
 			expect(await verifyPassword('from-the-environment', owner.password_hash!)).toBe(true)

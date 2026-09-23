@@ -15,7 +15,7 @@ import { buildReadinessRows, type ReadinessFacts } from '../src/lib/settings/rea
 
 const SECRETS = {
 	DATABASE_URL: 'postgresql://user:db-secret-value@host/db',
-	ANTHROPIC_API_KEY: 'sk-ant-secret-value',
+	CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-secret-value',
 	LLM_GATEWAY_URL: 'https://gateway.internal/secret-path',
 	LLM_GATEWAY_TOKEN: 'gateway-secret-value',
 	OPENROUTER_API_KEY: 'sk-or-secret-value',
@@ -71,11 +71,16 @@ test.describe('settings/readiness — the rules', () => {
 		expect(byId.get('gateway')!.envVars).toEqual(['LLM_GATEWAY_URL', 'LLM_GATEWAY_TOKEN'])
 	})
 
-	test('the Claude row accepts a CLI login on disk or a key in the environment', () => {
+	test('the Claude row accepts a CLI login on disk or a token the CLI receives', () => {
 		const find = (f: ReadinessFacts) => buildReadinessRows(f).find((row) => row.id === 'claude')!
 		expect(find(facts({ claudeCredentialFile: '/data/.claude/.credentials.json' })).ok).toBe(true)
 		expect(find(facts({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'x' } })).ok).toBe(true)
-		expect(find(facts({ env: { ANTHROPIC_API_KEY: '   ' } })).ok, 'blank is not set').toBe(false)
+		expect(find(facts({ env: { CLAUDE_CODE_OAUTH_TOKEN: '   ' } })).ok, 'blank is not set').toBe(false)
+		// The CLI gets an allow-listed environment without the server's ANTHROPIC_* (engine-env),
+		// so a key there never reaches a Claude run and must not read as signed in.
+		const apiKeyOnly = find(facts({ env: { ANTHROPIC_API_KEY: 'sk-ant-x', ANTHROPIC_AUTH_TOKEN: 'y' } }))
+		expect(apiKeyOnly.ok).toBe(false)
+		expect(apiKeyOnly.envVars).not.toContain('ANTHROPIC_API_KEY')
 	})
 
 	test('a half-configured integration counts as off', () => {

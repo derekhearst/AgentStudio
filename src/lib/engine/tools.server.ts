@@ -65,15 +65,20 @@ export type ToolServerContext = {
 }
 
 /**
- * Build the in-process MCP server exposing every tool in the registry.
+ * Build the in-process MCP server exposing the registry's tools.
  *
  * Built per-run rather than at module scope because the handlers close over
  * `userId` / `runId` / workspace, which differ for every chat run.
+ *
+ * `only` is a scoped agent's in-house tools (`./tool-scope`). A tool outside it is not
+ * registered at all, which is what makes a read-only agent read-only: the model cannot
+ * call a tool that does not exist, whatever the approval settings say.
  */
 
-export function buildToolServer(ctx: ToolServerContext) {
+export function buildToolServer(ctx: ToolServerContext, only?: ReadonlySet<string> | null) {
 	const tools = allToolNames
 		.filter((name: ToolName) => !ENGINE_EXCLUDED_TOOLS.has(name))
+		.filter((name: ToolName) => !only || only.has(name))
 		.map((name: ToolName) =>
 			tool(
 				name,

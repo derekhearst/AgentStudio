@@ -34,7 +34,7 @@ There are two ways to create the owner.
 2. Start the server. While it prepares the database it sees there is no owner and creates one with that password. The log says `Created the owner account "owner" from AUTH_PASSWORD`.
 3. `/setup` never opens. Sign in at `/login`.
 
-On later starts nothing happens: an owner exists, and `AUTH_PASSWORD` is never used to overwrite its password. The server also removes `AUTH_PASSWORD` from its own environment once it has used it, so the agents' shell commands cannot read it.
+On later starts nothing happens: an owner exists, and `AUTH_PASSWORD` is never used to overwrite its password. The server also removes `AUTH_PASSWORD` from its own environment once it has used it. The agents' shell commands never see the server's environment in the first place (see "The agent process gets a minimal environment" in [../runtime/spec.md](../runtime/spec.md)), but nothing else the server starts needs the password either.
 
 The placeholder from `.env.example` ("change-me") is refused, with a warning in the log, so an unedited copy cannot create an owner whose password is public.
 
@@ -120,7 +120,7 @@ Settings → System lists what the deployment provides, read-only, with the envi
 | Row | Required | What "ready" means |
 | --- | -------- | ------------------ |
 | Database | Yes | Reachable, and every migration the running build ships has been applied |
-| Claude sign-in | Yes | A Claude Code login is on the server (`claude login`), or `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_AUTH_TOKEN` is set. This checks that a credential is present, not that it still works — a stale login shows up at the first chat |
+| Claude sign-in | Yes | A Claude Code login is on the server (`claude login`), or `CLAUDE_CODE_OAUTH_TOKEN` is set (from `claude setup-token`). `ANTHROPIC_API_KEY` does not count: the agent process never receives the server's `ANTHROPIC_*` variables (see the runtime spec). This checks that a credential is present, not that it still works — a stale login shows up at the first chat |
 | Workspace folder | Yes | `SANDBOX_WORKSPACE` exists and the server can write to it |
 | Shell sandbox | No | bubblewrap can confine shell commands (Linux only; installed in the Docker image) |
 | Model gateway | No | `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` are set, so non-Claude models can run |

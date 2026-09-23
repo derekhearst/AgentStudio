@@ -16,6 +16,7 @@ import {
 } from '$lib/chat/agent-switch.server'
 import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
 import {
 	describePermissionMode,
 	PERMISSION_MODES,
@@ -135,7 +136,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 	}
 
 	// Parallelize messages + active-run lookup — both are scoped to the now-verified conversation.
-	const [rows, [activeRun]] = await Promise.all([
+	const [rows, [activeRun], liveRunId] = await Promise.all([
 		db
 			.select()
 			.from(messages)
@@ -157,6 +158,8 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 			)
 			.orderBy(desc(chatRuns.updatedAt))
 			.limit(1),
+		// The chat turn still running, which a reloaded page re-attaches to (#129).
+		findLiveChatRun(conversationId, user.id),
 	])
 
 	// Surface the first un-decided ask_user entry so a hard refresh during a paused question
@@ -172,6 +175,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		conversation,
 		messages: rows,
 		pendingAskUser,
+		liveRunId,
 	}
 })
 

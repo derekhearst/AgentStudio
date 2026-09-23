@@ -11,6 +11,8 @@
  * Only presence is reported, never a value — the rows go to the browser.
  */
 
+import { ENGINE_AUTH_ENV_NAMES, engineEnvAllows } from '../engine/engine-env'
+
 export type ReadinessRow = {
 	id: string
 	label: string
@@ -37,8 +39,15 @@ function isSet(env: Record<string, string | undefined>, key: string) {
 	return (env[key]?.trim() ?? '') !== ''
 }
 
-/** Environment variables, any of which authenticates the Agent SDK without a CLI login on disk. */
-export const CLAUDE_CREDENTIAL_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'] as const
+/**
+ * Environment variables, any of which authenticates a Claude run without a CLI login on disk.
+ *
+ * Only the ones the Claude Code CLI actually receives. It is spawned with an allow-listed
+ * environment (`$lib/engine/engine-env`) that drops the server's `ANTHROPIC_*` on purpose,
+ * so an `ANTHROPIC_API_KEY` set on the server never reaches a Claude run and must not turn
+ * this row green. Derived from that list so the two cannot disagree.
+ */
+export const CLAUDE_CREDENTIAL_ENV_VARS: readonly string[] = ENGINE_AUTH_ENV_NAMES.filter(engineEnvAllows)
 
 export function buildReadinessRows(facts: ReadinessFacts): ReadinessRow[] {
 	const { env, migrations } = facts
@@ -67,7 +76,7 @@ export function buildReadinessRows(facts: ReadinessFacts): ReadinessRow[] {
 			? `Found ${credentialVar} in the environment.`
 			: facts.claudeCredentialFile
 				? 'Found a Claude Code login on the server. It is checked for real when a chat runs.'
-				: 'No Claude credential found. Chats with Claude models will fail to authenticate. Sign in with the Claude Code CLI (run "claude login") as the user the server runs as, or set an API key.',
+				: 'No Claude credential found. Chats with Claude models will fail to authenticate. Sign in with the Claude Code CLI (run "claude login") as the user the server runs as, or set CLAUDE_CODE_OAUTH_TOKEN (from "claude setup-token").',
 		envVars: [...CLAUDE_CREDENTIAL_ENV_VARS, 'CLAUDE_CONFIG_DIR'],
 	})
 

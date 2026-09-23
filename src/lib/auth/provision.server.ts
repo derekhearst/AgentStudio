@@ -143,10 +143,11 @@ export type EnvProvisionOutcome =
  * The boot step: create the owner from `AUTH_PASSWORD` if there is none yet.
  *
  * Never overwrites — an owner who changed their password keeps it across restarts. Then
- * removes `AUTH_PASSWORD` from `env` whatever happened: every Claude run spawns the Agent
- * SDK's CLI, which inherits `process.env` (options.server.ts passes `env` only for gateway
- * runs), so a plaintext password left there is readable by the agent's own shell. The
- * server never needs it again; the test suite reads it from its own process.
+ * removes `AUTH_PASSWORD` from `env` whatever happened. The Agent SDK's CLI no longer sees
+ * it either way (it gets an allow-listed environment, `$lib/engine/engine-env`), but the
+ * server's other child processes (the `git` calls, for one) still inherit `process.env`,
+ * and a plaintext password has no reason to be there. The server never needs it again; the
+ * test suite reads it from its own process.
  */
 export async function provisionOwnerFromEnv(
 	database: ProvisionDb,
