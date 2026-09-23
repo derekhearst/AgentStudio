@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
+	acquireGlobalStateLock,
 	authenticateContext,
 	expectNoHorizontalOverflow,
 	getActiveAdminUserId,
@@ -15,7 +16,18 @@ import {
  * Asserts each mutation persists to the `app_settings` table for the active admin
  * user AND that an `audit_events` row is written (settings.updated / settings.reset)
  * via the existing governance wrappers.
+ *
+ * Saving a daily limit creates an enabled global block limit in `budget_limits`, which the
+ * budget gate checks before every run. So this holds the same `budget-state` then
+ * `settings-state` locks as the other budget and settings specs, and removes any limit rows
+ * it caused before putting the settings back — a stray one would block the owner's chats.
  */
+
+type BudgetConfig = {
+	dailyLimit: number | null
+	monthlyLimit: number | null
+	limitIds?: Record<string, string | null>
+}
 
 test.describe('/settings — CRUD lifecycle', () => {
 	test('read → update budget + memory → reset', async ({ page, context }) => {
@@ -23,16 +35,20 @@ test.describe('/settings — CRUD lifecycle', () => {
 		await authenticateContext(context)
 		const sql = getSql()
 		const userId = await getActiveAdminUserId()
+		const releases = [await acquireGlobalStateLock('budget-state'), await acquireGlobalStateLock('settings-state')]
 
 		// Snapshot the current settings so the reset assertion can compare back to defaults
 		// regardless of what the admin had configured before the test ran.
 		const [snapshot] = await sql<
 			{
 				default_model: string
-				budget_config: { dailyLimit: number | null; monthlyLimit: number | null } | null
+				budget_config: BudgetConfig | null
 				memory_config: { topK: number; enabled: boolean } | null
 			}[]
-		>`select default_model, budget_config, memory_config from app_settings where user_id = ${userId}`
+		>`
+			select default_model, budget_config, memory_config from app_settings
+			where user_id = ${userId} order by created_at asc limit 1
+		`
 
 		try {
 			await withErrorCapture(page, async () => {
@@ -110,18 +126,33 @@ test.describe('/settings — CRUD lifecycle', () => {
 				})
 			})
 		} finally {
-			// Best-effort restore of pre-test settings via direct SQL (don't poll the UI for this).
-			if (snapshot) {
-				await sql`
-					update app_settings
-					set default_model = ${snapshot.default_model},
-					    budget_config = ${sql.json(snapshot.budget_config ?? {})},
-					    memory_config = ${sql.json(snapshot.memory_config ?? {})}
-					where user_id = ${userId}
+			try {
+				// Best-effort restore of pre-test settings via direct SQL (don't poll the UI for this).
+				// First the limit rows the save created: restoring the snapshot drops their ids, and
+				// nothing else would ever switch them off. A row the snapshot already named is kept;
+				// the budget gate brings it back to the restored amount on its next check.
+				const [current] = await sql<{ budget_config: BudgetConfig | null }[]>`
+					select budget_config from app_settings where user_id = ${userId} order by created_at asc limit 1
 				`
+				const before = Object.values(snapshot?.budget_config?.limitIds ?? {})
+				const created = Object.values(current?.budget_config?.limitIds ?? {}).filter(
+					(id): id is string => typeof id === 'string' && !before.includes(id),
+				)
+				if (created.length) await sql`delete from budget_limits where id in ${sql(created)}`
+				if (snapshot) {
+					await sql`
+						update app_settings
+						set default_model = ${snapshot.default_model},
+						    budget_config = ${sql.json(snapshot.budget_config ?? {})},
+						    memory_config = ${sql.json(snapshot.memory_config ?? {})}
+						where user_id = ${userId}
+					`
+				}
+				// Suppress unused-var warning
+				void prefix
+			} finally {
+				for (const release of releases.reverse()) await release()
 			}
-			// Suppress unused-var warning
-			void prefix
 		}
 	})
 })
