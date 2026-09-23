@@ -111,6 +111,7 @@ A digest can also be written by hand on `/automations`: a **maintenance** automa
 
 - **Tool calls from the older agent loop are not counted.** Agent-attached automations, monitor actions and PR fixes still run tools through the older loop, which does not write tool-call rows. Chat turns (the SDK engine) are counted in full. The strip says this in its footnote.
 - **Automation history is kept for 30 days**, which is why the longest window is 30 days. It also limits the "Automation newly failing" warning, which compares a window with the one before it: for any window longer than 15 days, part of the previous window has already been deleted, so the warning is not given at all rather than calling every failure new. On the 30-day view, failing automations are still counted and named in the Automation runs tile, and "Automation switched off" still appears.
+- **Subagent tokens are credited to the parent model.** When a chat turn hands work to a subagent on a different model (for example a Haiku helper), the turn is recorded as one usage row under the model the turn ran on. "Top models" therefore counts the helper's tokens under the parent model. Totals are right; the split by model is not. This belongs to the cost-attribution work in #32.
 - **Token counts are approximate across sources.** Chat turns record input tokens net of cache (cache is counted separately), while some OpenRouter paths count input including cache.
 
 ## Roles & Permissions

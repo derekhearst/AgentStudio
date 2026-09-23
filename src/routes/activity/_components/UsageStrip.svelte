@@ -7,6 +7,7 @@
 	 * the same one the weekly digest prints — both come from `computeUsageDigest`.
 	 */
 	import {
+		BUDGET_NEAR_LIMIT_PCT,
 		USAGE_DIGEST_WINDOW_DAYS,
 		digestWindowLabel,
 		formatDigestPct,
@@ -224,7 +225,7 @@
 					<p
 						class="mt-1 text-2xl font-bold leading-tight"
 						class:text-error={tightest.pct >= 1}
-						class:text-warning={tightest.pct >= 0.8 && tightest.pct < 1}
+						class:text-warning={tightest.pct >= BUDGET_NEAR_LIMIT_PCT && tightest.pct < 1}
 					>
 						{formatDigestPct(tightest.pct)}
 					</p>
