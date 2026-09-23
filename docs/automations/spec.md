@@ -140,6 +140,18 @@ An automation can route its output to:
 
 This makes recurring research and recurring coding workflows first-class.
 
+Today a **maintenance** automation routes to the Review Inbox (an "Automation summary" item, one per automation per hour; expanding it shows the output rendered as markdown) or to a chat session (an assistant message in the automation's conversation).
+
+### Weekly usage digest
+
+A maintenance automation whose prompt is exactly `{{usage_digest}}` is the **weekly usage digest** (#38): the numbers from the `/activity` usage strip — runs, tokens, automations, tool calls, the review inbox, budget headroom, and anything that looks wrong — written as markdown and routed like any other maintenance output. `{{usage_digest:30}}` covers the last 30 days instead of 7 (1 to 30 days).
+
+- **No model call.** The digest is rendered by code, so the run costs $0 and cannot fail for lack of model credentials. Any other maintenance prompt still goes to the model as before; a prompt with text around the placeholder is treated as an ordinary prompt.
+- **Opt-in only.** Nothing creates the digest on deploy. The owner turns it on from `/activity`, which creates "Weekly usage digest" for Monday 09:00 in their browser's time zone (or switches an existing, disabled one back on). After that it is managed here like any automation.
+- **Nothing new underneath.** It uses the existing dispatch tick, run history, retries and failure reporting. A budget limit that blocks automations blocks the digest too.
+
+The card on `/automations` notes when a prompt is the digest. See [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what the digest contains.
+
 ### Project and repository context
 
 Automations can attach project or repository context so recurring runs are not context-free. Examples:
