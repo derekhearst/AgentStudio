@@ -3,6 +3,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { handOffAttachments, type HandoffAttachment } from '$lib/chat/new-chat-handoff';
 	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
@@ -141,6 +142,8 @@
 	}
 
 	const greeting = getGreeting();
+	/** The owner's display name from /setup (#70), rather than a name written into the page. */
+	const displayName = $derived(page.data.user?.name?.trim() ?? '');
 
 	const filtered = $derived.by(() => {
 		const q = search.trim().toLowerCase();
@@ -249,7 +252,7 @@
 	<div class="w-full max-w-2xl space-y-4 text-center tablet:space-y-8">
 		<!-- Greeting -->
 		<div>
-			<h2 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}, Derek</h2>
+			<h2 class="text-2xl font-semibold tracking-tight text-base-content/90 tablet:text-4xl">{greeting}{displayName ? `, ${displayName}` : ''}</h2>
 			<p class="mt-1 text-sm text-base-content/50 tablet:mt-2 tablet:text-lg">How can I help you today?</p>
 		</div>
 
