@@ -62,7 +62,8 @@
 	/*
 	 * No `try` here used to mean any rejection spun forever — including the ordinary one:
 	 * `/agents/not-a-uuid` fails the query's id schema with a 400. That is "not found" to a
-	 * reader; anything else is shown as the error it is.
+	 * reader; anything else is shown as the error it is. A failure leaves any agent already
+	 * on screen where it is, under the error.
 	 */
 	async function loadData() {
 		loading = true
@@ -72,8 +73,8 @@
 			const result = await fetchFresh(getAgent(agentId))
 			data = result ?? null
 		} catch (err) {
-			data = null
-			if (!isNotFoundError(err)) loadError = remoteErrorMessage(err, 'Could not load this agent.')
+			if (isNotFoundError(err)) data = null
+			else loadError = remoteErrorMessage(err, 'Could not load this agent.')
 		} finally {
 			loading = false
 		}
@@ -136,7 +137,10 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 
-{#if loading}
+{#if loadError && data}
+	<div role="alert" class="alert alert-error mb-4 py-2 text-sm">{loadError}</div>
+{/if}
+{#if loading && !data}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
 	</div>

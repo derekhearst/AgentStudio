@@ -162,7 +162,8 @@
 
 		<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
 			<div class="space-y-3">
-				{#if loading}
+				<!-- First load only: a reload keeps the cards, and the reader's place, on screen. -->
+				{#if loading && rows.length === 0}
 					<div class="card card-body border-base-300 flex items-center justify-center rounded-2xl border bg-base-100 py-16">
 						<span class="loading loading-spinner loading-lg text-primary"></span>
 					</div>

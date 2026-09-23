@@ -125,17 +125,22 @@
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
 	<!--
-		The error comes first. It used to sit after `!result`, and a failed load never sets
-		`result` — so the spinner branch always won and a bad id or a lost session spun forever.
+		The error is checked before the spinner. It used to sit after `!result`, and a failed
+		load never sets `result` — so the spinner branch always won and a bad id or a lost
+		session spun forever. It sits above the trace rather than in its place, so a Refresh
+		that fails leaves the spans already loaded on screen.
 	-->
 	{#if error}
 		<div role="alert" class="alert alert-error alert-soft border-error/40 p-6 text-sm text-error">
 			{error}
 		</div>
-	{:else if !result}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
-		</div>
+	{/if}
+	{#if !result}
+		{#if !error}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else if result.adminOnly}
 		<div class="alert alert-warning alert-soft border-warning/40 p-6 text-center">
 			<p class="text-sm font-medium">Admin only</p>

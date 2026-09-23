@@ -253,10 +253,15 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 		<div class="mx-auto max-w-4xl space-y-4">
+			<!--
+				Above the skill, not instead of it: when the reload after an edit fails, the skill as
+				last loaded stays on screen under the error rather than vanishing.
+			-->
+			{#if error}
+				<div role="alert" class="alert alert-error">{error}</div>
+			{/if}
 			{#if loading}
 				<div class="flex justify-center py-16"><span class="loading loading-spinner loading-lg"></span></div>
-			{:else if error}
-				<div class="alert alert-error">{error}</div>
 			{:else if skill}
 				{@const s = skill}
 				{#if isSystemSkill}

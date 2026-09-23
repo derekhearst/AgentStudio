@@ -227,7 +227,12 @@
 
 		<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
 			<div>
-				{#if loading}
+				<!--
+					The spinner is for a first load only. Every toggle, delete and create reloads from
+					the server now, and swapping the list for a spinner during that round trip threw
+					the reader back to the top and collapsed any open History panel.
+				-->
+				{#if loading && rows.length === 0}
 					<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">
 						<span class="loading loading-spinner loading-lg text-primary"></span>
 					</div>

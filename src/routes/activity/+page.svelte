@@ -91,7 +91,9 @@
 <div class="flex h-full min-h-0 flex-col">
 	<PageHeader title="Activity feed" subtitle="Chronological stream of all system activity">
 		{#snippet actions()}
-			<button class="btn btn-ghost btn-xs" type="button" onclick={refresh}>Refresh</button>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={refresh} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
 	</PageHeader>
 
@@ -109,12 +111,19 @@
 			{/each}
 		</div>
 
-	{#if loading}
-		<div class="flex justify-center p-8"><span class="loading loading-spinner loading-lg"></span></div>
-	{:else if error}
+	<!--
+		A failed refresh shows its error above the events it already had, rather than in their
+		place, and only the first load shows a spinner.
+	-->
+	{#if error}
 		<div role="alert" class="alert alert-error py-2 text-sm">{error}</div>
+	{/if}
+	{#if loading && events.length === 0}
+		<div class="flex justify-center p-8"><span class="loading loading-spinner loading-lg"></span></div>
 	{:else if events.length === 0}
-		<p class="text-sm text-base-content/70">No activity events yet.</p>
+		{#if !error}
+			<p class="text-sm text-base-content/70">No activity events yet.</p>
+		{/if}
 	{:else}
 		<div class="space-y-2">
 			{#each events as event (event.id)}
