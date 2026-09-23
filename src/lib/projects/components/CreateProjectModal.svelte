@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte'
 	import {
 		createProjectCommand,
 		listGithubImportCandidatesQuery,
@@ -53,16 +54,21 @@
 
 	$effect(() => {
 		if (!open) return
-		// Re-seed when the modal opens. `initialTab` may have changed between opens.
-		modalTab = initialTab
-		creating = false
-		formError = null
-		formName = ''
-		formKind = 'other'
-		formDescription = ''
-		formDefaultBranch = 'main'
-		formCloneUrl = ''
-		if (modalTab === 'github' && githubCandidates.length === 0) void loadGithubCandidates()
+		// Re-seed when the modal opens, and only then. `initialTab` may have changed between
+		// opens. Untracked because this reads `modalTab` and `githubCandidates` too: as
+		// dependencies they re-ran it on every tab click, which put the modal straight back
+		// on its opening tab, so Local repo, From GitHub and From URL could not be chosen.
+		untrack(() => {
+			modalTab = initialTab
+			creating = false
+			formError = null
+			formName = ''
+			formKind = 'other'
+			formDescription = ''
+			formDefaultBranch = 'main'
+			formCloneUrl = ''
+			if (modalTab === 'github' && githubCandidates.length === 0) void loadGithubCandidates()
+		})
 	})
 
 	const filteredGithub = $derived(

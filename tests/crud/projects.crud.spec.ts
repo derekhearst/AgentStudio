@@ -19,6 +19,22 @@ import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expect
  */
 
 test.describe('/projects — CRUD lifecycle', () => {
+	test('the New project modal stays on the tab that was clicked', async ({ page, context }) => {
+		await authenticateContext(context)
+		await page.goto('/projects')
+		await waitForHydration(page)
+		await page.getByRole('button', { name: '+ New project' }).click()
+		await expect(page.getByRole('button', { name: 'Create empty project' })).toBeVisible()
+
+		// The modal's re-seed effect depended on the current tab, so every tab click re-ran it
+		// and put the modal straight back on Empty.
+		await page.getByRole('button', { name: 'Local repo', exact: true }).click()
+		await expect(page.getByRole('button', { name: 'Create local project' })).toBeVisible()
+		await page.getByRole('button', { name: 'From URL', exact: true }).click()
+		await expect(page.getByRole('button', { name: 'Clone & create' })).toBeVisible()
+		await expect(page.getByRole('button', { name: 'Create empty project' })).toHaveCount(0)
+	})
+
 	test('create project → open detail → delete project', async ({ page, context }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('crud-projects')
