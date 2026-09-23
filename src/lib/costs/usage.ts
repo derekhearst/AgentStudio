@@ -1,6 +1,7 @@
 import { db } from '$lib/db.server'
 import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { listModels, type ModelInfo } from '$lib/llm/models.server'
+import { toOpenRouterModelId } from '$lib/llm/model-ids'
 
 export type LlmUsageSource =
 	| 'chat'
@@ -55,7 +56,9 @@ async function getModelPricing(modelId: string): Promise<{ promptPrice: number; 
 		}
 	}
 
-	const model = modelCache.find((m) => m.id === modelId)
+	// The catalogue is OpenRouter's, so a stored SDK-style id is looked up the way it was sent.
+	const catalogueId = toOpenRouterModelId(modelId)
+	const model = modelCache.find((m) => m.id === catalogueId)
 	if (!model) return null
 
 	return {
