@@ -160,13 +160,15 @@ export async function importRepository(input: ImportRepositoryInput): Promise<Im
 }
 
 /**
- * Re-run the mirror materialization for an already-imported repo. Updates `lastPulledAt`
- * on the row's metadata so the UI can show "Last pulled 5m ago".
+ * Re-run the mirror materialization for an already-imported repo: fetch every branch and
+ * fast-forward the checked-out one when it is behind. Updates `lastPulledAt` on the row's
+ * metadata so the UI can show "Last pulled 5m ago", and returns what happened to the
+ * checked-out branch so the caller does not report a pull that moved nothing as success.
  */
 export async function pullRepositoryLatest(
 	userId: string,
 	repositoryId: string,
-): Promise<{ repository: RepositoryRow; fresh: boolean; branch: string | null }> {
+): Promise<{ repository: RepositoryRow; fresh: boolean; branch: string | null; summary: string | null }> {
 	const repo = await getRepositoryById(repositoryId)
 	if (!repo) throw new Error('Repository not found.')
 	if (repo.userId !== userId) throw new Error('Not authorized for this repository.')
@@ -199,7 +201,7 @@ export async function pullRepositoryLatest(
 		.where(eq(repositories.id, repo.id))
 		.returning()
 
-	return { repository: updated, fresh: mirror.fresh, branch: mirror.branch }
+	return { repository: updated, fresh: mirror.fresh, branch: mirror.branch, summary: mirror.refreshSummary ?? null }
 }
 
 export type RepositoryDetail = {

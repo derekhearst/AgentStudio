@@ -1,53 +1,119 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { commitUpstream, createUpstream, git, makeTempDir, startGitHttpServer } from './git-http-server'
 
 /**
  * Wave 5 #19 phase 3 finish — write-tool argv builder + approval-set invariants.
  *
  * The push + PR tools are HTTPS-bound to GitHub via the user's stored OAuth token. We
- * can't exercise the live remote in unit tests, so this spec pins the structural
- * contracts that gate safety: the argv shape never embeds the token in command args,
- * the redactor scrubs the token from any returned text, and the mandatory-approval set
- * carries both new tool names so chat-stream can never accidentally turn approval off.
+ * can't exercise GitHub in unit tests, so this spec pins the structural contracts that
+ * gate safety — the argv never carries the token, branch names cannot smuggle options or
+ * refspecs, and the mandatory-approval set carries both tool names so chat-stream can
+ * never accidentally turn approval off — and runs the push itself against a local HTTP
+ * remote to pin how `--force-with-lease` behaves.
  */
 
 test.describe('source-control/git-push — argv builder', () => {
-	test('uses fully-qualified GitHub HTTPS URL (not the local origin) and credential helper via env var', async () => {
+	test('pushes a fully-qualified refspec to the URL, with no token and no credential helper in argv', async () => {
 		const { buildPushArgs } = await import('../src/lib/source-control/git-push.server')
-		const { args, remote } = buildPushArgs({
-			repoPath: '/repo',
-			owner: 'acme',
-			repo: 'widgets',
-			branch: 'feature/x',
-			token: 'never-in-argv',
-		})
-		expect(remote).toBe('https://github.com/acme/widgets.git')
-		// The remote URL appears in argv (this is fine — the URL itself isn't a secret),
-		// but the token MUST NOT appear anywhere in argv.
-		expect(args.join(' ')).not.toContain('never-in-argv')
-		// Helper string sources the token from the env, never inlined.
-		expect(args).toContain('credential.helper=!f() { echo "username=x-access-token"; echo "password=$GIT_TOKEN"; }; f')
-		// We push a fully-qualified refspec so the local branch tracking config never
-		// surprises us with a different remote ref name.
+		const args = buildPushArgs({ remote: 'https://github.com/acme/widgets.git', branch: 'feature/x' })
+		expect(args[0]).toBe('push')
+		expect(args).toContain('https://github.com/acme/widgets.git')
+		// A fully-qualified refspec so the local branch tracking config never surprises us
+		// with a different remote ref name.
 		expect(args).toContain('refs/heads/feature/x:refs/heads/feature/x')
-		// `-C <repoPath>` so we don't have to chdir.
-		expect(args.includes('-C') && args.includes('/repo')).toBe(true)
+		// The token travels as a URL-scoped header in the child environment (git-exec.ts).
+		expect(args.join(' ')).not.toContain('credential.helper')
 	})
 
-	test('force=true switches on --force-with-lease, never plain --force', async () => {
+	test('force=true spells the lease out, and never uses plain --force', async () => {
 		const { buildPushArgs } = await import('../src/lib/source-control/git-push.server')
-		const safe = buildPushArgs({ repoPath: '/r', owner: 'a', repo: 'b', branch: 'main', token: 't' })
-		const forced = buildPushArgs({
-			repoPath: '/r',
-			owner: 'a',
-			repo: 'b',
-			branch: 'main',
-			token: 't',
-			force: true,
-		})
-		expect(safe.args).not.toContain('--force-with-lease')
-		expect(safe.args).not.toContain('--force')
-		expect(forced.args).toContain('--force-with-lease')
-		expect(forced.args).not.toContain('--force')
+		const remote = 'https://github.com/a/b.git'
+		const safe = buildPushArgs({ remote, branch: 'main' })
+		const forced = buildPushArgs({ remote, branch: 'main', force: true, leaseExpected: 'abc123' })
+		const neverSeen = buildPushArgs({ remote, branch: 'main', force: true, leaseExpected: '' })
+		expect(safe.some((a) => a.startsWith('--force'))).toBe(false)
+		// A bare `--force-with-lease` to a URL has no tracking ref to consult and rejects every
+		// existing branch as "stale info" — the lease must name its expected commit.
+		expect(forced).toContain('--force-with-lease=refs/heads/main:abc123')
+		expect(neverSeen).toContain('--force-with-lease=refs/heads/main:')
+		expect(forced).not.toContain('--force-with-lease')
+		expect(forced).not.toContain('--force')
+	})
+
+	test('branch names shaped like options or refspecs are refused before git runs', async () => {
+		const { buildPushArgs } = await import('../src/lib/source-control/git-push.server')
+		const remote = 'https://github.com/a/b.git'
+		for (const branch of ['--delete', 'x:refs/heads/main', 'refs/*', 'a..b']) {
+			expect(() => buildPushArgs({ remote, branch })).toThrow(/Invalid branch name/)
+		}
+	})
+
+	test('owner and repo are validated as path segments', async () => {
+		const { pushBranchToGithub } = await import('../src/lib/source-control/git-push.server')
+		const tmp = makeTempDir('push-validate')
+		try {
+			git(['init', '-b', 'main', tmp.path])
+			await expect(
+				pushBranchToGithub({ repoPath: tmp.path, owner: 'evil.com/x#', repo: 'r', branch: 'main', token: 't' }),
+			).rejects.toThrow(/Invalid owner segment/)
+		} finally {
+			tmp.cleanup()
+		}
+	})
+})
+
+test.describe('source-control/git-push — force-with-lease against a real remote', () => {
+	test('a rewritten branch force-pushes; a branch someone else moved is refused with a hint', async () => {
+		const { pushBranch } = await import('../src/lib/source-control/git-push.server')
+		const { refreshClone } = await import('../src/lib/source-control/repo-mirror.server')
+		const tmp = makeTempDir('push-lease')
+		const server = await startGitHttpServer(tmp.path)
+		try {
+			const bare = createUpstream(tmp.path)
+			const remote = `${server.origin}/upstream.git`
+			// Cloned from the path (a synchronous git call must not wait on this process's own
+			// HTTP server), then pointed at the served URL like any AgentStudio clone.
+			const clone = join(tmp.path, 'clone')
+			git(['clone', '-q', bare, clone])
+			git(['remote', 'set-url', 'origin', remote], clone)
+			git(['checkout', '-b', 'agent/1'], clone)
+			writeFileSync(join(clone, 'work.txt'), 'v1\n')
+			git(['add', '-A'], clone)
+			git(['commit', '-m', 'v1'], clone)
+
+			const first = await pushBranch({ repoPath: clone, remote, branch: 'agent/1', token: '' })
+			expect(first.success).toBe(true)
+			// The push is recorded where the next lease will look for it.
+			expect(git(['rev-parse', 'refs/remotes/origin/agent/1'], clone)).toBe(git(['rev-parse', 'HEAD'], clone))
+
+			// Rewrite and force-push: the lease holds, because nobody else touched the branch.
+			writeFileSync(join(clone, 'work.txt'), 'v2\n')
+			git(['add', '-A'], clone)
+			git(['commit', '--amend', '-m', 'v2'], clone)
+			const rewritten = await pushBranch({ repoPath: clone, remote, branch: 'agent/1', token: '', force: true })
+			expect(rewritten.stderr).not.toMatch(/stale info/)
+			expect(rewritten.success).toBe(true)
+			expect(git(['rev-parse', 'refs/heads/agent/1'], bare)).toBe(git(['rev-parse', 'HEAD'], clone))
+
+			// Someone else pushes. Our next force-push must refuse to overwrite what we never saw.
+			const theirs = commitUpstream(tmp.path, bare, 'agent/1', 'theirs.txt', 'theirs\n')
+			git(['commit', '--amend', '-m', 'v3'], clone)
+			const refused = await pushBranch({ repoPath: clone, remote, branch: 'agent/1', token: '', force: true })
+			expect(refused.success).toBe(false)
+			expect(refused.stderr).toMatch(/stale info/)
+			expect(refused.stderr).toMatch(/Pull latest/)
+			expect(git(['rev-parse', 'refs/heads/agent/1'], bare)).toBe(theirs)
+
+			// Once we have fetched their work, the lease is ours to break deliberately.
+			await refreshClone({ repoPath: clone, remoteUrl: remote, token: '' })
+			const afterFetch = await pushBranch({ repoPath: clone, remote, branch: 'agent/1', token: '', force: true })
+			expect(afterFetch.success).toBe(true)
+		} finally {
+			await server.close()
+			tmp.cleanup()
+		}
 	})
 })
 

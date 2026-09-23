@@ -10,16 +10,13 @@
  * approval, so even with a misconfigured runtime these tools fail closed.
  */
 
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { toolSchemas } from '../tool-schemas'
 import { ensureWorkspaceDir, getWorkspace, safePath, toolUserContext } from '../sandbox.server'
 import { logger } from '$lib/observability/logger'
 import type { ToolHandler } from '../handler-types'
-
-const execFileAsync = promisify(execFile)
+import { isSafeRevision } from '$lib/source-control/git-exec'
 
 export const sourceControlHandlers: Record<string, ToolHandler> = {
 	list_my_repos: async (call, { userId, startedAt }) => {
@@ -381,6 +378,8 @@ export const sourceControlHandlers: Record<string, ToolHandler> = {
 					path: result.path,
 					fresh: result.fresh,
 					branch: result.branch,
+					// On a refresh: whether the checked-out branch moved, and if not, why not.
+					refresh: result.refreshSummary ?? null,
 					workspaceRoot,
 				},
 				executionMs: Date.now() - startedAt,
@@ -491,60 +490,52 @@ function gitInspectHandler(name: 'git_status' | 'git_log' | 'git_diff'): ToolHan
 		}
 		await ensureWorkspaceDir()
 		const workspace = getWorkspace()
+		const fail = (error: string, input?: unknown) => ({
+			success: false,
+			tool: call.name,
+			...(input === undefined ? {} : { input }),
+			error,
+			executionMs: Date.now() - startedAt,
+		})
 		try {
+			const { runGit } = await import('$lib/source-control/git-exec.server')
+			let input: unknown = {}
+			let args: string[]
+			let maxOutputBytes = 4 * 1024 * 1024
+			let timeoutMs = 30_000
 			if (name === 'git_status') {
-				const result = await execFileAsync(
-					'git',
-					['-C', workspace, 'status', '--porcelain=v1', '-b'],
-					{ maxBuffer: 4 * 1024 * 1024, timeout: 30_000 },
-				)
-				return {
-					success: true,
-					tool: call.name,
-					input: {},
-					result: { stdout: result.stdout, stderr: result.stderr },
-					executionMs: Date.now() - startedAt,
-				}
-			}
-			if (name === 'git_log') {
-				const input = toolSchemas.git_log.parse(call.arguments)
-				const args = [
-					'-C',
-					workspace,
-					'log',
-					`--max-count=${input.max}`,
-					'--pretty=format:%h%x09%an%x09%ad%x09%s',
-					'--date=short',
-				]
-				if (input.paths?.length) {
+				args = ['status', '--porcelain=v1', '-b']
+			} else if (name === 'git_log') {
+				const parsed = toolSchemas.git_log.parse(call.arguments)
+				input = parsed
+				args = ['log', `--max-count=${parsed.max}`, '--pretty=format:%h%x09%an%x09%ad%x09%s', '--date=short']
+				if (parsed.paths?.length) {
 					args.push('--')
-					for (const p of input.paths) args.push(safePath(p))
+					for (const p of parsed.paths) args.push(safePath(p))
 				}
-				const result = await execFileAsync('git', args, {
-					maxBuffer: 4 * 1024 * 1024,
-					timeout: 30_000,
-				})
-				return {
-					success: true,
-					tool: call.name,
-					input,
-					result: { stdout: result.stdout, stderr: result.stderr },
-					executionMs: Date.now() - startedAt,
+			} else {
+				const parsed = toolSchemas.git_diff.parse(call.arguments)
+				input = parsed
+				// The ref comes from the model. Refuse anything shaped like an option, and put it
+				// after `--end-of-options` too, so git can only ever read it as a revision.
+				if (parsed.ref !== undefined && !isSafeRevision(parsed.ref)) {
+					return fail(
+						`Invalid ref ${JSON.stringify(parsed.ref)}: use a branch, tag, commit or HEAD~N. A ref may not start with "-".`,
+						parsed,
+					)
 				}
+				args = ['diff']
+				if (parsed.staged) args.push('--cached')
+				if (parsed.ref) args.push('--end-of-options', parsed.ref)
+				if (parsed.paths?.length) {
+					args.push('--')
+					for (const p of parsed.paths) args.push(safePath(p))
+				}
+				maxOutputBytes = 8 * 1024 * 1024
+				timeoutMs = 60_000
 			}
-			// git_diff
-			const input = toolSchemas.git_diff.parse(call.arguments)
-			const args = ['-C', workspace, 'diff']
-			if (input.staged) args.push('--cached')
-			if (input.ref) args.push(input.ref)
-			if (input.paths?.length) {
-				args.push('--')
-				for (const p of input.paths) args.push(safePath(p))
-			}
-			const result = await execFileAsync('git', args, {
-				maxBuffer: 8 * 1024 * 1024,
-				timeout: 60_000,
-			})
+			const result = await runGit(args, { repoPath: workspace, maxOutputBytes, timeoutMs })
+			if (result.code !== 0) return fail(result.stderr.trim() || `${call.name} failed (exit ${result.code})`, input)
 			return {
 				success: true,
 				tool: call.name,
@@ -553,13 +544,7 @@ function gitInspectHandler(name: 'git_status' | 'git_log' | 'git_diff'): ToolHan
 				executionMs: Date.now() - startedAt,
 			}
 		} catch (err: unknown) {
-			const e = err as { code?: number | string; stdout?: string; stderr?: string; message?: string }
-			return {
-				success: false,
-				tool: call.name,
-				error: e.stderr ?? e.message ?? `${call.name} failed`,
-				executionMs: Date.now() - startedAt,
-			}
+			return fail(err instanceof Error ? err.message : `${call.name} failed`)
 		}
 	}
 }

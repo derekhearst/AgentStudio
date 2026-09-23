@@ -1,9 +1,10 @@
-import { spawn } from 'node:child_process'
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { projects, type ProjectRow } from './projects.schema'
 import { repositories, type RepositoryRow } from '$lib/source-control/source-control.schema'
-import { defaultGitRunner } from '$lib/workspace/worktree.server'
+import { runGit } from '$lib/source-control/git-exec.server'
+import { assertSafeRevision } from '$lib/source-control/git-exec'
+import { describeCloneRefresh, type CloneRefreshOutcome } from '$lib/source-control/repo-mirror'
 import {
 	gitStatusAt,
 	listRecentCommits,
@@ -25,9 +26,9 @@ import { getActiveGithubConnection } from '$lib/source-control/source-control.se
  * is a thin read on the working copy.
  */
 
-const SAFE_BRANCH = /^[a-zA-Z0-9_/-]+$/
-const SAFE_REF = /^[a-zA-Z0-9_/-]+$/
-const REQUEST_TIMEOUT_MS = 60_000
+// No leading `-` in either: git would read the value as an option.
+const SAFE_BRANCH = /^(?!-)[a-zA-Z0-9_/-]+$/
+const SAFE_REF = /^(?!-)[a-zA-Z0-9_/-]+$/
 
 export type ProjectWithRepo = {
 	project: ProjectRow
@@ -70,35 +71,6 @@ export async function prepareProjectCommit(userId: string, projectId: string): P
 	return prepareCommitDraft(path)
 }
 
-async function runGit(args: string[], cwd: string, env: Record<string, string> = {}) {
-	return new Promise<{ stdout: string; stderr: string; code: number }>((resolveRun) => {
-		const ac = new AbortController()
-		const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS)
-		let stdout = ''
-		let stderr = ''
-		const proc = spawn('git', args, {
-			cwd,
-			stdio: ['ignore', 'pipe', 'pipe'],
-			env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...env },
-			signal: ac.signal,
-		})
-		proc.stdout.on('data', (chunk: Buffer) => {
-			stdout += chunk.toString('utf8')
-		})
-		proc.stderr.on('data', (chunk: Buffer) => {
-			stderr += chunk.toString('utf8')
-		})
-		proc.on('error', (err) => {
-			clearTimeout(timer)
-			resolveRun({ stdout, stderr: `${stderr}\n${(err as Error).message}`, code: -1 })
-		})
-		proc.on('close', (code) => {
-			clearTimeout(timer)
-			resolveRun({ stdout, stderr, code: code ?? -1 })
-		})
-	})
-}
-
 /**
  * Stage and commit the working tree. When `paths` is supplied, only those paths are added
  * (like `git add -- path1 path2`); otherwise everything via `git add -A`. Local commit only —
@@ -118,18 +90,22 @@ export async function commitProject(
 			if (p.includes('..') || p.startsWith('/')) throw new Error(`Unsafe path in commit: ${p}`)
 			return p
 		})
-		const addRes = await runGit(['add', '--', ...safePaths], path)
+		const addRes = await runGit(['add', '--', ...safePaths], { repoPath: path })
 		if (addRes.code !== 0) {
 			throw new Error(`git add failed (exit ${addRes.code}): ${addRes.stderr.trim()}`)
 		}
 	} else {
-		const addRes = await runGit(['add', '-A'], path)
+		const addRes = await runGit(['add', '-A'], { repoPath: path })
 		if (addRes.code !== 0) {
 			throw new Error(`git add failed (exit ${addRes.code}): ${addRes.stderr.trim()}`)
 		}
 	}
 
-	const commitRes = await runGit(['commit', '-m', message], path)
+	// Server-side git reads no host config, so an imported clone has no identity unless the
+	// repository sets one. Fall back to the one local projects are created with.
+	const identity = await runGit(['config', '--get', 'user.email'], { repoPath: path })
+	const config = identity.code === 0 && identity.stdout.trim() ? [] : ['user.name=AgentStudio', 'user.email=agentstudio@local']
+	const commitRes = await runGit(['commit', '-m', message], { repoPath: path, config })
 	if (commitRes.code !== 0) {
 		// `nothing to commit` is a non-error from the user's POV — surface it cleanly.
 		const stderr = (commitRes.stderr + commitRes.stdout).toLowerCase()
@@ -139,7 +115,7 @@ export async function commitProject(
 		throw new Error(`git commit failed (exit ${commitRes.code}): ${commitRes.stderr.trim() || commitRes.stdout.trim()}`)
 	}
 
-	const headRes = await runGit(['rev-parse', 'HEAD'], path)
+	const headRes = await runGit(['rev-parse', 'HEAD'], { repoPath: path })
 	const sha = headRes.code === 0 ? headRes.stdout.trim() : null
 	return { committed: true, sha }
 }
@@ -151,7 +127,7 @@ export async function commitProject(
 export async function pullProject(
 	userId: string,
 	projectId: string,
-): Promise<{ ok: boolean; lastPulledAt: Date }> {
+): Promise<{ ok: boolean; lastPulledAt: Date; refresh: CloneRefreshOutcome; summary: string }> {
 	const { project, repository, path } = await loadProjectAndRepo(userId, projectId)
 	if (project.repoKind !== 'imported' || !repository) {
 		throw new Error('Pull is only available for imported projects.')
@@ -167,7 +143,7 @@ export async function pullProject(
 		credentialUsername = 'x-access-token'
 	}
 
-	await fetchProjectRemote({
+	const refresh = await fetchProjectRemote({
 		userId,
 		projectId,
 		cloneUrl: repository.cloneUrl,
@@ -178,7 +154,7 @@ export async function pullProject(
 	const now = new Date()
 	await db.update(projects).set({ lastPulledAt: now, updatedAt: now }).where(eq(projects.id, projectId))
 	void path // referenced for symmetry; actual fs work happens in fetchProjectRemote
-	return { ok: true, lastPulledAt: now }
+	return { ok: true, lastPulledAt: now, refresh, summary: describeCloneRefresh(refresh) }
 }
 
 /**
@@ -224,17 +200,11 @@ export type ProjectBranch = {
  */
 export async function listProjectBranches(userId: string, projectId: string): Promise<ProjectBranch[]> {
 	const { path } = await loadProjectAndRepo(userId, projectId)
-	const headRes = await runGit(['symbolic-ref', '--short', 'HEAD'], path)
+	const headRes = await runGit(['symbolic-ref', '--short', 'HEAD'], { repoPath: path })
 	const current = headRes.code === 0 ? headRes.stdout.trim() : null
 
-	const localRes = await runGit(
-		['for-each-ref', '--format=%(refname:short)', 'refs/heads'],
-		path,
-	)
-	const remoteRes = await runGit(
-		['for-each-ref', '--format=%(refname:short)', 'refs/remotes'],
-		path,
-	)
+	const localRes = await runGit(['for-each-ref', '--format=%(refname:short)', 'refs/heads'], { repoPath: path })
+	const remoteRes = await runGit(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'], { repoPath: path })
 	const branches: ProjectBranch[] = []
 	if (localRes.code === 0) {
 		for (const line of localRes.stdout.split(/\r?\n/)) {
@@ -264,7 +234,7 @@ export async function createProjectBranch(
 	if (input.from && !SAFE_REF.test(input.from)) throw new Error(`Invalid base ref: ${input.from}`)
 	const args = ['checkout', '-b', input.name]
 	if (input.from) args.push(input.from)
-	const res = await runGit(args, path)
+	const res = await runGit(args, { repoPath: path })
 	if (res.code !== 0) {
 		throw new Error(`git checkout -b failed (exit ${res.code}): ${res.stderr.trim() || res.stdout.trim()}`)
 	}
@@ -278,7 +248,7 @@ export async function switchProjectBranch(
 ): Promise<{ branch: string }> {
 	const { path } = await loadProjectAndRepo(userId, projectId)
 	if (!SAFE_BRANCH.test(name)) throw new Error(`Invalid branch name: ${name}`)
-	const res = await runGit(['checkout', name], path)
+	const res = await runGit(['checkout', name], { repoPath: path })
 	if (res.code !== 0) {
 		throw new Error(`git checkout failed (exit ${res.code}): ${res.stderr.trim() || res.stdout.trim()}`)
 	}
@@ -303,16 +273,16 @@ export async function getProjectDiff(
 	opts: { ref?: string; paths?: string[] } = {},
 ): Promise<{ ref: string; files: ProjectDiffFile[]; raw: string }> {
 	const { path } = await loadProjectAndRepo(userId, projectId)
-	const ref = opts.ref?.trim() || 'HEAD'
-	if (!SAFE_REF.test(ref)) throw new Error(`Invalid ref: ${ref}`)
-	const args = ['diff', '--no-color', ref]
+	const ref = assertSafeRevision(opts.ref?.trim() || 'HEAD')
+	// `--end-of-options`: whatever `ref` is, git reads it as a revision, never a flag.
+	const args = ['diff', '--no-color', '--end-of-options', ref]
 	if (opts.paths && opts.paths.length > 0) {
 		for (const p of opts.paths) {
 			if (p.includes('..') || p.startsWith('/')) throw new Error(`Unsafe path in diff: ${p}`)
 		}
 		args.push('--', ...opts.paths)
 	}
-	const res = await runGit(args, path)
+	const res = await runGit(args, { repoPath: path })
 	if (res.code !== 0) {
 		throw new Error(`git diff failed (exit ${res.code}): ${res.stderr.trim() || res.stdout.trim()}`)
 	}
@@ -331,5 +301,3 @@ export async function getProjectDiff(
 	}
 	return { ref, files, raw }
 }
-
-void defaultGitRunner // satisfies unused-import lint when tests stub runs

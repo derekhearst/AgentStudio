@@ -3,7 +3,8 @@
  * imports so unit tests can call into it without touching the filesystem or env.
  */
 
-const SAFE_REF = /^[a-zA-Z0-9_/-]+$/
+// No leading `-`: git would read the name as an option rather than a ref.
+const SAFE_REF = /^(?!-)[a-zA-Z0-9_/-]+$/
 
 export type WorktreeRequest = {
 	/** Absolute path of the source repo (the .git dir lives here). */

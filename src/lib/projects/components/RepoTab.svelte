@@ -65,7 +65,9 @@
 	}
 
 	async function pull() {
-		await runAction('Pull latest', () => pullProjectCommand({ projectId }));
+		const result = await runAction('Pull latest', () => pullProjectCommand({ projectId }));
+		// Fetching can succeed while the checked-out branch stays put; say which.
+		if (result) actionMessage = `Pull latest ✓ ${result.summary}`;
 		await load();
 	}
 
