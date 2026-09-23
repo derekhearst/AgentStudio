@@ -72,6 +72,8 @@ Most jobs carry a dedupe key. What it prevents depends on the job:
 
 Until September 2026 every key behaved like the second kind. Since nothing deletes finished jobs, each recurring job with a fixed key ran exactly once for the life of the database: scheduled automations, monitor checks, PR CI polling, and memory mining all silently stopped after their first run.
 
+A request that arrives while a matching job is already **running** folds into that job too — and a running job may have read its input before the request's data existed. Memory mining is the case that matters: a job mining a conversation keeps its key until the conversation has nothing left to mine, going round again if an exchange finished while it worked, and gives the key back (with its own id appended, so `/settings/jobs` still shows what it was) in the same step as that final check. After that, the next exchange gets a job of its own.
+
 ### An automation slot that the queue gave up on is skipped
 
 Each scheduled run of an automation gets exactly one job. When an attempt fails, the automation queues its next attempt as a separate job and links to it, so a scheduled run can be a short chain of jobs. If the queue itself gives up on any job in that chain — the worker running it kept dying, its lease lapsed during a long outage, or someone canceled it from `/settings/jobs` — the automation's own failure handling never ran, so nothing moved its schedule on. The dispatcher follows the chain to its newest job, sees that nothing is left to run while the automation is still due, and skips that slot. The automation carries on from its next scheduled time.

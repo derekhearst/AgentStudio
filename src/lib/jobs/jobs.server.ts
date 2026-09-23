@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNotNull, lte, notExists, sql as drizzleSql, type SQLWrapper } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { jobLeases, jobPolicies, jobs, type JobRow, type JobStatus } from './jobs.schema'
 import { logger } from '$lib/observability/logger'
@@ -119,6 +119,43 @@ export async function enqueueJobWithOutcome(input: EnqueueJobInput): Promise<Enq
 		if (active) return { job: active, created: false }
 	}
 	throw new Error(`enqueueJob: dedupe collision but no active row found — type=${input.type} dedupeKey=${dedupeKey}`)
+}
+
+/**
+ * Give a running job's dedupe key back before the job finishes, so the next enqueue with that
+ * key queues a fresh job instead of folding into this one. The key is kept on the row with the
+ * job's id appended, so `/settings/jobs` still shows what the job was for.
+ *
+ * For catch-up work — "mine whatever this conversation has that is not mined yet". Such a job
+ * reads its input when it starts, so an enqueue that folds into it after that point is lost
+ * unless the job looks again before it lets go. `unlessExists` is that second look: while the
+ * subquery finds rows the key is kept, this returns false, and the caller does another pass.
+ *
+ * The look has to be taken after new enqueues can no longer fold in unseen, so the transaction
+ * first writes the job row. From then until commit, an enqueue's insert that collides with the
+ * key waits for this transaction (Postgres checks a unique index against rows other
+ * transactions are changing, and waits for them), then either finds the key released and gets
+ * a job of its own, or finds it kept and folds into a job that is about to look again. An
+ * enqueue that collided before the write committed its input before that, and the next
+ * statement's fresh snapshot — READ COMMITTED takes one per statement — sees it.
+ *
+ * Returns true when the key was released, or when the job had none to release.
+ */
+export async function releaseDedupeKey(jobId: string, opts: { unlessExists?: SQLWrapper } = {}): Promise<boolean> {
+	return db.transaction(async (tx) => {
+		const held = await tx
+			.update(jobs)
+			.set({ updatedAt: new Date() })
+			.where(and(eq(jobs.id, jobId), isNotNull(jobs.dedupeKey)))
+			.returning({ id: jobs.id })
+		if (held.length === 0) return true
+		const released = await tx
+			.update(jobs)
+			.set({ dedupeKey: drizzleSql`${jobs.dedupeKey} || '#' || ${jobs.id}` })
+			.where(and(eq(jobs.id, jobId), opts.unlessExists ? notExists(opts.unlessExists) : undefined))
+			.returning({ id: jobs.id })
+		return released.length > 0
+	})
 }
 
 /** Newest job with this `(type, dedupeKey)`, optionally only among the active ones. */

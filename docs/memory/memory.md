@@ -77,7 +77,7 @@ When `useRerank` is enabled in settings, the top 20 candidates are sent to a che
 4. Mining extracts entities and topics via a small LLM call, then writes one drawer per new turn into the palace, computing AAAK indexes and embeddings inline.
 5. An `agent_action` activity event of type `memory_mined` records what landed.
 
-A conversation holds at most one queued mining job at a time: if the user sends several messages while a job is still waiting, they all fold into that one job. Once it has run, the next exchange queues a fresh one. (Until September 2026 a conversation's mining job could only ever run once, so everything said after its first exchange was never memorized. **Mine pending** on the Memory page catches up any conversation left behind.)
+A conversation holds at most one queued mining job at a time: if the user sends several messages while a job is still waiting, they all fold into that one job. If an exchange finishes while the job is already mining, the job goes round again for the new turns before it finishes — so the last exchange of a conversation is mined too, not left for an exchange that may never come. (It goes round at most five times; anything still left after that waits for the next exchange or **Mine pending**.) Once the job is done, the next exchange queues a fresh one. (Until September 2026 a conversation's mining job could only ever run once, so everything said after its first exchange was never memorized. **Mine pending** on the Memory page catches up any conversation left behind.)
 
 ### Mine pending
 

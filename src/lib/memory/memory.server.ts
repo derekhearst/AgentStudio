@@ -84,35 +84,52 @@ export async function mineConversation(opts: {
 }
 
 /**
- * The user's conversations that hold at least one message the miner would still pick up: a
- * mined role, some content, no drawer and no tombstone. What "Mine pending" sweeps.
+ * A message the miner would still pick up: a mined role, some content, no drawer and no
+ * tombstone. Written against `messages`, for queries that select from it.
+ */
+function isUnminedMessage() {
+	return and(
+		inArray(messages.role, [...MINED_ROLES]),
+		// Some non-whitespace, as the miner's own `trim()` filter requires.
+		sql`${messages.content} ~ '[^[:space:]]'`,
+		notExists(
+			db
+				.select({ one: sql`1` })
+				.from(memoryDrawers)
+				.where(eq(memoryDrawers.sourceMessageId, messages.id)),
+		),
+		notExists(
+			db
+				.select({ one: sql`1` })
+				.from(memoryMessageTombstones)
+				.where(eq(memoryMessageTombstones.messageId, messages.id)),
+		),
+	)
+}
+
+/**
+ * The user's conversations that hold at least one message the miner would still pick up.
+ * What "Mine pending" sweeps.
  */
 export async function listConversationsWithUnminedMessages(userId: string): Promise<string[]> {
 	const rows = await db
 		.selectDistinct({ id: conversations.id })
 		.from(conversations)
 		.innerJoin(messages, eq(messages.conversationId, conversations.id))
-		.where(
-			and(
-				eq(conversations.userId, userId),
-				inArray(messages.role, [...MINED_ROLES]),
-				// Some non-whitespace, as the miner's own `trim()` filter requires.
-				sql`${messages.content} ~ '[^[:space:]]'`,
-				notExists(
-					db
-						.select({ one: sql`1` })
-						.from(memoryDrawers)
-						.where(eq(memoryDrawers.sourceMessageId, messages.id)),
-				),
-				notExists(
-					db
-						.select({ one: sql`1` })
-						.from(memoryMessageTombstones)
-						.where(eq(memoryMessageTombstones.messageId, messages.id)),
-				),
-			),
-		)
+		.where(and(eq(conversations.userId, userId), isUnminedMessage()))
 	return rows.map((row) => row.id)
+}
+
+/**
+ * The conversation's messages the miner would still pick up, as a subquery — for a mining job
+ * to ask, in the statement that lets go of its dedupe key, whether anything arrived while it
+ * was mining (see `releaseDedupeKey`).
+ */
+export function unminedMessagesOf(conversationId: string) {
+	return db
+		.select({ one: sql`1` })
+		.from(messages)
+		.where(and(eq(messages.conversationId, conversationId), isUnminedMessage()))
 }
 
 /**
