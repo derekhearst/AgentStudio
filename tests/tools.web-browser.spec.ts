@@ -13,7 +13,7 @@
  *     browser a redirect, a subresource or a page script cannot reach one either
  *   - #38: every call gets its own browser context, closed afterwards; concurrent calls
  *     never see each other's page or cookies
- *   - #43: pdf_read's download is capped
+ *   - #43: pdf_read's download is capped at 50 MB, whether or not the server declares a length
  *   - web_fetch reads only a bounded slice of a page's text out of the browser, however big
  *     the page makes it and whatever its scripts do to stop that
  */
@@ -25,6 +25,7 @@ import {
 	createEgressProxy,
 	EGRESS_REFUSAL_HEADER,
 	EgressBlockedError,
+	EgressTooLargeError,
 	type EgressProxy,
 } from '../src/lib/tools/egress.server'
 import {
@@ -85,8 +86,18 @@ test.describe('web tools refuse private targets before sending anything', () => 
 		expect(fixture.hits('/secret')).toBe(0)
 	})
 
-	test('pdf_read caps downloads at 50 MB', () => {
+	test('pdf_read caps downloads at 50 MB, declared or not', async () => {
 		expect(PDF_MAX_BYTES).toBe(50 * 1024 * 1024)
+		const over = PDF_MAX_BYTES + 1
+		// A declared length over the cap is refused on the headers alone.
+		await expect(pdfRead(fixture.url(`/bytes?n=${over}&declare=1`), undefined, fixtureLookup)).rejects.toBeInstanceOf(
+			EgressTooLargeError,
+		)
+		// An undeclared body is cut off once it passes the cap.
+		await expect(pdfRead(fixture.url(`/bytes?n=${over}`), undefined, fixtureLookup)).rejects.toBeInstanceOf(EgressTooLargeError)
+		// Exactly the cap downloads, and fails only later, in pdftotext (missing here, or handed
+		// a file that is not a PDF) — so the cap is 50 MB, not something smaller.
+		await expect(pdfRead(fixture.url(`/bytes?n=${PDF_MAX_BYTES}`), undefined, fixtureLookup)).rejects.toThrow(/pdftotext/)
 	})
 
 	test('browser_screenshot requires a URL — there is no shared "current page" to capture', () => {

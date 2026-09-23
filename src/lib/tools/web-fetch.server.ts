@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
+import type { LookupFunction } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Page } from 'playwright'
@@ -82,6 +83,8 @@ const PDFTOTEXT_TIMEOUT_MS = 60_000
  * only bites on pathological files — and it keeps one of those from filling the heap.
  */
 const PDFTOTEXT_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+/** Only the start of pdftotext's stderr ever reaches an error message. */
+const PDFTOTEXT_MAX_STDERR_BYTES = 4 * 1024
 
 function runPdftotext(pdfPath: string): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
@@ -93,6 +96,7 @@ function runPdftotext(pdfPath: string): Promise<string> {
 		let capped = false
 		let timedOut = false
 		const err: Buffer[] = []
+		let errBytes = 0
 		const timer = setTimeout(() => {
 			timedOut = true
 			proc.kill('SIGKILL')
@@ -110,7 +114,11 @@ function runPdftotext(pdfPath: string): Promise<string> {
 			out.push(chunk)
 			outBytes += chunk.length
 		})
-		proc.stderr.on('data', (chunk: Buffer) => err.push(chunk))
+		proc.stderr.on('data', (chunk: Buffer) => {
+			if (errBytes >= PDFTOTEXT_MAX_STDERR_BYTES) return
+			err.push(chunk)
+			errBytes += chunk.length
+		})
 		proc.on('error', (e) => {
 			clearTimeout(timer)
 			if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -151,10 +159,14 @@ function runPdftotext(pdfPath: string): Promise<string> {
  * Returns the extracted text trimmed to maxChars at the nearest paragraph boundary. When
  * pdftotext is missing, returns a structured error with install instructions instead of
  * crashing the run.
+ *
+ * `lookup` is a test seam, as on `guardedDownload`: production callers leave it unset so every
+ * hop resolves through the real policy; a spec sets it to reach a fixture server on loopback.
  */
 export async function pdfRead(
 	rawSource: string,
 	maxChars = 100_000,
+	lookup?: LookupFunction,
 ): Promise<{
 	source: string
 	text: string
@@ -175,6 +187,7 @@ export async function pdfRead(
 				maxBytes: PDF_MAX_BYTES,
 				timeoutMs: PDF_DOWNLOAD_TIMEOUT_MS,
 				headers: { accept: 'application/pdf,*/*;q=0.8' },
+				lookup,
 			})
 			if (download.status < 200 || download.status >= 300) {
 				throw new Error(`failed to download PDF: HTTP ${download.status}`)

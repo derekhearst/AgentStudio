@@ -1,6 +1,6 @@
 /**
  * Shared fixtures for the egress-guard specs (`tools.egress-guard.spec.ts`,
- * `tools.browser-isolation.spec.ts`).
+ * `tools.web-browser.spec.ts`).
  *
  * The guard refuses loopback, which is exactly where a fixture server has to live. So the
  * specs that need to *reach* the fixture hand the guard `fixtureLookup`: it answers
@@ -72,6 +72,31 @@ export type Fixture = {
 	close(): Promise<void>
 }
 
+/**
+ * Send `bytes` bytes, 1 MB at a time and only as fast as the client reads, with or without a
+ * Content-Length. Stops early if the client hangs up — which is what a capped client does.
+ */
+async function sendBytes(res: http.ServerResponse, bytes: number, declare: boolean) {
+	res.writeHead(200, { 'content-type': 'application/pdf', ...(declare ? { 'content-length': String(bytes) } : {}) })
+	const chunk = Buffer.alloc(1024 * 1024, 'p')
+	for (let sent = 0; sent < bytes && !res.destroyed; ) {
+		const n = Math.min(chunk.length, bytes - sent)
+		sent += n
+		if (!res.write(n === chunk.length ? chunk : chunk.subarray(0, n))) {
+			await new Promise<void>((resolve) => {
+				const done = () => {
+					res.off('drain', done)
+					res.off('close', done)
+					resolve()
+				}
+				res.on('drain', done)
+				res.on('close', done)
+			})
+		}
+	}
+	if (!res.destroyed) res.end()
+}
+
 export async function startFixture(): Promise<Fixture> {
 	const counts = new Map<string, number>()
 	let port = 0
@@ -81,6 +106,12 @@ export async function startFixture(): Promise<Fixture> {
 		const redirect = (location: string) => {
 			res.writeHead(302, { location })
 			res.end()
+		}
+		// `/bytes?n=<count>[&declare=1]` — a body of exactly that size, for the size caps.
+		const bytesRoute = /^\/bytes\?n=(\d+)(&declare=1)?$/.exec(path)
+		if (bytesRoute) {
+			void sendBytes(res, Number(bytesRoute[1]), Boolean(bytesRoute[2]))
+			return
 		}
 		switch (path) {
 			case '/ok':
