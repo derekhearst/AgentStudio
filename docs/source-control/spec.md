@@ -281,6 +281,7 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
 - Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
+- The GitHub connect link can say where to land afterwards (`?return=`), but only a path on this site is accepted. A full URL, a `//host` shorthand or anything that normalises to one sends the user to `/projects` instead. The value is checked again when GitHub sends the user back, because it travels in a cookie the browser controls.
 
 ## Roles & Permissions
 
