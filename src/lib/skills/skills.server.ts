@@ -13,6 +13,8 @@ import {
 	shouldIncludeSystemSkill,
 } from './skills-system.server'
 import { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
+import { z } from 'zod'
+import { parseSkillPackage, parseSkillSource, serializeSkillSource } from './skill-source'
 
 // Re-export so external callers ($lib/skills/skills.server) keep working after the split.
 export { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
@@ -185,6 +187,67 @@ export async function upsertSkillFromSource(input: {
 
 	void refreshSkillEmbedding(skillId)
 	return { id: skillId, created, updated }
+}
+
+/** What a resource file must look like to be imported — the same limits the import command's input has. */
+export const skillResourceSchema = z.object({
+	name: z.string().trim().min(1).max(200),
+	description: z.string().trim().max(500).optional(),
+	content: z.string().min(1),
+})
+
+/**
+ * A skill as a SKILL.md package: the document and its resource files. The export dialog
+ * joins them into the one text it copies with `serializeSkillPackage`.
+ *
+ * Everything the import path reads back is carried — `category` included. It was left
+ * out, and an overwrite import writes `category: null` when the frontmatter has none, so
+ * exporting an identity or hook skill and importing it again dropped it out of the
+ * always-included set.
+ */
+export async function exportSkillPackage(id: string) {
+	const skill = await getSkillById(id)
+	if (!skill) return null
+	const skillMd = serializeSkillSource({
+		name: skill.name,
+		description: skill.description,
+		content: skill.content,
+		category: skill.category,
+		tags: skill.tags,
+		enabled: skill.enabled,
+	})
+	const resources = skill.files.map((f) => ({
+		name: f.name,
+		description: f.description ?? '',
+		content: f.content,
+	}))
+	return { name: skill.name, skillMd, resources }
+}
+
+/**
+ * Import pasted text: a plain SKILL.md, or a whole package with its resource files
+ * (`parseSkillPackage`). Resources passed explicitly win over any in the text. A plain
+ * SKILL.md with none leaves an existing skill's files as they are on overwrite.
+ */
+export async function importSkillPackage(input: {
+	source: string
+	mode: 'create' | 'overwrite'
+	resources?: Array<{ name: string; description?: string; content: string }>
+}) {
+	const pkg = parseSkillPackage(input.source)
+	const parsed = parseSkillSource(pkg.source)
+	const resources = input.resources ?? (pkg.resources.length > 0 ? z.array(skillResourceSchema).parse(pkg.resources) : undefined)
+	const result = await upsertSkillFromSource({
+		mode: input.mode,
+		name: parsed.frontmatter.name,
+		description: parsed.frontmatter.description,
+		content: parsed.body,
+		category: parsed.frontmatter.category,
+		tags: parsed.frontmatter.tags,
+		enabled: parsed.frontmatter.enabled,
+		resources,
+	})
+	return { id: result.id, name: parsed.frontmatter.name, created: result.created, updated: result.updated }
 }
 
 export async function getSkillById(id: string) {

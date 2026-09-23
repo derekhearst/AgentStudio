@@ -169,4 +169,123 @@ test.describe('skills/skill-source — serializeSkillSource', () => {
 		})
 		expect(second).toBe(first)
 	})
+
+	/*
+	 * #145 — the serializer escaped an embedded `"` as `\"`, and the parser only stripped
+	 * the outer quotes, so every export and re-import added a backslash in front of each one.
+	 */
+	test('quotes, backslashes and line breaks survive repeated export and import unchanged', async () => {
+		const { parseSkillSource, serializeSkillSource } = await import('../src/lib/skills/skill-source')
+		const descriptions = [
+			'Handles "quoted" input.',
+			'A Windows path: C:\\Users\\agent',
+			'Ends with a backslash \\',
+			'First line.\nSecond line.',
+			"It's got 'single' quotes: too",
+		]
+		for (const original of descriptions) {
+			let description = original
+			for (let cycle = 0; cycle < 3; cycle++) {
+				const md = serializeSkillSource({ name: 'tools/quotes', description, content: 'Body.', tags: ['a, b', 'say "hi"'] })
+				const parsed = parseSkillSource(md)
+				expect(parsed.frontmatter.description, `${JSON.stringify(original)}, cycle ${cycle}`).toBe(original)
+				expect(parsed.frontmatter.tags).toEqual(['a, b', 'say "hi"'])
+				description = parsed.frontmatter.description
+			}
+		}
+	})
+
+	test('a single-quoted value reads the way YAML reads it', async () => {
+		const { parseSkillSource } = await import('../src/lib/skills/skill-source')
+		const parsed = parseSkillSource(['---', 'name: x', "description: 'It''s here'", '---', 'body'].join('\n'))
+		expect(parsed.frontmatter.description).toBe("It's here")
+	})
+})
+
+test.describe('skills/skill-source — the package (SKILL.md plus resource files)', () => {
+	const resources = [
+		{ name: 'checklist.md', description: 'Release "steps"', content: '# Checklist\n\n---\n\n## resources/not-a-new-file\n\n- ship it' },
+		{ name: 'data.json', content: '{"a": 1}\n' },
+	]
+
+	test('resource files come back as files, not as part of the body', async () => {
+		const { parseSkillPackage, serializeSkillPackage, serializeSkillSource } = await import('../src/lib/skills/skill-source')
+		const skillMd = serializeSkillSource({ name: 'tools/pkg', description: 'Packaged.', content: '# Body\n\nInstructions.' })
+		const pkg = parseSkillPackage(serializeSkillPackage(skillMd, resources))
+
+		expect(pkg.resources).toEqual(resources)
+		// The old layout (`---` then `## resources/<name>`) was read back as body text.
+		const { parseSkillSource } = await import('../src/lib/skills/skill-source')
+		expect(parseSkillSource(pkg.source).body).toBe('# Body\n\nInstructions.')
+	})
+
+	test('a plain SKILL.md is its own package, with no resources', async () => {
+		const { parseSkillPackage } = await import('../src/lib/skills/skill-source')
+		const text = ['---', 'name: x', 'description: y', '---', '', 'body <!-- a comment -->'].join('\n')
+		expect(parseSkillPackage(text)).toEqual({ source: text, resources: [] })
+	})
+
+	test('a section that is never closed, or stray text between sections, is refused rather than dropped', async () => {
+		const { parseSkillPackage } = await import('../src/lib/skills/skill-source')
+		const head = ['---', 'name: x', 'description: y', '---', 'body', '']
+		expect(() => parseSkillPackage([...head, '<!-- skill-resource {"name":"a.md"} -->', 'text'].join('\n'))).toThrow(/a\.md/)
+		expect(() =>
+			parseSkillPackage(
+				[...head, '<!-- skill-resource {"name":"a.md"} -->', 'text', '<!-- /skill-resource -->', 'orphan line'].join('\n'),
+			),
+		).toThrow(/orphan line/)
+		expect(() => parseSkillPackage([...head, '<!-- skill-resource {"nope":1} -->', '<!-- /skill-resource -->'].join('\n'))).toThrow(
+			/no name/,
+		)
+	})
+})
+
+test.describe('skills/import-export — a skill survives export and re-import', () => {
+	/*
+	 * The whole path the export dialog and the /skills Import dialog take, against the
+	 * database. Before: the category was not exported and an overwrite import wrote NULL,
+	 * dropping an identity skill out of the always-included set; the resource files were
+	 * folded into the body; and the description gained a backslash per quote.
+	 */
+	test('category, description, body and resource files are unchanged after an overwrite import', async () => {
+		const { cleanupPrefixedRecords, getSql, seedSkill, uniquePrefix } = await import('./helpers')
+		const { exportSkillPackage, importSkillPackage } = await import('../src/lib/skills/skills.server')
+		const { serializeSkillPackage } = await import('../src/lib/skills/skill-source')
+		const prefix = uniquePrefix('skill-roundtrip')
+		await cleanupPrefixedRecords(prefix)
+		const sql = getSql()
+		try {
+			const skill = await seedSkill(prefix, {
+				description: `${prefix} handles "quoted" input`,
+				content: '# Identity\n\nYou are careful.',
+				tags: ['identity', 'e2e'],
+				files: [
+					{ name: 'voice.md', description: 'Tone "rules"', content: 'Be brief.\n\n---\n\nNo filler.' },
+					{ name: 'examples.md', content: '## resources/fake\n\nExample text.' },
+				],
+			})
+			await sql`update skills set category = 'identity' where id = ${skill.id}`
+			const read = async () => {
+				const [row] = await sql<{ name: string; description: string; content: string; category: string | null; tags: string[] }[]>`
+					select name, description, content, category, tags from skills where id = ${skill.id}
+				`
+				const files = await sql<{ name: string; description: string; content: string }[]>`
+					select name, description, content from skill_files where skill_id = ${skill.id} order by sort_order
+				`
+				return { ...row, files: [...files] }
+			}
+			const before = await read()
+
+			for (let cycle = 0; cycle < 2; cycle++) {
+				const exported = await exportSkillPackage(skill.id)
+				expect(exported).not.toBeNull()
+				const pasted = serializeSkillPackage(exported!.skillMd, exported!.resources)
+				const result = await importSkillPackage({ source: pasted, mode: 'overwrite' })
+				expect(result).toMatchObject({ id: skill.id, updated: true })
+				expect(await read(), `after cycle ${cycle}`).toEqual(before)
+			}
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
 })
