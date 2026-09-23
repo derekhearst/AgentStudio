@@ -5,15 +5,17 @@ import {
 	createSkill,
 	deleteSkill,
 	deleteSkillFile,
+	exportSkillPackage,
 	getSkillById,
+	importSkillPackage,
 	listSkills,
+	skillResourceSchema,
 	updateSkill,
 	updateSkillFile,
-	upsertSkillFromSource,
 } from '$lib/skills/skills.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { withUserInputErrors } from '$lib/server/user-input-error'
 import { auditSkillDeleted } from '$lib/governance'
-import { parseSkillSource, serializeSkillSource } from '$lib/skills/skill-source'
 
 /* ── Queries ────────────────────────────────────────────────── */
 
@@ -146,51 +148,21 @@ export const deleteSkillFileCommand = command(deleteSkillFileSchema, async ({ fi
 /* ── SKILL.md import / export ───────────────────────────────── */
 
 const importSkillSchema = z.object({
+	/** A SKILL.md, or the export dialog's whole package with its resource files. */
 	source: z.string().min(1, 'SKILL.md text cannot be empty'),
 	mode: z.enum(['create', 'overwrite']).default('create'),
-	resources: z
-		.array(
-			z.object({
-				name: z.string().trim().min(1).max(200),
-				description: z.string().trim().max(500).optional(),
-				content: z.string().min(1),
-			}),
-		)
-		.optional(),
+	resources: z.array(skillResourceSchema).optional(),
 })
 
 export const importSkillCommand = command(importSkillSchema, async ({ source, mode, resources }) => {
 	requireAuthenticatedRequestUser()
-	const parsed = parseSkillSource(source)
-	const result = await upsertSkillFromSource({
-		mode,
-		name: parsed.frontmatter.name,
-		description: parsed.frontmatter.description,
-		content: parsed.body,
-		category: parsed.frontmatter.category,
-		tags: parsed.frontmatter.tags,
-		enabled: parsed.frontmatter.enabled,
-		resources,
-	})
-	return { id: result.id, name: parsed.frontmatter.name, created: result.created, updated: result.updated }
+	// A bad package or a name clash is a 400 with the reason, not a 500 reading "Internal Error".
+	return withUserInputErrors(() => importSkillPackage({ source, mode, resources }))
 })
 
 export const exportSkillCommand = command(skillIdSchema, async ({ id }) => {
 	requireAuthenticatedRequestUser()
-	const skill = await getSkillById(id)
-	if (!skill) throw new Error('Skill not found')
-	const skillMd = serializeSkillSource({
-		name: skill.name,
-		description: skill.description,
-		content: skill.content,
-		tags: skill.tags,
-		enabled: skill.enabled,
-	})
-	const resources = skill.files.map((f) => ({
-		name: f.name,
-		description: f.description ?? '',
-		content: f.content,
-	}))
-	return { name: skill.name, skillMd, resources }
+	const pkg = await exportSkillPackage(id)
+	if (!pkg) throw new Error('Skill not found')
+	return pkg
 })
-

@@ -6,23 +6,38 @@
 	import { getAgent, updateAgentCommand } from '$lib/agents'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { fetchFresh } from '$lib/ui/fresh-query'
+	import { isNotFoundError, remoteErrorMessage } from '$lib/ui/remote-error'
 	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
 	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
 	import AgentConfigEditor from '$lib/agents/AgentConfigEditor.svelte'
+	import { setAgentPausedFromPage } from '$lib/agents/agent-pause'
+	import {
+		AGENT_PAUSED_HELP,
+		agentPauseAction,
+		agentStatusHint,
+		agentStatusLabel,
+		isAgentPaused,
+	} from '$lib/agents/agent-status'
 	import {
 		agentColor,
 		agentInitials,
 		describeSchedule,
 		modelShortName,
 		relativeTime,
+		streamPreview,
+		type AgentStreamEntry,
 	} from '$lib/agents/agent-format'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
-	type StreamEntry = { conversationId: string; agentId: string; delta: string }
+	// Was `{ delta: string }`, which the monitor never sends: the live banner below threw
+	// on `undefined.length` as soon as this agent streamed. See `AgentStreamEntry`.
+	type StreamEntry = AgentStreamEntry
 
 	const agentId = $derived(page.params.id ?? '')
 	let data = $state<AgentData | null>(null)
 	let loading = $state(true)
+	let loadError = $state<string | null>(null)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 
 	let eventSource: EventSource | null = null
@@ -38,6 +53,14 @@
 
 	const liveEntry = $derived(liveStream())
 
+	// #66 — one status, from the shared rule: Available or Paused.
+	const paused = $derived(isAgentPaused(data?.agent.status))
+	const statusLabel = $derived(agentStatusLabel(data?.agent.status))
+	const statusHint = $derived(data ? agentStatusHint(data.agent) : '')
+	const pauseAction = $derived(data ? agentPauseAction(data.agent) : null)
+	let statusBusy = $state(false)
+	let statusError = $state<string | null>(null)
+
 	const maxToolCount = $derived(
 		data?.toolUsage.length ? Math.max(...data.toolUsage.map((t) => t.count)) : 1,
 	)
@@ -52,11 +75,25 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	/*
+	 * No `try` here used to mean any rejection spun forever — including the ordinary one:
+	 * `/agents/not-a-uuid` fails the query's id schema with a 400. That is "not found" to a
+	 * reader; anything else is shown as the error it is. A failure leaves any agent already
+	 * on screen where it is, under the error.
+	 */
 	async function loadData() {
 		loading = true
-		const result = await getAgent(agentId)
-		data = result ?? null
-		loading = false
+		loadError = null
+		try {
+			// Fresh, so coming back after saving the config below shows what was saved.
+			const result = await fetchFresh(getAgent(agentId))
+			data = result ?? null
+		} catch (err) {
+			if (isNotFoundError(err)) data = null
+			else loadError = remoteErrorMessage(err, 'Could not load this agent.')
+		} finally {
+			loading = false
+		}
 	}
 
 	async function handleConfigSave(input: {
@@ -77,6 +114,20 @@
 		return updated ?? null
 	}
 
+	async function togglePaused() {
+		if (!data || !pauseAction) return
+		statusBusy = true
+		statusError = null
+		try {
+			const updated = await setAgentPausedFromPage(data.agent.id, pauseAction === 'pause')
+			if (data && updated) data = { ...data, agent: updated }
+		} catch (err) {
+			statusError = remoteErrorMessage(err, pauseAction === 'pause' ? 'Could not pause this agent.' : 'Could not resume this agent.')
+		} finally {
+			statusBusy = false
+		}
+	}
+
 	function connectMonitor() {
 		eventSource?.close()
 		eventSource = new EventSource('/api/agents/monitor')
@@ -93,6 +144,23 @@
 	}
 </script>
 
+<!--
+	Passed only when there is a control to show: PageHeader gives `actions` its own row on a
+	phone, and a built-in's would otherwise be an empty bar.
+-->
+{#snippet statusActions()}
+	<button
+		type="button"
+		class="btn btn-xs {pauseAction === 'resume' ? 'btn-primary' : 'btn-outline'}"
+		disabled={statusBusy}
+		title={pauseAction === 'resume' ? 'Make this agent available again' : AGENT_PAUSED_HELP}
+		onclick={() => void togglePaused()}
+	>
+		{#if statusBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+		{pauseAction === 'resume' ? 'Resume' : 'Pause'}
+	</button>
+{/snippet}
+
 <div class="flex h-full min-h-0 flex-col">
 	<PageHeader
 		title={data?.agent.name ?? 'Agent'}
@@ -100,10 +168,11 @@
 		backHref="/agents"
 		subtitle={data ? `${data.agent.role}` : ''}
 		live={!!liveEntry}
+		actions={pauseAction ? statusActions : undefined}
 	>
 		{#snippet chips()}
 			{#if data}
-				<span class="console-chip {data.agent.status === 'active' ? 'is-run' : ''}">{data.agent.status}</span>
+				<span class="console-chip {paused ? 'is-warn' : ''}" title={statusHint}>{statusLabel}</span>
 				{#if liveEntry}
 					<span class="console-chip is-run">
 						<span class="pulse-dot"></span>
@@ -116,13 +185,20 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 
-{#if loading}
+{#if loadError && data}
+	<div role="alert" class="alert alert-error mb-4 py-2 text-sm">{loadError}</div>
+{/if}
+{#if loading && !data}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
 	</div>
 {:else if !data}
 	<div class="py-20 text-center">
-		<p class="text-sm text-base-content/50">Agent not found.</p>
+		{#if loadError}
+			<p role="alert" class="text-sm text-error">{loadError}</p>
+		{:else}
+			<p class="text-sm text-base-content/50">Agent not found.</p>
+		{/if}
 		<a class="btn btn-ghost btn-sm mt-4" href="/agents">← Back to agents</a>
 	</div>
 {:else}
@@ -130,6 +206,9 @@
 	{@const live = liveEntry}
 
 	<section class="space-y-5">
+		{#if statusError}
+			<div role="alert" class="alert alert-error py-2 text-sm">{statusError}</div>
+		{/if}
 
 		<!-- ── Hero card ────────────────────────────────────────────────── -->
 		<div class="relative overflow-hidden rounded-2xl border border-base-300 bg-base-100">
@@ -156,7 +235,8 @@
 					{:else}
 						<span
 							class="absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-base-100
-								{data.agent.status === 'active' ? 'bg-success' : data.agent.status === 'paused' ? 'bg-warning' : 'bg-base-content/20'}"
+								{paused ? 'bg-warning' : 'bg-success'}"
+							title={statusLabel}
 						></span>
 					{/if}
 				</div>
@@ -165,9 +245,14 @@
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-start gap-2">
 						<h2 class="text-2xl font-bold leading-tight">{data.agent.name}</h2>
-						<span
-							class="badge badge-sm mt-1 {data.agent.status === 'active' ? 'badge-success' : data.agent.status === 'paused' ? 'badge-warning' : 'badge-ghost'}"
-						>{data.agent.status}</span>
+						<span class="badge badge-sm mt-1 {paused ? 'badge-warning' : 'badge-success'}" title={statusHint}
+							>{statusLabel}</span
+						>
+						{#if data.agent.builtinKey}
+							<span class="badge badge-sm badge-ghost mt-1">Built-in</span>
+						{:else if data.agent.kind === 'evaluator'}
+							<span class="badge badge-sm badge-ghost mt-1">Evaluator</span>
+						{/if}
 						{#if live}
 							<span class="badge badge-sm badge-primary mt-1 gap-1">
 								<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current"></span>
@@ -177,6 +262,9 @@
 					</div>
 					<p class="mt-1 text-sm text-base-content/65">{data.agent.role}</p>
 					<p class="mt-0.5 font-mono text-xs text-base-content/40">{modelShortName(data.agent.model)}</p>
+					{#if paused}
+						<p class="mt-2 text-xs text-warning" role="note">{AGENT_PAUSED_HELP}</p>
+					{/if}
 				</div>
 
 				<!-- Right: last active -->
@@ -198,7 +286,7 @@
 					<a href="/chat/{live.conversationId}" class="btn btn-xs btn-primary">Watch live →</a>
 				</div>
 				<p class="line-clamp-2 break-words text-xs leading-relaxed text-base-content/70">
-					{live.delta.length > 500 ? '…' + live.delta.slice(-500) : live.delta}
+					{streamPreview(live.lastDelta, 500)}
 				</p>
 				<span class="cursor-blink mt-1 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 			</div>

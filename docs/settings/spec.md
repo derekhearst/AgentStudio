@@ -16,6 +16,8 @@ One row per user. Created with defaults when the user first accesses settings.
 | `userId`             | uuid        | FK → `users` (nullable means global/unowned)      |
 | `defaultModel`       | text        | OpenRouter model ID for chat/agents               |
 | `transcriptionModel` | text        | OpenRouter model ID for audio transcription       |
+| `ttsModel`           | text        | OpenRouter speech model for read-aloud (default `hexgrad/kokoro-82m`) |
+| `ttsVoice`           | text        | Voice for that model (default `af_heart`); empty = the model's default voice |
 | `notificationPrefs`  | jsonb       | See notification prefs shape below                |
 | `budgetConfig`       | jsonb       | Daily / monthly spend limits                      |
 | `contextConfig`      | jsonb       | Compaction thresholds and model                   |
@@ -32,20 +34,25 @@ One row per user. Created with defaults when the user first accesses settings.
 
 ```ts
 {
-	taskCompleted: boolean // notify when task finishes
-	needsInput: boolean // notify when agent needs answer
-	agentErrors: boolean // notify on agent hard errors
+	taskCompleted: boolean // notify when a research report is finished
+	needsInput: boolean // notify when a chat run has waited a minute for an approval or an answer
+	agentErrors: boolean // notify when an automation fails for good, or a check fails on an agent's pull request
 }
 ```
+
+Every notification is sent through one place that reads these switches, so a switch that is off stops that kind of notification, in-app and push. Monitor pushes and budget alerts are not covered by a switch: the user turns those off where they set them up. See [../notifications/spec.md](../notifications/spec.md).
 
 **`budgetConfig`**
 
 ```ts
 {
-	dailyLimit: number | null // max USD spend per day (null = unlimited)
+	dailyLimit: number | null // max USD spend per day (null or 0 = unlimited)
 	monthlyLimit: number | null // max USD spend per month
+	limitIds?: { day?: string | null; month?: string | null } // the budget_limits rows these two became (set by the server)
 }
 ```
+
+Each limit is enforced as a budget limit (see [../cost/spec.md](../cost/spec.md)): a global limit for its period that blocks new chat and automation runs once spend reaches it, and warns at 80%. The server keeps those limits in step with these fields whenever settings are saved or reset, and again before every budget check. Clearing a limit switches its budget limit off rather than deleting it, so its alert history stays. Before 2026-09-23 these two fields only drew the progress bars in /review; nothing enforced them.
 
 **`contextConfig`**
 
@@ -84,19 +91,22 @@ The Tool Approval panel lists every AgentStudio tool a chat can call, and each o
 
 - **`getSettings(userId)`** — returns the user's settings, creating defaults if the row does not exist. All callers use this — never query `appSettings` directly.
 - **`updateSettings(userId, patch)`** — accepts a partial patch and merges it. JSONB fields are merged at the top level (not deep-merged). Callers must pass the full JSONB object for any nested field they want to change.
+- **Reset** puts every setting back to its default — the default model, the transcription model, the read-aloud model and voice, notifications, budget, context, tools and memory — in one step. Settings added later are included automatically, because Reset works from the same list of defaults that a new user starts with. Reset clears both budget limits and switches off the budget limits they were enforced through, so nothing goes on blocking at the old amount.
+- After **Save** or **Reset**, other pages read the new values straight away. For example, a chat started from the home page uses the default model you just saved, not the one from before.
 - Settings are consumed by multiple domains at runtime: `contextConfig` by context assembly, `budgetConfig` by cost enforcement, `memoryConfig` by memory recall, `toolConfig` by tool execution, `notificationPrefs` by notification dispatch.
 
 ## Settings UI
 
 The `/settings` route provides a UI for all editable settings grouped by category:
 
-- **Models** — default model, transcription model
+- **Models** — default model, transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
-- **Budget** — daily/monthly limits
+- **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%
 - **Tools** — approval-required list: one tickable entry per tool (the three always-ask tools locked on), plus a switch that requires approval for every tool
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
+- **Job queue** (`/settings/jobs`) and **Hook invocations** (`/settings/hooks`) — admin views of background work. **Refresh** fetches the latest rows from the server, and if they cannot be loaded the page shows the reason instead of a spinner.
 - **System** (read-only) — a checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway, and each integration (OpenRouter, web search, GitHub, webhooks, push, external cron). Each row says whether it is in place and names the environment variable that controls it, never its value. These are deploy-time settings, not stored in `appSettings` — first run collects only the owner account (see [../auth/auth.md](../auth/auth.md)).
 
 

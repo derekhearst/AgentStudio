@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
+import { isAgentPaused } from '$lib/agents/agent-status'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
@@ -110,29 +111,25 @@ async function fireReviewItem(monitor: MonitorRow, observation: MonitorObservati
 // ─────────── push ───────────
 
 async function firePush(monitor: MonitorRow, observation: MonitorObservation): Promise<MonitorFireResult> {
-	const { createNotificationRecord, sendPushToAll } = await import('$lib/notifications/notifications.server')
+	const { notifyUser } = await import('$lib/notifications/notify.server')
 	const payload = {
 		title: monitor.actionConfig.title ?? `Monitor: ${monitor.name}`,
 		body: (monitor.actionConfig.body ?? observation.note ?? observation.value).slice(0, 400),
 		url: monitor.actionConfig.url ?? '/monitors',
 		tag: `monitor-${monitor.id}`,
 	}
-	// The in-app row is the durable half and always written first. Web push is best-effort:
-	// an unconfigured VAPID key throws, and that must not turn a real observation into a
-	// failed action.
-	const record = await createNotificationRecord(payload, monitor.userId)
-	let delivered = 0
-	let pushError: string | null = null
-	try {
-		const result = await sendPushToAll(payload, monitor.userId)
-		delivered = result.delivered
-	} catch (err) {
-		pushError = err instanceof Error ? err.message : String(err)
-	}
+	// No category: sending a push *is* this monitor's action, which the user chose when they
+	// set it up, so the Settings toggles do not mute it. The in-app row is the durable half;
+	// web push is best-effort, and an unconfigured VAPID key must not turn a real observation
+	// into a failed action.
+	const result = await notifyUser({ userId: monitor.userId, category: null, payload })
+	const notificationId = result.sent ? result.notificationId : null
+	const delivered = result.sent ? result.delivered : 0
+	const pushError = result.sent ? result.pushError : undefined
 	return {
 		kind: 'push',
-		ok: true,
-		detail: { notificationId: record?.id ?? null, delivered, ...(pushError ? { pushError } : {}) },
+		ok: notificationId !== null,
+		detail: { notificationId, delivered, ...(pushError ? { pushError } : {}) },
 	}
 }
 
@@ -207,6 +204,11 @@ async function fireConversation(
 
 	const [agent] = await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
 	if (!agent) throw new Error(`agent ${agentId} not found`)
+	// #66 — a paused agent does no unattended work. Thrown rather than skipped quietly, so
+	// what the monitor saw still reaches a human: a failed action falls back to a review item.
+	if (isAgentPaused(agent.status)) {
+		throw new Error(`agent "${agent.name}" is paused — resume it on the Agents page to let this monitor start a conversation with it`)
+	}
 
 	const { getOrCreateSettings } = await import('$lib/settings/settings.server')
 	const settings = await getOrCreateSettings(monitor.userId)

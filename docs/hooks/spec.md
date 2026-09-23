@@ -39,6 +39,8 @@ Audit log of every hook call, used for telemetry and debugging.
 
 ### Hook events
 
+Not every event below is raised yet. Which ones fire today, on the chat path and on the automation path, is in [hooks.md](hooks.md#where-hooks-run). Chats raise theirs from the frames the chat stream already sends (`src/lib/hooks/chat-run-hooks.server.ts`); the old runtime loop raises its own.
+
 | Event                     | Payload fields                                                 | When                                     |
 | ------------------------- | -------------------------------------------------------------- | ---------------------------------------- |
 | `before_run`              | `runId`, `definition`, `environment`, `conversationId`         | Before the loop starts                   |
@@ -91,7 +93,7 @@ Each agent can add custom hooks on top of the built-ins via `config.hooks`. Orde
 
 ### Hook management UI
 
-`/settings/hooks` — global hook registry, enable/disable built-ins, view recent invocations.
+`/settings/hooks` — global hook registry, enable/disable built-ins, view recent invocations. **Refresh** fetches invocations recorded since the page opened.
 `/agents/[id]/hooks` — per-agent hook overrides, custom hook slugs, invocation history.
 
 ## Behavior Contracts

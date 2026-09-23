@@ -15,7 +15,7 @@ import { authenticateContext, getSql, uniquePrefix } from './helpers'
  */
 
 async function seedReviewItem(input: {
-	type: 'pull_request_ready' | 'automation_summary' | 'policy_override_request'
+	type: 'pull_request_ready' | 'pull_request_checks_failed' | 'automation_summary' | 'policy_override_request'
 	severity: 'info' | 'warning' | 'critical'
 	summary: string
 	payload: Record<string, unknown>
@@ -84,6 +84,40 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 		}
 	})
 
+	test('an automation_summary opens to its summary rendered as sanitized markdown', async ({ page }) => {
+		// #38 — the weekly usage digest lands here as markdown. It used to show only as a JSON
+		// string full of `\n` escapes. A model-written summary is untrusted, so the renderer
+		// is the chat's sanitizing one: markup in the summary must not become live HTML.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-auto-markdown')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'automation_summary',
+				severity: 'info',
+				summary: `${prefix} usage digest`,
+				payload: {
+					kind: 'maintenance_summary',
+					mode: 'maintenance',
+					summary: `## ${prefix} heading\n\n- **Runs:** 12\n\n<img src=x onerror="window.__pwned = 1">`,
+				},
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+
+			await page.getByText(`${prefix} usage digest`).click({ timeout: 30_000 })
+			const rendered = page.getByTestId('inbox-automation-summary')
+			await expect(rendered.getByRole('heading', { name: `${prefix} heading` })).toBeVisible()
+			await expect(rendered.locator('strong')).toHaveText('Runs:')
+			await expect(rendered.locator('img')).toHaveCount(0)
+			expect(await page.evaluate(() => (window as { __pwned?: number }).__pwned)).toBeUndefined()
+		} finally {
+			await clearItems(prefix)
+		}
+	})
+
 	test('a policy_override_request item appears with warning severity', async ({ page }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('review-policy')
@@ -123,5 +157,95 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 		expect(allOptions).toContain('Pull request ready')
 		expect(allOptions).toContain('Automation summary')
 		expect(allOptions).toContain('Policy override request')
+	})
+
+	test('filtering by "PR checks failed" shows the CI failures and nothing else', async ({ page }) => {
+		// The filter used to fail validation, leaving the previous filter's items on screen
+		// under the "PR checks failed" label.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-ci-filter')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'warning',
+				summary: `${prefix} CI failed on #7 — build`,
+				payload: { checkName: 'build', prNumber: 7 },
+			})
+			await seedReviewItem({
+				type: 'automation_summary',
+				severity: 'info',
+				summary: `${prefix} nightly summary`,
+				payload: { kind: 'maintenance_summary' },
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+			await expect(page.locator('body')).toContainText(`${prefix} nightly summary`, { timeout: 30_000 })
+
+			// The inbox's type filter — the logs panel above it has selects of its own.
+			const typeFilter = page.locator('select', { has: page.locator('option[value="pull_request_checks_failed"]') })
+			await typeFilter.selectOption('pull_request_checks_failed')
+
+			await expect(page.locator('body')).not.toContainText(`${prefix} nightly summary`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #7`)
+			await expect(page.getByTestId('inbox-error')).toHaveCount(0)
+		} finally {
+			await clearItems(prefix)
+		}
+	})
+
+	test('under "Open queue" the type and severity filters still narrow the list', async ({ page }) => {
+		// "Open queue" read only the limit, so every type and severity filter listed the whole
+		// queue under its own label. The queue sorts by severity first, so the items that must
+		// show unfiltered are critical: the newest criticals head it however full it is.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-open-queue-filter')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'warning',
+				summary: `${prefix} CI failed on #9 — build`,
+				payload: { checkName: 'build', prNumber: 9 },
+			})
+			await seedReviewItem({
+				type: 'policy_override_request',
+				severity: 'critical',
+				summary: `${prefix} override request`,
+				payload: { reason: 'spec' },
+			})
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'critical',
+				summary: `${prefix} CI failed on #8 — lint`,
+				payload: { checkName: 'lint', prNumber: 8 },
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+			await expect(page.locator('body')).toContainText(`${prefix} override request`, { timeout: 30_000 })
+
+			const statusFilter = page.locator('select', { has: page.locator('option[value="in_progress"]') })
+			await statusFilter.selectOption({ label: 'Open queue' })
+			await expect(page.locator('body')).toContainText(`${prefix} override request`)
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+
+			const typeFilter = page.locator('select', { has: page.locator('option[value="pull_request_checks_failed"]') })
+			await typeFilter.selectOption('pull_request_checks_failed')
+			await expect(page.locator('body')).not.toContainText(`${prefix} override request`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #9`)
+
+			const severityFilter = page.locator('select', { has: page.locator('option[value="critical"]') })
+			await severityFilter.selectOption('critical')
+			await expect(page.locator('body')).not.toContainText(`${prefix} CI failed on #9`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+			await expect(page.getByTestId('inbox-error')).toHaveCount(0)
+		} finally {
+			await clearItems(prefix)
+		}
 	})
 })

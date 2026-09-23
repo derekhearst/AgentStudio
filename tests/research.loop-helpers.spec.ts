@@ -211,6 +211,19 @@ test.describe('research/loop-helpers — pickUrlsToFetch', () => {
 		expect(pickUrlsToFetch(hits, 2).length).toBe(2)
 		expect(pickUrlsToFetch(hits, 5).length).toBe(5)
 	})
+
+	test('skips URLs the run already fetched and fills the limit from the rest', async () => {
+		// Sub-questions overlap, so their searches return many of the same pages. Each one
+		// used to be fetched and stored again, and the report read the same source twice.
+		const { pickUrlsToFetch } = await import('../src/lib/research/research-loop-helpers')
+		const hits = [
+			{ url: 'https://nasa.gov/tides', rank: 0 },
+			{ url: 'https://noaa.gov/tides', rank: 1 },
+			{ url: 'https://example.com/tides', rank: 2 },
+		]
+		const picked = pickUrlsToFetch(hits, 2, new Set(['https://nasa.gov/tides']))
+		expect(picked.map((p) => p.url)).toEqual(['https://noaa.gov/tides', 'https://example.com/tides'])
+	})
 })
 
 test.describe('research/loop-helpers — buildSourcesPromptBlock', () => {

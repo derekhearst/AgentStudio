@@ -179,7 +179,8 @@ async function openFailureReviewItem(args: {
 
 /**
  * In-app notification row + web push when VAPID is configured. Mirrors the research
- * completion notification so failures land in the same place users already look.
+ * completion notification so failures land in the same place users already look, and is
+ * switched off with "Agent errors" in Settings → Notifications.
  */
 async function fireFailureNotification(args: {
 	automation: Pick<AutomationRow, 'id' | 'userId' | 'description'>
@@ -199,18 +200,10 @@ async function fireFailureNotification(args: {
 	}
 
 	try {
-		const { createNotificationRecord } = await import('$lib/notifications/notifications.server')
-		await createNotificationRecord(payload, args.automation.userId)
+		const { notifyUser } = await import('$lib/notifications/notify.server')
+		await notifyUser({ userId: args.automation.userId, category: 'agentErrors', payload })
 	} catch (err) {
-		logger.warn('[automations] failure notification record failed', { err })
-	}
-
-	try {
-		const { sendPushToAll } = await import('$lib/notifications/notifications.server')
-		await sendPushToAll(payload, args.automation.userId)
-	} catch {
-		// No VAPID keys in local/dev, or every subscription is stale. The in-app row is
-		// already written, which is the part we actually rely on.
+		logger.warn('[automations] failure notification failed', { err })
 	}
 }
 

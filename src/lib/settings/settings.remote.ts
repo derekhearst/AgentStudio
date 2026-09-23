@@ -4,10 +4,14 @@ import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/setting
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
 import { getSystemReadiness as readSystemReadiness } from '$lib/settings/readiness.server'
+import { SPEECH_MODEL_ID_PATTERN, SPEECH_VOICE_PATTERN } from '$lib/speech/speech'
 
 const settingsUpdateSchema = z.object({
 	defaultModel: z.string().trim().min(1).max(120).optional(),
 	transcriptionModel: z.string().trim().min(1).max(120).optional(),
+	ttsModel: z.string().trim().max(120).regex(SPEECH_MODEL_ID_PATTERN, 'Speech model must be an OpenRouter model id').optional(),
+	// Empty is allowed: the speech model's own default voice.
+	ttsVoice: z.string().trim().regex(SPEECH_VOICE_PATTERN, 'A voice name is up to 80 letters, digits, spaces and . _ : -').optional(),
 	theme: z.enum(['AgentStudio-night']).optional(),
 	notificationPrefs: z
 		.object({

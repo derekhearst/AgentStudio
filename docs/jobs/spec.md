@@ -124,6 +124,7 @@ A caller that needs at-most-once-ever semantics — one run per automation slot,
 - Deduplication is best-effort at enqueue time. If two workers try to lease the same job simultaneously, the database lease constraint prevents double-execution.
 - A job's `payload` is immutable after creation. Retry attempts use the same payload.
 - `canceled` jobs are soft-stopped: if a worker is already executing the job, it will finish the current execution unit but not commit a result.
+- `canceled` is final even for a job that was running when it was canceled. When its handler winds down — returning, or throwing at a cancel checkpoint — the job is neither marked completed nor failed, and it is never put back for a retry: heartbeat, complete and fail only touch a job that is still `leased` or `running`, which also keeps a late report from a worker that lost its lease from undoing a retirement. A handler's cancel checkpoint (`checkCancellation`) throws a `JobCanceledError` only for a job that was canceled (or deleted), so the handler can tell "the user canceled" from any other error; a job the claim path took back after the worker's lease lapsed gets a plain error instead. Before 2026-09-23 a canceled job whose handler threw went to `retry_wait` and ran again from the start.
 
 ## Roles & Permissions
 

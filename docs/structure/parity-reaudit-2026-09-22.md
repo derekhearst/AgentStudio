@@ -258,7 +258,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
-| #27 | Wire up or delete the TTS endpoint | **delete** | confirmed dead: no UI reference, and the setting the issue mentions does not exist |
+| #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
 | #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
 | #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules) and the exports left without a caller (the tiktoken estimator and the `js-tiktoken` dependency, the settings prompt preview query, the agent tool-definition filter, the OpenRouter `plugins` option, the image lookups the images remote module left behind); the old loop stays while automations, monitors and CI fix runs call it |
 
@@ -511,6 +511,17 @@ header strip, then decide whether anyone wants the prose digest. The strip is ~a
 on screen without waiting; the digest is an agent run that costs money every week to tell
 you something you could have glanced at.
 
+**Status (2026-09-23).** Step 1 shipped in e0c6234. The strip shipped on `/activity`
+(`src/lib/costs/usage-digest*.ts`): runs, tokens first with metered dollars, automations,
+most-used tools, the review inbox, budget headroom read from the enforced `budget_limits`,
+and anomaly flags with fixed floors. The digest was built as the cheap version rather than
+the agent run: the same numbers rendered to markdown by code, delivered through the existing
+maintenance output routing, costing nothing, and opt-in from the strip — nothing posts on
+deploy. A written narrative was not built. Still open: tool calls from the older runtime
+loop (automations, monitors, PR fix) write no ledger rows. The Settings daily/monthly
+budget figures, display-only when the strip shipped, became enforced budget limits the same
+day, so once set they show as headroom instead of "No limits set".
+
 ### #14 — the right sidebar
 
 Half-resolved already: #29 made `Preview` the default tab
@@ -539,6 +550,14 @@ The reason to delete rather than finish: the only case TTS earns its keep is han
 listening, and the reply is already on screen. If that case ever turns up, it comes back as a
 play button, and it comes back in a day.
 
+**Landed** (finished rather than deleted, by the owner's decision): a speaker button on each
+reply, an opt-in per-device auto-read for the hands-free case, and `ttsModel` / `ttsVoice`
+settings picked from OpenRouter's speech catalogue. The hard-coded `openai/gpt-4o-mini-tts`
+turned out not to exist on OpenRouter at all, so the endpoint could never have worked; the
+default is now `hexgrad/kokoro-82m`. `/api/tts` is JSON-only with capped, validated input,
+checks budget limits, and records catalogue-priced spend under `tts`. See
+[`docs/speech/speech.md`](../speech/speech.md).
+
 ### #9 — gateway
 
 No change to the issue, but worth stating the economics plainly before anyone spends a week
@@ -558,8 +577,8 @@ unless one of those is the actual goal.
    `TodoWrite` output onto an optional `details` field on the tool block, and the chat
    renders a diff, a terminal and a checklist from it. What is left of those three issues is
    placement rather than data — the pinned todo list above the composer (#21), live output
-   while a command runs (#26, which is the background path in #35). The ledger gap is
-   untouched and still wants the same field.
+   while a command runs (#26, which is the background path in #35). The ledger gap was
+   closed off the same field (e0c6234; see the "Fixed" note under the ledger finding).
 2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
    of #35, and real context accounting.
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool
@@ -568,7 +587,7 @@ unless one of those is the actual goal.
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
 6. **#17**, HTTP transport first.
-7. The cheap independents whenever: **#27 delete**, **#4**, **#18**, **#14**.
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or

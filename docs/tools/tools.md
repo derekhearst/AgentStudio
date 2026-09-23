@@ -30,7 +30,7 @@ The groups of AgentStudio tools:
 | Files (beyond Claude's own) | `file_info`, `move_file`, `delete_file` |
 | Projects | `list_projects`, `create_project`, `set_project_context` |
 | Source control | `list_my_repos`, `sync_my_repos`, `clone_repository`, `git_status`, `git_log`, `git_diff`, `prepare_commit`, `push_branch`, `create_pull_request`, `list_pull_requests`, `get_pull_request` |
-| Agents and planning | `update_agent`, `pause_agent`, `resume_agent`, `request_plan_approval`, `run_subagent` |
+| Agents and planning | `list_agents`, `update_agent`, `pause_agent`, `resume_agent`, `request_plan_approval`, `run_subagent` |
 | Automations and monitors | `create_automation`, `list_automations`, `update_automation`, `delete_automation`, `create_monitor`, `list_monitors`, `cancel_monitor`, `extend_monitor` |
 | Skills | `list_skills`, `read_skill`, `read_skill_file`, `create_skill`, `update_skill`, `add_skill_file`, `update_skill_file`, `delete_skill`, `delete_skill_file` |
 | Media | `image_generate`, `video_generate` |

@@ -11,6 +11,7 @@
 	} from '$lib/automations';
 	import { getAgentChoices } from '$lib/agents';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import AutomationCard from '$lib/automations/AutomationCard.svelte';
 	import AutomationCreateForm from '$lib/automations/AutomationCreateForm.svelte';
 	import { isDueSoon, toTime } from '$lib/automations/automation-format';
@@ -75,13 +76,15 @@
 		void loadPageData();
 	});
 
+	// Every create, toggle and delete reloads through here, so it reads from the server:
+	// a cached read left a deleted card on screen and a toggled one showing its old state.
 	async function loadPageData() {
 		loading = true;
 		formError = null;
 		try {
 			const [automations, agentChoices] = await Promise.all([
-				listAutomationsQuery(),
-				getAgentChoices(),
+				fetchFresh(listAutomationsQuery()),
+				fetchFresh(getAgentChoices()),
 			]);
 			rows = automations;
 			agents = agentChoices;
@@ -222,9 +225,14 @@
 			<div class="alert alert-success py-2 text-sm">{createMessage}</div>
 		{/if}
 
-		<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+		<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
 			<div>
-				{#if loading}
+				<!--
+					The spinner is for a first load only. Every toggle, delete and create reloads from
+					the server now, and swapping the list for a spinner during that round trip threw
+					the reader back to the top and collapsed any open History panel.
+				-->
+				{#if loading && rows.length === 0}
 					<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">
 						<span class="loading loading-spinner loading-lg text-primary"></span>
 					</div>

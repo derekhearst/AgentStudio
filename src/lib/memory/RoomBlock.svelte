@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		listMemoryClosetsQuery,
 		listMemoryDrawersQuery,
@@ -26,30 +27,58 @@
 	let drawers = $state<MemoryDrawerRow[]>([]);
 	let selectedClosetId = $state<string | null>(null);
 	let loading = $state(false);
+	let loadError = $state<string | null>(null);
+	// Its own: a closet's drawers failing to load says so under the closet tabs, where the
+	// room's error (shown only while there are no closets) never would.
+	let drawersError = $state<string | null>(null);
+	// The room whose closets were asked for. Not reactive on purpose: the effect below loads once
+	// per room when it is expanded, and must not re-run because a load finished. Keyed on
+	// "no closets yet" instead, a room with none (a failed mine used to leave them) reloaded
+	// for ever.
+	let requestedRoomId: string | null = null;
 
 	$effect(() => {
-		if (expanded && closets.length === 0 && !loading) {
-			void loadClosets();
-		}
+		if (!expanded) return;
+		const roomId = room.id;
+		if (requestedRoomId === roomId) return;
+		requestedRoomId = roomId;
+		untrack(() => void loadClosets(roomId));
 	});
 
-	async function loadClosets() {
+	async function loadClosets(roomId: string) {
 		loading = true;
+		loadError = null;
 		try {
-			const result = (await listMemoryClosetsQuery({ roomId: room.id })) as MemoryClosetRow[];
+			const result = (await listMemoryClosetsQuery({ roomId })) as MemoryClosetRow[];
 			closets = result;
 			if (result.length > 0 && !selectedClosetId) {
 				selectedClosetId = result[0].id;
 				await loadDrawers(result[0].id);
 			}
+		} catch (err) {
+			loadError = err instanceof Error ? err.message : 'Could not load closets.';
+			// Collapsing and expanding the room again asks once more.
+			requestedRoomId = null;
 		} finally {
 			loading = false;
 		}
 	}
 
+	/**
+	 * Picking the closet's tab again asks once more after a failure. An answer for a closet that
+	 * is no longer the one picked is dropped, so a slow load cannot fill another closet's tab.
+	 */
 	async function loadDrawers(closetId: string) {
-		const result = (await listMemoryDrawersQuery({ closetId })) as MemoryDrawerRow[];
-		drawers = result;
+		drawersError = null;
+		try {
+			const result = (await listMemoryDrawersQuery({ closetId })) as MemoryDrawerRow[];
+			if (selectedClosetId !== closetId) return;
+			drawers = result;
+		} catch (err) {
+			if (selectedClosetId !== closetId) return;
+			drawers = [];
+			drawersError = err instanceof Error ? err.message : 'Could not load drawers.';
+		}
 	}
 
 	async function pickCloset(id: string) {
@@ -87,6 +116,8 @@
 		<div class="room-block__body">
 			{#if loading && closets.length === 0}
 				<div class="room-block__skeleton">Loading closets…</div>
+			{:else if loadError && closets.length === 0}
+				<div class="room-block__empty">Could not load closets: {loadError}</div>
 			{:else if closets.length === 0}
 				<div class="room-block__empty">No closets in this room.</div>
 			{:else}
@@ -105,15 +136,19 @@
 				</div>
 
 				<div class="room-block__drawers">
-					{#each drawers as drawer (drawer.id)}
-						<DrawerCard
-							{drawer}
-							selected={selectedDrawerId === drawer.id}
-							onSelect={(id) => onSelectDrawer?.(id)}
-						/>
+					{#if drawersError}
+						<div class="room-block__empty">Could not load drawers: {drawersError}</div>
 					{:else}
-						<div class="room-block__empty">No drawers in this closet.</div>
-					{/each}
+						{#each drawers as drawer (drawer.id)}
+							<DrawerCard
+								{drawer}
+								selected={selectedDrawerId === drawer.id}
+								onSelect={(id) => onSelectDrawer?.(id)}
+							/>
+						{:else}
+							<div class="room-block__empty">No drawers in this closet.</div>
+						{/each}
+					{/if}
 				</div>
 			{/if}
 		</div>

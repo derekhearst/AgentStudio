@@ -2,7 +2,8 @@ import { and, asc, eq, lte, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
 import type { JobRow } from '$lib/jobs/jobs.schema'
-import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
+import { checkBudgetLimits, recordBudgetAlert, recordBudgetWarnings, type BudgetLimitRow } from '$lib/costs/budget.server'
+import { isUsageDigestAutomation } from '$lib/costs/usage-digest'
 import { logger } from '$lib/observability/logger'
 import { computeNextRunAt } from './cron'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
@@ -14,6 +15,7 @@ import {
 	startAutomationRun,
 } from './automation-runs.server'
 import { automationTriggerPolicy } from './failure-policy'
+import { findPausedAutomationAgent, skipAutomationForPausedAgent } from './paused-agent.server'
 
 export { computeNextRunAt } from './cron'
 
@@ -107,20 +109,40 @@ export async function runAutomationById(
 		throw new AutomationUnavailableError(automationId, 'disabled')
 	}
 
+	// #66 — a paused agent does no unattended work, whatever triggered the run. Ahead of the
+	// budget gate: nothing is about to be spent, and the operator's own switch is the more
+	// specific reason to report. See paused-agent.server.ts.
+	const pausedAgent = await findPausedAutomationAgent(automation.agentId)
+	if (pausedAgent) {
+		return await skipAutomationForPausedAgent(automation, pausedAgent, now, {
+			trigger,
+			attempt,
+			jobId: options.jobId ?? null,
+			preserveSchedule,
+		})
+	}
+
 	// Wave 5 #21 phase 5 — budget pre-check. Skip the run + bump nextRunAt + open a review
 	// item when an applicable cap is exceeded; the next scheduled tick can try again once the
 	// period rolls or an operator lifts the cap. Mirrors the chat-stream policy_override_request
 	// flow so the same /review surface covers both interactive and scheduled execution paths.
-	const budgetCheck = await checkBudgetLimits({
-		userId: automation.userId,
-		agentId: automation.agentId ?? undefined,
-	})
-	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
+	// #38 — the usage digest spends nothing, so a limit has nothing to protect from it; and
+	// the week a limit is exceeded is the week the digest has to say so.
+	const budgetCheck = isUsageDigestAutomation(automation)
+		? null
+		: await checkBudgetLimits({
+				userId: automation.userId,
+				agentId: automation.agentId ?? undefined,
+			})
+	// Unattended spend crossing a warning line is the case a warning is most for.
+	if (budgetCheck) await recordBudgetWarnings(budgetCheck)
+	if (budgetCheck && !budgetCheck.allowed && budgetCheck.blockedBy) {
 		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now, {
 			trigger,
 			attempt,
 			jobId: options.jobId ?? null,
 			preserveSchedule,
+			spendUsd: budgetCheck.blockedSpendUsd ?? parseFloat(budgetCheck.blockedBy.limitUsd),
 		})
 	}
 
@@ -221,7 +243,14 @@ async function handleAutomationBudgetBlocked(
 	automation: typeof automations.$inferSelect,
 	blockedBy: BudgetLimitRow,
 	now: Date,
-	context: { trigger: AutomationRunTrigger; attempt: number; jobId: string | null; preserveSchedule: boolean },
+	context: {
+		trigger: AutomationRunTrigger
+		attempt: number
+		jobId: string | null
+		preserveSchedule: boolean
+		/** What had been spent when the limit tripped — recorded on the alert, not the limit itself. */
+		spendUsd: number
+	},
 ) {
 	// #31 — a blocked tick is part of the run history too, with its own status so it is not
 	// confused with a failure (nothing is broken; a cap was hit).
@@ -244,7 +273,7 @@ async function handleAutomationBudgetBlocked(
 		await recordBudgetAlert({
 			limit: blockedBy,
 			triggerType: 'block',
-			spendUsd: parseFloat(blockedBy.limitUsd),
+			spendUsd: context.spendUsd,
 		})
 	} catch (err) {
 		logger.warn('[automations] budget block alert insert failed', { err })
@@ -331,23 +360,20 @@ async function handleAutomationBudgetBlocked(
  */
 async function runResearchModeAutomation(automation: typeof automations.$inferSelect) {
 	const conversation = await getOrCreateAutomationConversation(automation)
-	const { createResearch, updateResearch } = await import('$lib/research/research.server')
-	const { enqueueJob } = await import('$lib/jobs/jobs.server')
+	const { createResearch, enqueueResearchRun } = await import('$lib/research/research.server')
 
 	const research = await createResearch({
 		userId: automation.userId,
 		query: automation.prompt,
 		conversationId: conversation.id,
 	})
-	const job = await enqueueJob({
-		type: 'research_run',
-		queue: 'default',
+	const job = await enqueueResearchRun({
+		researchId: research.id,
+		userId: automation.userId,
 		// Background-tier — a scheduled research automation shouldn't preempt user-initiated
 		// research runs (which use priority 150). 100 keeps it ahead of chat_followup ticks
 		// (priority 50) without getting in the way of an interactive operator.
 		priority: 100,
-		payload: { researchId: research.id },
-		userId: automation.userId,
 		// One job per research row, which this call has just created. Not the schedule slot:
 		// "Run now" leaves `nextRunAt` alone, so a slot-derived key made the manual run and the
 		// next scheduled tick compute the same key, and the tick's research row was linked to
@@ -355,7 +381,6 @@ async function runResearchModeAutomation(automation: typeof automations.$inferSe
 		// settled upstream, by the automation_run job's own key.
 		dedupeKey: `automation_research:${research.id}`,
 	})
-	await updateResearch(research.id, { jobId: job.id })
 
 	return {
 		conversationId: conversation.id,

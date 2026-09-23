@@ -142,10 +142,11 @@ When deciding what to compact, treat `(assistant tool_call message, tool result 
 
 At assembly time:
 
-1. Embed the user's message (or use a keyword fallback if no embedding model is configured)
-2. Score all skill summaries against the embedding
-3. Inject the top-K results only
-4. The model can still call `list_skills` to discover others
+1. Check the user's message against their memory exclusion rules (the same check memory recall makes). If a rule matches — the message holds an API key, say — or the rules cannot be loaded, skip ranking and list every skill; the message is not sent to the embedding provider.
+2. Otherwise embed the user's message, without the provider's response cache (or use a keyword fallback if no embedding model is configured)
+3. Score all skill summaries against the embedding
+4. Inject the top-K results only
+5. The model can still call `list_skills` to discover others
 
 ### Memory write-back
 

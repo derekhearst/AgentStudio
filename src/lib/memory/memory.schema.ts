@@ -252,12 +252,18 @@ export const memoryKgRelations = pgTable(
  * exchange, and the miner treats a message as done when a drawer still points at it; without
  * a tombstone, a drawer the user deleted, or a conversation they forgot, came straight back
  * on the next turn. A turn an exclusion rule dropped is tombstoned too, so re-mining does not
- * re-count it against the rule.
+ * re-count it against the rule. A turn whose exclusion check ran out of time is only set aside
+ * (`exclusion_timed_out`): no rule was seen to match it, so the tombstone is cleared when the
+ * user's rules change, or on Mine pending, and the turn is checked again.
  *
  * Keyed on the message, so deleting the conversation (which deletes its messages) clears
  * them. Existing drawers need no tombstone: the drawer itself marks its message as mined.
  */
-export type MemoryTombstoneReason = 'drawer_deleted' | 'conversation_forgotten' | 'excluded_by_rule'
+export type MemoryTombstoneReason =
+	| 'drawer_deleted'
+	| 'conversation_forgotten'
+	| 'excluded_by_rule'
+	| 'exclusion_timed_out'
 
 export const memoryMessageTombstones = pgTable('memory_message_tombstones', {
 	messageId: uuid('message_id')

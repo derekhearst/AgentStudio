@@ -1,4 +1,5 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { z } from 'zod'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import {
@@ -9,6 +10,7 @@ import {
 	resolveReviewItem,
 	reviewInboxRollup,
 } from './review.server'
+import { reviewItemListSchema } from './review-filters'
 import { getRunTraceByRunId, listRecentFailures } from './traces.server'
 import { listMetricSnapshotsWithSeries } from './metrics.server'
 
@@ -21,36 +23,10 @@ import { listMetricSnapshotsWithSeries } from './metrics.server'
  * `false`; it is kept only so the response shape stays stable for existing consumers.
  */
 
-const REVIEW_ITEM_TYPES = [
-	'approval_request',
-	'user_question',
-	'evaluation_failure',
-	'job_failure',
-	'job_stuck',
-	'hook_failure',
-	'memory_conflict',
-	'policy_override_request',
-	'pull_request_ready',
-	'automation_summary',
-	'monitor_fired',
-] as const
-
-const REVIEW_ITEM_STATUSES = ['open', 'in_progress', 'resolved', 'dismissed'] as const
-
-const listSchema = z
-	.object({
-		status: z.enum(REVIEW_ITEM_STATUSES).optional(),
-		type: z.enum(REVIEW_ITEM_TYPES).optional(),
-		severity: z.enum(['info', 'warning', 'critical']).optional(),
-		openOnly: z.boolean().optional(),
-		limit: z.number().int().min(1).max(500).optional(),
-	})
-	.default({})
-
-export const listReviewItemsQuery = query(listSchema, async (input) => {
+export const listReviewItemsQuery = query(reviewItemListSchema, async (input) => {
 	requireAuthenticatedRequestUser()
 	const items = input.openOnly
-		? await listOpenReviewItems(input.limit)
+		? await listOpenReviewItems({ type: input.type, severity: input.severity, limit: input.limit })
 		: await listReviewItems({
 				status: input.status,
 				type: input.type,
@@ -75,6 +51,22 @@ const resolveSchema = z.object({
 
 export const resolveReviewItemCommand = command(resolveSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	// A paused run's prompt is answered, not resolved. Closing only the review row used to
+	// leave the run waiting until it timed out, whatever the button said.
+	const item = await getReviewItemById(input.itemId)
+	if (item?.type === 'approval_request') {
+		// "A dismissed approval request means the tool call is denied."
+		if (input.finalStatus !== 'dismissed') error(400, 'Approve or deny this tool call instead')
+		const { decideApprovalFromReview } = await import('$lib/runs/review-decisions.server')
+		await decideApprovalFromReview({
+			itemId: input.itemId,
+			userId: user.id,
+			approved: false,
+			note: input.note ?? 'Dismissed from the review inbox',
+		})
+		return getReviewItemById(input.itemId)
+	}
+	if (item?.type === 'user_question') error(400, 'Answer the question instead, here or in the chat')
 	return resolveReviewItem({
 		itemId: input.itemId,
 		resolvedBy: user.id,
@@ -82,6 +74,34 @@ export const resolveReviewItemCommand = command(resolveSchema, async (input) => 
 		note: input.note,
 		finalStatus: input.finalStatus,
 	})
+})
+
+const decideApprovalSchema = z.object({
+	itemId: z.string().uuid(),
+	approved: z.boolean(),
+	note: z.string().trim().max(2000).optional(),
+})
+
+/** Approve or deny, from /review, the tool call a paused run is waiting on. */
+export const decideApprovalReviewItemCommand = command(decideApprovalSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const { decideApprovalFromReview } = await import('$lib/runs/review-decisions.server')
+	return decideApprovalFromReview({ ...input, userId: user.id })
+})
+
+const answerQuestionSchema = z.object({
+	itemId: z.string().uuid(),
+	// Keyed by question header, as the chat's answer card sends them.
+	answers: z
+		.record(z.string().trim().min(1).max(200), z.string().trim().min(1).max(4000))
+		.refine((answers) => Object.keys(answers).length > 0, 'Answer at least one question'),
+})
+
+/** Answer, from /review, the questions a paused run asked with ask_user. */
+export const answerQuestionReviewItemCommand = command(answerQuestionSchema, async (input) => {
+	const user = requireAuthenticatedRequestUser()
+	const { answerQuestionFromReview } = await import('$lib/runs/review-decisions.server')
+	return answerQuestionFromReview({ ...input, userId: user.id })
 })
 
 const assignSchema = z.object({
@@ -121,9 +141,9 @@ export const getOperationalSnapshotQuery = query(async () => {
 })
 
 /**
- * Recent run + tool failures for the consolidated /review dashboard. Backed by `run_traces`:
- * each `success=false` tool-call span surfaces as one row, plus one row per run that ended
- * in `failed` state. Cap small (<=50) — for full history, drill into the trace viewer.
+ * Recent run + tool failures for the consolidated /review dashboard: one row per run that
+ * ended in `failed` state (from `chat_runs`), plus one per `success=false` tool-call span
+ * (from `run_traces`). Cap small (<=50) — for full history, drill into the run pages.
  */
 const recentFailuresSchema = z
 	.object({

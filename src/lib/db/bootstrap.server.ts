@@ -189,8 +189,9 @@ async function provisionOwnerFromEnvironment(client: Client): Promise<void> {
 }
 
 /**
- * Built-in row seeders. Each is idempotent and runs ON CONFLICT (id) DO NOTHING so
- * operator edits to seeded rows survive re-runs. Failures are best-effort —
+ * Built-in row seeders. Each is idempotent and upserts by id, refreshing only the fields
+ * the code owns, so operator edits to seeded rows survive re-runs (the built-in agents'
+ * rules are in builtin-agents.server.ts). Failures are best-effort —
  * a missing built-in agent would just mean the orchestrator falls back to its
  * default identity until the next boot.
  */
@@ -355,6 +356,13 @@ async function registerJobHandlers(): Promise<void> {
 		registerLogsJobHandlers()
 	} catch (err) {
 		console.warn('[db] Logs handler registration failed (non-fatal):', err)
+	}
+
+	try {
+		const { registerCostJobHandlers } = await import('$lib/costs/costs-handler.server')
+		registerCostJobHandlers()
+	} catch (err) {
+		console.warn('[db] Costs handler registration failed (non-fatal):', err)
 	}
 }
 

@@ -11,7 +11,7 @@
  * from this module keep working.
  */
 
-import { checkBudgetLimits, recordBudgetAlert } from '$lib/costs/budget.server'
+import { checkBudgetLimits, recordBudgetAlert, recordBudgetWarnings } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
 import type { getSettings } from '$lib/settings'
 
@@ -157,13 +157,7 @@ export async function enforceBudgetGuard(input: {
 		agentId: input.agentId,
 	})
 
-	for (const w of budgetCheck.warnings) {
-		try {
-			await recordBudgetAlert({ limit: w.limit, triggerType: 'warn', spendUsd: w.spendUsd })
-		} catch (err) {
-			logger.warn('[budget] warn alert insert failed', { err })
-		}
-	}
+	await recordBudgetWarnings(budgetCheck)
 
 	if (budgetCheck.allowed || !budgetCheck.blockedBy) {
 		return { blocked: false }
@@ -177,7 +171,7 @@ export async function enforceBudgetGuard(input: {
 		await recordBudgetAlert({
 			limit: blockedBy,
 			triggerType: 'block',
-			spendUsd: parseFloat(blockedBy.limitUsd),
+			spendUsd: budgetCheck.blockedSpendUsd ?? parseFloat(blockedBy.limitUsd),
 		})
 	} catch (err) {
 		logger.warn('[budget] block alert insert failed', { err })

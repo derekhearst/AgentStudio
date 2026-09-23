@@ -1,9 +1,10 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
-import { getAgentDetail, listAgentsWithCounts, updateAgentRecord } from '$lib/agents/agents.server'
+import { getAgentDetail, listAgentsWithCounts, setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
 import {
 	ensureAgentIdentitySkill,
 	getAgentIdentity,
@@ -93,6 +94,21 @@ export const getAgentChoices = query(async () => {
 		.from(agents)
 		.orderBy(asc(agents.createdAt))
 })
+
+/**
+ * #66 — the Pause / Resume control on /agents and /agents/[id]. Refused for a built-in or an
+ * evaluator here, not only hidden in the page, so a hand-made call cannot produce a pause
+ * that would mean something different from what the button says.
+ */
+export const setAgentPausedCommand = command(
+	z.object({ agentId: agentIdSchema, paused: z.boolean() }),
+	async ({ agentId, paused }) => {
+		const user = requireAuthenticatedRequestUser()
+		const result = await setAgentPaused(agentId, paused, user.id)
+		if (!result.ok) error(result.reason === 'not_found' ? 404 : 400, result.message)
+		return result.agent
+	},
+)
 
 /* ── Wave 5 #22 phase 3 — identity editor ─────────────────────────────────── */
 

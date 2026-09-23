@@ -6,6 +6,10 @@ export const appSettings = pgTable('app_settings', {
 	userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
 	defaultModel: text('default_model').notNull().default('claude-sonnet-5'),
 	transcriptionModel: text('transcription_model').notNull().default('google/gemini-2.5-flash'),
+	// #27 — read-aloud: an OpenRouter speech model and one of the voices it lists. An empty
+	// voice lets the model use its own default. Same values as DEFAULT_TTS_MODEL / _VOICE.
+	ttsModel: text('tts_model').notNull().default('hexgrad/kokoro-82m'),
+	ttsVoice: text('tts_voice').notNull().default('af_heart'),
 	notificationPrefs: jsonb('notification_prefs')
 		.$type<{
 			taskCompleted: boolean
@@ -18,6 +22,12 @@ export const appSettings = pgTable('app_settings', {
 		.$type<{
 			dailyLimit: number | null
 			monthlyLimit: number | null
+			/**
+			 * The `budget_limits` rows these two limits are enforced through, written by
+			 * `syncSettingsBudgetLimits`. Kept here so the rows Settings owns are never
+			 * confused with limits created any other way.
+			 */
+			limitIds?: { day?: string | null; month?: string | null }
 		}>()
 		.notNull()
 		.default({ dailyLimit: null, monthlyLimit: null }),

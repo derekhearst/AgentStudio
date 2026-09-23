@@ -1,5 +1,6 @@
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
+import { purgeOldHookInvocations } from '$lib/hooks/retention.server'
 import { extractSource, insertAppLogBatch, purgeOldLogs } from './logs.server'
 import { logger, registerDbSink, type LogEntry } from './logger'
 
@@ -9,7 +10,8 @@ import { logger, registerDbSink, type LogEntry } from './logger'
  * run, so the `app_logs` table exists before the first flush.
  *
  * Retention default: 14 days. Override with `APP_LOGS_RETENTION_DAYS` if needed (e.g. on a
- * resource-constrained host where 14d is too noisy).
+ * resource-constrained host where 14d is too noisy). The same job and window also trim the
+ * `hook_invocations` log.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -33,7 +35,15 @@ export function registerLogsJobHandlers(): void {
 
 	registerJobHandler('app_logs_purge', async () => {
 		const result = await purgeOldLogs(retentionDays)
-		return { deleted: result.deleted, retentionDays, purgedAt: new Date().toISOString() }
+		// The hook log is the other per-call record nothing else trims; same window. Its
+		// failure is its own: the app log purge above has already happened.
+		let hookInvocationsDeleted: number | null = null
+		try {
+			hookInvocationsDeleted = (await purgeOldHookInvocations(retentionDays)).deleted
+		} catch (err) {
+			logger.warn('[observability] hook_invocations purge failed (non-fatal)', { err })
+		}
+		return { deleted: result.deleted, hookInvocationsDeleted, retentionDays, purgedAt: new Date().toISOString() }
 	})
 
 	registerScheduledJob({
@@ -77,8 +87,8 @@ export function registerLogsJobHandlers(): void {
 
 	// Now that the table exists and the retention job is registered, enable the DB sink so
 	// subsequent log lines persist. (The sink starts on by default for cold starts where this
-	// handler is the first thing to run; calling here is a safety net for the case where the
-	// sink was disabled earlier by a flush failure during pre-migration writes.)
+	// handler is the first thing to run; calling here also ends any pause left by a flush
+	// that failed during pre-migration writes, so the first flush after bootstrap is not held.)
 	logger.setDbSinkEnabled(true)
 
 	registered = true

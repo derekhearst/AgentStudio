@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 
@@ -189,5 +191,45 @@ test.describe('hooks/bus — pure dispatch contract (no DB)', () => {
 			// the durable contract; this test is best-effort.
 			expect(err).toBeTruthy()
 		}
+	})
+})
+
+test.describe('hooks/invocations — retention', () => {
+	/*
+	 * Since chats raise hook events, every chat tool call and turn writes rows here, and
+	 * nothing trimmed the table. The daily app-log purge now deletes hook rows older than the
+	 * same window. The fixture rows are dated in January 2000 and the purge is run "as of"
+	 * then, so it can only reach rows older than the fixture — never real ones.
+	 */
+	test('rows older than the window are deleted and newer ones are kept', async () => {
+		const prefix = uniquePrefix('hook-retention')
+		const sql = getSql()
+		const { purgeOldHookInvocations } = await import('../src/lib/hooks/retention.server')
+		try {
+			const insert = async (ref: string, createdAt: string) => {
+				const [row] = await sql<{ id: string }[]>`
+					insert into hook_invocations (run_id, event, hook_kind, hook_ref, success, duration_ms, created_at)
+					values (NULL, 'after_tool', 'builtin'::hook_kind, ${`${prefix}-${ref}`}, true, 1, ${createdAt}::timestamptz)
+					returning id
+				`
+				return row.id
+			}
+			const old = await insert('old', '2000-01-01T00:00:00Z')
+			const recent = await insert('recent', '2000-01-15T00:00:00Z')
+
+			const result = await purgeOldHookInvocations(14, new Date('2000-01-20T00:00:00Z'))
+			expect(result.deleted).toBeGreaterThanOrEqual(1)
+
+			const left = await sql<{ id: string }[]>`select id from hook_invocations where id in (${old}, ${recent})`
+			expect(left.map((r) => r.id)).toEqual([recent])
+		} finally {
+			await sql`delete from hook_invocations where hook_ref like ${`${prefix}-%`}`
+		}
+	})
+
+	test('the daily log purge trims the hook log with the same window', async () => {
+		const source = readFileSync(resolve('src/lib/observability/logs-handler.server.ts'), 'utf8')
+		const handler = source.slice(source.indexOf("registerJobHandler('app_logs_purge'"))
+		expect(handler.slice(0, handler.indexOf('\n\t})'))).toMatch(/purgeOldHookInvocations\(retentionDays\)/)
 	})
 })

@@ -34,9 +34,9 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | --- | --- | --- | --- |
 | Recurring scheduled runs | **even** (#30, #31 landed) | full crontab parsing with a per-automation IANA zone (#30); run-now, per-run history with cost and links, bounded retry with backoff, review item + notification on failure, and auto-disable after 5 consecutive failures (#31). Until the job-queue dedupe fix, the dispatcher ran once per database and never again, so none of this fired on a schedule | Cowork scheduled + on-demand tasks |
 | Runs with the laptop closed | **win** | the NAS *is* the always-on host; nothing depends on a local device | Cowork runs remotely in beta; earlier it needed the desktop VM |
-| Durable job queue with leases and retries | **win** | real queue, heartbeats, a job whose worker died is picked up again (or failed, if it keeps killing workers), cancellation, `/settings/jobs` | not exposed to the user |
-| Budget enforcement | **win** | daily/monthly caps that actually block a run before it spends | plan limits, no per-workflow budget |
-| Unattended failure surfacing | **win** | `/review` inbox with dedupe, plus web push | notifications only |
+| Durable job queue with leases and retries | **win** | real queue, heartbeats, a job whose worker died is picked up again (or failed, if it keeps killing workers), cancellation that holds (a canceled job is never completed or retried afterwards), `/settings/jobs` | not exposed to the user |
+| Budget enforcement | **win** | daily/monthly caps that actually block a run before it spends, with alerts at 80% and 100%. Until 2026-09-23 the caps set in Settings were display-only; they now go through the same gate, and image/video spend is counted | plan limits, no per-workflow budget |
+| Unattended failure surfacing | **win** | `/review` inbox with dedupe, plus web push that honours the Settings switches; approvals and questions can be answered from the inbox and close when settled; Recent failures lists every failed run (fixed 2026-09-23) | notifications only |
 | Long-horizon monitoring | **even** (#33 landed) | a monitor checks a read-only tool result, or asks a cheap model a yes/no question, on an interval, and acts once when the answer changes — a conversation, a review item, a push, or an automation run — inside a deadline, a check budget and an error budget; an agent can leave one mid-conversation | Monitor tool with deadlines |
 | Multi-agent orchestration | **behind** (#5, #32) | `run_subagent`, one level, serial, no fan-out or concurrency cap | workflow scripts, concurrency limits, agent map, forked sessions |
 | Delegate from a phone | **behind** | the web UI is responsive and push works | persistent agent thread on mobile, Cowork on web + mobile |
@@ -59,9 +59,9 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Commit / push / PR | **even** | approval-gated tools, PR recorded and surfaced in `/review` | same, plus richer GitHub triggers |
 | Code review of a PR | **absent** | — | `/ultrareview`, merge-aware follow-up reviews |
 | CI watch and fix | **even** (#20 landed) | an opened PR's checks are watched (webhook, or polling every few minutes) for up to 14 days; a red check opens a review item and a notification, and **Fix it** hands the failure back to the conversation that wrote the code — a button, not an automatic run | cloud sessions react to CI |
-| Hooks | **even** | `/settings/hooks`, event bus, skill hooks | same idea, dialog-managed |
+| Hooks | **even** | `/settings/hooks`, event bus, skill hooks, per-agent bindings. Until the September 2026 audit the bus was never called on the chat engine path, so bindings and the built-in activity hooks only fired for automations; chats now raise run, tool, approval and question events too ([hooks.md](../hooks/hooks.md)) | same idea, dialog-managed |
 | Background tasks | **behind** (#35) | the job queue backgrounds automations and research; inside a chat turn a long command blocks the turn | background bash that survives turns, with a completion notice |
-| Session cost accounting | **win** | per-run rows, `/activity`, `/runs/[id]`, ledger per tool call. Caveat: #15 means built-in tool calls miss the ledger entirely | session cost in a dialog |
+| Session cost accounting | **win** | per-run rows, `/runs/[id]`, a ledger row per tool call, and the `/activity` usage strip (#38). Built-in calls write $0 call-count rows again since the ledger fix; tool calls made through the older loop (agent-attached automations, monitors, PR fix) are still not counted | session cost in a dialog |
 
 ## Chat
 
@@ -72,11 +72,11 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Code execution | **n/a** — removed (#69) | `run_code` never ran on the engine path and was deleted rather than rebuilt. The agent writes a script into the run's workspace and runs it with the SDK's `Bash`, sandboxed by bubblewrap in production and approval-gated where bubblewrap is missing. No in-script tool calls, no chart output — a chart is a file shown in the Preview tab | analysis tool / sandboxed Python, renders charts |
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped; files attached on the new-chat page go with the first message (they were silently dropped until 2026-09-23) | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
-| Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
-| Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |
+| Text-to-speech | **even** (#27 fixed) | speaker button on every reply and an opt-in, per-device auto-read for hands-free use, through an OpenRouter speech model and voice chosen in Settings; code is skipped, long replies are chunked, spend is on the ledger and under budget limits | shipped |
+| Deep research | **even** | in a chat, the Research agent writes a plan the user must approve, then hands it to Chat, which does the research as ordinary turns with the web tools — steerable, but no cited-report page or notification. The background pipeline (planner, fetch, reflection, cited report, notification) runs only from research-mode automations, and it is fixed: a run cannot be steered once started. The composer's Research button that would start one is not switched on. (Until 2026-09-23 every background run failed at its first model call — the bare SDK model id was sent to OpenRouter — and would have failed again at its last, marking the cited sources; a canceled run was retried to completion, or saved its report over a Cancel pressed during the write-up.) | agentic, steerable |
 | Memory | **win** | Memory Palace: wing/room/closet/drawer, hybrid vector + tsvector + temporal recall, mining pipeline | categorized entries, Topics editor, sensitive-topics exclusion — thinner retrieval |
-| Memory management UI | **win** (#37 fixed) | per-drawer edit with mandatory re-embed, delete, pin / never-recall, per-conversation forget, exclusion rules applied *before* embedding with built-in credential patterns and a tester, plus a per-drawer "why was this recalled?" score breakdown | Topics editor, per-item delete, sensitive-topic exclusion — no recall explainability |
-| Skills | **even** | full CRUD, skill hooks, agent identity skills. No packaging or sharing, which only matters with a second user | same, plus a marketplace and `claude plugin eval` |
+| Memory management UI | **win** (#37 fixed) | per-drawer edit with mandatory re-embed, delete, pin / never-recall, per-conversation forget, exclusion rules applied *before* embedding — to mined turns, recall queries and the chat turn's skill ranking, with a time limit and a capped pool of workers so a user's regex cannot stall or exhaust the server — with built-in credential patterns and a tester, plus a per-drawer "why was this recalled?" score breakdown | Topics editor, per-item delete, sensitive-topic exclusion — no recall explainability |
+| Skills | **even** | full CRUD, skill hooks, agent identity skills, and a copy-paste `SKILL.md` package (resource files included) that round-trips cleanly. No marketplace or sharing, which only matters with a second user | same, plus a marketplace and `claude plugin eval` |
 | Plugins / marketplace | **absent** | — | plugin system, marketplace, admin controls, `claude plugin eval` |
 | Connect external MCP servers | **absent** (#17) | we *serve* MCP at `/api/mcp`, we cannot consume one | first-class, OAuth, `/mcp`, managed policies |
 | Connectors (Slack, M365, Salesforce…) | **absent** | — | write-capable connectors, Claude Tag for Slack |
@@ -89,7 +89,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Search across conversations | **far behind** (#18) | client-side filter over loaded rows | server-side across all history |
 | Export a conversation | **absent** (#18) | — | export |
 | Temporary / incognito chat | **n/a** | delete covers it here | incognito |
-| Usage digest | **absent** (#38) | `/activity` is raw rows | smart reports, monthly recap |
+| Usage digest | **behind** (#38) | `/activity` usage strip over 24h / 7d / 30d: runs and failure rate, tokens first with metered dollars, automations, most-used tools, review inbox, budget headroom, and anomaly flags (spend spike, newly failing automation, monitor that never fired). An opt-in weekly digest sends the same numbers to the inbox or chat, rendered by code with no model call. Numbers only, no written narrative | smart reports, monthly recap |
 | Image generation | **win** | `image_generate` | — |
 | Video generation | **win** | `video_generate` with async job polling | — |
 
@@ -101,7 +101,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 **We are even on the core loop.** Same SDK, same models, same thinking, same research shape.
 
-**The evens are thinner than they look.** Two of them hide a real disadvantage: research runs on a fixed pipeline that cannot be steered once approved; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
+**The evens are thinner than they look.** Two of them hide a real disadvantage: background research runs on a fixed pipeline that cannot be steered once started; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
 
 **We are far behind on the session surface.** Diffs, checkpoints, terminal output, todo list, permission modes — five things that turn a long run from opaque to legible.
 
@@ -139,6 +139,6 @@ Ordered for how this box is used — NAS host, repeating jobs, files rarely open
 
 **Wave 4 — the long tail.**
 
-[#17](https://github.com/derekhearst/AgentStudio/issues/17) external MCP · [#18](https://github.com/derekhearst/AgentStudio/issues/18) conversation search, pin, archive, export · [#37](https://github.com/derekhearst/AgentStudio/issues/37) memory management · [#38](https://github.com/derekhearst/AgentStudio/issues/38) usage digest · [#22](https://github.com/derekhearst/AgentStudio/issues/22) slash commands and `@`-mentions · [#23](https://github.com/derekhearst/AgentStudio/issues/23) project instructions · [#27](https://github.com/derekhearst/AgentStudio/issues/27) the dead TTS endpoint
+[#17](https://github.com/derekhearst/AgentStudio/issues/17) external MCP · [#18](https://github.com/derekhearst/AgentStudio/issues/18) conversation search, pin, archive, export · [#37](https://github.com/derekhearst/AgentStudio/issues/37) memory management · [#38](https://github.com/derekhearst/AgentStudio/issues/38) usage digest · [#22](https://github.com/derekhearst/AgentStudio/issues/22) slash commands and `@`-mentions · [#23](https://github.com/derekhearst/AgentStudio/issues/23) project instructions · ~~[#27](https://github.com/derekhearst/AgentStudio/issues/27) the dead TTS endpoint~~ (finished instead: read-aloud)
 
 **Deferred on purpose:** artifacts (#13, removed), incognito chat (delete covers it), remote control (the web UI is reachable anywhere), plugin marketplace and connector governance (no second user), computer use (large, and the browser tools cover the real cases), inline charts and Claude Design (worth revisiting only if the reports get visual).

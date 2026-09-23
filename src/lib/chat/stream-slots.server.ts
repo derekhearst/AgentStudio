@@ -16,6 +16,7 @@ import type { ContextSlot } from '$lib/context/slots.server'
 import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
+import { builtinHandoffNote } from '$lib/agents/builtin-agents.server'
 import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
@@ -37,12 +38,14 @@ export const VOLATILE_SLOT_NAMES = new Set(['memory', 'skills', 'companion_skill
  * Returns `undefined` when no skills exist so callers can omit the slot.
  */
 export async function buildSkillSummariesText(input: {
+	/** Whose exclusion rules the query is held to before it is embedded. */
+	userId: string
 	userQuery: string | undefined
 	skillTopK: number
 }): Promise<string | undefined> {
 	const trimmed = input.userQuery?.trim() ?? ''
 	const skillSummaries = trimmed.length > 0
-		? await listRelevantSkillSummaries(trimmed, input.skillTopK)
+		? await listRelevantSkillSummaries(trimmed, input.skillTopK, { userId: input.userId })
 		: await listSkillSummaries()
 	if (skillSummaries.length === 0) return undefined
 	return skillSummaries
@@ -107,14 +110,19 @@ export async function buildMemoryRecallSlot(input: {
  * posture slot at priority 95 — under the orchestrator identity at 100, above
  * the project context at 80. Returns null for the `chat` built-in (which IS
  * the default orchestrator persona) and for custom agents.
+ *
+ * Plan and Research also get the handoff facts (`builtinHandoffNote`): the ids
+ * `request_plan_approval` needs, which the operator-owned persona cannot be
+ * trusted to carry.
  */
 export async function buildBuiltinAgentPostureSlot(agent: AgentRow): Promise<ContextSlot | null> {
 	if (!agent.builtinKey || agent.builtinKey === 'chat') return null
 	const posture = await loadAgentIdentityContent(agent)
+	const handoff = builtinHandoffNote(agent.builtinKey)
 	return {
 		name: `agent_${agent.builtinKey}`,
 		priority: 95,
-		content: posture,
+		content: handoff ? `${posture}\n\n${handoff}` : posture,
 	}
 }
 

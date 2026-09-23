@@ -13,7 +13,7 @@ type SubscriptionInput = {
 	userId?: string | null
 }
 
-type PushPayload = {
+export type PushPayload = {
 	title: string
 	body: string
 	url?: string

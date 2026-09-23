@@ -1,14 +1,31 @@
 <script lang="ts">
 	import {
+		answerQuestionReviewItemCommand,
+		decideApprovalReviewItemCommand,
 		listReviewItemsQuery,
 		resolveReviewItemCommand,
 	} from '$lib/observability/review.remote';
+	import { REVIEW_ITEM_TYPE_LABELS } from '$lib/observability/review-item-labels';
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
+	import AskUserCard from '$lib/chat/AskUserCard.svelte';
+	import { renderMarkdown } from '$lib/chat/chat';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
+	type InboxItem = Inbox['items'][number];
+
+	/**
+	 * A maintenance automation's output — the weekly usage digest (#38) or a model-written
+	 * summary — is markdown meant to be read, not a JSON string with `\n` escapes. Rendered
+	 * through the chat's sanitizing renderer, because a model-written summary is untrusted.
+	 */
+	function automationSummary(item: InboxItem): string | null {
+		if (item.type !== 'automation_summary') return null;
+		const summary = item.payload.summary;
+		return typeof summary === 'string' && summary.trim() ? summary : null;
+	}
 
 	let {
 		inbox,
@@ -26,20 +43,11 @@
 
 	let expanded = $state<Set<string>>(new Set());
 
+	// One entry per review item type the database knows, so the filter cannot offer a type
+	// the server refuses (it did, for "PR checks failed").
 	const TYPES = [
 		{ value: '', label: 'All types' },
-		{ value: 'approval_request', label: 'Approval request' },
-		{ value: 'user_question', label: 'User question' },
-		{ value: 'evaluation_failure', label: 'Evaluation failure' },
-		{ value: 'job_failure', label: 'Job failure' },
-		{ value: 'job_stuck', label: 'Job stuck' },
-		{ value: 'hook_failure', label: 'Hook failure' },
-		{ value: 'memory_conflict', label: 'Memory conflict' },
-		{ value: 'policy_override_request', label: 'Policy override request' },
-		{ value: 'pull_request_ready', label: 'Pull request ready' },
-		{ value: 'pull_request_checks_failed', label: 'PR checks failed' },
-		{ value: 'automation_summary', label: 'Automation summary' },
-		{ value: 'monitor_fired', label: 'Monitor fired' },
+		...Object.entries(REVIEW_ITEM_TYPE_LABELS).map(([value, label]) => ({ value, label })),
 	];
 
 	async function handleResolve(itemId: string, action: string) {
@@ -57,6 +65,56 @@
 			alert(remoteErrorMessage(e, 'Failed to resolve'));
 		}
 	}
+
+	/**
+	 * Approval requests and agent questions are answered, not resolved: the answer goes to
+	 * the paused run, exactly as the chat's cards send it, and the item closes because of it.
+	 */
+	let answering = $state<string | null>(null);
+
+	const NOT_ANSWERED: Record<string, string> = {
+		no_longer_waiting: 'The run is no longer waiting for this, so the item was closed.',
+		already_closed: 'This item was already closed.',
+		not_found: 'This item no longer exists.',
+		not_yours: 'This run belongs to someone else.',
+		wrong_type: 'This item cannot be answered here.',
+	};
+
+	async function answered(result: { resolved: boolean; reason?: string }) {
+		if (!result.resolved) alert(NOT_ANSWERED[result.reason ?? ''] ?? 'The run did not take the answer.');
+		onChange();
+	}
+
+	async function handleDecision(itemId: string, approved: boolean) {
+		answering = itemId;
+		try {
+			await answered(await decideApprovalReviewItemCommand({ itemId, approved }));
+		} catch (e) {
+			alert(remoteErrorMessage(e, approved ? 'Failed to approve' : 'Failed to deny'));
+		} finally {
+			answering = null;
+		}
+	}
+
+	async function handleAnswers(itemId: string, answers: Record<string, string>) {
+		answering = itemId;
+		try {
+			await answered(await answerQuestionReviewItemCommand({ itemId, answers }));
+		} catch (e) {
+			alert(remoteErrorMessage(e, 'Failed to send the answer'));
+		} finally {
+			answering = null;
+		}
+	}
+
+	type QuestionPayload = {
+		questions?: Array<{
+			header: string;
+			question: string;
+			options: Array<{ label: string; description?: string; recommended?: boolean }>;
+			allowFreeformInput?: boolean;
+		}>;
+	};
 
 	function fmtDate(d: Date | string) {
 		return new Date(d).toLocaleString();
@@ -189,20 +247,28 @@
 					<li class="rounded-xl border border-base-300/60 bg-base-100">
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+							class="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 							onclick={() => toggleExpand(item.id)}
 						>
 							<span class="badge badge-xs {severityTone(item.severity)}">{item.severity}</span>
 							<span class="badge badge-xs badge-outline">{typeLabel(item.type)}</span>
 							<span class="badge badge-xs {statusTone(item.status)}">{item.status}</span>
-							<span class="line-clamp-1 flex-1 text-xs leading-tight">{item.summary ?? '(no summary)'}</span>
+							<!-- On a phone the badges and date fill the row, and a flex-1 summary shrank to
+							     nothing — every item's text was invisible. It takes its own line there. -->
+							<span class="order-last line-clamp-1 w-full text-xs leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{item.summary ?? '(no summary)'}</span>
 							<span class="font-mono text-xs text-base-content/40">{fmtDate(item.createdAt)}</span>
 							<svg class="size-3 transition-transform {isOpen ? 'rotate-180' : ''}" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
 								<polyline points="3 5 6 8 9 5" />
 							</svg>
 						</button>
 						{#if isOpen}
+							{@const summaryMarkdown = automationSummary(item)}
 							<div class="space-y-2 border-t border-base-300/60 px-3 py-3 text-xs">
+								{#if summaryMarkdown}
+									<div class="markdown-body max-h-96 overflow-auto rounded-lg bg-base-200/60 p-3 text-xs" data-testid="inbox-automation-summary">
+										{@html renderMarkdown(summaryMarkdown)}
+									</div>
+								{/if}
 								{#if item.runId}
 									<p>
 										<span class="font-semibold uppercase tracking-wide opacity-50">Run:</span>
@@ -231,7 +297,34 @@
 										{/if}
 									</div>
 								{/if}
-								{#if item.status === 'open' || item.status === 'in_progress'}
+								{#if (item.status === 'open' || item.status === 'in_progress') && item.type === 'approval_request'}
+									<div class="flex gap-2 pt-2">
+										<button
+											class="btn btn-xs btn-success"
+											type="button"
+											disabled={answering === item.id}
+											onclick={() => handleDecision(item.id, true)}
+										>
+											Approve
+										</button>
+										<button
+											class="btn btn-xs btn-error btn-outline"
+											type="button"
+											disabled={answering === item.id}
+											onclick={() => handleDecision(item.id, false)}
+										>
+											Deny
+										</button>
+									</div>
+								{:else if (item.status === 'open' || item.status === 'in_progress') && item.type === 'user_question'}
+									<div class="pt-2">
+										<AskUserCard
+											questions={(item.payload as QuestionPayload).questions ?? []}
+											status={answering === item.id ? 'executing' : 'pending'}
+											onSubmit={(answers: Record<string, string>) => handleAnswers(item.id, answers)}
+										/>
+									</div>
+								{:else if item.status === 'open' || item.status === 'in_progress'}
 									<div class="flex gap-2 pt-2">
 										{#if fixTarget(item.payload)}
 											<button

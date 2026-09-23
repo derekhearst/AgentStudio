@@ -78,6 +78,8 @@ Anything that writes — `Bash`, `Write`, `push_branch` — is absent by constru
 | `push`               | Writes an in-app notification row and sends a web push                                                            |
 | `run_automation`     | Runs one of the owner's own automations once (see Business rules)                                                 |
 
+A paused agent (#66) is not run by either agent-running action. `start_conversation` refuses and falls back to a review item, so what the monitor saw still reaches the owner; `run_automation` queues the run as usual, and the automation records it as skipped (`blocked`) because its agent is paused. See [../agents/agents.md](../agents/agents.md).
+
 ## User flows
 
 ### Creating a monitor
@@ -164,7 +166,7 @@ The `tool_result` path costs nothing beyond whatever the tool itself costs, whic
 
 ## Surfaces
 
-- **`/monitors`** — the list with what each monitor is watching, its last observation, next check, budget used, and deadline, plus Pause / Check now / Extend / Cancel, and a creation form. Monitors live here rather than under `/settings/jobs` because a monitor is a standing user intention with its own lifecycle, the same class of thing as an automation; `/settings/jobs` is the queue's forensic view and the `monitor_check` rows already show up there.
+- **`/monitors`** — the list with what each monitor is watching, its last observation, next check, budget used, and deadline, plus Pause / Check now / Extend / Cancel, and a creation form. On a wide screen (1280px and up) the form sits in a column beside the list and stays in view while the list scrolls; on narrower screens it sits below the list. Every action updates the list straight away, and **Refresh** fetches the latest state — for example the result of a **Check now** once the check has run. While a reload is in flight the current cards stay on screen, so acting on a monitor far down the list does not scroll you back to the top. Monitors live here rather than under `/settings/jobs` because a monitor is a standing user intention with its own lifecycle, the same class of thing as an automation; `/settings/jobs` is the queue's forensic view and the `monitor_check` rows already show up there.
 - **`/review`** — `monitor_fired` items.
 - **`/settings/jobs`** — every check as a job row, with its result payload.
 

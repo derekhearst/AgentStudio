@@ -34,6 +34,7 @@
 		agent_synthesis: 'Agent Synthesis',
 		titlegen: 'Title Generation',
 		image_gen: 'Image Generation',
+		tts: 'Read Aloud',
 	};
 
 	function sourceLabel(src: string): string {
@@ -86,6 +87,12 @@
 			<h3 class="text-[10px] font-semibold uppercase tracking-wide text-base-content/55">Total Spend</h3>
 			<p class="mt-1 text-2xl font-bold">{fmt(cost.totalSpend)}</p>
 			<p class="text-xs text-base-content/70">{cost.callCount} LLM calls</p>
+			{#if cost.unpricedCallCount > 0}
+				<!-- These calls had no catalogue price, so the total leaves them out. -->
+				<p class="mt-1 text-xs text-warning" data-testid="unpriced-calls">
+					{cost.unpricedCallCount} could not be priced and are not in this total
+				</p>
+			{/if}
 		</div>
 		<div class="rounded-xl border border-base-300/60 bg-base-100 p-3">
 			<h3 class="text-[10px] font-semibold uppercase tracking-wide text-base-content/55">Tokens In</h3>

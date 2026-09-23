@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { listAutomationRunsQuery, listAutomationsQuery } from '$lib/automations'
+	import { isAgentPaused } from '$lib/agents/agent-status'
 	import { describeRunTrigger, formatDate, relativeTime } from './automation-format'
+	import { digestWindowLabel, parseUsageDigestPrompt } from '$lib/costs/usage-digest'
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number]
 	type AutomationRunRow = Awaited<ReturnType<typeof listAutomationRunsQuery>>[number]
@@ -31,6 +33,11 @@
 	// It must not render the same as a switch the user flipped.
 	const autoDisabled = $derived(!automation.enabled && automation.disabledReason === 'consecutive_failures')
 	const lastRunFailed = $derived(automation.lastRunStatus === 'failed')
+	// #66 — runs are skipped while the agent is paused, so an enabled card would otherwise
+	// look ready to run when it is not.
+	const agentPaused = $derived(isAgentPaused(automation.agentStatus))
+	// #38 — a maintenance prompt of just `{{usage_digest}}` is the usage digest, not a prompt.
+	const digestDays = $derived(automation.mode === 'maintenance' ? parseUsageDigestPrompt(automation.prompt) : null)
 
 	let historyOpen = $state(false)
 	let historyLoading = $state(false)
@@ -106,6 +113,7 @@
 				<h2 class="truncate font-semibold leading-snug">{automation.description}</h2>
 				<p class="truncate text-xs text-base-content/55">
 					Agent: {automation.agentName ?? 'Orchestrator'}
+					{#if agentPaused}<span class="text-warning">(paused)</span>{/if}
 					<span class="mx-1">•</span>
 					{automation.conversationMode === 'new_each_run' ? 'New conversation' : 'Reuse conversation'}
 				</p>
@@ -161,6 +169,11 @@
 		<div class="rounded-xl border border-base-300/60 bg-base-200/20 p-3">
 			<p class="text-[10px] font-semibold uppercase tracking-wide text-base-content/35">Prompt</p>
 			<p class="mt-1 line-clamp-3 text-sm text-base-content/70">{automation.prompt}</p>
+			{#if digestDays !== null}
+				<p class="mt-1 text-[11px] text-base-content/55">
+					Usage digest for the last {digestWindowLabel(digestDays)}, built from the ledgers by code. No model call, no cost.
+				</p>
+			{/if}
 		</div>
 
 		<div class="grid gap-2 text-xs text-base-content/60 sm:grid-cols-2">
