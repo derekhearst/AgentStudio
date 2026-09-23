@@ -65,6 +65,38 @@ test.describe('memory/recall — exclusion rules apply to the query', () => {
 		expect(call.headers['x-openrouter-cache']).toBeUndefined()
 		expect(call.headers['x-openrouter-cache-ttl']).toBeUndefined()
 	})
+
+	test("the same turn's skill list does not embed a message with a key in it either", async () => {
+		// The chat turn also ranks skills by the message, and that ranker embedded it with a day
+		// of caching requested — so the key recall kept in the process left it anyway.
+		stub = stubOpenRouter()
+		const userId = await getActiveUserId()
+		const { buildSkillSummariesText } = await import('../src/lib/chat/stream-slots.server')
+		const { listSkillSummaries } = await import('../src/lib/skills/skills.server')
+
+		const text = await buildSkillSummariesText({
+			userId,
+			userQuery: `${prefix} why does sk-proj-AbCdEf0123456789XYZ fail with 401?`,
+			skillTopK: 8,
+		})
+
+		expect(stub.callsTo('/embeddings'), 'the message never left the process').toHaveLength(0)
+		// Unranked instead: every skill is listed, as when embedding is unavailable.
+		for (const skill of await listSkillSummaries()) expect(text).toContain(`- ${skill.name}:`)
+	})
+
+	test('an ordinary message ranks the skills — without asking OpenRouter to cache it', async () => {
+		stub = stubOpenRouter()
+		const userId = await getActiveUserId()
+		const { buildSkillSummariesText } = await import('../src/lib/chat/stream-slots.server')
+
+		await buildSkillSummariesText({ userId, userQuery: `${prefix} how do I rotate the van battery?`, skillTopK: 8 })
+
+		const [call] = stub.callsTo('/embeddings')
+		expect(call.body?.input).toEqual([`${prefix} how do I rotate the van battery?`])
+		expect(call.headers['x-openrouter-cache']).toBeUndefined()
+		expect(call.headers['x-openrouter-cache-ttl']).toBeUndefined()
+	})
 })
 
 /** wing → room → closet under `prefix`, returning the closet to hang drawers off. */

@@ -158,6 +158,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	contextSlots.push(buildToolPolicySlot(isOrchestrator))
 
 	const skillSummariesText = await buildSkillSummariesText({
+		userId: user.id,
 		userQuery: body.content,
 		skillTopK: resolveSkillTopK(currentSettings),
 	})

@@ -104,6 +104,9 @@ export async function exclusionRulesChanged(userId: string): Promise<void> {
 	}
 }
 
+/** Rules already warned about as unusable, so the warning is not repeated on every chat turn. */
+const warnedUnusable = new Set<string>()
+
 /** Load every enabled rule for a user, compiled and ready to match. */
 export async function loadCompiledExclusionRules(userId: string): Promise<CompiledExclusionRule[]> {
 	const rows = await db
@@ -118,7 +121,10 @@ export async function loadCompiledExclusionRules(userId: string): Promise<Compil
 
 	const compiled = rows.map((row) => compileExclusionRule(row))
 	for (const rule of compiled) {
-		if (rule.invalid) {
+		// Recall loads the rules on every chat turn; once per rule and wording is enough.
+		const key = `${rule.id}:${rule.pattern}`
+		if (rule.invalid && !warnedUnusable.has(key)) {
+			warnedUnusable.add(key)
 			logger.warn('[memory] exclusion rule has an unusable pattern and will never match', { rule: rule.name })
 		}
 	}
