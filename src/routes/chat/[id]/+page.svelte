@@ -2,7 +2,7 @@
 
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onDestroy, tick } from 'svelte';
 	import {
@@ -85,7 +85,7 @@
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
 	import { approvalAnswerProblem, askUserAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
-	import { takeHandedOffAttachments, withoutPromptParam } from '$lib/chat/new-chat-handoff';
+	import { dropPromptParam, takeHandedOffAttachments } from '$lib/chat/new-chat-handoff';
 
 	type ChatAttachment = {
 		id: string;
@@ -515,20 +515,24 @@
 	 * The first message handed over by the page that created this conversation (#75, #59).
 	 * Only once the conversation has loaded — `messages` is empty until then, so the "already
 	 * sent" check never fired and a reload sent the prompt again. And the prompt leaves the
-	 * URL before it is sent, not after the reply ends: a reload or a restored tab mid-reply
-	 * must not repeat it, and a navigation at the end of the reply pulled the user off
-	 * whatever page they had moved on to.
+	 * URL and the history entry before it is sent, not after the reply ends: a reload, a
+	 * restored tab or a Back to this page must not repeat it, and a navigation at the end of
+	 * the reply pulled the user off whatever page they had moved on to.
 	 */
 	$effect(() => {
 		const prompt = initialPrompt;
 		if (!prompt || consumedInitialPrompt || !conversationId || !conversationData) return;
 		consumedInitialPrompt = true;
-		replaceState(withoutPromptParam(page.url), page.state);
 		const attachments = takeHandedOffAttachments(conversationId);
-		// Already sent: the conversation has messages, or a turn is running (re-attached to below).
-		if (messages.length > 0 || pendingUserMessages.length > 0) return;
-		if (streaming || conversationData.liveRunId) return;
-		void streamMessage(prompt, false, attachments);
+		void dropPromptParam(page.url, page.state)
+			.catch((error) => logChatUi('warn', 'Could not take the prompt out of the URL', { error: String(error) }))
+			.then(() => {
+				if (leftPage) return;
+				// Already sent: the conversation has messages, or a turn is running (re-attached to below).
+				if (messages.length > 0 || pendingUserMessages.length > 0) return;
+				if (streaming || conversationData?.liveRunId) return;
+				void streamMessage(prompt, false, attachments);
+			});
 	});
 
 	$effect(() => {

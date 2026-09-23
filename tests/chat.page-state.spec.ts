@@ -184,6 +184,43 @@ test.describe('the ?prompt= handoff (#75)', () => {
 		}
 	})
 
+	test('going Back to the chat after the send was refused does not send the prompt again', async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name !== 'desktop', 'moves on through the desktop sidebar; the page itself is the same on mobile')
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('chat-prompt-back')
+		await cleanupPrefixedRecords(prefix)
+		await authenticateContext(page.context())
+		const conversation = await seedEmptyConversation(prefix)
+		// Refused before the server wrote anything, so the conversation stays empty and only
+		// the prompt's absence from the history entry can stop a second send.
+		const sends: Array<Record<string, unknown>> = []
+		await page.route(isStream(conversation.id), (route) => {
+			sends.push(route.request().postDataJSON())
+			return route.fulfill({ status: 503, json: { error: 'scripted refusal' } })
+		})
+
+		try {
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto(`/chat/${conversation.id}?prompt=${encodeURIComponent(`${prefix} q`)}`, {
+				waitUntil: 'domcontentloaded',
+			})
+			await expect.poll(() => sends.length, { timeout: 30_000 }).toBe(1)
+			await expect(page.getByText(/scripted refusal/).first()).toBeVisible({ timeout: 30_000 })
+			expect(await messageRows(conversation.id)).toEqual([])
+
+			await page.locator('a.console-nav-item[href="/projects"]').first().click()
+			await expect(page).toHaveURL(/\/projects$/)
+			await page.goBack()
+			await expect(page).toHaveURL(new RegExp(`/chat/${conversation.id}$`))
+			await page.getByPlaceholder('Message AgentStudio...').waitFor({ state: 'visible', timeout: 30_000 })
+			await page.waitForTimeout(2000)
+			expect(sends).toHaveLength(1)
+		} finally {
+			await page.unrouteAll({ behavior: 'ignoreErrors' })
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
 	test('a file attached on the new-chat page is sent with the first message (#59)', async ({ page }) => {
 		test.setTimeout(90_000)
 		const prefix = uniquePrefix('chat-home-attach')

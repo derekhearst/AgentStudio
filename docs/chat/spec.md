@@ -122,7 +122,7 @@ Sending from the new-chat page works like this:
 2. It opens the conversation, handing over the typed message and any attached files.
 3. The conversation page waits until it has loaded the conversation, then removes the message from the address bar and sends it.
 
-The order matters. The message leaves the address bar before the reply starts, so reloading the page or restoring the tab while the reply streams does not send it a second time. A conversation that already has messages, or a turn already running, never gets the handed-over message again. And moving to another page while the first reply streams keeps you there: the conversation page no longer jumps back to the chat when the reply finishes.
+The order matters. The message leaves the address bar before the reply starts, so reloading the page or restoring the tab while the reply streams does not send it a second time. It also leaves the browser history, so going to another page and pressing Back returns to the conversation without the message, even when the first send failed before anything was saved. A conversation that already has messages, or a turn already running, never gets the handed-over message again. And moving to another page while the first reply streams keeps you there: the conversation page no longer jumps back to the chat when the reply finishes.
 
 Attached files are handed over inside the open tab, not through the address. If the tab is reloaded before the message is sent, the files are not attached. They stay uploaded and can be attached again.
 
@@ -256,9 +256,11 @@ The context meter above the composer, and the same figure in the right rail, est
 | System prompt | Measured by the server when it builds the prompt for a turn. Before any turn has run on the page, a fixed allowance stands in |
 | Tool definitions | A fixed allowance |
 | Messages | Estimated from the text of every message in the conversation |
-| Tool results | Estimated from the saved output of every tool call, including those saved on a reply's steps |
+| Tool results | Estimated from the saved output of every tool call. Each reply's output is counted once, from its saved steps when it has them |
 
 Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page asks the agent to summarise the conversation first if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure.
+
+A reply saved after Stop or an error keeps its tool output in two places. The meter counts it once, so a stopped turn with a large command output does not read as twice its size or set off that summary early.
 
 ### Mobile and compact layout
 
