@@ -65,13 +65,28 @@ Every event the runtime emits is written to `run_events` in the same transaction
 
 A chat run does not depend on the browser staying connected. If the page reloads, the network drops for a moment, or a proxy closes an idle connection, the run keeps working on the server and keeps writing its events.
 
-A client that disconnects from a run's SSE stream can reconnect via `GET /chat/[id]/stream/resume?since=<seq>`, and the chat page does so on its own (up to three attempts). The server replays all `run_events` with `seq > since` and then follows the run until it ends. The client does not need to reload the page. When the reader of a resumed stream goes away, the server stops following at once instead of checking the database until the run ends.
+A client that disconnects from a run's SSE stream can reconnect via `GET /chat/[id]/stream/resume?since=<seq>`, and the chat page does so on its own (up to three attempts). The server replays all `run_events` with `seq > since` and then follows the run until it ends. The request can name the run with `runId`; without it, the server follows the conversation's most recently updated run. When the reader of a resumed stream goes away, the server stops following at once instead of checking the database until the run ends.
 
-Reloading the page does not yet re-attach the live view to a run still in progress. The run still finishes and its reply is saved to the conversation.
+**Coming back to a running turn.** When the chat page opens — after a reload, or when the user returns to the conversation — it checks whether a turn is still running there. If one is, the page attaches to it from its first event:
+
+1. The conversation data names the live run.
+2. The page opens `stream/resume?since=0&runId=<id>` and shows the turn as streaming, with its tool cards, any approval cards still waiting, and the **Stop** button.
+3. It then follows the turn live until it ends, and the saved reply replaces the live view.
+
+Text the agent wrote before the page attached is not part of the replay (text is streamed, not saved event by event); it appears with the saved reply when the turn ends. A page attaches to a given run at most once, so a turn that cannot be followed is not retried in a loop.
+
+### One turn at a time
+
+A conversation has at most one chat turn running. Because a turn keeps going when the page that started it goes away, a second message could otherwise start a second agent on the same session while the first is still working — both writing to one history and both saving a reply.
+
+- Sending a message while a turn is running is refused with `409` and the running turn's `runId`. Nothing is saved: not the message, not a new run. The page says the message was not sent, keeps it for Retry, and attaches to the running turn.
+- "Running" means a chat turn this server is actually working on. A turn left marked as running by a server restart is not waited out: the next message marks it canceled ("Abandoned: the server restarted while this turn was running") and goes ahead. Runs started by automations are not affected.
 
 ### Stopping a run
 
 The chat's **Stop** button sends its own request, `POST /chat/[id]/stop`. Losing the connection is not a stop — until 2026-09-23 it was, so a reload or a network blip cut the turn short and the automatic reconnect could only replay what was left.
+
+To stop a turn you are no longer watching, open its conversation: the page attaches to the running turn (see above) and shows **Stop**.
 
 1. The server looks up the live runs in that conversation that belong to the person asking — or only the one run the request names.
 2. It interrupts each one it is running.
@@ -79,7 +94,9 @@ The chat's **Stop** button sends its own request, `POST /chat/[id]/stop`. Losing
 
 The answer is `stopped: true`, or `stopped: false` with a reason: `run_not_active` when the turn had already finished, `not_reachable` when no process on this server is running it.
 
-Dismissing a run from the running-sessions dock is different: it marks the run canceled straight away (and interrupts it too).
+A Stop that arrives while the turn is still being set up — its workspace being prepared, before the agent has started — is remembered, and the agent is interrupted the moment it starts.
+
+Dismissing a run (`dismissStuckRun`) is different: it marks the run canceled straight away and interrupts it too. Nothing in the UI offers it at the moment; the running-sessions dock that did was removed.
 
 ### Why a run failed
 
@@ -93,6 +110,8 @@ When a tool requires approval:
 2. The runtime loop suspends via `session.pendingApproval`
 3. The approve/deny endpoint updates `runs.pendingApprovals` in the DB
 4. The loop detects the update (poll or LISTEN/NOTIFY) and continues
+
+The chat's Allow / Deny card can appear a moment before step 1 has happened. An answer that arrives in that gap waits up to three seconds for the approval to be written instead of being lost. If the answer still does not land (`resolved: false` — the approval timed out, or was answered elsewhere), the card keeps its buttons and says so, instead of showing the call as approved.
 
 ### Pending user questions
 
@@ -112,7 +131,7 @@ While a chat run is producing anything — text, tool calls, or the progress pin
 
 A maintenance job (`runs_reap.5min`) cancels any run that is still marked active but has not been refreshed for an hour. It records the reason, clears pending approvals and questions, and interrupts the run if this server is still running it. So a run is only reaped when nothing has come out of it for an hour — a crashed process, or a session that is truly stuck — never just because it has been working for a long time. Until 2026-09-23 chat runs never refreshed their record, so every turn longer than an hour was cancelled mid-work.
 
-A user can also dismiss a run from the running-sessions dock. A run that was reaped or dismissed **stays canceled**: when the interrupted turn winds down, its own final save no longer overwrites that with "completed".
+A run that was reaped or dismissed **stays canceled**: when the interrupted turn winds down, its own final save no longer overwrites that with "completed". A turn that fails before the agent starts (for example, its workspace could not be created) is recorded as finished and failed at once, so it never reads as a turn still in progress.
 
 ### Evaluator gating
 
@@ -157,4 +176,4 @@ This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 - [The Design of Claude Managed Agents — Anthropic](https://www.anthropic.com/engineering/managed-agents) — stateful session as independent primitive
 - [Honcho](https://github.com/plastic-labs/honcho) — agent state memory library
 - [Zylos](https://github.com/zylos-ai/zylos-core) — persistent agent harness with tiered state
-- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/runs/run-lifecycle.server.ts` (heartbeat, final save), `src/lib/runs/run-replay-stream.ts` (resume), `src/lib/runs/runs.server.ts` (reaper, dismiss, stop), `src/lib/sessions/sessions.schema.ts` (conversation/message owner)
+- **Internal:** `src/lib/runs/runs.schema.ts`, `src/lib/runs/events.server.ts`, `src/lib/runs/run-lifecycle.server.ts` (heartbeat, final save), `src/lib/runs/run-replay-stream.ts` (resume), `src/lib/runs/runs.server.ts` (reaper, dismiss, stop), `src/lib/runs/live-chat-run.server.ts` (one turn at a time), `src/lib/engine/run-registry.server.ts` (which runs this server is working on), `src/lib/sessions/sessions.schema.ts` (conversation/message owner)

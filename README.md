@@ -73,7 +73,7 @@ cp .env.example .env
 - `DATABASE_URL`
 - `OPENROUTER_API_KEY`
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
-- `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
+- `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`). It must be a directory the app can create folders in: every chat turn creates its workspace there before the agent starts, and a turn fails with "Could not prepare the workspace for this run." when it cannot. On a development machine without a writable `/workspace`, point it at a local folder such as `./.sandbox` (gitignored).
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
