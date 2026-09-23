@@ -62,10 +62,10 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 ### Pull and push from the Repo tab
 
 1. **Pull latest** fetches every branch from the remote and fast-forwards the checked-out branch when it is behind. If it cannot move the branch without losing something — local commits the remote does not have, edits the update would overwrite — it leaves the branch alone and the message under the buttons says why. The remote's branches are recorded either way.
-2. **Push** sends a branch to GitHub under the same name. The **--force-with-lease** box replaces the branch on GitHub only if nobody else has pushed to it since AgentStudio last pulled or pushed it; if someone has, the push is refused with a hint to pull first.
+2. **Push** sends a branch to GitHub under the same name. The **--force-with-lease** box replaces the branch on GitHub only if nobody else has pushed to it since AgentStudio last pulled or pushed it; if someone has, the push is refused with a hint saying why. This works for a local project with no GitHub `origin` too: AgentStudio keeps its own record of what it last pushed where. A branch AgentStudio has never pulled or pushed is never force-pushed over.
 3. **Commit** uses the repository's own name and email, or `AgentStudio <agentstudio@local>` when the repository has none — the server's own git settings are never used.
 
-All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder that would run a program or send the GitHub token elsewhere are switched off rather than obeyed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
+All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder (or a submodule's) that would run a program are switched off rather than obeyed. Settings that would send the GitHub token elsewhere make pull and push refuse to run. When the runner cannot read the settings in full, it refuses the command rather than run it unprotected; the Repo tab then shows no status for the project until the settings are fixed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
 
 ### Delete a project
 

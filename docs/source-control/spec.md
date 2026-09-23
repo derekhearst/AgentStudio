@@ -143,11 +143,18 @@ else has pushed" option. The push is allowed when the branch on GitHub is still 
 AgentStudio last saw it, and refused otherwise, so an agent that rebased its branch can
 replace it, but never over someone else's commits it has not seen.
 
-"Where AgentStudio last saw it" is the clone's `origin/<branch>`. It is written when the repo
-is cloned, every time it is refreshed (Pull latest, `clone_repository`), and after every
-successful push. A branch that has never been fetched or pushed is expected not to exist yet.
-When a force-push is refused this way, the message says the remote branch has commits
-AgentStudio has not fetched: pull, look at what changed, and push again.
+"Where AgentStudio last saw it" comes from one of two records:
+
+| The clone's `origin` is... | AgentStudio's record of the branch | Kept up to date by |
+| -------------------------- | ---------------------------------- | ------------------ |
+| The repository being pushed to | The clone's `origin/<branch>` | Cloning, every refresh (Pull latest, `clone_repository`), every successful push |
+| Anything else, or missing (a local project) | Its own private record of what it last pushed to that repository | Every successful push |
+
+A branch with no record is expected not to exist yet, so AgentStudio never force-pushes over a
+branch it has neither fetched nor pushed. When a force-push is refused this way, the message
+says why: for a clone of that repository, the remote branch has commits AgentStudio has not
+fetched (pull, look at what changed, and push again); otherwise, the branch is not where
+AgentStudio last pushed it.
 
 ### Running git safely
 
@@ -169,26 +176,45 @@ So every git command the server runs goes through one hardened runner that:
 | Ignores the host machine's own git settings | A credential manager or URL rewrite on the server quietly taking part |
 | Starts git with a short list of environment variables, not the server's | A program that did run finding database passwords or encryption keys |
 | Switches off every repository setting that names a program: hooks, file-system monitors, filter and diff drivers, password prompts, commit signing, credential helpers | The repository running anything |
-| Never descends into submodules on its own | A submodule's settings, which were not checked, taking effect |
+| Does the same for every submodule that is checked out inside the repository, at any depth | A submodule's own settings running a program when git looks inside it (adding files checks each submodule for changes) |
+| Shows a changed submodule as one line, and never diffs inside it | A submodule's diff program running when a diff is shown |
+| Refuses to run at all when it cannot read the repository's settings in full | A setting it could not see going unswitched |
 | Pins git to the repository's own folder | A setting pointing a status or diff at files outside the workspace |
 | Only speaks HTTPS (and plain HTTP when that is the clone URL) | A setting swapping in another transport, such as one that runs a command |
-| Sends the GitHub token only as a header for the one exact URL being fetched or pushed | A rewritten URL or a repository-chosen proxy receiving the token |
+| Sends the GitHub token only as a header for the one exact URL being fetched or pushed, and pins that URL's proxy, certificate checking and cookie settings | A repository-chosen proxy receiving the token, or a cookie file being written over another file |
+| Refuses to fetch or push from a repository whose settings would send that URL somewhere else | A rewritten URL escaping the protections above |
+
+Settings are switched off by name, so the runner first reads which names the repository (and
+each checked-out submodule) uses. Reading settings runs nothing. If that read cannot be
+completed, the command is refused rather than run unprotected. "Refused" means nothing ran,
+and the message says why. It happens when:
+
+| Situation | Refused |
+| --------- | ------- |
+| Git cannot parse the settings file | Every command that touches files |
+| More than 32 filter drivers or 32 checked-out submodules, or more than 1,024 filter settings in one repository | Every command that touches files |
+| A submodule that cannot be read (a broken `.git` link, a bare repository) | Every command that touches files |
+| The read takes longer than 30 seconds | Every command that touches files |
+| A URL rewrite (`url.*.insteadOf`), a remote named after the URL being contacted, or any URL-specific `http.*` setting | Fetch, pull and push from that repository |
 
 Consequences worth knowing:
 
 - Server-side git does not use the host's git configuration at all. A commit made from the
   Repo tab uses the repository's own name and email, or `AgentStudio <agentstudio@local>` if
-  the repository has none.
+  the repository has none. A custom certificate authority has to come from the server's
+  environment (`GIT_SSL_CAINFO`, `SSL_CERT_FILE`), not from a global git setting.
 - Git LFS content is not downloaded by server-side clones; LFS files arrive as pointers.
 - The token is never on a command line, never in a file, and never given to a credential
   helper.
 - References the agent passes to `git_diff` must look like a branch, tag, commit or `HEAD~N`.
   Anything starting with `-` is refused, because git would read it as an option.
+- A repository refused for its settings stays refused until someone removes the offending
+  lines from `.git/config` (or the submodule's config). Nothing is changed automatically.
 
-One gap remains: git has no way to ignore a repository's settings wholesale, so filter drivers
-are switched off by name after reading which ones the repository defines. An agent that
-rewrites its settings in the instant between that read and the command could slip a new one
-in. Running server-side git inside the same sandbox as the agent's shell would close it.
+One gap remains: the read and the command are two steps. An agent that rewrites its settings
+in the instant between them could add a filter driver, check out a new submodule, or add a URL
+rewrite that the read did not see. Running server-side git inside the same sandbox as the
+agent's shell would close it.
 
 ### Pull request status sync
 
@@ -230,7 +256,7 @@ itself is no good:
 | 401 from any call | Marked `error` |
 | 403 on the repository listing, not a rate limit | Marked `error` |
 | 403 on one PR (single sign-on, an organisation's app restrictions) | Stays active |
-| Rate limit (429, or 403 with GitHub's rate-limit headers) | Stays active |
+| Rate limit (429, or a 403 whose headers or message say it is a rate limit, including GitHub's secondary limits) | Stays active |
 | Timeout, network error, 5xx | Stays active |
 
 A failure that leaves the connection active is still reported to whoever asked, and the next
@@ -393,13 +419,15 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
 - Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
-- The server never spawns git except through the hardened runner. No repository setting can make server-side git run a program, and the host's own git configuration plays no part.
-- The GitHub token reaches git only as a header scoped to the exact remote URL. It is never in argv, a file, or a credential helper, and a rewritten URL does not receive it.
+- The server never spawns git except through the hardened runner, and the host's own git configuration plays no part.
+- Every program-running setting the runner knows of is switched off for the repository and every checked-out submodule in it. The runner reads the repository's settings immediately before each command. If that read cannot be completed, the command is refused, never run unprotected. The known gap is the moment between the read and the command (see [Running git safely](#running-git-safely)).
+- Server-side git never starts a git inside a submodule to diff it or summarise it.
+- The GitHub token reaches git only as a header scoped to the exact remote URL. It is never in argv, a file, or a credential helper. A repository whose settings would rewrite or re-route that URL is refused before git contacts anything.
 - A model-supplied ref or branch name that starts with `-` is refused before git runs.
 - A refresh records every remote branch and moves the checked-out branch only by fast-forward.
-- A force-push is always a lease against the last state AgentStudio fetched or pushed; plain `--force` is never used.
+- A force-push is always a lease against the last state AgentStudio fetched or pushed, whether or not the target is the clone's `origin`; plain `--force` is never used.
 - A webhook action that says nothing about status never changes a PR's status, and never replaces its metadata.
-- Only a credential failure (401, or a non-rate-limit 403 on a token-level call) takes a GitHub connection out of service.
+- Only a credential failure (401, or a 403 on a token-level call that is not a rate limit by header or by message) takes a GitHub connection out of service.
 
 ## Roles & Permissions
 
