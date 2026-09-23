@@ -73,7 +73,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
-| Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |
+| Deep research | **even** | in a chat, the Research agent writes a plan the user must approve, then hands it to Chat, which does the research as ordinary turns with the web tools — steerable, but no cited-report page or notification. The background pipeline (planner, fetch, reflection, cited report, notification) runs only from research-mode automations, and it is fixed: a run cannot be steered once started. The composer's Research button that would start one is not switched on | agentic, steerable |
 | Memory | **win** | Memory Palace: wing/room/closet/drawer, hybrid vector + tsvector + temporal recall, mining pipeline | categorized entries, Topics editor, sensitive-topics exclusion — thinner retrieval |
 | Memory management UI | **win** (#37 fixed) | per-drawer edit with mandatory re-embed, delete, pin / never-recall, per-conversation forget, exclusion rules applied *before* embedding with built-in credential patterns and a tester, plus a per-drawer "why was this recalled?" score breakdown | Topics editor, per-item delete, sensitive-topic exclusion — no recall explainability |
 | Skills | **even** | full CRUD, skill hooks, agent identity skills, and a copy-paste `SKILL.md` package (resource files included) that round-trips cleanly. No marketplace or sharing, which only matters with a second user | same, plus a marketplace and `claude plugin eval` |
@@ -101,7 +101,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 **We are even on the core loop.** Same SDK, same models, same thinking, same research shape.
 
-**The evens are thinner than they look.** Three of them hide a real disadvantage: research runs on a fixed pipeline that cannot be steered once approved; `run_code` has no chart output; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
+**The evens are thinner than they look.** Three of them hide a real disadvantage: background research runs on a fixed pipeline that cannot be steered once started; `run_code` has no chart output; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
 
 **We are far behind on the session surface.** Diffs, checkpoints, terminal output, todo list, permission modes — five things that turn a long run from opaque to legible.
 
