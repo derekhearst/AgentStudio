@@ -112,6 +112,70 @@ Rules that keep this honest:
 3. The same rules apply whether the conversation is on a Claude model or a third-party model routed through the gateway. A gateway model that cannot see images will simply not use them; nothing about the delivery path changes.
 4. Files attached on the new-chat page (`/`) go with the first message, exactly as if they had been attached inside the conversation. The new-chat page used to upload them, show them, and then send only the text.
 
+### Composer shortcuts: `@` file mentions and `/` commands
+
+The message box has two shortcuts. Both work from the keyboard, and both work on a phone by tapping.
+
+#### Mentioning a file with `@`
+
+Typing `@` at the start of a word opens a list of the files and folders in the chat's workspace. As you keep typing, the list narrows to the closest matches. The letters only have to appear in order, so `pnt` finds `PinnedTodoPanel.svelte`, and a match in a file's name ranks above the same letters spread across folder names. Picking an entry writes its path into the message as inline code (for example `src/lib/app.ts`) followed by a space. Nothing is sent. The **@ Context** button does the same as typing `@`.
+
+Which files are listed depends on where the chat's next turn will run:
+
+| The chat is… | The list shows |
+| --- | --- |
+| Bound to a project | The project's working folder |
+| Talking to an agent that keeps a persistent workspace | That workspace |
+| Neither | Nothing. Each turn in such a chat starts in a fresh, empty folder, so a file the last turn wrote is not where the next turn will look. The list says so and suggests binding the chat to a project. |
+| Not created yet (the new-chat page) | No `@` list and no **@ Context** button |
+
+Rules:
+
+1. A path is relative to the folder the next turn starts in, so the agent can open it exactly as written.
+2. Folders that are never worth mentioning and are often huge are skipped: `.git`, `node_modules`, build output (`build`, `dist`, `.next`, `.svelte-kit`, `.turbo`, `target`), caches, coverage reports and Python virtual environments. Other dot-folders stay, so project knowledge (`.agentstudio/knowledge`), `.github` and `.claude` can be mentioned.
+3. Symbolic links are never followed or listed. A link the agent made, or one a cloned repository contains, cannot be used to see files elsewhere on the server.
+4. Only names reach the browser. File contents and full server paths never do.
+5. A very large workspace is searched only up to 20,000 entries, 16 folders deep or 1.5 seconds of scanning, whichever comes first, and the list says when that happened. The list of files is remembered for 15 seconds, so a brand-new file can take that long to appear.
+6. Only the conversation's owner can search its files. Asking about someone else's conversation gets the same answer as asking about one that does not exist.
+7. The path goes in as inline code, not as `@path`, so what the model receives does not depend on how the Agent SDK happens to treat an `@`.
+
+#### Running a command with `/`
+
+Typing `/` as the very first character of the message opens the command palette. The **/ Commands** button does the same. Every command is an action the app already has a button for; the palette is a quicker way to reach it, and it calls exactly what that button calls.
+
+| Command | What it does | Available |
+| --- | --- | --- |
+| `/compact` | Asks the agent to summarise the conversation so far, to free up context. The same as Compact on the context meter | In a chat |
+| `/model <model>` | Switches the model for the next message | Everywhere |
+| `/agent <agent>` | Hands the conversation to another agent | Everywhere, when there are agents to pick |
+| `/research <question>` | Starts a deep research run on the question and opens its page | In a chat |
+| `/plan` | Turns plan mode on or off. Plan mode is read-only: the agent plans instead of making changes. Turning it off goes back to Ask. It never switches to Bypass, which still needs the confirmation on the mode chip | In a chat |
+| `/effort <level>` (also `/reasoning`, `/think`) | Sets how hard the model thinks before answering | Everywhere |
+| `/attach` | Opens the file picker | Everywhere |
+| `/voice` | Starts or stops dictation | Where the browser supports it |
+
+How it behaves:
+
+1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and highlighted first. Typing after the command narrows the list (`/model sonnet`).
+2. `/research` takes free text: type the question after it and press Enter.
+3. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
+4. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
+5. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds.
+6. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
+
+#### Keyboard and touch
+
+| Key | With a list open |
+| --- | --- |
+| Up / Down | Move through the list (it wraps around) |
+| Enter or Tab | Take the highlighted entry |
+| Escape | Close the list. It stays closed until the cursor leaves that word |
+| Enter, when the list is empty | Sends the message as typed |
+
+While a Japanese, Chinese or Korean input method is composing, Enter confirms the composition. It never sends the message or picks from a list; before this, Enter could send half-composed text.
+
+On a phone the **Attach**, **@ Context** and **/ Commands** buttons sit in a row above the message box (before this they did nothing). Tapping an entry in a list picks it without closing the keyboard. The list opens above the message box, or below it when the box is near the top of the screen, as on the new-chat page.
+
 ### Starting a conversation from the new-chat page
 
 The new-chat page (`/`) greets the owner by the display name they gave during first-run setup ("Good morning, Alex"). If no name was given, the greeting is just "Good morning".
@@ -304,6 +368,8 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Messages keep their order when two writers add to a conversation at the same moment (a Stop saving what was written so far while the turn saves its final reply, or a background run). The one that loses the race takes the next position and is still saved.
 - A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
 - Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
+- A path offered by `@` is one the next turn can open as written: it is relative to the folder that turn starts in, and it never reaches through a symbolic link.
+- A palette command calls the same handler as the button it stands in for. The palette has no copy of its own of any action.
 
 ## Roles & Permissions
 
@@ -311,6 +377,7 @@ The renderer checks itself when the app starts by running a set of known attack 
 | -------------------------------- | ------------------ |
 | View own workbench sessions      | Authenticated user |
 | Approve own plan or tool request | Owner user, admin  |
+| Search a conversation's files with `@` | The conversation's owner |
 | Resolve another user's item      | Admin only         |
 | View admin observability panes   | Admin only         |
 

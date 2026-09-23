@@ -237,7 +237,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
 | #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
-| #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
+| #22 | Slash commands and `@`-mentions | **split** — `@` shipped, `/` shipped over app actions | `@` lists the next turn's workspace; the `/` palette covers the app's own buttons, with SDK commands still to add |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
 | #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
@@ -481,6 +481,23 @@ all of which are already buttons in the composer — is re-skinning. Once `setti
 lands (#23), `query.supportedCommands()` returns the real command list, including the repo's
 own `.claude/commands/` and every skill, pushed live on change via `commands_changed`. A
 palette over *that* is worth having; a palette over three buttons is not.
+
+**Status (2026-09-23).** The owner chose to ship both halves now, the `/` half as a palette
+over the app's existing actions (option B of the triage).
+
+- `@` lists files and folders in the folder the chat's next turn starts in: the bound
+  project's checkout, or an agent's persistent workspace. A chat whose every turn gets a fresh
+  `runs/<id>` directory (or a fresh worktree) has nothing to list, and the menu says so rather
+  than offering paths the next turn will not find. The walk never follows a symlink, skips
+  `.git`, `node_modules` and build output, is capped by entries, depth and time, and never
+  shells out to `git` or `rg`. The path is inserted as inline code, not as `@path`.
+- `/` offers `/compact`, `/model`, `/agent`, `/research`, `/plan`, `/effort`, `/attach` and
+  `/voice`, each calling the handler its button calls. Commands are plain data with a
+  `source`, so the SDK list (`supportedCommands()`, cached from `init` / `commands_changed`)
+  can be merged in later without changing the palette.
+- Still open for the SDK half: caching the command list on the conversation (control
+  requests only work mid-turn), routing `/compact` to the SDK's real compaction, and handling
+  `local_command_output` and `conversation_reset` in the stream loop.
 
 ### #38 — usage digest
 

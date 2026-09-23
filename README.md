@@ -8,6 +8,8 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+The message box has two shortcuts. Typing `@` lists the files in the chat's workspace (a bound project's folder, or an agent's persistent workspace) and inserts the chosen file's relative path. Typing `/` at the start opens a command palette over the app's own actions: `/compact`, `/model`, `/agent`, `/research`, `/plan`, `/effort`, `/attach` and `/voice`. Both work from the keyboard and by tapping on a phone. See "Composer shortcuts" in [docs/chat/spec.md](docs/chat/spec.md).
+
 Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
 
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
@@ -205,6 +207,7 @@ Notes:
 - Architecture refactor plan: `docs/structure/plan.md`
 - Runtime spec: `docs/runtime/spec.md`
 - Chat plan: `docs/chat/plan.md`
+- Chat spec (composer shortcuts, attachments, safe rendering): `docs/chat/spec.md`
 - Memory spec: `docs/memory/spec.md`
 - Automations: `docs/automations/automations.md`
 - Monitors: `docs/monitors/monitors.md`

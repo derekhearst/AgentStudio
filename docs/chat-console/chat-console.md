@@ -119,6 +119,13 @@ These are the constraints that matter, and why:
 - **The URL is always visible** above the frame, so it is never ambiguous what is loaded.
 - **Framed pages are sandboxed.** Scripts and forms are allowed; a page on the app's own
   origin additionally loses `allow-same-origin` so it cannot script the app.
+- **The composer's `@` file list follows the same rules.** It lists the workspace the chat's
+  next turn will run in (a bound project's folder, or an agent's persistent workspace; a chat
+  whose turns each start in a fresh folder has nothing to list), re-checks ownership on every
+  search, never follows or lists a symbolic link, skips `.git`, `node_modules` and build
+  output, and returns relative names only. It never runs `git` or any other program over the
+  workspace: the agent can write a repository's `.git/config`, and some of its settings make
+  git run a program on the server. See "Composer shortcuts" in the chat spec.
 - **Previewed markdown is sanitized.** Raw HTML in the file is escaped rather than
   executed, and links and images that are not `http(s)` are dropped. That includes text
   that follows an inline `<code>`, `<kbd>` or `<pre>` tag, which the markdown library
@@ -129,5 +136,6 @@ These are the constraints that matter, and why:
 ## Integrations
 
 - `src/lib/workspace/workspace.server.ts` — workspace resolution and path containment.
+- `src/lib/chat-console/workspace-files.server.ts` and `mentions.server.ts` — the `@` file list.
 - `src/lib/tools/sandbox.server.ts` — the same workspace the agent's file tools use.
 - `/api/preview/raw` — image and PDF bytes for the rail.
