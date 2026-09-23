@@ -28,7 +28,9 @@ export const toolSchemas = {
 		overwrite: z.boolean().default(false),
 	}),
 	file_info: z.object({ path: z.string().min(1) }),
-	browser_screenshot: z.object({ url: z.string().url().optional() }),
+	// Required: every screenshot loads its page in a fresh browser context, so there is no
+	// "current page" to capture without one.
+	browser_screenshot: z.object({ url: z.string().url().max(2048) }),
 	web_fetch: z.object({
 		url: z.string().min(1).max(2048),
 		maxChars: z.number().int().min(1000).max(100_000).default(50_000).optional(),
@@ -278,7 +280,7 @@ export const toolDescriptions: Record<ToolName, string> = {
 	delete_file: 'Delete a file or directory (recursive deletes require explicit recursive=true).',
 	move_file: 'Move or rename a file/directory within the sandbox workspace.',
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
-	browser_screenshot: 'Take a screenshot of a web page.',
+	browser_screenshot: 'Take a screenshot of a web page (HTTP/HTTPS only; private and loopback addresses are blocked). Returns the image so you can see the rendered page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
 	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
 	list_projects: 'List the user\'s projects (durable work surfaces, each with its own sandbox working directory). Returns id, name, slug, kind, description for each project.',
