@@ -29,6 +29,7 @@ type ToolBlockLike = {
 // the shared implementation lives in `$lib/util/json` (parseJsonRecord — also
 // guards against non-object JSON values like null or arrays).
 import { parseJsonRecord as parseJsonFallback } from '$lib/util/json'
+import { readAskUserAnswers } from './ask-user-answers'
 export { parseJsonFallback }
 
 export function getAskUserQuestionsFromTool(block: ToolBlockLike): AskUserQuestion[] {
@@ -59,15 +60,12 @@ export function getAskUserQuestionsFromTool(block: ToolBlockLike): AskUserQuesti
 		.filter((row) => row.question.trim().length > 0)
 }
 
+/**
+ * The answers recorded on an ask_user block's result, or null while it has none. Reads the
+ * host's `Header: answer` text as well as a JSON `{ answers }` object — see `./ask-user-answers`.
+ */
 export function getAskUserAnswersFromTool(block: ToolBlockLike): Record<string, string> | null {
 	if (!block.result) return null
-	const result = parseJsonFallback(block.result)
-	if (!result || typeof result !== 'object') return null
-	const answers = result.answers
-	if (!answers || typeof answers !== 'object') return null
-	const out: Record<string, string> = {}
-	for (const [k, v] of Object.entries(answers as Record<string, unknown>)) {
-		if (typeof v === 'string') out[k] = v
-	}
-	return Object.keys(out).length > 0 ? out : null
+	const headers = getAskUserQuestionsFromTool(block).map((question) => question.header)
+	return readAskUserAnswers(block.result, headers)
 }

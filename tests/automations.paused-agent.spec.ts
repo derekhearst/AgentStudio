@@ -122,6 +122,31 @@ test.describe('automations/paused-agent — the gate', () => {
 		}
 	})
 
+	test('a usage digest assigned to a paused agent is skipped like any other automation (#38)', async () => {
+		// The digest is exempt from budget limits because it spends nothing, but pausing is
+		// the operator's switch on everything assigned to the agent, and it is checked first.
+		const prefix = uniquePrefix('paused-agent-digest')
+		await cleanup(prefix)
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		try {
+			const agent = await seedAgent(prefix, { status: 'paused' })
+			const next = new Date(Date.now() + 24 * 60 * 60_000)
+			const [row] = await sql<{ id: string }[]>`
+				insert into automations (user_id, agent_id, description, cron_expression, prompt, mode, output_target, enabled, next_run_at)
+				values (${userId}, ${agent.id}, ${`${prefix} digest`}, '0 9 * * 1', '{{usage_digest}}', 'maintenance', 'review_inbox', true, ${next})
+				returning id
+			`
+
+			const result = await runAutomationById(row.id, new Date(), { trigger: 'manual' })
+			expect(result).toMatchObject({ blocked: true, reason: 'agent_paused' })
+			const runs = await sql<{ status: string }[]>`select status from automation_runs where automation_id = ${row.id}`
+			expect(runs).toEqual([{ status: 'blocked' }])
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
 	test('a monitor that would start a conversation with a paused agent does not, and the owner hears about it', async () => {
 		const prefix = uniquePrefix('paused-agent-monitor')
 		await cleanup(prefix)

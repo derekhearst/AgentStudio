@@ -6,9 +6,22 @@
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
+	import { renderMarkdown } from '$lib/chat/chat';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
+	type InboxItem = Inbox['items'][number];
+
+	/**
+	 * A maintenance automation's output — the weekly usage digest (#38) or a model-written
+	 * summary — is markdown meant to be read, not a JSON string with `\n` escapes. Rendered
+	 * through the chat's sanitizing renderer, because a model-written summary is untrusted.
+	 */
+	function automationSummary(item: InboxItem): string | null {
+		if (item.type !== 'automation_summary') return null;
+		const summary = item.payload.summary;
+		return typeof summary === 'string' && summary.trim() ? summary : null;
+	}
 
 	let {
 		inbox,
@@ -202,7 +215,13 @@
 							</svg>
 						</button>
 						{#if isOpen}
+							{@const summaryMarkdown = automationSummary(item)}
 							<div class="space-y-2 border-t border-base-300/60 px-3 py-3 text-xs">
+								{#if summaryMarkdown}
+									<div class="markdown-body max-h-96 overflow-auto rounded-lg bg-base-200/60 p-3 text-xs" data-testid="inbox-automation-summary">
+										{@html renderMarkdown(summaryMarkdown)}
+									</div>
+								{/if}
 								{#if item.runId}
 									<p>
 										<span class="font-semibold uppercase tracking-wide opacity-50">Run:</span>

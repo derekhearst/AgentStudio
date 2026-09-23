@@ -120,3 +120,70 @@ export async function scriptBusyRun(page: Page, conversationId: string, runId: s
 	)
 	return { seen, release: () => release() }
 }
+
+/* Held runs for the page-state specs (chat.page-state, chat.ask-user-answers). */
+
+export type Frame = { id?: number; event: string; data: unknown }
+
+const isStream = (conversationId: string) => (url: URL) => url.pathname === `/chat/${conversationId}/stream`
+const isResume = (conversationId: string) => (url: URL) => url.pathname === `/chat/${conversationId}/stream/resume`
+
+/**
+ * A run whose first response carries `frames` and then drops, so the page reconnects
+ * through `stream/resume` — which is held open until `release()`, keeping the page mid-turn.
+ */
+export async function scriptHeldRun(page: Page, conversationId: string, frames: Frame[]) {
+	let release: () => void = () => {}
+	const gate = new Promise<void>((resolve) => (release = resolve))
+	const seen = { sends: [] as unknown[], resumes: 0, resumeAborted: false, stops: [] as unknown[] }
+
+	page.on('requestfailed', (request) => {
+		if (isResume(conversationId)(new URL(request.url()))) seen.resumeAborted = true
+	})
+	await page.route(isStream(conversationId), (route) => {
+		seen.sends.push(route.request().postDataJSON())
+		return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: sse(frames) })
+	})
+	await page.route(isResume(conversationId), async (route) => {
+		seen.resumes++
+		await gate
+		await route
+			.fulfill({
+				status: 200,
+				headers: { 'content-type': 'text/event-stream' },
+				body: sse([{ event: 'done', data: { resumed: true, terminal: true } }]),
+			})
+			.catch(() => {
+				// The page let go of the request; nothing left to answer.
+			})
+	})
+	await page.route(
+		(url) => url.pathname === `/chat/${conversationId}/stop`,
+		async (route) => {
+			seen.stops.push(route.request().postDataJSON())
+			await route.fulfill({ json: { stopped: true } })
+		},
+	)
+	return { seen, release: () => release() }
+}
+
+/** A send whose response is held until `release()`, and then ends the turn. */
+export async function scriptHeldSend(page: Page, conversationId: string) {
+	let release: () => void = () => {}
+	const gate = new Promise<void>((resolve) => (release = resolve))
+	const seen = { sends: [] as Array<Record<string, unknown>> }
+	await page.route(isStream(conversationId), async (route) => {
+		seen.sends.push(route.request().postDataJSON())
+		await gate
+		await route
+			.fulfill({
+				status: 200,
+				headers: { 'content-type': 'text/event-stream' },
+				body: sse([{ id: 1, event: 'done', data: { error: 'scripted end' } }]),
+			})
+			.catch(() => {
+				// The page let go of the request; nothing left to answer.
+			})
+	})
+	return { seen, release: () => release() }
+}

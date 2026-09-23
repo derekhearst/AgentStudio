@@ -84,6 +84,40 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 		}
 	})
 
+	test('an automation_summary opens to its summary rendered as sanitized markdown', async ({ page }) => {
+		// #38 — the weekly usage digest lands here as markdown. It used to show only as a JSON
+		// string full of `\n` escapes. A model-written summary is untrusted, so the renderer
+		// is the chat's sanitizing one: markup in the summary must not become live HTML.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-auto-markdown')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'automation_summary',
+				severity: 'info',
+				summary: `${prefix} usage digest`,
+				payload: {
+					kind: 'maintenance_summary',
+					mode: 'maintenance',
+					summary: `## ${prefix} heading\n\n- **Runs:** 12\n\n<img src=x onerror="window.__pwned = 1">`,
+				},
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+
+			await page.getByText(`${prefix} usage digest`).click({ timeout: 30_000 })
+			const rendered = page.getByTestId('inbox-automation-summary')
+			await expect(rendered.getByRole('heading', { name: `${prefix} heading` })).toBeVisible()
+			await expect(rendered.locator('strong')).toHaveText('Runs:')
+			await expect(rendered.locator('img')).toHaveCount(0)
+			expect(await page.evaluate(() => (window as { __pwned?: number }).__pwned)).toBeUndefined()
+		} finally {
+			await clearItems(prefix)
+		}
+	})
+
 	test('a policy_override_request item appears with warning severity', async ({ page }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('review-policy')

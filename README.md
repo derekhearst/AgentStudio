@@ -18,6 +18,10 @@ Autonomous agents with custom roles, system prompts, and model assignments. Agen
 
 Reusable instruction sets agents load on demand, managed at `/skills`. A skill exports as a `SKILL.md` package with its resource files, and importing that package recreates it exactly. See [docs/skills/skills.md](docs/skills/skills.md).
 
+### Activity and Usage
+
+`/activity` opens with a usage strip for the last 24 hours, 7 days or 30 days: runs and their failure rate, tokens (the real measure, since Claude subscription runs record $0) with metered dollars underneath, automation runs, the top models and agents (each with its metered dollars), the most-used tools, the review inbox, budget headroom, and a short list of anomalies such as a spend spike or an automation that started failing. Below it is the chronological activity feed. The same numbers can be sent every Monday as a weekly usage digest to the review inbox or a chat thread; it is opt-in and written by code, with no model call. See [docs/activity/spec.md](docs/activity/spec.md).
+
 ### Settings
 
 Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
@@ -255,7 +259,8 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
-- `/cost` Cost dashboard
+- `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
+- `/review` Cost, recent failures, logs and the review inbox
 - `/agents` Agent management
 - `/automations` Scheduled automation workflows ([docs](docs/automations/automations.md))
 - `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))

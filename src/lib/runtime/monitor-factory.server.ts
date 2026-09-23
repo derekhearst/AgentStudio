@@ -8,14 +8,25 @@
  */
 
 import type { RequestHandler } from '@sveltejs/kit'
-import { encodeSseData } from '$lib/runtime/sse-codec'
+import { encodeSseData, encodeSseFrame } from '$lib/runtime/sse-codec'
 import { logger } from '$lib/observability/logger'
 
 const POLL_INTERVAL_MS = 700
+/** The version is read on every third snapshot (~2s): a list catching up is not a live run. */
+const VERSION_EVERY_POLLS = 3
+
+export type MonitorVersionSignal = {
+	/** The SSE event name. A named event, so a listener on the snapshots never sees it. */
+	event: string
+	/** A cheap fingerprint of something the page caches; sent only when it changes. */
+	read: (userId: string) => Promise<string>
+}
 
 export type SseMonitorOptions = {
 	/** How often to poll. Default 700ms. */
 	pollIntervalMs?: number
+	/** Also send a named event whenever this fingerprint changes. */
+	version?: MonitorVersionSignal
 }
 
 export function createSseMonitorHandler<T>(
@@ -23,6 +34,7 @@ export function createSseMonitorHandler<T>(
 	options: SseMonitorOptions = {},
 ): RequestHandler {
 	const pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS
+	const versionSignal = options.version
 
 	return ({ request, locals }) => {
 		if (!locals.user) {
@@ -34,6 +46,8 @@ export function createSseMonitorHandler<T>(
 		let closed = false
 		let polling = false
 		let failing = false
+		let lastVersion: string | null = null
+		let polls = 0
 
 		const stop = () => {
 			closed = true
@@ -54,7 +68,8 @@ export function createSseMonitorHandler<T>(
 				 * failure is logged once when it starts and once when it clears, not per tick.
 				 *
 				 * One query at a time: a slow database skips ticks instead of stacking a new
-				 * query every 700ms behind the ones still waiting.
+				 * query every 700ms behind the ones still waiting. The version read is part of
+				 * the same tick, so it is single-flight and guarded too.
 				 */
 				const emitSnapshot = async () => {
 					if (closed || polling) return
@@ -70,6 +85,18 @@ export function createSseMonitorHandler<T>(
 							controller.enqueue(encodeSseData(snapshot))
 						} catch {
 							// The client went away between ticks.
+							stop()
+							return
+						}
+
+						if (!versionSignal || polls++ % VERSION_EVERY_POLLS !== 0) return
+						// A failed read only skips this fingerprint; the snapshots carry on.
+						const version = await versionSignal.read(userId).catch(() => null)
+						if (closed || version === null || version === lastVersion) return
+						lastVersion = version
+						try {
+							controller.enqueue(encodeSseFrame(versionSignal.event, { version }))
+						} catch {
 							stop()
 						}
 					} catch (err) {

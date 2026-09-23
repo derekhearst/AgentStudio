@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation'
-import { createConversation } from '$lib/chat'
+import { createConversation, getConversations } from '$lib/chat'
 
 export type CreationKind = 'agent' | 'skill'
 
@@ -46,5 +46,6 @@ export async function startGuidedCreationChat(input: GuidedCreationInput) {
 	const prompt = buildPrompt(input)
 	const title = `Create ${input.kind}`
 	const created = await createConversation({ title, model: input.model })
+	void getConversations().refresh().catch(() => {})
 	await goto(`/chat/${created.id}?prompt=${encodeURIComponent(prompt)}`)
 }
