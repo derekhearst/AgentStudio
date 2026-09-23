@@ -115,6 +115,69 @@ test.describe('source-control/git-push — force-with-lease against a real remot
 			tmp.cleanup()
 		}
 	})
+
+	test('a push target that is not origin keeps its own record, so the lease works there too', async () => {
+		const { pushBranch, pushRecordRef } = await import('../src/lib/source-control/git-push.server')
+		const tmp = makeTempDir('push-lease-record')
+		const server = await startGitHttpServer(tmp.path)
+		try {
+			const bare = createUpstream(tmp.path)
+			const remote = `${server.origin}/upstream.git`
+			// A local project: its own history, and no `origin` at all.
+			const project = join(tmp.path, 'project')
+			git(['init', '-b', 'agent/2', project])
+			writeFileSync(join(project, 'work.txt'), 'v1\n')
+			git(['add', '-A'], project)
+			git(['commit', '-m', 'v1'], project)
+			const record = pushRecordRef(remote, 'agent/2')
+
+			const first = await pushBranch({ repoPath: project, remote, branch: 'agent/2', token: '' })
+			expect(first.success).toBe(true)
+			expect(git(['rev-parse', record], project)).toBe(git(['rev-parse', 'HEAD'], project))
+
+			// Rewrite and force-push. With only `origin/<branch>` to go on this was always
+			// "stale info"; the record makes it the ordinary case.
+			git(['commit', '--amend', '-m', 'v2'], project)
+			const rewritten = await pushBranch({ repoPath: project, remote, branch: 'agent/2', token: '', force: true })
+			expect(rewritten.stderr).not.toMatch(/stale info/)
+			expect(rewritten.success).toBe(true)
+			expect(git(['rev-parse', 'refs/heads/agent/2'], bare)).toBe(git(['rev-parse', 'HEAD'], project))
+			expect(git(['rev-parse', record], project)).toBe(git(['rev-parse', 'HEAD'], project))
+
+			// Someone else pushes: the lease still holds the line.
+			const theirs = commitUpstream(tmp.path, bare, 'agent/2', 'theirs.txt', 'theirs\n')
+			git(['commit', '--amend', '-m', 'v3'], project)
+			const refused = await pushBranch({ repoPath: project, remote, branch: 'agent/2', token: '', force: true })
+			expect(refused.success).toBe(false)
+			expect(refused.stderr).toMatch(/stale info/)
+			expect(refused.stderr).toMatch(/not where AgentStudio last pushed it/)
+			expect(git(['rev-parse', 'refs/heads/agent/2'], bare)).toBe(theirs)
+
+			// And a branch AgentStudio never pushed there is never overwritten by a force-push.
+			git(['checkout', '-q', '-b', 'main'], project)
+			const neverPushed = await pushBranch({ repoPath: project, remote, branch: 'main', token: '', force: true })
+			expect(neverPushed.success).toBe(false)
+			expect(neverPushed.stderr).toMatch(/stale info/)
+		} finally {
+			await server.close()
+			tmp.cleanup()
+		}
+	})
+
+	test('push records are keyed by the target repository', async () => {
+		const { pushRecordRef } = await import('../src/lib/source-control/git-push.server')
+		expect(pushRecordRef('https://github.com/Acme/Widgets.git', 'agent/1')).toBe(
+			'refs/agentstudio/pushed/github.com/acme/widgets/agent/1',
+		)
+		// GitHub compares owner and repo without case, so the record does too.
+		expect(pushRecordRef('https://github.com/acme/widgets', 'agent/1')).toBe(
+			pushRecordRef('https://github.com/ACME/widgets.git', 'agent/1'),
+		)
+		const other = pushRecordRef('https://gitea.example/team/app.git', 'main')
+		expect(other).toMatch(/^refs\/agentstudio\/pushed\/url\/[0-9a-f]{24}\/main$/)
+		expect(other).not.toBe(pushRecordRef('https://gitea.example/team/other.git', 'main'))
+		expect(() => pushRecordRef('https://github.com/a/b.git', '--delete')).toThrow(/Invalid branch name/)
+	})
 })
 
 test.describe('source-control — mandatory approval set', () => {

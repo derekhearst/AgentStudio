@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { runGit } from './git-exec.server'
-import { assertSafeBranchName } from './git-exec'
+import { assertSafeBranchName, isSafeBranchName } from './git-exec'
 import { githubCloneUrl } from './repo-mirror'
 import { parseCloneUrl } from './parse-clone-url'
 
@@ -25,10 +26,16 @@ import { parseCloneUrl } from './parse-clone-url'
  *
  * "Last saw it" needs a record, and a push to a URL has none: git's bare
  * `--force-with-lease` looks for a remote-tracking ref, finds nothing for an anonymous URL,
- * and rejects every existing branch as "stale info". So the lease is spelled out:
- * the expected value is `refs/remotes/origin/<branch>` — written by clone, by "Pull
- * latest" and by every successful push below — when the repository's `origin` is this
- * GitHub repo. With no such record the expectation is "the branch does not exist yet".
+ * and rejects every existing branch as "stale info". So the lease is spelled out, from one
+ * of two records:
+ *
+ *   - `refs/remotes/origin/<branch>` when the repository's `origin` is the push target.
+ *     Clone, "Pull latest" and every successful push below keep it current.
+ *   - Otherwise `refs/agentstudio/pushed/<target>/<branch>` (`pushRecordRef`): what
+ *     AgentStudio itself last pushed there. Written after every successful push, whatever
+ *     the target — a local project with no `origin`, or a push to a repo that is not it.
+ *
+ * With no record the expectation is "the branch does not exist yet".
  *
  * Returns the structured push result (stderr is the source of truth for git's pretty output)
  * so the caller can show the operator exactly what happened.
@@ -108,6 +115,33 @@ async function trackingRefFor(repoPath: string, remote: string, branch: string):
 	return `refs/remotes/origin/${branch}`
 }
 
+/** Refs under here are AgentStudio's own bookkeeping; git and the user's tools ignore them. */
+const PUSH_RECORD_NAMESPACE = 'refs/agentstudio/pushed'
+
+/**
+ * Where the commit AgentStudio last pushed to `branch` at `remote` is recorded. Keyed by
+ * the target: `github.com/<owner>/<repo>` (lower-cased, as GitHub compares them) for a
+ * GitHub URL, a hash of the normalised URL for anything else.
+ */
+export function pushRecordRef(remote: string, branch: string): string {
+	assertSafeBranchName(branch)
+	let key: string | null = null
+	try {
+		const parsed = parseCloneUrl(remote)
+		if (parsed.provider === 'github') {
+			const candidate = `github.com/${parsed.owner.toLowerCase()}/${parsed.repo.toLowerCase()}`
+			if (isSafeBranchName(candidate)) key = candidate
+		}
+	} catch {
+		// Not a URL parseCloneUrl knows; hashed below.
+	}
+	if (!key) {
+		const normalized = remote.trim().toLowerCase().replace(/\/+$/, '').replace(/\.git$/, '')
+		key = `url/${createHash('sha256').update(normalized).digest('hex').slice(0, 24)}`
+	}
+	return `${PUSH_RECORD_NAMESPACE}/${key}/${branch}`
+}
+
 async function resolveCommit(repoPath: string, ref: string): Promise<string | null> {
 	const res = await runGit(['rev-parse', '--verify', '--quiet', '--end-of-options', `${ref}^{commit}`], { repoPath })
 	const sha = res.code === 0 ? res.stdout.trim() : ''
@@ -132,7 +166,9 @@ export async function pushBranch(input: {
 	assertSafeBranchName(input.branch)
 
 	const trackingRef = await trackingRefFor(input.repoPath, input.remote, input.branch)
-	const leaseExpected = input.force && trackingRef ? ((await resolveCommit(input.repoPath, trackingRef)) ?? '') : ''
+	const recordRef = pushRecordRef(input.remote, input.branch)
+	const leaseRef = trackingRef ?? recordRef
+	const leaseExpected = input.force ? ((await resolveCommit(input.repoPath, leaseRef)) ?? '') : ''
 	const pushedSha = await resolveCommit(input.repoPath, `refs/heads/${input.branch}`)
 	const args = buildPushArgs({ remote: input.remote, branch: input.branch, force: input.force, leaseExpected })
 
@@ -145,13 +181,16 @@ export async function pushBranch(input: {
 	let stderr = res.stderr
 	if (res.code === 0) {
 		// Record what the remote branch now is, the way a push to a named remote would, so the
-		// next force-with-lease has an accurate expectation.
-		if (trackingRef && pushedSha) {
-			await runGit(['update-ref', trackingRef, pushedSha], { repoPath: input.repoPath })
+		// next force-with-lease has an accurate expectation — whichever record it will read.
+		if (pushedSha) {
+			await runGit(['update-ref', recordRef, pushedSha], { repoPath: input.repoPath })
+			if (trackingRef) await runGit(['update-ref', trackingRef, pushedSha], { repoPath: input.repoPath })
 		}
 	} else if (input.force && /stale info/.test(stderr)) {
-		stderr +=
-			'\nhint: the remote branch has commits AgentStudio has not fetched. Pull latest, check what changed, then push again.'
+		stderr += trackingRef
+			? '\nhint: the remote branch has commits AgentStudio has not fetched. Pull latest, check what changed, then push again.'
+			: '\nhint: the remote branch is not where AgentStudio last pushed it — someone else pushed, or AgentStudio never ' +
+				'pushed this branch there. Check what is on the remote first; a force-push will not overwrite work AgentStudio has not seen.'
 	}
 
 	return {
