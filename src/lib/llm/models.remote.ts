@@ -1,5 +1,6 @@
 import { query } from '$app/server'
 import { listModels } from '$lib/llm/models.server'
+import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -26,6 +27,9 @@ import { logger } from '$lib/observability/logger'
  * The UI can degrade; the ledger cannot.
  */
 export const getAvailableModels = query(async () => {
+	// Outside the try on purpose: a missing session is a refusal, not a catalogue outage to
+	// paper over with an empty list.
+	requireAuthenticatedRequestUser()
 	try {
 		return await listModels()
 	} catch (error) {

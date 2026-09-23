@@ -62,7 +62,7 @@ Direct database imports from `.server.ts` files inside components or `+page.svel
 | ---------------- | ------------------------------------------------------------ |
 | `activity/`      | Append-only audit event log and feed                         |
 | `agents/`        | Agent records, identity skills, orchestrator                 |
-| `auth/`          | Users, sessions, passkeys, invites                           |
+| `auth/`          | The single owner account, sessions, the request auth gate    |
 | `automations/`   | Scheduled and event-triggered automation runs                |
 | `chat/`          | Chat UI and streaming orchestration                          |
 | `costs/`         | LLM usage tracking, budget limits, spend dashboard           |
@@ -117,8 +117,9 @@ Routes map directly to the URL structure. Each route folder contains the SvelteK
 | `/activity`    | activity                                           |
 | `/skills`      | skills                                             |
 | `/review`      | observability                                      |
-| `/settings`    | settings + auth (passkeys)                         |
-| `/users`       | auth (admin user mgmt)                             |
+| `/settings`    | settings                                           |
+| `/login`       | auth (password sign-in)                            |
+| `/setup`       | auth (first-run owner creation)                    |
 | `/cost`        | cost                                               |
 | `/automations` | automation                                         |
 | `/api/*`       | Server API routes (SSE, webhooks, cron, MCP proxy) |
@@ -134,7 +135,7 @@ API routes handle everything that is not a page: SSE streams, webhook receivers,
 /api/agents/[id]/run        # POST: start a run for an agent
 /api/mcp/[serverId]/proxy   # POST: proxy MCP tool call
 /api/notifications/push     # POST: register push subscription
-/api/cron/*                 # GET: cron job triggers
+/api/cron                   # POST: scheduler tick (session or CRON_SECRET bearer)
 /api/transcribe             # POST: audio transcription
 /api/upload                 # POST: file upload
 ```

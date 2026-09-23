@@ -1,5 +1,5 @@
 import { command, query } from '$app/server'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { chatRuns, runEvents } from '$lib/runs/runs.schema'
@@ -18,6 +18,10 @@ import { dismissStuckRun } from '$lib/runs/runs.server'
  *
  * Per-token `delta` and `reasoning` events ARE persisted to run_events but they're noisy in
  * a debug view; the caller can opt to filter them by passing `includeNoisyEvents: false`.
+ *
+ * Only the caller's own runs: a run someone else owns answers exactly like one that does not
+ * exist (null), so the id space cannot be probed. Every path that creates a run records its
+ * user — the chat stream, automations, monitors and CI fixes all set `user_id`.
  */
 
 const runIdSchema = z.string().uuid()
@@ -30,9 +34,14 @@ const detailSchema = z.object({
 const NOISY_EVENT_TYPES = new Set(['delta', 'reasoning'])
 
 export const getRunDetailQuery = query(detailSchema, async ({ runId, includeNoisyEvents }) => {
+	const user = requireAuthenticatedRequestUser()
 	if (!runId || runId === '00000000-0000-0000-0000-000000000000') return null
 
-	const [run] = await db.select().from(chatRuns).where(eq(chatRuns.id, runId)).limit(1)
+	const [run] = await db
+		.select()
+		.from(chatRuns)
+		.where(and(eq(chatRuns.id, runId), eq(chatRuns.userId, user.id)))
+		.limit(1)
 	if (!run) return null
 
 	const [conversation] = await db

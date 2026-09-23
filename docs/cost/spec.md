@@ -172,6 +172,8 @@ A reconciliation job can import actual spend from OpenRouter (or other provider)
 | Override or delete cost rows | Admin only (audit logged) |
 | Export cost data             | Any authenticated user    |
 
+What is enforced today: the cost summary and the day/month budget status require signing in. They report the whole instance's spend rather than one user's, on purpose — background work such as embeddings, title generation and memory mining records usage with no user attached, so a per-user filter would under-report the real bill, and AgentStudio has a single owner. Budget limits and alerts are per user.
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.

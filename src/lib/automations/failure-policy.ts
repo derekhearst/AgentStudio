@@ -20,6 +20,44 @@
  * retry chain for one tick cannot still be running when the next tick is due.
  */
 
+import type { AutomationRunTrigger } from './automation.schema'
+
+/** What a run may do, decided by who asked for it. See `automationTriggerPolicy`. */
+export type AutomationTriggerPolicy = {
+	/** Leave `nextRunAt` where it is — only the schedule's own tick moves it. */
+	preserveSchedule: boolean
+	/** Run even when the automation is switched off (by its owner or by the failure policy). */
+	allowDisabled: boolean
+	/**
+	 * Retry a failure with backoff, then count it toward the disable streak and open a review
+	 * item plus a notification. Off only when a person is waiting on the result.
+	 */
+	escalateFailures: boolean
+}
+
+/**
+ * Three kinds of run, three contracts:
+ *
+ *   - `schedule` — the scheduler's tick. Advances the schedule, never runs a switched-off
+ *     automation, and escalates failures (the whole of #31).
+ *   - `manual` — "Run now". A person is watching: the schedule is left alone, a switched-off
+ *     automation can be run to verify a fix, and a failure is theirs to see, not retried.
+ *   - `monitor` — a monitor fired. Nobody is watching, so it is unattended like a scheduled
+ *     tick: it respects the off switch (including the auto-disable kill switch) and escalates
+ *     failures. But it is not the schedule, so it never moves `nextRunAt`.
+ */
+export function automationTriggerPolicy(trigger: AutomationRunTrigger): AutomationTriggerPolicy {
+	switch (trigger) {
+		case 'manual':
+			return { preserveSchedule: true, allowDisabled: true, escalateFailures: false }
+		case 'monitor':
+			return { preserveSchedule: true, allowDisabled: false, escalateFailures: true }
+		case 'schedule':
+		default:
+			return { preserveSchedule: false, allowDisabled: false, escalateFailures: true }
+	}
+}
+
 /** Attempts per tick, including the first. 3 = the original run plus two retries. */
 export const AUTOMATION_MAX_ATTEMPTS = 3
 

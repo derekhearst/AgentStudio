@@ -1,24 +1,26 @@
 import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit'
+import { dev } from '$app/environment'
 import { and, arrayContains, sql } from 'drizzle-orm'
-import { getSessionUser, isProvisioned } from '$lib/auth/auth.server'
+import { findOwnerIdentity, getSessionUser } from '$lib/auth/auth.server'
+import { authGateRedirect } from '$lib/auth/gate.server'
+import { refuseAnonymousRemoteCall } from '$lib/auth/remote-gate.server'
+import { authDevBypassEnabled } from '$lib/auth/dev-bypass'
 import { db, ensureDatabaseReady } from '$lib/db.server'
-import { users } from '$lib/auth/auth.schema'
 import { skills } from '$lib/skills/skills.schema'
 import { logger } from '$lib/observability/logger'
 
-// Dev-mode auth bypass. Active only when NODE_ENV !== 'production' AND AUTH_DEV_BYPASS=1.
-// When active, requests without a session cookie are auto-attached to the singleton user
-// row, skipping the /login redirect. Useful when you've lost the dev password or are
-// driving the app from a viewer that can't set cookies via DevTools.
-const AUTH_DEV_BYPASS = process.env.NODE_ENV !== 'production' && process.env.AUTH_DEV_BYPASS === '1'
+// Dev-mode auth bypass. Active only in a dev build (`vite dev`), with NODE_ENV !== 'production'
+// AND AUTH_DEV_BYPASS=1 — a production build ignores the variable (see dev-bypass.ts).
+// When active, requests without a session cookie are auto-attached to the owner, skipping
+// the /login redirect — for driving the app from a viewer or agent that cannot (or must not)
+// type the password. It attaches only to a real owner (one with a password): on an instance
+// without one it does nothing and the setup gate applies. To get a local owner without a
+// browser, use `bun run db:bootstrap`.
+const AUTH_DEV_BYPASS = authDevBypassEnabled({ devBuild: dev, env: process.env })
 if (AUTH_DEV_BYPASS) {
 	logger.warn('[hooks] AUTH_DEV_BYPASS=1 — anonymous requests will auto-attach to the singleton user. Set AUTH_DEV_BYPASS=0 in .env to disable.')
 }
 let warnedAboutBypass = false
-async function loadSingletonUserForBypass() {
-	const [row] = await db.select({ id: users.id, name: users.name, username: users.username }).from(users).limit(1)
-	return row ?? null
-}
 
 // Cleanup old capability-group skill seed records once on startup.
 let cleanedUpLegacyCapabilitySkills = false
@@ -35,26 +37,13 @@ async function cleanupLegacyCapabilitySkills() {
 	}
 }
 
-// `/api/webhooks` is unauthenticated by design — third-party providers (GitHub, …) POST
-// here without session cookies. The handlers verify provider signatures themselves so the
-// path-level skip is safe; never broaden this prefix without an explicit signature check.
-const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks', '/api/health']
-
-function isPublicPath(pathname: string) {
-	if (pathname.startsWith('/_app') || pathname.startsWith('/favicon')) {
-		return true
-	}
-
-	return PUBLIC_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
-}
-
 export const handle: Handle = async ({ event, resolve }) => {
 	await ensureDatabaseReady()
 	await cleanupLegacyCapabilitySkills()
 
 	let user = await getSessionUser(event.cookies)
 	if (!user && AUTH_DEV_BYPASS) {
-		const fallback = await loadSingletonUserForBypass()
+		const fallback = await findOwnerIdentity()
 		if (fallback) {
 			user = fallback
 			if (!warnedAboutBypass) {
@@ -66,28 +55,17 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.user = user
 	event.locals.authenticated = user !== null
 
-	const provisioned = await isProvisioned()
+	// Remote-function calls are gated on their real request path and settled here. Every
+	// check below reads `event.url.pathname`, which for a remote call is a client-supplied
+	// header — see src/lib/auth/remote-gate.ts.
+	const remoteRefusal = refuseAnonymousRemoteCall(event)
+	if (remoteRefusal) return remoteRefusal
+	if (event.isRemoteRequest) return resolve(event)
 
-	// Setup gate: until a password is set, every request lands on /setup.
-	if (!provisioned) {
-		if (event.url.pathname !== '/setup' && !event.url.pathname.startsWith('/_app') && !event.url.pathname.startsWith('/favicon')) {
-			throw redirect(303, '/setup')
-		}
-		return resolve(event)
-	}
-
-	// Once provisioned, /setup is no longer reachable.
-	if (event.url.pathname === '/setup') {
-		throw redirect(303, event.locals.authenticated ? '/' : '/login')
-	}
-
-	if (!event.locals.authenticated && !isPublicPath(event.url.pathname)) {
-		throw redirect(303, '/login')
-	}
-
-	if (event.locals.authenticated && event.url.pathname === '/login') {
-		throw redirect(303, '/')
-	}
+	// Setup gate (no owner yet: everything goes to /setup) and the page gate (no session:
+	// everything but the public paths goes to /login). Rules in src/lib/auth/gate.ts.
+	const gateRedirect = await authGateRedirect(event)
+	if (gateRedirect) throw redirect(303, gateRedirect)
 
 	return resolve(event)
 }

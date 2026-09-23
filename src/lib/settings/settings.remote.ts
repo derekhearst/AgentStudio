@@ -6,6 +6,7 @@ import { getToolDefinitions } from '$lib/tools/tools.server'
 import { listSkillSummaries } from '$lib/skills/skills.server'
 import { estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
 import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
+import { getSystemReadiness as readSystemReadiness } from '$lib/settings/readiness.server'
 
 const settingsUpdateSchema = z.object({
 	defaultModel: z.string().trim().min(1).max(120).optional(),
@@ -100,6 +101,16 @@ export const resetAppSettings = command(async () => {
 		summary: 'Settings reset to defaults',
 	})
 	return after
+})
+
+/**
+ * Settings > System: which deploy-time settings (model credential, workspace, gateway,
+ * integrations) are in place. Read-only — they are environment settings, not stored in the
+ * database. Reports presence only, never a value.
+ */
+export const getSystemReadiness = query(async () => {
+	requireAuthenticatedRequestUser()
+	return readSystemReadiness()
 })
 
 export const getFullPromptPreview = query(async () => {

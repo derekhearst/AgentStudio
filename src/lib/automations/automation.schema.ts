@@ -41,8 +41,12 @@ export type AutomationDisabledReason = 'consecutive_failures'
 /** Lifecycle of one attempt at executing an automation. */
 export type AutomationRunStatus = 'running' | 'completed' | 'failed' | 'blocked'
 
-/** What kicked the run off: the scheduler, or a human pressing "Run now". */
-export type AutomationRunTrigger = 'schedule' | 'manual'
+/**
+ * What kicked the run off: the scheduler, a human pressing "Run now", or a monitor that
+ * fired. Stored as text, so a new value needs no migration. What each may do is decided in
+ * `automationTriggerPolicy` (failure-policy.ts).
+ */
+export type AutomationRunTrigger = 'schedule' | 'manual' | 'monitor'
 
 export const automations = pgTable(
 	'automations',

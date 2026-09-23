@@ -158,6 +158,8 @@ If `runs.evalRequired = true`, the runtime does not transition the run to `compl
 | Delete a run record       | Admin only                                              |
 | View another user's runs  | Admin only                                              |
 
+What is enforced today (AgentStudio has a single owner and no admin tier): the run detail view at `/runs/[id]` only finds runs recorded for the signed-in user. Any other id — another user's run, or one that does not exist — shows "Run not found", so the two cannot be told apart. A visitor without a session is refused before any run data is read.
+
 ## Rewrite Authority
 
 The current implementation is a baseline, not a constraint. This domain may be rewritten, restyled, reorganized, or replaced as needed to achieve the target product quality. No code path is off-limits if behavior contracts, safety controls, tests, and documentation remain correct.
