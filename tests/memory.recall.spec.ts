@@ -150,3 +150,99 @@ test.describe('memory/recall — candidates in a shared index', () => {
 		expect(found?.pinnedBoost).toBeGreaterThan(0)
 	})
 })
+
+test.describe('memory/recall — recency', () => {
+	test('a recent drawer outranks an old one that is otherwise identical', async () => {
+		// Production recall never passed a query date, so the temporal part of the score was 0
+		// for every drawer while the recall log recorded a 0.25 weight for it.
+		stub = stubOpenRouter({ embeddings: () => [QUERY_VECTOR] })
+		const userId = await getActiveUserId()
+		const closetId = await makeCloset(userId)
+		const sql = getSql()
+		const insert = (content: string, daysAgo: number) => sql<{ id: string }[]>`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, occurred_at)
+			values (
+				${closetId}, ${userId}, ${content}, 1, array_fill(1::real, array[1536])::vector,
+				now() - make_interval(days => ${daysAgo})
+			)
+			returning id
+		`
+		const [[recent], [old]] = [await insert(`${prefix} decided last week`, 7), await insert(`${prefix} decided in spring`, 120)]
+
+		const { recallForUser } = await import('../src/lib/memory/memory.server')
+		const recalled = await recallForUser(userId, `${prefix} battery decision`, { topK: 1_000, recallSource: 'search' })
+
+		const recentHit = recalled.find((drawer) => drawer.drawerId === recent.id)
+		const oldHit = recalled.find((drawer) => drawer.drawerId === old.id)
+		expect(recentHit?.temporalScore).toBeGreaterThan(0.5)
+		expect(oldHit?.temporalScore).toBeLessThan(recentHit?.temporalScore ?? 0)
+		expect(recalled.indexOf(recentHit!)).toBeLessThan(recalled.indexOf(oldHit!))
+	})
+
+	test('a mined drawer is dated when its message was said, not when the conversation started', async () => {
+		stub = stubOpenRouter()
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		const [conversation] = await sql<{ id: string }[]>`
+			insert into conversations (title, user_id, model, total_tokens, total_cost, created_at)
+			values (${`${prefix} long chat`}, ${userId}, 'claude-sonnet-5', 0, '0', now() - interval '60 days')
+			returning id
+		`
+		try {
+			const [early] = await sql<{ id: string; created_at: Date }[]>`
+				insert into messages (conversation_id, role, content, sequence, created_at)
+				values (${conversation.id}, 'user'::message_role, 'We chose the 48V battery.', 1, now() - interval '59 days')
+				returning id, created_at
+			`
+			const [late] = await sql<{ id: string; created_at: Date }[]>`
+				insert into messages (conversation_id, role, content, sequence, created_at)
+				values (${conversation.id}, 'user'::message_role, 'Switching to the 24V battery.', 2, now() - interval '1 day')
+				returning id, created_at
+			`
+
+			const { mineConversation } = await import('../src/lib/memory/memory.server')
+			await mineConversation({ conversationId: conversation.id })
+
+			const drawers = await sql<{ source_message_id: string; occurred_at: Date }[]>`
+				select source_message_id, occurred_at from memory_drawers
+				where source_message_id in (${early.id}, ${late.id})
+			`
+			const dated = Object.fromEntries(drawers.map((row) => [row.source_message_id, row.occurred_at.getTime()]))
+			expect(dated[early.id]).toBe(early.created_at.getTime())
+			expect(dated[late.id]).toBe(late.created_at.getTime())
+		} finally {
+			await sql`delete from conversations where id = ${conversation.id}`
+		}
+	})
+
+	test('an embedding failure leaves no empty wing or room behind', async () => {
+		// The room used to be created before the embedding call; when that failed (rate limit,
+		// no credit) the palace kept an empty room, which the wing panel opened first.
+		stub = stubOpenRouter({
+			embeddings: () =>
+				new Response(JSON.stringify({ error: { code: 402, message: 'Insufficient credits' } }), {
+					status: 402,
+					headers: { 'content-type': 'application/json' },
+				}),
+		})
+		const userId = await getActiveUserId()
+		const { mineSession } = await import('../src/lib/memory/mining.server')
+
+		await expect(
+			mineSession({
+				userId,
+				session: {
+					conversationId: null,
+					occurredAt: new Date(),
+					sessionLabel: `${prefix} unlucky chat`,
+					turns: [{ role: 'user', content: 'The van battery is 48V.' }],
+				},
+			}),
+		).rejects.toThrow(/402/)
+
+		const [{ n }] = await getSql()<{ n: number }[]>`
+			select count(*)::int as n from memory_wings where name like ${`${prefix}%`}
+		`
+		expect(n).toBe(0)
+	})
+})

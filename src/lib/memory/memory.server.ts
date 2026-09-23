@@ -75,6 +75,9 @@ export async function mineConversation(opts: {
 				role: row.role as 'user' | 'assistant' | 'system',
 				content: typeof row.content === 'string' ? row.content : String(row.content ?? ''),
 				sourceMessageId: row.id,
+				// When it was said, not when the conversation started: a conversation runs for
+				// weeks, and recall ranks by how recent a drawer is.
+				occurredAt: row.createdAt,
 			}))
 			.filter((turn) => turn.content.trim().length > 0),
 	}
@@ -143,6 +146,9 @@ export function unminedMessagesOf(conversationId: string) {
  * for 30 days — so a message the miner will drop, because it holds a key or a password, is
  * not recalled on at all: no memory for that turn, and nothing leaves the process.
  *
+ * Recency counts from now unless the caller says otherwise (`queryDate`); without a date the
+ * temporal part of the score is 0 for every drawer.
+ *
  * Every recall writes its component scores to `memory_recall_events` (unless
  * `logRecall: false`), which is what powers "why was this recalled?" on the drawer.
  * Logging is best-effort and never fails the recall.
@@ -170,6 +176,7 @@ export async function recallForUser(
 	const candidatePoolSize = options.candidatePoolSize ?? (options.useRerank ? 20 : 50)
 	const initial = await recall(userId, query, {
 		...options,
+		queryDate: options.queryDate ?? new Date(),
 		topK: options.useRerank ? candidatePoolSize : (options.topK ?? 5),
 		candidatePoolSize,
 	})

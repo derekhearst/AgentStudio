@@ -34,6 +34,8 @@ export type MiningTurn = {
 	content: string
 	hasAnswer?: boolean
 	sourceMessageId?: string | null
+	/** When the turn was said; its drawer's `occurredAt`. Defaults to the session's. */
+	occurredAt?: Date
 }
 
 export type MiningSession = {
@@ -315,6 +317,10 @@ export async function mineSession(opts: {
 
 	const extraction = await extractSession(session, candidates)
 
+	// Before anything is written: if embedding fails (rate limit, no credit, no key) the job
+	// fails with nothing half-built, instead of leaving an empty room behind to retry around.
+	const embeddings = await embed(session.turns.map((turn) => turn.content))
+
 	const allowedKinds: WingKind[] = ['person', 'project', 'topic', 'agent']
 	const wingKind: WingKind = allowedKinds.includes(extraction.primaryWing.kind as WingKind)
 		? (extraction.primaryWing.kind as WingKind)
@@ -345,8 +351,6 @@ export async function mineSession(opts: {
 	const drawerIds: string[] = []
 	const closetIdsSet = new Set<string>()
 
-	const embeddings = await embed(session.turns.map((turn) => turn.content))
-
 	for (let i = 0; i < session.turns.length; i += 1) {
 		const turn = session.turns[i]
 		const meta = extraction.turns[i] ?? { topic: 'general', tags: {} }
@@ -360,12 +364,13 @@ export async function mineSession(opts: {
 		}
 		closetIdsSet.add(closetId)
 
+		const occurredAt = turn.occurredAt ?? session.occurredAt
 		const drawerNumber = await nextDrawerNumber(closetId)
 		const aaak = encodeAaak(
 			{ wing: wingIndex, room: roomIndex, drawer: drawerNumber },
 			{
 				...meta.tags,
-				t: meta.tags.t && meta.tags.t.length > 0 ? meta.tags.t : [session.occurredAt.toISOString()],
+				t: meta.tags.t && meta.tags.t.length > 0 ? meta.tags.t : [occurredAt.toISOString()],
 			},
 		)
 
@@ -381,7 +386,7 @@ export async function mineSession(opts: {
 				aaak,
 				tokenCount: Math.ceil(turn.content.length / 4),
 				sourceMessageId: turn.sourceMessageId ?? null,
-				occurredAt: session.occurredAt,
+				occurredAt,
 			})
 			.returning({ id: memoryDrawers.id })
 		drawerIds.push(drawer.id)
