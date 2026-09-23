@@ -236,10 +236,16 @@ no review item or "Automation run failed" notification goes out. The same applie
 monitor's `run_automation` job for an automation that has since been switched off.
 
 Each scheduled slot gets exactly one `automation_run` job, however many dispatch ticks see it
-due while its retries play out. If the job queue itself gives up on that job before the
-retry policy could — the worker running it kept dying mid-run, or someone canceled it in
-`/settings/jobs` — the next dispatch tick skips the slot the same way, so the automation
-carries on from its following slot instead of staying stuck on a dead one.
+due while its retries play out; each retry is a job of its own, linked from the attempt
+before it. While any job in that chain can still run, the dispatcher leaves the slot alone.
+Once the whole chain has finished, the slot is normally no longer due — a successful run and
+an exhausted retry policy both move `nextRunAt` on. If it is still due, the job queue gave up
+on one of those jobs before the retry policy could: the worker running an attempt kept dying
+mid-run, its lease lapsed during a long outage, or someone canceled it in `/settings/jobs`.
+The next dispatch tick then skips the slot, so the automation carries on from its following
+slot instead of staying stuck on a dead one. A skipped slot is logged, not counted as a
+failure: the queue's own records (a *Job stuck* review item for a crash loop, the job's error
+in `/settings/jobs`) already say what went wrong.
 
 ### Failure surfacing
 

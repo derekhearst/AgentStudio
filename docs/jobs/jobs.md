@@ -57,7 +57,7 @@ Pressing Ctrl+C a second time exits immediately.
 
 ## Integrations
 
-- **PostgreSQL** holds the queue. Workers claim jobs with a row lock that skips rows another worker already holds, so any number of workers can share one database without running a job twice.
+- **PostgreSQL** holds the queue. Workers claim jobs with a row lock that skips rows another worker already holds, so any number of workers can share one database without two of them picking up the same job at once. A job can still run twice: if its worker stops heartbeating — usually because it died, but a database outage longer than the lease does the same — another worker takes the job over (see **When a worker dies mid-job**).
 - **Review inbox** — a job that fails for good opens a *Job failure* item; a job whose worker kept dying until it ran out of attempts opens a *Job stuck* item.
 - **Metrics** — every finished job records its duration and outcome for the health dashboard.
 
@@ -74,7 +74,7 @@ Until September 2026 every key behaved like the second kind. Since nothing delet
 
 ### An automation slot that the queue gave up on is skipped
 
-Each scheduled run of an automation gets exactly one job. If the queue itself gives up on that job — the worker running it kept dying, or someone canceled it from `/settings/jobs` — the automation's own failure handling never ran, so nothing moved its schedule on. The dispatcher notices and skips that slot, and the automation carries on from its next scheduled time.
+Each scheduled run of an automation gets exactly one job. When an attempt fails, the automation queues its next attempt as a separate job and links to it, so a scheduled run can be a short chain of jobs. If the queue itself gives up on any job in that chain — the worker running it kept dying, its lease lapsed during a long outage, or someone canceled it from `/settings/jobs` — the automation's own failure handling never ran, so nothing moved its schedule on. The dispatcher follows the chain to its newest job, sees that nothing is left to run while the automation is still due, and skips that slot. The automation carries on from its next scheduled time.
 
 ### Worker configuration
 

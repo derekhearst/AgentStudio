@@ -158,11 +158,22 @@ test.describe('jobs/dedupe — automation slots', () => {
 	const SLOT = new Date('2000-01-01T00:00:00.000Z')
 	const SLOT_KEY_SUFFIX = '2000-01-01T00:00'
 
+	type ChainJobStatus = 'completed' | 'failed' | 'canceled' | 'pending'
+
 	/**
 	 * Insert the automation disabled, give its slot the job under test, then enable it — so
 	 * a scheduler tick landing in between cannot queue a real run for the slot first.
+	 *
+	 * `retries` builds the chain the handler leaves behind when an attempt fails: the failed
+	 * attempt's job ends `completed` with `{ retrying: true, retryJobId }` pointing at the next
+	 * attempt's job, and the last entry is how the newest attempt stands. A pending retry is
+	 * scheduled far ahead so no worker picks it up during the test.
 	 */
-	async function insertDueAutomationWithSlotJob(prefix: string, slotJobStatus: 'completed' | 'failed') {
+	async function insertDueAutomationWithSlotJob(
+		prefix: string,
+		slotJobStatus: ChainJobStatus,
+		retries: ChainJobStatus[] = [],
+	) {
 		const sql = getSql()
 		const userId = await getActiveUserId()
 		const [automation] = await sql<{ id: string }[]>`
@@ -170,16 +181,53 @@ test.describe('jobs/dedupe — automation slots', () => {
 			values (${userId}, ${`${prefix} slot`}, '0 9 * * *', ${`${prefix} prompt`}, ${SLOT}, false)
 			returning id
 		`
-		const [job] = await sql<{ id: string }[]>`
-			insert into jobs (type, status, dedupe_key, payload, user_id, finished_at)
-			values (
-				'automation_run', ${slotJobStatus}::job_status, ${`automation:${automation.id}:${SLOT_KEY_SUFFIX}`},
-				${sql.json({ automationId: automation.id })}, ${userId}, now()
-			)
-			returning id
-		`
+		const insertJob = async (status: ChainJobStatus, dedupeKey: string, attempt: number) => {
+			const [job] = await sql<{ id: string }[]>`
+				insert into jobs (type, status, dedupe_key, payload, user_id, scheduled_at, finished_at)
+				values (
+					'automation_run', ${status}::job_status, ${dedupeKey},
+					${sql.json({ automationId: automation.id, attempt, trigger: 'schedule' })}, ${userId},
+					${status === 'pending' ? new Date('2999-01-01T00:00:00.000Z') : new Date()},
+					${status === 'pending' ? null : new Date()}
+				)
+				returning id
+			`
+			return job.id
+		}
+
+		const chain = [slotJobStatus, ...retries]
+		const ids: string[] = []
+		for (let i = 0; i < chain.length; i += 1) {
+			const key = i === 0 ? `automation:${automation.id}:${SLOT_KEY_SUFFIX}` : `automation_retry:${ids[i - 1]}:${i + 1}`
+			ids.push(await insertJob(chain[i], key, i + 1))
+		}
+		// Link each failed attempt to the retry it queued, the way `executeAutomationRunJob` does.
+		for (let i = 0; i < ids.length - 1; i += 1) {
+			await sql`
+				update jobs set result = ${sql.json({ status: 'failed', retrying: true, retryJobId: ids[i + 1] })}
+				where id = ${ids[i]}
+			`
+		}
+
 		await sql`update automations set enabled = true where id = ${automation.id}`
-		return { automationId: automation.id, slotJobId: job.id }
+		return { automationId: automation.id, slotJobId: ids[0], newestJobId: ids[ids.length - 1] }
+	}
+
+	async function readSchedule(automationId: string) {
+		const sql = getSql()
+		const [row] = await sql<{ next_run_at: Date; last_run_at: Date | null }[]>`
+			select next_run_at, last_run_at from automations where id = ${automationId}
+		`
+		return row
+	}
+
+	async function countSlotJobs(automationId: string) {
+		const sql = getSql()
+		const [{ count }] = await sql<{ count: number }[]>`
+			select count(*)::int as count from jobs
+			where type = 'automation_run' and payload->>'automationId' = ${automationId}
+		`
+		return count
 	}
 
 	async function cleanupAutomation(prefix: string, automationId: string | null) {
@@ -191,12 +239,12 @@ test.describe('jobs/dedupe — automation slots', () => {
 		await sql`delete from automations where description like ${`${prefix}%`}`
 	}
 
-	test('a slot whose job already ran is not queued again while the slot is still due', async () => {
-		const prefix = uniquePrefix('dedupe-slot-ran')
-		const sql = getSql()
+	test('a slot whose retry is still waiting is neither queued again nor skipped', async () => {
+		const prefix = uniquePrefix('dedupe-slot-retrying')
 		let automationId: string | null = null
 		try {
-			const inserted = await insertDueAutomationWithSlotJob(prefix, 'completed')
+			// Attempt 1 failed and queued attempt 2, which has not run yet.
+			const inserted = await insertDueAutomationWithSlotJob(prefix, 'completed', ['pending'])
 			automationId = inserted.automationId
 
 			const { checkAndRunAutomations } = await import('../src/lib/automations/engine')
@@ -204,12 +252,10 @@ test.describe('jobs/dedupe — automation slots', () => {
 			const entry = result.enqueued.find((e) => e.automationId === automationId)
 			expect(entry?.jobId).toBe(inserted.slotJobId)
 			expect(entry?.created).toBe(false)
+			expect(entry?.skipped, 'the retry may still succeed, so the slot stays').toBeUndefined()
 
-			const [{ count }] = await sql<{ count: number }[]>`
-				select count(*)::int as count from jobs
-				where type = 'automation_run' and payload->>'automationId' = ${automationId}
-			`
-			expect(count, 'no second attempt-1 job for the same slot').toBe(1)
+			expect(await countSlotJobs(automationId), 'no second attempt-1 job beside the retry').toBe(2)
+			expect((await readSchedule(automationId)).next_run_at.getTime(), 'the slot is still due').toBe(SLOT.getTime())
 		} finally {
 			await cleanupAutomation(prefix, automationId)
 		}
@@ -217,7 +263,6 @@ test.describe('jobs/dedupe — automation slots', () => {
 
 	test('a slot whose job the queue gave up on is skipped instead of wedging the automation', async () => {
 		const prefix = uniquePrefix('dedupe-slot-dead')
-		const sql = getSql()
 		let automationId: string | null = null
 		try {
 			const inserted = await insertDueAutomationWithSlotJob(prefix, 'failed')
@@ -229,11 +274,77 @@ test.describe('jobs/dedupe — automation slots', () => {
 			const entry = result.enqueued.find((e) => e.automationId === automationId)
 			expect(entry?.skipped).toBe('slot job failed')
 
-			const [row] = await sql<{ next_run_at: Date; last_run_at: Date | null }[]>`
-				select next_run_at, last_run_at from automations where id = ${automationId}
-			`
+			const row = await readSchedule(automationId)
 			expect(row.next_run_at.getTime(), 'the schedule rolled past the dead slot').toBeGreaterThan(now.getTime())
 			expect(row.last_run_at, 'nothing ran, so lastRunAt is untouched').toBeNull()
+		} finally {
+			await cleanupAutomation(prefix, automationId)
+		}
+	})
+
+	test('a slot whose RETRY the queue gave up on is skipped too', async () => {
+		// The common shape of a dead slot. A failed attempt completes its own job and queues
+		// the next attempt, so when the queue later retires that retry — its lease lapsed during
+		// a long outage, or it crash-looped out of attempts — the slot's job reads `completed`.
+		// Checking only the slot job's status left the automation due on this slot for good.
+		const prefix = uniquePrefix('dedupe-slot-retry-dead')
+		let automationId: string | null = null
+		try {
+			const inserted = await insertDueAutomationWithSlotJob(prefix, 'completed', ['failed'])
+			automationId = inserted.automationId
+
+			const now = new Date()
+			const { checkAndRunAutomations } = await import('../src/lib/automations/engine')
+			const result = await checkAndRunAutomations(now)
+			const entry = result.enqueued.find((e) => e.automationId === automationId)
+			expect(entry?.skipped).toBe('retry job failed')
+			expect(entry?.jobId, 'the entry names the job the chain ended on').toBe(inserted.newestJobId)
+
+			const row = await readSchedule(automationId)
+			expect(row.next_run_at.getTime(), 'the schedule rolled past the dead slot').toBeGreaterThan(now.getTime())
+			expect(row.last_run_at).toBeNull()
+			expect(await countSlotJobs(automationId), 'skipping queues nothing').toBe(2)
+		} finally {
+			await cleanupAutomation(prefix, automationId)
+		}
+	})
+
+	test('the chain is followed to its newest job — a retry canceled two links down still frees the slot', async () => {
+		const prefix = uniquePrefix('dedupe-slot-retry-canceled')
+		let automationId: string | null = null
+		try {
+			const inserted = await insertDueAutomationWithSlotJob(prefix, 'completed', ['completed', 'canceled'])
+			automationId = inserted.automationId
+
+			const now = new Date()
+			const { checkAndRunAutomations } = await import('../src/lib/automations/engine')
+			const result = await checkAndRunAutomations(now)
+			expect(result.enqueued.find((e) => e.automationId === automationId)?.skipped).toBe('retry job canceled')
+			expect((await readSchedule(automationId)).next_run_at.getTime()).toBeGreaterThan(now.getTime())
+		} finally {
+			await cleanupAutomation(prefix, automationId)
+		}
+	})
+
+	test('a finished slot that nothing moved on is never queued again, and is skipped', async () => {
+		// A chain that finished without moving the schedule — here a slot job that completed
+		// with no retry — can never move it later either.
+		const prefix = uniquePrefix('dedupe-slot-ran')
+		let automationId: string | null = null
+		try {
+			const inserted = await insertDueAutomationWithSlotJob(prefix, 'completed')
+			automationId = inserted.automationId
+
+			const now = new Date()
+			const { checkAndRunAutomations } = await import('../src/lib/automations/engine')
+			const result = await checkAndRunAutomations(now)
+			const entry = result.enqueued.find((e) => e.automationId === automationId)
+			expect(entry?.jobId).toBe(inserted.slotJobId)
+			expect(entry?.created).toBe(false)
+			expect(entry?.skipped).toBe('slot job completed')
+
+			expect(await countSlotJobs(automationId), 'no second attempt-1 job for the same slot').toBe(1)
+			expect((await readSchedule(automationId)).next_run_at.getTime()).toBeGreaterThan(now.getTime())
 		} finally {
 			await cleanupAutomation(prefix, automationId)
 		}

@@ -1,6 +1,7 @@
-import { and, asc, eq, lte } from 'drizzle-orm'
+import { and, asc, eq, lte, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
+import type { JobRow } from '$lib/jobs/jobs.schema'
 import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
 import { computeNextRunAt } from './cron'
@@ -402,15 +403,28 @@ export async function checkAndRunAutomations(now = new Date()) {
 					payload: { automationId: automation.id },
 					userId: automation.userId,
 				})
-				if (!created && (job.status === 'failed' || job.status === 'canceled')) {
-					// The queue gave up on this slot's job before the handler's own failure path
-					// could run — a worker that kept dying mid-run, or a cancel from
-					// /settings/jobs — so nothing rolled the schedule forward. Skip the slot the
-					// way an exhausted retry chain does; otherwise the automation stays due and
-					// every tick finds the same dead job for good.
-					await skipScheduledSlot(automation, now)
-					enqueued.push({ automationId: automation.id, jobId: job.id, created, skipped: `slot job ${job.status}` })
-					continue
+				if (!created) {
+					// The slot already has its job. While that job — or the retry it queued, or
+					// the retry after that — can still run, there is nothing to do. Once the whole
+					// chain has finished, the slot should no longer be due: a run that worked, and
+					// a chain the retry policy gave up on, both rolled `nextRunAt` forward. If it
+					// IS still due, the queue gave up on a job before the handler's own failure
+					// path could run — a worker that kept dying mid-run, a lease that lapsed during
+					// a long outage, a cancel from /settings/jobs — and nothing will ever move the
+					// schedule. Skip the slot the way an exhausted retry chain does; otherwise the
+					// automation stays due, every tick finds the same dead chain, and a handful of
+					// wedged rows fill the 25-row page above and starve every other automation.
+					const chain = await followRetryChain(job)
+					if (!chain.active && (await skipScheduledSlot(automation, now))) {
+						const which = chain.last.id === job.id ? 'slot job' : 'retry job'
+						enqueued.push({
+							automationId: automation.id,
+							jobId: chain.last.id,
+							created,
+							skipped: `${which} ${chain.last.status}`,
+						})
+						continue
+					}
 				}
 				enqueued.push({ automationId: automation.id, jobId: job.id, created })
 			} catch (error) {
@@ -429,8 +443,42 @@ export async function checkAndRunAutomations(now = new Date()) {
 	}
 }
 
-/** Roll `nextRunAt` past a slot that will never run. `lastRunAt` is untouched — nothing ran. */
-async function skipScheduledSlot(automation: typeof automations.$inferSelect, now: Date): Promise<void> {
+/** More hops than any real chain has (one job per attempt), so a malformed result cannot loop. */
+const MAX_RETRY_CHAIN_HOPS = 10
+
+/**
+ * Where a slot's run has got to. A failed attempt does not fail its job: the handler records
+ * the failure, queues the next attempt as a job of its own, and returns `{ retrying: true,
+ * retryJobId }`, so the slot's job ends `completed` either way. Follow those links to the
+ * newest job. The chain is `active` while that job may still run; otherwise it has finished,
+ * and `last` is how it ended.
+ */
+async function followRetryChain(slotJob: JobRow): Promise<{ active: boolean; last: JobRow }> {
+	const { ACTIVE_JOB_STATUSES, getJobById } = await import('$lib/jobs/jobs.server')
+	const isActive = (job: JobRow) => (ACTIVE_JOB_STATUSES as readonly string[]).includes(job.status)
+	let job = slotJob
+	for (let hop = 0; hop < MAX_RETRY_CHAIN_HOPS; hop += 1) {
+		if (isActive(job)) return { active: true, last: job }
+		const retryJobId = job.status === 'completed' && job.result?.retrying === true ? job.result.retryJobId : null
+		if (typeof retryJobId !== 'string') break
+		const next = await getJobById(retryJobId)
+		if (!next) break
+		job = next
+	}
+	return { active: isActive(job), last: job }
+}
+
+/**
+ * Roll `nextRunAt` past a slot that will never run. `lastRunAt` is untouched — nothing ran.
+ *
+ * Only if the automation is still on that slot: the handler moves `nextRunAt` before the
+ * worker marks its job completed, so a tick that read the row just before a successful run
+ * finished sees a finished chain for a slot that has already moved on. Returns whether the
+ * slot was skipped.
+ */
+async function skipScheduledSlot(automation: typeof automations.$inferSelect, now: Date): Promise<boolean> {
+	const slot = automation.nextRunAt
+	if (!slot) return false
 	let nextRunAt: Date
 	try {
 		nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
@@ -441,15 +489,24 @@ async function skipScheduledSlot(automation: typeof automations.$inferSelect, no
 			automationId: automation.id,
 			error: err instanceof Error ? err.message : String(err),
 		})
-		return
+		return false
 	}
-	await db
+	const moved = await db
 		.update(automations)
 		.set({ nextRunAt, updatedAt: now })
-		.where(eq(automations.id, automation.id))
-	logger.warn('[automations] skipped a slot whose job the queue gave up on', {
+		.where(
+			and(
+				eq(automations.id, automation.id),
+				// Compared to the millisecond: that is all a JS Date carries of the stored value.
+				sql`date_trunc('milliseconds', ${automations.nextRunAt}) = ${slot.toISOString()}::timestamptz`,
+			),
+		)
+		.returning({ id: automations.id })
+	if (moved.length === 0) return false
+	logger.warn('[automations] skipped a slot whose job chain ended without moving the schedule', {
 		automationId: automation.id,
-		slot: automation.nextRunAt?.toISOString() ?? null,
+		slot: slot.toISOString(),
 		nextRunAt: nextRunAt.toISOString(),
 	})
+	return true
 }
