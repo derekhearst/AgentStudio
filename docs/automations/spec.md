@@ -44,7 +44,7 @@ attempt starts and closed when it ends, so a run that dies mid-flight still leav
 | `automationId`   | uuid       | FK to `automations`, cascade delete                              |
 | `userId`         | uuid?      | Owner at run time                                                |
 | `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap)         |
-| `trigger`        | text       | `schedule` or `manual` ("Run now")                               |
+| `trigger`        | text       | `schedule`, `manual` ("Run now") or `monitor` (a monitor fired)  |
 | `attempt`        | integer    | 1-based; >1 means this attempt is a retry of a failed tick        |
 | `mode`           | text       | Snapshot of the automation's mode at execution time              |
 | `startedAt`      | timestamp  |                                                                  |
@@ -149,7 +149,7 @@ Automations can attach project or repository context so recurring runs are not c
 
 ### Budget controls
 
-Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created.
+Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was.
 
 ### Review policies
 
@@ -165,9 +165,9 @@ Automations can require human approval before:
 Users can inspect past automation runs, including summaries, failures, linked tasks, linked runs, and linked pull requests.
 
 Each card on `/automations` has a **History** disclosure listing the last ten runs: status,
-when it started, how long it took, whether it was scheduled or a manual run, which retry
-attempt it was, what it cost, and a link straight to the conversation or research run it
-produced. A failed run shows its error; a successful one shows an excerpt of its output.
+when it started, how long it took, whether it was scheduled, a manual run or fired by a
+monitor, which retry attempt it was, what it cost, and a link straight to the conversation or
+research run it produced. A failed run shows its error; a successful one shows an excerpt of its output.
 
 ### Run now
 
@@ -182,6 +182,22 @@ request must not be held open that long. Two guarantees:
    verify, then switch it back on.
 
 Double-clicking is harmless — manual runs within the same minute collapse into one job.
+
+### Fired by a monitor
+
+A monitor with the `run_automation` action runs one of its owner's automations when it fires
+(see the monitors spec). That run is recorded with the trigger `monitor`, and follows its own
+rules because nobody is watching it:
+
+| | Scheduled tick | Run now | Monitor-fired |
+| - | -------------- | ------- | ------------- |
+| Moves `nextRunAt` | Yes | No | No |
+| Runs a switched-off automation | No | Yes | No |
+| Retried on failure | Yes | No | Yes |
+| Failure counts toward the disable streak, opens a review item and a notification | Yes | No | Yes |
+
+A monitor that fires while its automation is switched off does not run it; the monitor opens a
+review item saying so instead.
 
 ### External trigger
 
@@ -217,7 +233,8 @@ per-type backoff, so an operator can see the policy:
 Giving up rolls `nextRunAt` forward to the next scheduled slot — the system gives up on the
 tick, not on the automation. Manual runs are never retried: a person is standing there and
 can press the button again, and a manual failure does not count against the schedule's
-failure streak.
+failure streak. A monitor-fired run is retried and escalated like a scheduled tick, but giving
+up on it leaves `nextRunAt` alone — the schedule did not fail.
 
 ### Failure surfacing
 

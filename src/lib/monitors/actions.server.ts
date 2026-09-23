@@ -141,18 +141,20 @@ async function firePush(monitor: MonitorRow, observation: MonitorObservation): P
 /**
  * The `automation_run` job a monitor enqueues.
  *
- * `trigger: 'manual'` because an event, not the schedule, asked for this run. Without it the
- * handler defaulted to `schedule`, and a monitor firing an automation moved that
- * automation's `nextRunAt`, refused to run it if the schedule was switched off, retried it on
- * the schedule's backoff and counted its failures toward the auto-disable streak. As a manual
- * run it leaves the schedule alone and runs once — the same contract as "Run now".
+ * `trigger: 'monitor'` because an event, not the schedule, asked for this run. Without a
+ * trigger the handler treated it as a scheduled tick, and every firing moved the
+ * automation's `nextRunAt`. It is not a manual run either: "Run now" may run a switched-off
+ * automation and does not escalate failures, because a person is watching. Nobody watches a
+ * monitor, so a monitor-fired run respects the off switch and reports its failures like a
+ * scheduled one, and leaves the schedule alone like a manual one. See
+ * `automationTriggerPolicy` in the automations domain.
  */
 export function monitorAutomationJob(monitor: Pick<MonitorRow, 'id' | 'userId' | 'fireCount'>, automationId: string) {
 	return {
 		type: 'automation_run',
 		queue: 'default',
 		priority: 60,
-		payload: { automationId, attempt: 1, trigger: 'manual' as const },
+		payload: { automationId, attempt: 1, trigger: 'monitor' as const },
 		userId: monitor.userId,
 		dedupeKey: `monitor_fire:${monitor.id}:${monitor.fireCount}`,
 	}
@@ -164,8 +166,15 @@ async function fireAutomation(monitor: MonitorRow, observation: MonitorObservati
 	// Re-checked at fire time, not only when the monitor was saved: the automation may have
 	// been deleted since. The job handler runs an automation as its own owner, so this is the
 	// last point where "whose automation is this" can be asked.
-	if (!(await findOwnedAutomation(monitor.userId, automationId))) {
+	const automation = await findOwnedAutomation(monitor.userId, automationId)
+	if (!automation) {
 		throw new Error(`automation ${automationId} not found for this monitor's owner`)
+	}
+	// Switched off by its owner, or by the failure policy after repeated failures: either way
+	// it must not run unattended. Refusing here (rather than letting the job fail) turns it into
+	// one review item for this firing instead of a retry chain against a disabled automation.
+	if (!automation.enabled) {
+		throw new Error(`automation ${automationId} is switched off, so the monitor did not run it`)
 	}
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	// Enqueued by job type rather than by importing the automations engine — the monitor

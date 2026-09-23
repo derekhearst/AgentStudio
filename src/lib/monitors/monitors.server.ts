@@ -52,10 +52,16 @@ export type CreateMonitorInput = {
  * looks an automation up by id alone and runs it as ITS owner — so a monitor could fire
  * someone else's automation, on their budget. Checked when the monitor is written and again
  * when it fires, because the automation can change hands or disappear in between.
+ *
+ * `enabled` rides along for the fire-time check: a monitor may point at an automation that is
+ * switched off (saving it is fine — it may be switched on later), but must not run one.
  */
-export async function findOwnedAutomation(userId: string, automationId: string): Promise<{ id: string } | null> {
+export async function findOwnedAutomation(
+	userId: string,
+	automationId: string,
+): Promise<{ id: string; enabled: boolean } | null> {
 	const [row] = await db
-		.select({ id: automations.id })
+		.select({ id: automations.id, enabled: automations.enabled })
 		.from(automations)
 		.where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
 		.limit(1)
