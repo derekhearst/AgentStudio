@@ -2,10 +2,11 @@
  * Public memory facade — the surface used by chat, agents, and the bench harness.
  */
 
-import { asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, notExists, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
-import { memoryDrawers } from '$lib/memory/memory.schema'
+import { memoryDrawers, memoryMessageTombstones } from '$lib/memory/memory.schema'
+import { findTombstonedMessageIds } from '$lib/memory/tombstones.server'
 import { mineSession, mineSessions, type MineResult, type MiningSession } from '$lib/memory/mining.server'
 import { recall, type RecallOptions, type RetrievedDrawer } from '$lib/memory/retrieval.server'
 import { recordRecallEvents, type RecallSource } from '$lib/memory/recall-log.server'
@@ -14,7 +15,14 @@ import { rerank } from '$lib/memory/rerank.server'
 export type { RetrievedDrawer, RecallOptions } from '$lib/memory/retrieval.server'
 export type { MineResult } from '$lib/memory/mining.server'
 
-/** Mine the full message history of a single conversation into the palace. */
+/** The message roles the miner turns into drawers. */
+const MINED_ROLES = ['user', 'assistant', 'system'] as const
+
+/**
+ * Mine a conversation's not-yet-mined messages into the palace. Safe to run again after every
+ * exchange: a message with a drawer, or a tombstone (its drawer was deleted, its conversation
+ * forgotten, or an exclusion rule dropped it), is skipped.
+ */
 export async function mineConversation(opts: {
 	conversationId: string
 	userIdOverride?: string
@@ -39,9 +47,10 @@ export async function mineConversation(opts: {
 		.where(eq(messages.conversationId, opts.conversationId))
 		.orderBy(asc(messages.sequence))
 
-	// Skip messages that have already been mined into a drawer.
+	// Skip messages that have already been mined into a drawer, and messages the user took
+	// out of memory — without the tombstones a deleted drawer would be re-mined next turn.
 	const messageIds = messageRows.map((row) => row.id)
-	const minedIds = new Set<string>()
+	const minedIds = await findTombstonedMessageIds(messageIds)
 	if (messageIds.length > 0) {
 		const existing = await db
 			.select({ sourceMessageId: memoryDrawers.sourceMessageId })
@@ -58,7 +67,7 @@ export async function mineConversation(opts: {
 		sessionLabel: conversation.title ?? undefined,
 		turns: messageRows
 			.filter((row) => !minedIds.has(row.id))
-			.filter((row) => row.role === 'user' || row.role === 'assistant' || row.role === 'system')
+			.filter((row) => (MINED_ROLES as readonly string[]).includes(row.role))
 			.map((row) => ({
 				role: row.role as 'user' | 'assistant' | 'system',
 				content: typeof row.content === 'string' ? row.content : String(row.content ?? ''),
@@ -72,6 +81,38 @@ export async function mineConversation(opts: {
 		agentId: conversation.agentId ?? null,
 		session,
 	})
+}
+
+/**
+ * The user's conversations that hold at least one message the miner would still pick up: a
+ * mined role, some content, no drawer and no tombstone. What "Mine pending" sweeps.
+ */
+export async function listConversationsWithUnminedMessages(userId: string): Promise<string[]> {
+	const rows = await db
+		.selectDistinct({ id: conversations.id })
+		.from(conversations)
+		.innerJoin(messages, eq(messages.conversationId, conversations.id))
+		.where(
+			and(
+				eq(conversations.userId, userId),
+				inArray(messages.role, [...MINED_ROLES]),
+				// Some non-whitespace, as the miner's own `trim()` filter requires.
+				sql`${messages.content} ~ '[^[:space:]]'`,
+				notExists(
+					db
+						.select({ one: sql`1` })
+						.from(memoryDrawers)
+						.where(eq(memoryDrawers.sourceMessageId, messages.id)),
+				),
+				notExists(
+					db
+						.select({ one: sql`1` })
+						.from(memoryMessageTombstones)
+						.where(eq(memoryMessageTombstones.messageId, messages.id)),
+				),
+			),
+		)
+	return rows.map((row) => row.id)
 }
 
 /**
