@@ -18,6 +18,9 @@ The sidebar already keeps a live connection open to show which chats are running
 connection also reports, at most every couple of seconds, when the list has changed, and
 the list is then reloaded. So a chat started in another tab, on another device or by an
 automation shows up too. The recent list on the new-chat page follows the same signal.
+If the server cannot check the list for a moment (for example while the database
+reconnects), the sidebar keeps the list it has and the running-chat indicators carry on;
+the check is simply tried again a couple of seconds later.
 
 Opening another chat from the sidebar gives that chat a fresh page. Nothing the previous
 chat was doing (a reply streaming in, its tool cards, its Stop button, an error and its
