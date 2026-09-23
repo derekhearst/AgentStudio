@@ -67,6 +67,8 @@ export function mapPullRequestStatus(
 	draft: boolean,
 ): PullRequestStatus | null {
 	switch (action) {
+		// Status-irrelevant actions (see below) return null, and the route must then leave an
+		// existing row's status alone — `recordPullRequest` does when `status` is omitted.
 		case 'opened':
 		case 'reopened':
 		case 'ready_for_review':
@@ -94,7 +96,11 @@ export type PullRequestEventFields = {
 	action: string
 	owner: string
 	repo: string
+	/** GitHub's numeric repository id — stable across renames and transfers. */
+	repositoryId: number | null
 	prNumber: number
+	/** The PR's state at the time of the event, whatever the action was. */
+	state: 'open' | 'closed'
 	title: string
 	body: string | null
 	headBranch: string
@@ -144,7 +150,9 @@ export function extractPullRequestEventFields(payload: unknown): PullRequestEven
 		action,
 		owner,
 		repo: repoName,
+		repositoryId: typeof repository.id === 'number' ? repository.id : null,
 		prNumber,
+		state: pr.state === 'closed' ? 'closed' : 'open',
 		title,
 		body: typeof pr.body === 'string' ? pr.body : null,
 		headBranch,
@@ -161,6 +169,8 @@ export type CheckRunEventFields = {
 	action: string
 	owner: string
 	repo: string
+	/** GitHub's numeric repository id — stable across renames and transfers. */
+	repositoryId: number | null
 	checkName: string
 	status: PullRequestCheckStatus
 	detailsUrl: string | null
@@ -224,6 +234,7 @@ export function extractCheckRunEventFields(payload: unknown): CheckRunEventField
 		action,
 		owner,
 		repo: repoName,
+		repositoryId: typeof repository.id === 'number' ? repository.id : null,
 		checkName,
 		status,
 		detailsUrl: typeof checkRun.details_url === 'string' ? checkRun.details_url : null,

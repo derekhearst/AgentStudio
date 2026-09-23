@@ -1,14 +1,19 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { and, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { repositories, pullRequests, pullRequestChecks } from '$lib/source-control/source-control.schema'
+import { pullRequests, pullRequestChecks } from '$lib/source-control/source-control.schema'
 import {
 	extractCheckRunEventFields,
 	extractPullRequestEventFields,
 	mapPullRequestStatus,
 	verifyWebhookSignature,
 } from '$lib/source-control/github-webhook'
-import { recordPullRequest, recordPullRequestCheck } from '$lib/source-control/source-control.server'
+import { mapProviderPullRequestState } from '$lib/source-control/pr-checks'
+import {
+	findGithubRepositoriesForWebhook,
+	recordPullRequest,
+	recordPullRequestCheck,
+} from '$lib/source-control/source-control.server'
 import { openReviewItem } from '$lib/observability/review.server'
 import { logger } from '$lib/observability/logger'
 import { getGithubWebhookSecret } from '$lib/server/config'
@@ -79,15 +84,18 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 	const fields = extractPullRequestEventFields(payload)
 	if (!fields) return { ok: true, updated: false }
 
-	// Match on (owner, name) globally — webhooks aren't user-scoped, so any user who has
-	// connected this repo gets the update. The repository row carries userId, so we
-	// reconcile per-row.
-	const repos = await db
-		.select()
-		.from(repositories)
-		.where(and(eq(repositories.owner, fields.owner), eq(repositories.name, fields.repo)))
+	// Webhooks aren't user-scoped, so any user who has connected this repo gets the update.
+	// The repository row carries userId, so we reconcile per-row.
+	const repos = await findGithubRepositoriesForWebhook({
+		owner: fields.owner,
+		name: fields.repo,
+		providerRepoId: fields.repositoryId,
+	})
 	if (repos.length === 0) return { ok: true, updated: false }
 
+	// Null for actions that say nothing about status (synchronize, edited, labeled, ...).
+	// Then a known PR keeps its status, and one we have never seen is recorded with the
+	// state the payload reports rather than a guessed `draft`.
 	const newStatus = mapPullRequestStatus(fields.action, fields.merged, fields.draft)
 	let updated = 0
 	for (const repo of repos) {
@@ -99,6 +107,7 @@ async function handlePullRequestEvent(payload: unknown): Promise<{ ok: boolean; 
 			headBranch: fields.headBranch,
 			baseBranch: fields.baseBranch,
 			status: newStatus ?? undefined,
+			statusIfNew: mapProviderPullRequestState({ state: fields.state, merged: fields.merged, draft: fields.draft }),
 			providerUrl: fields.htmlUrl,
 			metadata: {
 				source: 'github_webhook',
@@ -162,10 +171,11 @@ async function handleCheckRunEvent(payload: unknown): Promise<{ ok: boolean; rec
 	if (!fields) return { ok: true, recorded: 0, notified: 0 }
 	if (fields.prNumbers.length === 0) return { ok: true, recorded: 0, notified: 0 }
 
-	const repos = await db
-		.select()
-		.from(repositories)
-		.where(and(eq(repositories.owner, fields.owner), eq(repositories.name, fields.repo)))
+	const repos = await findGithubRepositoriesForWebhook({
+		owner: fields.owner,
+		name: fields.repo,
+		providerRepoId: fields.repositoryId,
+	})
 	if (repos.length === 0) return { ok: true, recorded: 0, notified: 0 }
 
 	const { recordCheckObservation } = await import('$lib/source-control/pr-watch.server')
