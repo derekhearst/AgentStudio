@@ -5,7 +5,7 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
-import { buildFixPrompt } from './pr-checks'
+import { buildFixPrompt, CI_FIX_POLICY } from './pr-checks'
 import { mayFixPullRequest } from './pr-fix'
 import { pullRequestChecks, pullRequests, repositories } from './source-control.schema'
 
@@ -242,7 +242,8 @@ async function requireDefaultAgentId(userId: string, preferred: string | null): 
  *
  * It runs on the old loop, whose unattended tool list is `web_search` alone since `run_code`
  * was retired (#69; `$lib/runtime/detached-tools`). So today a fix run can reason about the
- * failure it is handed but cannot edit the checkout. Moving it onto the engine is the fix.
+ * failure it is handed but cannot edit the checkout, and its prompt and `CI_FIX_POLICY` say
+ * so: they ask for a proposed patch. Moving it onto the engine is the fix.
  */
 async function runFixLoop(input: {
 	userId: string
@@ -260,13 +261,7 @@ async function runFixLoop(input: {
 		agent,
 		userId: input.userId,
 		intent: input.prompt,
-		toolPolicy: [
-			'CI fix policy:',
-			'- A continuous-integration check failed on a pull request you opened; no user is watching in real time.',
-			'- Diagnose before editing. Say what broke and why before you change a line.',
-			'- If the failure is unrelated to this branch, report that and stop rather than rewriting working code.',
-			'- Do not push or re-open the pull request yourself; summarize the fix and leave the push to the operator.',
-		].join('\n'),
+		toolPolicy: CI_FIX_POLICY,
 	})
 
 	const [conversation] = await db

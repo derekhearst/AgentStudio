@@ -353,8 +353,8 @@ reply is in the conversation), or an earlier run already failed (Settings → Jo
 
 This is deliberately a button and not an automatic response. Much of red CI is a flake, an
 outage, or a failure that was already on the base branch, and none of those are worth
-spending an agent run on unasked. The seeded prompt tells the agent to diagnose before
-editing and to stop and say so if the failure is unrelated to the branch. The fix run also
+spending an agent run on unasked. The seeded prompt tells the agent to diagnose first and
+to stop and say so if the failure is unrelated to the branch. The fix run also
 cannot push or re-open the PR itself: `push_branch` and `create_pull_request` refuse to run
 outside an interactive chat run, so the last step stays a human's.
 
@@ -363,6 +363,11 @@ the Claude Agent SDK that runs chats, and there its only tool is `web_search`. `
 its one way to touch the checkout, and it was removed (#69). So a fix run can explain the
 failure it is handed but cannot edit anything until it moves onto the chat engine. See
 [../tools/tools.md](../tools/tools.md).
+
+The prompt and the run's policy say so plainly: the run cannot edit files, run commands or
+push, so if the branch needs a change it proposes one as a patch (a unified diff) and
+explains why, and you apply it. Before this, the prompt told the agent to fix the branch and
+report what it changed, which invited a reply describing edits that were never made.
 
 **Job types.** `pr_watch_dispatch` (scheduled tick, one indexed query), `pr_watch` (poll one
 PR), `pr_fix` (run the seeded fix). All three are ordinary durable jobs, so leases,
