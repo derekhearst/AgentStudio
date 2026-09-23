@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, notInArray, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, notInArray, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { enqueueJob } from '$lib/jobs/jobs.server'
 import type { JobRow } from '$lib/jobs/jobs.schema'
@@ -232,6 +232,11 @@ export async function countSourcesForResearch(researchId: string): Promise<{ tot
 	return { total: Number(row?.total ?? 0), cited: Number(row?.cited ?? 0) }
 }
 
+/**
+ * Flag the sources the report cites. `inArray`, not a hand-written `= ANY(${ids})`: Drizzle
+ * spreads an interpolated array into a parenthesised list, so that read `= ANY(($1))` and
+ * Postgres refused it. Every run whose report cited a source failed at its last step.
+ */
 export async function markSourcesCited(
 	researchId: string,
 	sourceIds: string[],
@@ -240,7 +245,7 @@ export async function markSourcesCited(
 	const result = await db
 		.update(researchSources)
 		.set({ citedInReport: true })
-		.where(and(eq(researchSources.researchId, researchId), drizzleSql`${researchSources.id} = ANY(${sourceIds})`))
+		.where(and(eq(researchSources.researchId, researchId), inArray(researchSources.id, sourceIds)))
 		.returning({ id: researchSources.id })
 	return { updated: result.length }
 }

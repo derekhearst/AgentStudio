@@ -16,6 +16,10 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  * after the synthesizer answered, so the run saved its report over "canceled", marked itself
  * complete and sent "Research complete".
  *
+ * And a run nobody canceled could not finish either: marking the sources its report cited
+ * sent Postgres `= ANY(($1))`, which it refuses, so every run that cited a source failed at
+ * its last step.
+ *
  * These specs drive the runner and the job handler directly. Most rows start at a point where
  * the runner stops before its first model call; the synthesis specs answer the model calls
  * with a stand-in for OpenRouter, so nothing here needs a model.
@@ -210,6 +214,37 @@ async function cancelRow(researchId: string) {
 }
 
 test.describe('research/cancel — a cancel during synthesis stands', () => {
+	// The control for the specs below: the same run, with no Cancel, finishes. It also pins
+	// the last step, marking the cited sources, which failed every run whose report cited one.
+	test('without a Cancel the same run completes, keeps its report and marks the source it cites', async () => {
+		const prefix = uniquePrefix('research-synth-complete')
+		const sql = getSql()
+		try {
+			const researchId = await insertRunReadyToSynthesize(prefix)
+			const { runResearchLoop } = await import('../src/lib/research/research-runner.server')
+
+			const outcome = await withFakeOpenRouter(
+				async () => undefined,
+				() => runResearchLoop(researchId),
+			)
+
+			expect(outcome.error ?? null).toBeNull()
+			expect(outcome.status).toBe('complete')
+			expect(outcome.citedCount).toBe(1)
+			const [row] = await sql<{ status: string; report: string | null }[]>`
+				select status::text as status, report from research where id = ${researchId}
+			`
+			expect(row.status).toBe('complete')
+			expect(row.report).toContain('Spring tides follow the new and full moon')
+			const [{ cited }] = await sql<{ cited: number }[]>`
+				select count(*)::int as cited from research_sources where research_id = ${researchId} and cited_in_report
+			`
+			expect(cited, 'the source the report cites is marked cited').toBe(1)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
 	test('a Cancel that lands while the report is being written ends the run canceled, with no report', async () => {
 		const prefix = uniquePrefix('research-cancel-synth')
 		const sql = getSql()
