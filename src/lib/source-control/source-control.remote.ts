@@ -186,18 +186,18 @@ export const startPullRequestFixCommand = command(startFixSchema, async (input) 
 		queue: 'default',
 		// Operator pressed a button; this outranks background polling.
 		priority: 90,
-		// Keyed on the review item, not on (PR, check). `(type, dedupeKey)` is unique
-		// FOREVER — a key that does not move would make the second press of "Fix it" hand
-		// back the first, long-completed job instead of running anything. One review item
-		// is one failure on one commit, so one fix run per item is the right grain, and a
-		// later failure opens a new item and is therefore fixable again. Without an item
-		// id we fall back to a minute bucket: a double-click collapses, a deliberate retry
-		// a minute later does not.
+		// Keyed on the review item, not on (PR, check), and held `forever`: one review item
+		// is one failure on one commit, so one fix run per item is the right grain — a second
+		// press hands back the first job — and a later failure opens a new item and is
+		// therefore fixable again. Without an item id we fall back to a minute bucket that
+		// only covers a fix still in flight: a double-click collapses, a deliberate retry a
+		// minute later does not.
 		dedupeKey: input.reviewItemId
 			? `pr_fix:item:${input.reviewItemId}`
 			: `pr_fix:${input.pullRequestId}:${input.checkName ?? 'latest'}:${new Date(
 					Math.floor(Date.now() / 60_000) * 60_000,
 				).toISOString()}`,
+		dedupeScope: input.reviewItemId ? 'forever' : 'active',
 		payload: {
 			pullRequestId: input.pullRequestId,
 			userId: user.id,

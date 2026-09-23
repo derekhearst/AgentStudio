@@ -29,9 +29,9 @@ import {
  *     `runAutomationById` which delegates to the existing runAutomation pipeline + updates
  *     last_run_at / next_run_at on success.
  *
- * Benefits: ticks survive restart, per-automation dedupe via `automation:<id>:<minute>`
- * prevents double-execution within the same tick window, failures show up in
- * `/settings/jobs` for forensics.
+ * Benefits: ticks survive restart, per-automation dedupe via `automation:<id>:<slot>`
+ * gives each scheduled slot exactly one job however many ticks see it due, failures show up
+ * in `/settings/jobs` for forensics.
  *
  * The cron route (`/api/cron`) still works as an external trigger — it just calls the same
  * `checkAndRunAutomations` enqueue path. Useful for environments that prefer external cron
@@ -96,9 +96,10 @@ export function registerAutomationJobHandlers(): void {
 	})
 
 	// Dispatch tick — every 60s, look for due automations and enqueue per-automation jobs.
-	// Idempotent: dedupeKey on each enqueue collapses double-fires within the same tick window.
-	// Note: `checkAndRunAutomations` itself doesn't need a dedupeKey because it's the
-	// dispatcher (it INSPECTS due automations); only its enqueued automation_run jobs do.
+	// The fixed key only collapses a tick onto one that is still queued or running (dedupe
+	// covers active jobs), so a backed-up worker never stacks ticks, and every tick after the
+	// previous one finished gets a job of its own. Idempotency per automation lives on the
+	// automation_run jobs the tick enqueues, not here.
 	registerScheduledJob({
 		name: 'automations.dispatch',
 		intervalMs: 60_000,
@@ -124,7 +125,7 @@ export function registerAutomationJobHandlers(): void {
 
 		return {
 			evaluated: result.evaluated,
-			enqueued: result.enqueued.filter((e) => !!e.jobId).length,
+			enqueued: result.enqueued.filter((e) => e.created).length,
 			errors: result.enqueued.filter((e) => !!e.error).length,
 			reapedRuns: reaped,
 			prunedRuns: pruned,
@@ -182,9 +183,11 @@ async function handleAutomationRunFailure(args: {
 				queue: 'default',
 				priority: 50,
 				scheduledAt: runAt,
-				// Keyed on the job that failed, so re-delivery of the same failure can't fan
-				// out into a second retry chain.
+				// Keyed on the job that failed, and `forever`, so re-delivery of the same
+				// failure can't fan out into a second retry chain even after the first retry
+				// has already run.
 				dedupeKey: automationRetryDedupeKey(args.jobId, args.automationId, nextAttempt),
+				dedupeScope: 'forever',
 				payload: { automationId: args.automationId, attempt: nextAttempt, trigger: 'schedule' },
 				userId: automation?.userId ?? null,
 			})

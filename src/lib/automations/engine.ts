@@ -350,24 +350,46 @@ export async function checkAndRunAutomations(now = new Date()) {
 		.orderBy(asc(automations.nextRunAt))
 		.limit(25)
 
-	const enqueued: Array<{ automationId: string; jobId?: string; error?: string }> = []
+	const enqueued: Array<{
+		automationId: string
+		jobId?: string
+		/** False when this slot already had its job — the tick found nothing new to queue. */
+		created?: boolean
+		/** Set when the slot was skipped instead of run; says why. */
+		skipped?: string
+		error?: string
+	}> = []
 	if (due.length > 0) {
-		const { enqueueJob } = await import('$lib/jobs/jobs.server')
+		const { enqueueJobWithOutcome } = await import('$lib/jobs/jobs.server')
 		for (const automation of due) {
 			try {
-				// Dedupe key includes the next-run minute so back-to-back ticks within the same
-				// minute collapse, but the next minute's tick gets a fresh enqueue if the job
-				// is still pending (the worker will skip when it sees lastRunAt updated).
+				// One job per scheduled slot, EVER — hence `forever`. The slot stays due until the
+				// run succeeds or its retry chain gives up, and both of those roll `nextRunAt`
+				// forward. In between, every minute's tick lands here again: a failed first
+				// attempt has already completed its job (the handler swallows the error and
+				// queues its own retry), so a key that only covered active jobs would start a
+				// fresh attempt-1 chain every minute alongside the retries.
 				const dedupeKey = `automation:${automation.id}:${(automation.nextRunAt ?? now).toISOString().slice(0, 16)}`
-				const job = await enqueueJob({
+				const { job, created } = await enqueueJobWithOutcome({
 					type: 'automation_run',
 					queue: 'default',
 					priority: 50, // background tier — same as memory_mine
 					dedupeKey,
+					dedupeScope: 'forever',
 					payload: { automationId: automation.id },
 					userId: automation.userId,
 				})
-				enqueued.push({ automationId: automation.id, jobId: job.id })
+				if (!created && (job.status === 'failed' || job.status === 'canceled')) {
+					// The queue gave up on this slot's job before the handler's own failure path
+					// could run — a worker that kept dying mid-run, or a cancel from
+					// /settings/jobs — so nothing rolled the schedule forward. Skip the slot the
+					// way an exhausted retry chain does; otherwise the automation stays due and
+					// every tick finds the same dead job for good.
+					await skipScheduledSlot(automation, now)
+					enqueued.push({ automationId: automation.id, jobId: job.id, created, skipped: `slot job ${job.status}` })
+					continue
+				}
+				enqueued.push({ automationId: automation.id, jobId: job.id, created })
 			} catch (error) {
 				enqueued.push({
 					automationId: automation.id,
@@ -382,4 +404,29 @@ export async function checkAndRunAutomations(now = new Date()) {
 		evaluated: due.length,
 		enqueued,
 	}
+}
+
+/** Roll `nextRunAt` past a slot that will never run. `lastRunAt` is untouched — nothing ran. */
+async function skipScheduledSlot(automation: typeof automations.$inferSelect, now: Date): Promise<void> {
+	let nextRunAt: Date
+	try {
+		nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
+	} catch (err) {
+		// A cron expression that no longer parses cannot be advanced; the automation's edit
+		// form is where that gets fixed.
+		logger.warn('[automations] could not skip a dead slot: bad cron expression', {
+			automationId: automation.id,
+			error: err instanceof Error ? err.message : String(err),
+		})
+		return
+	}
+	await db
+		.update(automations)
+		.set({ nextRunAt, updatedAt: now })
+		.where(eq(automations.id, automation.id))
+	logger.warn('[automations] skipped a slot whose job the queue gave up on', {
+		automationId: automation.id,
+		slot: automation.nextRunAt?.toISOString() ?? null,
+		nextRunAt: nextRunAt.toISOString(),
+	})
 }

@@ -32,13 +32,15 @@ export function registerMetricsJobHandlers(): void {
 		// First sample shortly after boot so a fresh deploy has data within a minute.
 		initialDelayMs: 45_000,
 		enqueue: () => {
-			// 5min bucket so re-fires in the same window collapse on the (type, dedupeKey) unique.
+			// 5min bucket, `forever`: one sample per window, even when a restart re-fires the
+			// schedule inside a window whose sample has already been taken.
 			const bucket = Math.floor(Date.now() / METRICS_SAMPLE_INTERVAL_MS)
 			return {
 				type: 'metrics_sample',
 				queue: 'maintenance',
 				priority: 10,
 				dedupeKey: `metrics:5min:${bucket}`,
+				dedupeScope: 'forever',
 				payload: {},
 			}
 		},

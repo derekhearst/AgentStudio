@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lte, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { jobLeases, jobPolicies, jobs, type JobRow, type JobStatus } from './jobs.schema'
 import { logger } from '$lib/observability/logger'
@@ -29,12 +29,32 @@ const DEFAULT_MAX_ATTEMPTS = 3
 const DEFAULT_BACKOFF_MS = 5_000
 const DEFAULT_QUEUE = 'default'
 
+/**
+ * The statuses in which a job is still queued or in flight. `(type, dedupeKey)` is unique
+ * across exactly these rows — the partial index `jobs_type_dedupe_active_uidx` in
+ * jobs.schema.ts spells out the same list, and the two must agree.
+ */
+export const ACTIVE_JOB_STATUSES = ['pending', 'leased', 'running', 'retry_wait'] as const satisfies readonly JobStatus[]
+
 export type EnqueueJobInput = {
 	type: string
 	payload?: Record<string, unknown>
 	priority?: number
 	queue?: string
 	dedupeKey?: string
+	/**
+	 * How long `dedupeKey` holds. Ignored when there is no key.
+	 *
+	 *   'active' (default) — collapse onto a job with the same key that is still queued or
+	 *     running. Once that job finishes the key is free again, so a recurring enqueue with a
+	 *     fixed key gets a fresh job each time: the dispatch ticks, memory mining.
+	 *   'forever' — collapse onto ANY job ever enqueued with the key, whatever its status.
+	 *     For work that must happen at most once: one run per automation slot, one evaluation
+	 *     per chat run, one sample per metrics window. The index cannot express this, so it
+	 *     is a read before the insert: two enqueues racing a job that finishes in between can
+	 *     still produce two jobs, but never two in flight at once.
+	 */
+	dedupeScope?: 'active' | 'forever'
 	scheduledAt?: Date
 	maxAttempts?: number
 	runId?: string | null
@@ -43,11 +63,23 @@ export type EnqueueJobInput = {
 	userId?: string | null
 }
 
+export type EnqueueJobOutcome = {
+	job: JobRow
+	/** False when the enqueue collapsed onto an existing job with the same dedupe key. */
+	created: boolean
+}
+
 /**
- * Enqueue a new job. When `dedupeKey` is set and a row with the same `(type, dedupeKey)` already
- * exists, returns the EXISTING row instead of creating a duplicate (idempotency contract).
+ * Enqueue a new job. When `dedupeKey` is set and a job with the same `(type, dedupeKey)` is
+ * still active — or, with `dedupeScope: 'forever'`, has ever existed — returns that EXISTING
+ * row instead of creating a duplicate (idempotency contract).
  */
 export async function enqueueJob(input: EnqueueJobInput): Promise<JobRow> {
+	return (await enqueueJobWithOutcome(input)).job
+}
+
+/** `enqueueJob`, plus whether a row was actually inserted — for callers that count work. */
+export async function enqueueJobWithOutcome(input: EnqueueJobInput): Promise<EnqueueJobOutcome> {
 	const policy = await getPolicyForType(input.type)
 	const insertValues = {
 		type: input.type,
@@ -64,24 +96,48 @@ export async function enqueueJob(input: EnqueueJobInput): Promise<JobRow> {
 		userId: input.userId ?? null,
 	}
 
-	if (input.dedupeKey) {
-		// `(type, dedupeKey)` is unique — INSERT … ON CONFLICT DO NOTHING + a follow-up SELECT
-		// returns the existing row when there's a collision.
-		const inserted = await db.insert(jobs).values(insertValues).onConflictDoNothing().returning()
-		if (inserted.length > 0) return inserted[0]
-		const [existing] = await db
-			.select()
-			.from(jobs)
-			.where(and(eq(jobs.type, input.type), eq(jobs.dedupeKey, input.dedupeKey)))
-			.limit(1)
-		if (!existing) {
-			throw new Error(`enqueueJob: dedupe collision but row not found — type=${input.type} dedupeKey=${input.dedupeKey}`)
-		}
-		return existing
+	const dedupeKey = input.dedupeKey
+	if (!dedupeKey) {
+		const [row] = await db.insert(jobs).values(insertValues).returning()
+		return { job: row, created: true }
 	}
 
-	const [row] = await db.insert(jobs).values(insertValues).returning()
-	return row
+	if (input.dedupeScope === 'forever') {
+		const existing = await findJobByDedupeKey(input.type, dedupeKey, { activeOnly: false })
+		if (existing) return { job: existing, created: false }
+	}
+
+	// INSERT … ON CONFLICT DO NOTHING against the partial unique index, then read back the
+	// active row it collided with. That row can finish in the gap between the two statements,
+	// leaving nothing active to return — at which point the key is free, so insert again.
+	for (let attempt = 0; attempt < 3; attempt += 1) {
+		const inserted = await db.insert(jobs).values(insertValues).onConflictDoNothing().returning()
+		if (inserted.length > 0) return { job: inserted[0], created: true }
+		const active = await findJobByDedupeKey(input.type, dedupeKey, { activeOnly: true })
+		if (active) return { job: active, created: false }
+	}
+	throw new Error(`enqueueJob: dedupe collision but no active row found — type=${input.type} dedupeKey=${dedupeKey}`)
+}
+
+/** Newest job with this `(type, dedupeKey)`, optionally only among the active ones. */
+async function findJobByDedupeKey(
+	type: string,
+	dedupeKey: string,
+	opts: { activeOnly: boolean },
+): Promise<JobRow | null> {
+	const [row] = await db
+		.select()
+		.from(jobs)
+		.where(
+			and(
+				eq(jobs.type, type),
+				eq(jobs.dedupeKey, dedupeKey),
+				opts.activeOnly ? inArray(jobs.status, [...ACTIVE_JOB_STATUSES]) : undefined,
+			),
+		)
+		.orderBy(desc(jobs.createdAt))
+		.limit(1)
+	return row ?? null
 }
 
 // ─────────── Claim / lease ───────────

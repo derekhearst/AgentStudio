@@ -52,6 +52,8 @@ export function registerMonitorJobHandlers(): void {
 			type: 'monitors_dispatch',
 			queue: 'maintenance',
 			priority: 30,
+			// Collapses onto a tick that is still queued or running; once it finishes, the
+			// next tick gets a job of its own.
 			dedupeKey: 'monitors:dispatch',
 			payload: {},
 		}),
