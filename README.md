@@ -1,6 +1,6 @@
 # AgentStudio
 
-Self-hosted autonomous AI agent platform with user-scoped tool sandboxes and passkey authentication.
+Self-hosted autonomous AI agent platform for a single owner, with a sandboxed workspace and password sign-in.
 
 ## Feature Overview
 
@@ -183,6 +183,7 @@ Notes:
 - UI spec: `docs/ui/spec.md`
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
+- Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
 
 ## Projects
 
@@ -204,21 +205,22 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - Domain-first API boundaries: browser-consumed remote functions live in `src/lib/{domain}`.
 - Server-only internals are colocated in domain folders under `src/lib/**` and are only imported by remote functions or `+server` routes.
 - Route and component imports should prefer domain barrels (for example, `$lib/chat`, `$lib/agents`) over deep `*.remote` paths.
+- Every remote function starts with `requireAuthenticatedRequestUser()` and scopes owned data to that user. The hook also refuses anonymous remote calls on its own, but a spec (`tests/auth.remote-guards.spec.ts`) fails if a remote function is added without the check.
 
-## Auth and Users
+## Authentication
 
-- Authentication uses WebAuthn passkeys (no OAuth or password login).
-- Native mobile/desktop webviews that do not expose WebAuthn now show an Open in browser to sign in fallback on the login page.
-- On first startup, the server seeds an unclaimed `admin` account and logs a one-time bootstrap claim URL/key.
-- Admins create new accounts from `/users`.
-- Accounts are claimed by the first successful passkey registration for that username.
-- User removal is soft-delete; access is blocked while historical data remains owned by that user.
+- One owner account per instance, signed in with a password. There are no other users, roles, invitations or passkeys.
+- On first start there is no owner, and every page redirects to `/setup`, where the first visitor creates the owner. **Nothing else protects that page — complete setup before the instance is reachable from the internet.** There is no claim key.
+- Sessions are 30-day HTTP-only cookies. Everything except `/login`, `/setup`, `/demo`, `/api/health`, `/api/webhooks` (signature-checked) and `/api/cron` (session or `CRON_SECRET`) requires one.
+- Remote functions are gated on the real request path: without a session only the sign-in and setup commands can run.
+- `AUTH_DEV_BYPASS=1` signs every visitor in as the owner on a development server only; production builds ignore it.
+- See [docs/auth/auth.md](docs/auth/auth.md) for the flows and rules.
 
 ## Route Map
 
 - `/` Redirects to chat
-- `/login` Authentication
-- `/users` Admin user management
+- `/login` Sign in
+- `/setup` First-run owner account creation (only until an owner exists)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
 - `/cost` Cost dashboard
