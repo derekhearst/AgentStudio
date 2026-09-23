@@ -33,7 +33,11 @@ test.describe('chat/agent-stream-integration — Research agent posture', () => 
 		`
 		test.skip(!agent, 'Research agent not yet seeded — restart dev server')
 		expect(agent.name).toBe('Research')
-		expect(agent.identity_skill_id, 'built-in agents must not link to a system/ skill').toBeNull()
+		// A link the operator made is kept across boots; one to the removed system/ namespace is not.
+		if (agent.identity_skill_id) {
+			const [linked] = await sql<{ name: string }[]>`select name from skills where id = ${agent.identity_skill_id}`
+			expect(linked?.name.startsWith('system/'), 'built-in agents must not link to a system/ skill').toBe(false)
+		}
 		expect(agent.system_prompt).not.toBe('Seeded at boot.')
 		expect(agent.system_prompt).toMatch(/Research/)
 		expect(agent.system_prompt.length).toBeGreaterThan(80)

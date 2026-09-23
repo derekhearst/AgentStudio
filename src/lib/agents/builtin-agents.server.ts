@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import { agents } from '$lib/agents/agents.schema'
+import { skills } from '$lib/skills/skills.schema'
 import type { db } from '$lib/db.server'
 
 type DbLike = typeof db
@@ -10,11 +11,17 @@ type DbLike = typeof db
  * Replaces the prior 4-mode concept (`chat` | `research` | `plan` | `agent`) with four seeded
  * agents that the picker pins to the top of the dropdown. Custom user agents appear below.
  *
- * Idempotency: upserts agents by `id`. On conflict we refresh `name`, `role`,
- * `config.toolPolicy`, `anchor_prompt`, `kind`, and force `identity_skill_id = NULL` (so any
- * stale link to a removed `system/mode-*` skill is healed). `system_prompt` is generally
- * preserved across boots — except when it still equals the migration-0055 placeholder
+ * Idempotency: upserts agents by `id`. On conflict we refresh what the code owns — `name`,
+ * `role`, `anchor_prompt`, `kind` and the `toolPolicy` key of `config` — and leave what the
+ * operator owns alone: every other `config` key (hook bindings, research overrides), and a
+ * linked identity skill. The link is cleared only when it points at a skill that no longer
+ * exists or at a legacy `system/` skill (the removed `system/mode-*` rows). `system_prompt` is
+ * preserved too — except when it still equals the migration-0055 placeholder
  * `'Seeded at boot.'`, in which case we backfill the canonical persona text.
+ *
+ * This runs on every boot, and a deploy is a boot. It used to replace the whole `config` with
+ * `{ toolPolicy }` and null the identity link unconditionally, so each deploy silently undid
+ * the operator's hook bindings and identity edits on the built-in agents.
  */
 
 export const BUILTIN_AGENT_KEYS = ['chat', 'research', 'plan', 'autonomous'] as const
@@ -207,10 +214,8 @@ export async function seedBuiltinAgents(
 		const id = BUILTIN_AGENT_IDS[key]
 		const promptContent = BUILTIN_AGENT_PROMPTS[key]
 		// ON CONFLICT (id) — each built-in agent has a stable UUID so id-based conflict
-		// handling is deterministic. Refresh metadata fields and force identity_skill_id
-		// to NULL (heals stale links to removed system/mode-* skills). system_prompt is
-		// preserved across boots EXCEPT when it still equals the migration-0055 placeholder,
-		// in which case we backfill the canonical persona text.
+		// handling is deterministic. What is refreshed, and what is left alone, is in the
+		// module comment above.
 		await dbInstance
 			.insert(agents)
 			.values({
@@ -232,8 +237,14 @@ export async function seedBuiltinAgents(
 				set: {
 					name: NAMES[key],
 					role: ROLE_DESCRIPTIONS[key],
-					config: buildToolPolicyConfig(key),
-					identitySkillId: null,
+					// `||` merges: the right-hand `toolPolicy` replaces the stored one, and every
+					// other key the operator saved survives. The allow-list is code, so it has to
+					// follow the code; nothing in the UI edits it.
+					config: sql`${agents.config} || ${JSON.stringify(buildToolPolicyConfig(key))}::jsonb`,
+					identitySkillId: sql`CASE WHEN EXISTS (
+						SELECT 1 FROM ${skills}
+						WHERE ${skills.id} = ${agents.identitySkillId} AND ${skills.name} NOT LIKE 'system/%'
+					) THEN ${agents.identitySkillId} ELSE NULL END`,
 					builtinKey: key,
 					anchorPrompt: ANCHOR_PROMPTS[key],
 					kind: 'orchestrator',
