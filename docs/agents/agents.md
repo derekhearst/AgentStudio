@@ -33,6 +33,29 @@ Pausing is a way to bench an agent without deleting it. It is useful because onl
 
 The database stores three values: `active`, `idle` and `paused`. `active` and `idle` mean the same thing and both show as Available. New agents start as `idle`; resuming an agent writes `active`.
 
+### Built-in agents keep your edits
+
+The four built-in agents are checked at every startup, and every deploy is a startup. A missing built-in is created again. An existing one has only the parts the app owns refreshed:
+
+| Refreshed at every startup | Left as you set it |
+| -------------------------- | ------------------ |
+| Name and role description | The system prompt (after it is first written) |
+| The reminder shown when a conversation switches to the agent | Hook bindings |
+| The list of tools Research and Plan may use | Research settings |
+| | A linked identity skill |
+
+A linked identity skill is only unlinked at startup if the skill has since been deleted, or if it is one of the old `system/` skills the built-ins used to point at.
+
+Before this, every startup replaced the whole agent configuration and unlinked any identity skill, so each deploy quietly undid hook bindings and identity edits on the built-in agents.
+
+### Identity skills
+
+An agent's instructions can live in its system prompt or in a linked **identity skill**, which is edited at `/agents/[id]/identity`.
+
+- **Promote to skill** copies the system prompt into a new skill named `agent/<name>-<first 8 characters of the id>/identity` and links it. Edits there take effect on the agent's next run.
+- **Unlink skill** makes the agent use its system prompt again. The skill itself stays in `/skills`.
+- **Promote to skill** after an unlink links that same skill again, with the content as you last left it. (It used to try to create a second skill with the same name and fail every time.)
+
 ## User flows
 
 ### Pause an agent
@@ -59,6 +82,19 @@ The automation cards on `/automations` show "(paused)" next to the agent's name,
 
 The assistant can also pause and resume agents itself with its `pause_agent` and `resume_agent` tools. The same rules apply, and the audit trail shows no person for those changes.
 
+### Hand a plan over from Plan or Research
+
+1. The user asks the Plan agent to plan a change, or the Research agent to research a question.
+2. The agent writes its plan to a markdown file (`PLAN.md` or `RESEARCH-PLAN.md`) and posts it in its reply.
+3. It calls `request_plan_approval` with the file and the **full id** of the agent that should carry the plan out. An approval card appears in the chat.
+4. On **Approve**, the conversation switches to that agent, which reads the plan file and does the work. On **Deny**, the planning agent stays, and the user usually says what to change.
+
+The agent that carries out the plan is usually Chat or Autonomous. Both agents are always told those two agents' ids, because the ids never change. For any other agent, they call `list_agents`, a read-only tool that lists every agent with its full id, name, role, whether it is built-in, and whether it is paused.
+
+There is no separate "research runner" agent. An approved research plan goes to Chat, which has web search, page fetching and PDF reading, unless the user asks for another agent.
+
+Before this, the handoff could not complete: `request_plan_approval` needs a full id, the agents' instructions pointed at a `list_agents` tool that did not exist, and the only list of agents the model ever saw showed shortened ids.
+
 ## Roles & permissions
 
 AgentStudio has a single owner and no admin tier. The owner can view every agent, pause and resume custom agents, and edit an agent's model, system prompt and hooks.
@@ -76,8 +112,8 @@ These agents show a **Built-in** or **Evaluator** label and have no Pause button
 | ----- | ----- |
 | Chat | All tools |
 | Autonomous | All tools |
-| Research | Read-only tools, plus `Write` and `request_plan_approval` |
-| Plan | Read-only tools, plus `Write` and `request_plan_approval` |
+| Research | Read-only tools (including `list_agents`), plus `Write` and `request_plan_approval` |
+| Plan | Read-only tools (including `list_agents`), plus `Write` and `request_plan_approval` |
 | Custom agent | All tools, unless its settings list the only tools it may use |
 
 Research and Plan share one list of allowed tools. That list includes `Write`, and this is deliberate (decided in issue #67). Both agents work the same way: they write their plan to a markdown file (`RESEARCH-PLAN.md` or `PLAN.md`), then ask the user to approve it with `request_plan_approval`. That tool reads the plan from the file, so Research needs `Write` as much as Plan does. Taking it away would break Research's only workflow.
@@ -88,6 +124,7 @@ Research and Plan cannot run shell commands, edit files in place, push code or o
 
 - **Claude Agent SDK.** The custom agents a run may delegate to are passed to the SDK as its list of agents. The SDK describes each one in its delegation tool, `Agent`. The built-in agents' instructions point there instead of keeping a list of their own, so the two cannot disagree.
 - **Automations and monitors.** Both check the agent's status before running it. See [../automations/spec.md](../automations/spec.md) and [../monitors/spec.md](../monitors/spec.md).
+- **Hooks.** The hook bindings saved on an agent's page run for its chats as well as its automations. See [../hooks/hooks.md](../hooks/hooks.md).
 - **Audit trail.** Every change of status is recorded as `agent.status.changed`.
 
 ## Business rules
@@ -99,3 +136,6 @@ Research and Plan cannot run shell commands, edit files in place, push code or o
 - An automation skipped because its agent is paused is not a failure. It does not count toward the five failures that switch an automation off, and it does not reset that count.
 - A skipped scheduled run moves the schedule on. A skipped "Run now" or monitor-started run leaves it where it was.
 - An automation with no agent is never affected by any agent's status.
+- A startup never overwrites a built-in agent's hook bindings, research settings, system prompt or identity skill. Only its name, role, switch reminder and tool list follow the code.
+- `request_plan_approval` only accepts a full agent id. `list_agents` is how the model finds one.
+- Promoting an agent to an identity skill re-uses the agent's existing identity skill when there is one.
