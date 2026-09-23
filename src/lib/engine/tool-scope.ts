@@ -25,15 +25,19 @@
  *
  * and nothing is ever auto-approved, so every call still meets the gate.
  *
+ * Names are compared as the CLI calls the tools today (`canonicalToolName`). An agent's list
+ * may say `Task` or `KillShell`; the CLI accepts those as aliases, but the call itself
+ * arrives as `Agent` or `TaskStop`, and a scope holding only the old spelling refused it.
+ *
  * Pure and dependency-free apart from the name lists, so a spec can import it.
  */
 
-import { BUILTIN_TOOL_SET, SUBAGENT_TOOL } from './builtin-tools'
+import { BUILTIN_TOOL_SET, SUBAGENT_TOOL, canonicalToolName } from './builtin-tools'
 
 export type ToolScope = {
-	/** Every tool the run may call, by bare name (our own MCP namespace stripped). */
+	/** Every tool the run may call, by bare canonical name (our own MCP namespace stripped). */
 	readonly allowed: ReadonlySet<string>
-	/** The SDK built-ins among them, in the order given — what `Options.tools` receives. */
+	/** The SDK built-ins among them, canonical and in the order given — what `Options.tools` receives. */
 	readonly builtins: readonly string[]
 	/** Our own registry tools among them — what the in-process MCP server registers. */
 	readonly inHouse: ReadonlySet<string>
@@ -47,9 +51,9 @@ function isBuiltin(name: string): boolean {
  * Resolve a scoped tool list, or null for an unscoped run (every tool).
  *
  * `delegation` is whether the run was given agents to delegate to. Delegation is only
- * reachable through `Task`, so a scoped run that was given agents gets `Task` too —
- * otherwise the definitions are described in the prompt and the tool that uses them is
- * missing. Being in scope does not approve it: `Task` is still gated like any other call.
+ * reachable through `Agent` (formerly `Task`), so a scoped run that was given agents gets it
+ * too — otherwise the definitions are described in the prompt and the tool that uses them is
+ * missing. Being in scope does not approve it: a delegation is still gated like any other call.
  */
 export function resolveToolScope(
 	names: readonly string[] | null | undefined,
@@ -59,7 +63,7 @@ export function resolveToolScope(
 	const builtins: string[] = []
 	const inHouse = new Set<string>()
 	for (const raw of names) {
-		const name = String(raw ?? '').trim()
+		const name = canonicalToolName(String(raw ?? '').trim())
 		if (!name) continue
 		if (isBuiltin(name)) {
 			if (!builtins.includes(name)) builtins.push(name)
@@ -71,10 +75,10 @@ export function resolveToolScope(
 	return { allowed: new Set([...builtins, ...inHouse]), builtins, inHouse }
 }
 
-/** True when the run may call `bareName`. An unscoped run may call anything. */
+/** True when the run may call `bareName`, under either spelling. An unscoped run may call anything. */
 export function isToolInScope(scope: ToolScope | null | undefined, bareName: string): boolean {
 	if (!scope) return true
-	return scope.allowed.has(bareName)
+	return scope.allowed.has(canonicalToolName(bareName))
 }
 
 /**

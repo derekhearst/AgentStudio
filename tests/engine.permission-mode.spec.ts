@@ -331,4 +331,12 @@ test.describe('permission-mode — capabilities rather than literal names', () =
 			resolveToolGate({ mode: 'default', toolName: 'Task', settingsRequiresApproval: true }).gate,
 		).toBe('ask')
 	})
+
+	test('Agent — the name the CLI actually calls delegation by — is classified the same', () => {
+		expect(toolCapabilities('Agent').has('read')).toBe(false)
+		expect(toolCapabilities('Agent').has('mutate')).toBe(true)
+		expect(resolveToolGate({ mode: 'plan', toolName: 'Agent', settingsRequiresApproval: false }).gate).toBe(
+			'deny',
+		)
+	})
 })

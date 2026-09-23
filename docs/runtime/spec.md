@@ -141,7 +141,7 @@ The mode is orthogonal to the bound **agent**. The Plan agent changes the person
 
 Chat runs execute on the Claude Agent SDK. Before any tool runs — the agent's own or one a delegated subagent makes — AgentStudio answers one question: allow, ask the operator, or refuse. Three checks feed that answer, and the strictest one wins:
 
-1. **The agent's tool list.** An agent with a fixed list (the Research and Plan built-ins, or a custom agent with `allowedTools`) can only call what is on it. Tools that are not listed are not offered to the model at all, and a call to one is refused.
+1. **The agent's tool list.** An agent with a fixed list (the Research and Plan built-ins, or a custom agent with `allowedTools`) can only call what is on it. Tools that are not listed are not offered to the model at all, and a call to one is refused. An agent that was given other agents to delegate to also gets the delegation tool, `Agent`. Tool names are compared as Claude Code calls them today: a list that says `Task` (the old name for `Agent`) or `KillShell` (now `TaskStop`) still works. Until 2026-09-23 it did not, and every delegation by the Research and Plan agents was refused.
 2. **Workspace containment.** File tools must stay inside the run's workspace — judged by where a path really leads, so a link inside the workspace that points out of it does not count as inside. Shell commands run inside the operating-system sandbox where the host has one, and need approval where it does not. A request to run a command outside the sandbox is always refused.
 3. **The permission mode and per-tool settings**, as described above. The mandatory-approval tools always ask.
 

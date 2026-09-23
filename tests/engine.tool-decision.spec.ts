@@ -55,9 +55,22 @@ test.describe('tool scope', () => {
 		expect(scopeBuiltinTools(scope)).toEqual([])
 	})
 
-	test('delegation adds Task, and only when there are agents to delegate to', () => {
-		expect(resolveToolScope(['Read'], { delegation: true })!.builtins).toContain(SUBAGENT_TOOL)
-		expect(resolveToolScope(['Read'], { delegation: false })!.builtins).not.toContain(SUBAGENT_TOOL)
+	test('delegation adds the Agent tool, and only when there are agents to delegate to', () => {
+		// The CLI's delegation tool is `Agent`; `Task` is only its old name. The scope used to
+		// hold `Task`, and every delegation — which arrives as `Agent` — was refused.
+		expect(SUBAGENT_TOOL).toBe('Agent')
+		expect(resolveToolScope(['Read'], { delegation: true })!.builtins).toContain('Agent')
+		expect(resolveToolScope(['Read'], { delegation: false })!.builtins).not.toContain('Agent')
+	})
+
+	test("a list in the CLI's old tool names is read in its current ones", () => {
+		const scope = resolveToolScope(['Read', 'Task', 'KillShell'], { delegation: false })
+		// What `Options.tools` gets, and what a call is checked against: today's names.
+		expect(scopeBuiltinTools(scope)).toEqual(['Read', 'Agent', 'TaskStop'])
+		for (const name of ['Agent', 'Task', 'TaskStop', 'KillShell', 'KillBash']) {
+			expect(isToolInScope(scope, name), name).toBe(true)
+		}
+		expect(scope!.inHouse.size).toBe(0)
 	})
 
 	test("the read-only agents' scope actually leaves out the tools that change things", () => {
@@ -73,6 +86,17 @@ test.describe('tool scope', () => {
 
 test.describe('decideToolCall', () => {
 	const readOnly = resolveToolScope(READ_ONLY_TOOL_NAMES, { delegation: false })
+
+	test('Research and Plan can delegate: the call arrives as Agent, not Task', () => {
+		// The built-in orchestrators are given subagents whenever a custom agent exists, and
+		// told about them in the prompt. The CLI names the call `Agent`.
+		const orchestrator = resolveToolScope(READ_ONLY_TOOL_NAMES, { delegation: true })
+		const input = { subagent_type: 'reviewer', description: 'Review it', prompt: 'Review the diff' }
+		expect(decideToolCall(ctx({ scope: orchestrator }), 'Agent', input).gate).not.toBe('deny')
+		expect(decideToolCall(ctx({ scope: orchestrator }), 'Task', input).gate).not.toBe('deny')
+		// Without agents to delegate to, the tool stays out of scope.
+		expect(decideToolCall(ctx({ scope: readOnly }), 'Agent', input).gate).toBe('deny')
+	})
 
 	test('a tool outside the scope is refused before anything else', () => {
 		const d = decideToolCall(ctx({ scope: readOnly, mode: 'bypassPermissions' }), 'Bash', { command: 'ls' })
