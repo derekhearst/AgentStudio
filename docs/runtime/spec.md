@@ -129,13 +129,45 @@ Per-tool approval settings say what always needs a confirmation; the permission 
 Two rules hold in every mode, including bypass:
 
 1. **The mandatory-approval tools stay gated.** `push_branch`, `create_pull_request` and `request_plan_approval` are classified `mandatory-approval`, which `resolveToolGate` checks before any mode branch runs.
-2. **The SDK is never told `bypassPermissions`.** That mode stops the SDK calling `canUseTool`, which is the only place AgentStudio's gate gets a say — so the bypass is applied in our own gate and the SDK is left on `default`. `sdkPermissionModeFor` owns that mapping.
+2. **The SDK is never told `bypassPermissions`.** That mode stops the SDK calling `canUseTool`, which is where AgentStudio asks the operator — so the bypass is applied in our own gate and the SDK is left on `default`. `sdkPermissionModeFor` owns that mapping.
 
 `bypassPermissions` is refused on any run whose `chat_runs.source` is not `chat_stream` — a detached sub-agent or an automation on a timer has no operator to approve anything. This is the same rule `push_branch` enforces in `assertInteractiveChatSurface`; here it downgrades the run to `default` rather than failing it.
 
 Tools are classified by **capability**, not by literal name (`TOOL_CAPABILITY_RULES`), so issue #15's swap to the SDK's built-in tools does not silently un-gate anything: the rules already carry `Write` / `Edit` / `MultiEdit` / `NotebookEdit` alongside `file_write` / `file_patch`, and an unrecognised tool falls through to `mutate`, which fails closed.
 
 The mode is orthogonal to the bound **agent**. The Plan agent changes the persona (write a plan, hand off via `request_plan_approval`); `plan` mode changes what the runtime permits. Running both is the strict case, and it works: plan mode leaves the plan-file write and the handoff available, as approvals.
+
+### How every tool call is checked (chat runs)
+
+Chat runs execute on the Claude Agent SDK. Before any tool runs — the agent's own or one a delegated subagent makes — AgentStudio answers one question: allow, ask the operator, or refuse. Three checks feed that answer, and the strictest one wins:
+
+1. **The agent's tool list.** An agent with a fixed list (the Research and Plan built-ins, or a custom agent with `allowedTools`) can only call what is on it. Tools that are not listed are not offered to the model at all, and a call to one is refused.
+2. **Workspace containment.** File tools must stay inside the run's workspace. Shell commands run inside the operating-system sandbox where the host has one, and need approval where it does not. A request to run a command outside the sandbox is always refused.
+3. **The permission mode and per-tool settings**, as described above. The mandatory-approval tools always ask.
+
+Being on an agent's list approves nothing — a listed tool still goes through containment and approval. The check runs *before* the SDK's own shortcuts (its allow rules, a trusted project's `permissions.allow`, its auto-accept for edits), so none of them can skip it.
+
+When the answer is "ask", the chat shows an **Allow / Deny card** for the call. The card carries the token the operator's answer is matched against. This works for a delegated subagent's calls too: the card appears in the conversation, marked as belonging to that subagent, and closes when the subagent's call finishes. A run with nobody to answer (an automation) refuses the call instead of waiting.
+
+**The agent's own configuration needs approval to change.** Writing, moving or deleting these files always asks, in every mode:
+
+| File | Why |
+| --- | --- |
+| `.claude/settings.json`, `.claude/settings.local.json` | permissions, environment and hooks — hooks run outside the sandbox |
+| `.claude/hooks/`, `.claude/commands/`, `.claude/agents/`, `.claude/skills/` | what the agent can be told to do |
+| `.mcp.json` | which tool servers connect |
+| `CLAUDE.md`, `CLAUDE.local.md` | only for a trusted project, where they are part of every prompt |
+
+**The agent process gets a minimal environment.** The Claude Code process that runs a chat turn does not inherit the server's environment, so a shell command cannot print the database URL or any other server secret. It receives only:
+
+| Passed | Examples |
+| --- | --- |
+| What a process needs to run | `PATH`, `HOME`, `TMPDIR`, locale (`LANG`, `LC_*`), and on Windows `USERPROFILE`, `SystemRoot`, `APPDATA` and similar |
+| How to reach the network | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` |
+| Its own login | `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN` |
+| For gateway models only | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, set from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN` |
+
+Inside the sandbox, the login variables are hidden from shell commands as well.
 
 ### Sub-agent spawning
 

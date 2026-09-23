@@ -78,6 +78,9 @@ cp .env.example .env
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
+- `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` (only needed for non-Claude models, which run through an Anthropic-compatible gateway)
+
+The Claude Code process that runs each chat turn does **not** inherit these. It gets a short allow-list — `PATH`, `HOME` / `USERPROFILE`, temp and locale variables, proxy and CA settings, `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN` for its own login, and the gateway's `ANTHROPIC_*` for gateway models — so an agent's shell command cannot read the server's secrets. A proxy or certificate setting the agent needs must use one of those names. See [`docs/runtime/spec.md`](docs/runtime/spec.md).
 
 Database note:
 

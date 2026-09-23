@@ -59,6 +59,18 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 2. In chat, bind the conversation to the project (or let the agent call `set_project_context`). From then on the agent's system prompt names the project, and it writes files into that working directory rather than anywhere else.
 3. History and diffs come from git — `git_status`, `git_log`, `git_diff`, `prepare_commit`, and, with explicit operator approval, `push_branch` and `create_pull_request`.
 
+### Trust a project's own configuration
+
+A repository can carry configuration for the agent: `CLAUDE.md` instructions, `.claude/` commands and skills, and a `.claude/settings.json` that can grant permissions and run hooks. None of it is loaded until the operator marks the project **trusted** on its detail page.
+
+1. Review the repository's `.claude/` folder and `CLAUDE.md`.
+2. Turn trust on. From the next turn, chats bound to the project load that configuration.
+3. Turn it off at any time; the next turn runs isolated again.
+
+Trust only applies when the chat is actually working in the project's own folder. An agent configured with its own persistent or worktree folder does not pick up the project's configuration.
+
+Once trusted, the agent cannot quietly rewrite what was reviewed: changing `.claude/settings.json`, the `.claude/` hooks, commands, agents or skills, `.mcp.json`, or `CLAUDE.md` always shows an approval card first.
+
 ### Delete a project
 
 Delete from the `/projects` list. Deleting removes the database row, and for `local` / `imported` projects the sandbox directory with it. There is no soft delete for projects.
@@ -90,6 +102,7 @@ Everything else the agent does inside a project goes through the ordinary filesy
 - **Filesystem after commit** — repo creation never happens inside the database transaction. A failure compensates by deleting the row and the directory.
 - **Imports need a source** — `repoMode: 'imported'` without a `source` is rejected outright rather than leaving a half-made project.
 - **Slug stability** — a project's slug is fixed at creation.
+- **Trust is opt-in** — a cloned repository's own agent configuration never loads until the operator trusts the project, and changes the agent makes to that configuration always need approval.
 
 ## Edge cases
 

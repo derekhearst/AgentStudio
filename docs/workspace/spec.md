@@ -43,9 +43,12 @@ Path layout:
 ${SANDBOX_WORKSPACE}/<userId>/runs/<runId>/          # ephemeral
 ${SANDBOX_WORKSPACE}/<userId>/persistent/<key>/      # persistent
 ${SANDBOX_WORKSPACE}/<userId>/worktrees/<runId>/     # worktree
+${SANDBOX_WORKSPACE}/<userId>/projects/<projectId>/  # conversation bound to a project
 ```
 
 Tools cannot traverse above the workspace root. Any path that resolves outside the root returns a `WORKSPACE_ESCAPE` error.
+
+For a chat run the root is worked out **once**, at the start of the turn, and the same value is used for three things: the agent process's working directory, the boundary its file tools are confined to, and the folder attachments are copied into. Because it is one value, a relative path like `notes.md` means the same file to the check and to the tool, and a file the agent is told to read is one it is allowed to read. The directory is created before the agent starts. A chat without a project gets a fresh `runs/<runId>` directory each turn; the conversation itself still continues, because the agent's session history is kept separately from the workspace.
 
 ### Workspace creation
 
@@ -76,6 +79,8 @@ Admins and run owners can browse a workspace's contents from `/runs/[id]/workspa
 ### Environment variables
 
 The `Environment` descriptor can include `envVars` that are injected into the shell subprocess when the `shell` tool runs. These are scoped to the run and not inherited from the app process.
+
+The same rule holds for chat runs on the Agent SDK: the agent process receives a short allow-list of variables (path, home and temp directories, locale, proxy settings, and its own login), never the server's environment. See the runtime spec's "How every tool call is checked" for the full list.
 
 Sensitive values (API keys, secrets) should come from the policies domain's secret management, not from plaintext `envVars`. The runtime redacts known secret patterns from tool output before it enters the context window.
 
