@@ -115,6 +115,10 @@ function toChatMessages(messages: LlmMessage[]) {
 	})) as Array<{ role: ChatRole; content: MessageContent }>
 }
 
+/**
+ * Stored the way the Agent SDK spells it, like every other default in the app. Both calls
+ * below send it through `toOpenRouterModelId`, which is what OpenRouter actually accepts.
+ */
 export const DEFAULT_MODEL = 'claude-sonnet-5'
 
 let singleton: OpenRouter | null = null

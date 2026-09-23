@@ -16,7 +16,8 @@
  * would lose its ledger row. A listener who stops before the call is made costs nothing.
  */
 
-import { checkBudgetLimits } from '$lib/costs/budget.server'
+import { checkBudgetLimits, recordBudgetAlert, recordBudgetWarnings } from '$lib/costs/budget.server'
+import type { UnpricedReason } from '$lib/costs/model-pricing'
 import { logLlmUsage } from '$lib/costs/usage'
 import { logger } from '$lib/observability/logger'
 import { getOpenRouterApiKey } from '$lib/server/config'
@@ -119,13 +120,23 @@ export function _resetSpeechCatalog(): void {
  * catalogue cannot be read or does not list the model — pricing must never be the reason
  * speech fails, so an unknown price is recorded as unknown rather than refused.
  */
-async function estimateSpeechCostUsd(model: string, characters: number): Promise<number | null> {
+/**
+ * The price of `characters` of speech, or why there is none. The reason goes on the ledger
+ * row as `metadata.unpriced`, the same marker every other unpriced call carries, so /review
+ * counts the chunk among the calls missing from its total instead of taking the zero as free.
+ */
+async function estimateSpeechCostUsd(
+	model: string,
+	characters: number,
+): Promise<{ costUsd: number; unpriced: null } | { costUsd: null; unpriced: UnpricedReason }> {
 	try {
 		const entry = (await listSpeechModels()).find((m) => m.id === model)
-		return entry?.pricePerCharacter == null ? null : entry.pricePerCharacter * characters
+		return entry?.pricePerCharacter == null
+			? { costUsd: null, unpriced: 'model_not_in_catalogue' }
+			: { costUsd: entry.pricePerCharacter * characters, unpriced: null }
 	} catch (err) {
 		logger.warn('[tts] could not price speech; recording it without a cost', { err, model })
-		return null
+		return { costUsd: null, unpriced: 'catalogue_unavailable' }
 	}
 }
 
@@ -177,13 +188,26 @@ export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<Sy
 	const model = input.model
 	const voice = input.voice?.trim() || null
 	const characters = text.length
-	const costUsd = await estimateSpeechCostUsd(model, characters)
+	const { costUsd, unpriced } = await estimateSpeechCostUsd(model, characters)
 
-	// Speech is paid, so it answers to the same budget limits a chat turn does.
+	// Speech is paid, so it answers to the same budget limits a chat turn does, and leaves the
+	// same record: a warning alert at a limit's warning line, a block alert when it refuses.
+	// Both are written once per limit and period, so a long reply's chunks add nothing more.
 	if (input.userId) {
 		const budget = await checkBudgetLimits({ userId: input.userId, projectedCostUsd: costUsd ?? 0 })
+		await recordBudgetWarnings(budget, input.runId ?? null)
 		if (!budget.allowed && budget.blockedBy) {
 			const limit = budget.blockedBy
+			try {
+				await recordBudgetAlert({
+					limit,
+					triggerType: 'block',
+					spendUsd: budget.blockedSpendUsd ?? parseFloat(limit.limitUsd),
+					runId: input.runId ?? null,
+				})
+			} catch (err) {
+				logger.warn('[tts] budget block alert insert failed', { err })
+			}
 			throw new TtsError(402, `Budget limit reached (${limit.scope} ${limit.period} limit of $${limit.limitUsd}).`)
 		}
 	}
@@ -233,6 +257,7 @@ export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<Sy
 			purpose: input.purpose ?? null,
 			// False when the catalogue had no price for the model and the cost is recorded as 0.
 			priced: costUsd !== null,
+			...(unpriced ? { unpriced } : {}),
 			generationId: response.headers.get('x-generation-id'),
 		},
 	}).catch((err) => {

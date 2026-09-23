@@ -153,3 +153,48 @@ test.describe('jobs/cancel — pure helper imports (best-effort)', () => {
 		}
 	})
 })
+
+test.describe('jobs/cancel — the cancel signal', () => {
+	/*
+	 * That completeJob and failJob leave a canceled job canceled — the handler of a job
+	 * canceled mid-run still returns or throws — is covered with the other late reports in
+	 * jobs.reclaim.spec.ts. What stays here is how a handler recognises the cancel.
+	 */
+	test('the worker cancel check throws a JobCanceledError, not a plain Error', async () => {
+		const { JobCanceledError, isJobCanceledError } = await import('../src/lib/jobs/worker.server')
+		const err = new JobCanceledError('abc')
+		expect(isJobCanceledError(err)).toBe(true)
+		expect(isJobCanceledError(new Error('Job abc canceled or removed'))).toBe(false)
+	})
+
+	test('a job the queue took back is not reported as canceled', async () => {
+		/*
+		 * The heartbeat returns null for a canceled job and for one the claim path retired
+		 * after this worker's lease lapsed. Only the first may reach a handler as a cancel: the
+		 * research runner records a JobCanceledError as the user's Cancel.
+		 */
+		const prefix = uniquePrefix('cancel-lost-job')
+		const type = `${prefix}-t`
+		const sql = getSql()
+		try {
+			const insert = async (status: 'canceled' | 'failed') => {
+				const [row] = await sql<{ id: string }[]>`
+					insert into jobs (type, status, attempt_count, max_attempts, finished_at)
+					values (${type}, ${status}::job_status, 1, 2, now())
+					returning id
+				`
+				return row.id
+			}
+			const { errorForLostJob, isJobCanceledError } = await import('../src/lib/jobs/worker.server')
+
+			expect(isJobCanceledError(await errorForLostJob(await insert('canceled')))).toBe(true)
+			expect(isJobCanceledError(await errorForLostJob(randomUUID())), 'a job that is gone counts as canceled').toBe(true)
+
+			const retired = await errorForLostJob(await insert('failed'))
+			expect(isJobCanceledError(retired)).toBe(false)
+			expect(retired.message).toContain('failed')
+		} finally {
+			await sql`delete from jobs where type = ${type}`
+		}
+	})
+})

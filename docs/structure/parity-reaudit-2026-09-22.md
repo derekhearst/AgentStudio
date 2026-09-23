@@ -500,8 +500,9 @@ and anomaly flags with fixed floors. The digest was built as the cheap version r
 the agent run: the same numbers rendered to markdown by code, delivered through the existing
 maintenance output routing, costing nothing, and opt-in from the strip — nothing posts on
 deploy. A written narrative was not built. Still open: tool calls from the older runtime
-loop (automations, monitors, PR fix) write no ledger rows, and the Settings daily/monthly
-budget figures are display-only, so headroom usually reads "No limits set".
+loop (automations, monitors, PR fix) write no ledger rows. The Settings daily/monthly
+budget figures, display-only when the strip shipped, became enforced budget limits the same
+day, so once set they show as headroom instead of "No limits set".
 
 ### #14 — the right sidebar
 

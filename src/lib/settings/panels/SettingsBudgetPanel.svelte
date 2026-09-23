@@ -23,7 +23,8 @@
 				<span class="h-1.5 w-1.5 rounded-full bg-warning"></span>
 				Budget
 			</h2>
-			<p class="mt-0.5 text-xs text-base-content/55">Alerts trigger at 80% and 100%</p>
+			<!-- Enforced by the budget gate through budget_limits rows (syncSettingsBudgetLimits). -->
+			<p class="mt-0.5 text-xs text-base-content/55">Alerts at 80%, new runs blocked at 100%</p>
 		</div>
 	{/snippet}
 	<div class="grid gap-x-6 gap-y-0 divide-y divide-base-300/50 sm:grid-cols-2 sm:divide-y-0">

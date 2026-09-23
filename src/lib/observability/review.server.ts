@@ -111,17 +111,28 @@ export async function listReviewItems(filters: ListReviewItemsFilters = {}): Pro
 		.limit(filters.limit ?? 200)
 }
 
-/** Default open-queue view: open + in_progress items ordered by severity desc + age. */
-export async function listOpenReviewItems(limit = 200): Promise<ReviewItemRow[]> {
+/**
+ * Default open-queue view: open + in_progress items ordered by severity desc + age.
+ *
+ * Takes the inbox's type and severity filters too. It used to take only a limit, so under
+ * "Open queue" every type and severity filter listed the whole queue under its own label.
+ */
+export async function listOpenReviewItems(
+	filters: Pick<ListReviewItemsFilters, 'type' | 'severity' | 'limit'> = {},
+): Promise<ReviewItemRow[]> {
+	const where = [drizzleSql`${reviewItems.status} in ('open', 'in_progress')`]
+	if (filters.type) where.push(eq(reviewItems.type, filters.type))
+	if (filters.severity) where.push(eq(reviewItems.severity, filters.severity))
+
 	return db
 		.select()
 		.from(reviewItems)
-		.where(drizzleSql`${reviewItems.status} in ('open', 'in_progress')`)
+		.where(and(...where))
 		.orderBy(
 			drizzleSql`case ${reviewItems.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`,
 			desc(reviewItems.createdAt),
 		)
-		.limit(limit)
+		.limit(filters.limit ?? 200)
 }
 
 export async function getReviewItemById(itemId: string): Promise<ReviewItemRow | null> {
@@ -150,6 +161,46 @@ export async function resolveReviewItem(input: ResolveReviewItemInput): Promise<
 		.where(eq(reviewItems.id, input.itemId))
 		.returning()
 	return row ?? null
+}
+
+export type ResolveByDedupeKeyInput = {
+	type: ReviewItemType
+	dedupeKey: string
+	action: string
+	note?: string
+	/** Null when nobody acted — the system closed it (a timeout, a run that ended). */
+	resolvedBy?: string | null
+	finalStatus?: Extract<ReviewItemStatus, 'resolved' | 'dismissed'>
+}
+
+/**
+ * Close the open item a source opened under `dedupeKey`, if there still is one. For sources
+ * whose item stops meaning anything once something else settles it — an approval answered
+ * in the chat, a question that timed out. Best-effort, like opening: returns null on error.
+ */
+export async function resolveReviewItemsByDedupeKey(input: ResolveByDedupeKeyInput): Promise<ReviewItemRow[] | null> {
+	try {
+		return await db
+			.update(reviewItems)
+			.set({
+				status: input.finalStatus ?? 'resolved',
+				resolvedBy: input.resolvedBy ?? null,
+				resolution: { action: input.action, note: input.note },
+				resolvedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(reviewItems.type, input.type),
+					drizzleSql`${reviewItems.payload}->>'dedupeKey' = ${input.dedupeKey}`,
+					drizzleSql`${reviewItems.status} in ('open', 'in_progress')`,
+				),
+			)
+			.returning()
+	} catch (err) {
+		logger.warn('[review] resolveReviewItemsByDedupeKey failed (non-fatal)', { err })
+		return null
+	}
 }
 
 export async function assignReviewItem(itemId: string, userId: string | null): Promise<ReviewItemRow | null> {

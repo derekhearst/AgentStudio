@@ -1,7 +1,11 @@
 import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
+import { syncSettingsBudgetLimits } from '$lib/costs/budget.server'
+import { logger } from '$lib/observability/logger'
 import { DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE } from '$lib/speech/speech'
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 /**
  * Note on `dreamConfig` + `notificationPrefs.dreamSummary`:
@@ -109,65 +113,108 @@ export async function updateSettings(input: {
 		autoMine?: boolean
 	}
 }) {
-	const current = await getOrCreateSettings(input.userId)
-	const currentToolConfig =
-		(current.toolConfig as
-			| {
-					approvalRequiredTools?: string[]
-					approvalMode?: 'auto' | 'confirm' | 'plan'
-					disabledTools?: string[]
-					programmaticToolCallingEnabled?: boolean
-			  }
-			| undefined) ?? {}
+	const { id } = await getOrCreateSettings(input.userId)
+	const updated = await withSettingsRowLocked(id, async (tx, current) => {
+		const currentToolConfig =
+			(current.toolConfig as
+				| {
+						approvalRequiredTools?: string[]
+						approvalMode?: 'auto' | 'confirm' | 'plan'
+						disabledTools?: string[]
+						programmaticToolCallingEnabled?: boolean
+				  }
+				| undefined) ?? {}
 
-	const migratedApprovalRequiredTools = Array.isArray(currentToolConfig.approvalRequiredTools)
-		? currentToolConfig.approvalRequiredTools
-		: currentToolConfig.approvalMode === 'confirm'
-			? ['*']
-			: []
-	const migratedProgrammaticToolCalling = currentToolConfig.programmaticToolCallingEnabled ?? false
-	const [updated] = await db
-		.update(appSettings)
-		.set({
-			defaultModel: input.defaultModel ?? current.defaultModel,
-			transcriptionModel: input.transcriptionModel ?? current.transcriptionModel,
-			ttsModel: input.ttsModel ?? current.ttsModel,
-			ttsVoice: input.ttsVoice ?? current.ttsVoice,
-			theme: 'AgentStudio-night',
-			notificationPrefs: {
-				...current.notificationPrefs,
-				...(input.notificationPrefs ?? {}),
-			},
-			budgetConfig: {
-				...(current.budgetConfig ?? DEFAULT_SETTINGS.budgetConfig),
-				...(input.budgetConfig ?? {}),
-			},
-			contextConfig: {
-				...((current.contextConfig as typeof DEFAULT_SETTINGS.contextConfig | undefined) ??
-					DEFAULT_SETTINGS.contextConfig),
-				...(input.contextConfig ?? {}),
-			},
-			toolConfig: {
-				approvalRequiredTools: migratedApprovalRequiredTools,
-				programmaticToolCallingEnabled: migratedProgrammaticToolCalling,
-				...(input.toolConfig ?? {}),
-			},
-			memoryConfig: {
-				...((current.memoryConfig as typeof DEFAULT_SETTINGS.memoryConfig | undefined) ??
-					DEFAULT_SETTINGS.memoryConfig),
-				...(input.memoryConfig ?? {}),
-			},
-			updatedAt: new Date(),
-		})
-		.where(eq(appSettings.id, current.id))
-		.returning()
+		const migratedApprovalRequiredTools = Array.isArray(currentToolConfig.approvalRequiredTools)
+			? currentToolConfig.approvalRequiredTools
+			: currentToolConfig.approvalMode === 'confirm'
+				? ['*']
+				: []
+		const migratedProgrammaticToolCalling = currentToolConfig.programmaticToolCallingEnabled ?? false
+		const currentBudgetConfig = current.budgetConfig ?? DEFAULT_SETTINGS.budgetConfig
+		const [row] = await tx
+			.update(appSettings)
+			.set({
+				defaultModel: input.defaultModel ?? current.defaultModel,
+				transcriptionModel: input.transcriptionModel ?? current.transcriptionModel,
+				ttsModel: input.ttsModel ?? current.ttsModel,
+				ttsVoice: input.ttsVoice ?? current.ttsVoice,
+				theme: 'AgentStudio-night',
+				notificationPrefs: {
+					...current.notificationPrefs,
+					...(input.notificationPrefs ?? {}),
+				},
+				budgetConfig: {
+					...currentBudgetConfig,
+					...(input.budgetConfig ?? {}),
+					// The budget sync's to write, never a caller's.
+					limitIds: currentBudgetConfig.limitIds,
+				},
+				contextConfig: {
+					...((current.contextConfig as typeof DEFAULT_SETTINGS.contextConfig | undefined) ??
+						DEFAULT_SETTINGS.contextConfig),
+					...(input.contextConfig ?? {}),
+				},
+				toolConfig: {
+					approvalRequiredTools: migratedApprovalRequiredTools,
+					programmaticToolCallingEnabled: migratedProgrammaticToolCalling,
+					...(input.toolConfig ?? {}),
+				},
+				memoryConfig: {
+					...((current.memoryConfig as typeof DEFAULT_SETTINGS.memoryConfig | undefined) ??
+						DEFAULT_SETTINGS.memoryConfig),
+					...(input.memoryConfig ?? {}),
+				},
+				updatedAt: new Date(),
+			})
+			.where(eq(appSettings.id, current.id))
+			.returning()
+		return row
+	})
 
-	return updated
+	return withBudgetLimitsSynced(input.userId, updated)
+}
+
+/**
+ * Read, merge and write the settings row under its lock.
+ *
+ * `syncSettingsBudgetLimits` records the ids of the budget rows it creates in
+ * `budget_config.limitIds`, under this same lock. A save that merged from an unlocked read
+ * could write back a copy taken before that and drop the new id. The row it named would go
+ * on blocking at its old amount with nothing left pointing at it, and the next sync would
+ * create a second one.
+ */
+async function withSettingsRowLocked<T>(
+	id: string,
+	write: (tx: Tx, current: typeof appSettings.$inferSelect) => Promise<T>,
+): Promise<T> {
+	return db.transaction(async (tx) => {
+		const [current] = await tx.select().from(appSettings).where(eq(appSettings.id, id)).for('update')
+		if (!current) throw new Error(`Settings row ${id} no longer exists`)
+		return write(tx, current)
+	})
+}
+
+/**
+ * The daily and monthly limits are enforced through `budget_limits` rows, which follow the
+ * settings here and again at every budget check. Returns the settings as they stand after
+ * the sync, which records the ids of any rows it created.
+ */
+async function withBudgetLimitsSynced<T extends { id: string }>(userId: string, settings: T): Promise<T> {
+	try {
+		await syncSettingsBudgetLimits(userId)
+		const [fresh] = await db.select().from(appSettings).where(eq(appSettings.id, settings.id)).limit(1)
+		return (fresh as T | undefined) ?? settings
+	} catch (err) {
+		// The next budget check retries; the settings themselves are saved either way.
+		logger.warn('[settings] syncing the budget limits failed', { err })
+		return settings
+	}
 }
 
 export async function resetSettings(userId: string) {
 	const [existing] = await db
-		.select()
+		.select({ id: appSettings.id })
 		.from(appSettings)
 		.where(eq(appSettings.userId, userId))
 		.orderBy(asc(appSettings.createdAt))
@@ -176,17 +223,22 @@ export async function resetSettings(userId: string) {
 		return getOrCreateSettings(userId)
 	}
 
-	const [updated] = await db
-		.update(appSettings)
-		.set({
-			// Every default, by spreading the one list of them. This used to name the fields
-			// one by one and missed `transcriptionModel`, so Reset said "Settings reset to
-			// defaults." and left the transcription model as it was. The read-aloud model and
-			// voice (#27) are in the list, so they come back too.
-			...DEFAULT_SETTINGS,
-			updatedAt: new Date(),
-		})
-		.where(eq(appSettings.id, existing.id))
-		.returning()
-	return updated
+	const updated = await withSettingsRowLocked(existing.id, async (tx, current) => {
+		const [row] = await tx
+			.update(appSettings)
+			.set({
+				// Every default, by spreading the one list of them. This used to name the fields
+				// one by one and missed `transcriptionModel`, so Reset said "Settings reset to
+				// defaults." and left the transcription model as it was. The read-aloud model and
+				// voice (#27) are in the list, so they come back too.
+				...DEFAULT_SETTINGS,
+				// The budget row ids stay: the sync below needs them to switch the old limits off.
+				budgetConfig: { ...DEFAULT_SETTINGS.budgetConfig, limitIds: current.budgetConfig?.limitIds },
+				updatedAt: new Date(),
+			})
+			.where(eq(appSettings.id, current.id))
+			.returning()
+		return row
+	})
+	return withBudgetLimitsSynced(userId, updated)
 }

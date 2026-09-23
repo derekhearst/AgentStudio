@@ -87,8 +87,8 @@ export function registerLogsJobHandlers(): void {
 
 	// Now that the table exists and the retention job is registered, enable the DB sink so
 	// subsequent log lines persist. (The sink starts on by default for cold starts where this
-	// handler is the first thing to run; calling here is a safety net for the case where the
-	// sink was disabled earlier by a flush failure during pre-migration writes.)
+	// handler is the first thing to run; calling here also ends any pause left by a flush
+	// that failed during pre-migration writes, so the first flush after bootstrap is not held.)
 	logger.setDbSinkEnabled(true)
 
 	registered = true

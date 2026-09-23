@@ -1,5 +1,7 @@
-import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, notInArray, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
+import { enqueueJob } from '$lib/jobs/jobs.server'
+import type { JobRow } from '$lib/jobs/jobs.schema'
 import {
 	research,
 	researchSources,
@@ -56,10 +58,7 @@ export type UpdateResearchInput = {
 	jobId?: string | null
 }
 
-export async function updateResearch(
-	researchId: string,
-	patch: UpdateResearchInput,
-): Promise<ResearchRow | null> {
+function toResearchUpdate(patch: UpdateResearchInput): Partial<typeof research.$inferInsert> {
 	const updates: Partial<typeof research.$inferInsert> = { updatedAt: new Date() }
 	if (patch.status !== undefined) updates.status = patch.status
 	if (patch.plan !== undefined) updates.plan = patch.plan
@@ -69,9 +68,83 @@ export async function updateResearch(
 	if (patch.finishedAt !== undefined) updates.finishedAt = patch.finishedAt
 	if (patch.error !== undefined) updates.error = patch.error
 	if (patch.jobId !== undefined) updates.jobId = patch.jobId
-	const [row] = await db.update(research).set(updates).where(eq(research.id, researchId)).returning()
+	return updates
+}
+
+export async function updateResearch(
+	researchId: string,
+	patch: UpdateResearchInput,
+): Promise<ResearchRow | null> {
+	const [row] = await db.update(research).set(toResearchUpdate(patch)).where(eq(research.id, researchId)).returning()
 	return row ?? null
 }
+
+/**
+ * Update a research row unless it has already ended. Returns null, having written nothing,
+ * when the row is in one of `ended` (by default every final status) or is gone.
+ *
+ * The runner writes the row at every phase, and the user's Cancel can land between its last
+ * look at the row and its next write. Written unconditionally, that next write turned the
+ * user's "canceled" back into "searching", or into "complete" with a report and a "Research
+ * complete" notification.
+ */
+export async function updateResearchUnlessEnded(
+	researchId: string,
+	patch: UpdateResearchInput,
+	ended: Iterable<ResearchStatus> = TERMINAL_RESEARCH_STATUSES,
+): Promise<ResearchRow | null> {
+	const [row] = await db
+		.update(research)
+		.set(toResearchUpdate(patch))
+		.where(and(eq(research.id, researchId), notInArray(research.status, [...ended])))
+		.returning()
+	return row ?? null
+}
+
+/** See `enqueueResearchRun`: the first attempt, and one more if its worker dies. */
+export const RESEARCH_RUN_MAX_ATTEMPTS = 2
+
+export type EnqueueResearchRunInput = {
+	researchId: string
+	userId: string | null
+	runId?: string | null
+	priority: number
+	dedupeKey?: string
+}
+
+/**
+ * Queue the background run for a research row and link the job back to the row.
+ *
+ * Two attempts, and the second is only for a run whose worker died. The queue's default was
+ * three, and a research run is ten minutes of paid model calls and a few dozen page fetches:
+ * a retry after a failure re-ran all of it on a row that still carried the first attempt's
+ * error, plan and sources, while the open page had already stopped polling at "failed". The
+ * runner now returns an ended row as it stands, so a failed run stays failed — its second
+ * attempt ends at once with the same error — and the job lands in the review inbox as a job
+ * failure.
+ *
+ * Not one attempt: the claim path fails a job whose worker died mid-run once it has no
+ * attempts left (jobs.server `staleRunningJobVerdict`), so a single attempt would turn every
+ * deploy or crash during a run into a "Job stuck" item and a run left at "searching" for
+ * good. With a second one, another worker picks the run up from its saved plan and sources.
+ */
+export async function enqueueResearchRun(input: EnqueueResearchRunInput): Promise<JobRow> {
+	const job = await enqueueJob({
+		type: 'research_run',
+		queue: 'default',
+		priority: input.priority,
+		payload: { researchId: input.researchId },
+		userId: input.userId,
+		runId: input.runId ?? null,
+		dedupeKey: input.dedupeKey,
+		maxAttempts: RESEARCH_RUN_MAX_ATTEMPTS,
+	})
+	await updateResearch(input.researchId, { jobId: job.id })
+	return job
+}
+
+/** Research statuses a run ends in. A row in one of these is never run again. */
+export const TERMINAL_RESEARCH_STATUSES: ReadonlySet<ResearchStatus> = new Set(['complete', 'failed', 'canceled'])
 
 export async function getResearchById(researchId: string): Promise<ResearchRow | null> {
 	const [row] = await db.select().from(research).where(eq(research.id, researchId)).limit(1)
@@ -149,6 +222,31 @@ export async function listSourcesForResearch(
 		.orderBy(asc(researchSources.fetchedAt))
 }
 
+/** The URLs already fetched for a run, so a later pass does not fetch and store them again. */
+export async function listSourceUrlsForResearch(researchId: string): Promise<string[]> {
+	const rows = await db
+		.select({ url: researchSources.url })
+		.from(researchSources)
+		.where(eq(researchSources.researchId, researchId))
+	return rows.map((row) => row.url)
+}
+
+export async function countSourcesForResearch(researchId: string): Promise<{ total: number; cited: number }> {
+	const [row] = await db
+		.select({
+			total: drizzleSql<number>`count(*)::int`,
+			cited: drizzleSql<number>`count(*) filter (where ${researchSources.citedInReport})::int`,
+		})
+		.from(researchSources)
+		.where(eq(researchSources.researchId, researchId))
+	return { total: Number(row?.total ?? 0), cited: Number(row?.cited ?? 0) }
+}
+
+/**
+ * Flag the sources the report cites. `inArray`, not a hand-written `= ANY(${ids})`: Drizzle
+ * spreads an interpolated array into a parenthesised list, so that read `= ANY(($1))` and
+ * Postgres refused it. Every run whose report cited a source failed at its last step.
+ */
 export async function markSourcesCited(
 	researchId: string,
 	sourceIds: string[],
@@ -157,7 +255,7 @@ export async function markSourcesCited(
 	const result = await db
 		.update(researchSources)
 		.set({ citedInReport: true })
-		.where(and(eq(researchSources.researchId, researchId), drizzleSql`${researchSources.id} = ANY(${sourceIds})`))
+		.where(and(eq(researchSources.researchId, researchId), inArray(researchSources.id, sourceIds)))
 		.returning({ id: researchSources.id })
 	return { updated: result.length }
 }

@@ -126,11 +126,17 @@ export type RecentFailure = {
 
 /**
  * Pull recent run/tool failures for the consolidated /review dashboard. Returns one row per
- * failed tool span plus one row per run-level failure (status='failed'). Ordered by
- * occurredAt desc, capped to `limit`.
+ * run that ended `failed` plus one row per failed tool span. Ordered by occurredAt desc,
+ * capped to `limit`.
  *
- * Run-level failures use `finishedAt` (or `updatedAt` fallback) as the occurredAt; tool-call
- * failures use the span's `startedAt`.
+ * Run-level failures come from `chat_runs`, the record every run path writes its terminal
+ * state to (and what the KPI strip's `runs.failed_24h` counts). They used to come from
+ * `run_traces`, which only the legacy runtime loop writes and which never recorded
+ * `failed`, so the panel said "No failures" beside a KPI showing them. The label is the
+ * run's error, and the cost is what the ledger holds for the run.
+ *
+ * Tool-call failures still come from trace spans (the only place a per-call `success` is
+ * kept) and use the span's `startedAt`.
  */
 export async function listRecentFailures(hours = 24, limit = 20): Promise<RecentFailure[]> {
 	const rows = await db.execute<{
@@ -140,34 +146,39 @@ export async function listRecentFailures(hours = 24, limit = 20): Promise<Recent
 		occurred_at: string
 		cost_usd: string | null
 	}>(drizzleSql`
-		with run_window as (
-			select run_id, status, finished_at, updated_at, cost_usd, trace
+		with run_level as (
+			select
+				cr.id as run_id,
+				'run_failed'::text as kind,
+				coalesce(nullif(btrim(left(split_part(cr.error, chr(10), 1), 200)), ''), 'Run failed')::text as label,
+				coalesce(cr.finished_at, cr.updated_at) as occurred_at,
+				round(
+					coalesce((select sum(lu.cost) from llm_usage lu where lu.run_id = cr.id), 0)
+					+ coalesce((select sum(tu.cost) from tool_usage tu where tu.run_id = cr.id), 0),
+					6
+				)::text as cost_usd
+			from chat_runs cr
+			where cr.state = 'failed'
+				and coalesce(cr.finished_at, cr.updated_at) >= now() - (${hours}::int * interval '1 hour')
+		),
+		trace_window as (
+			select run_id, finished_at, updated_at, cost_usd, trace
 			from run_traces
 			where coalesce(finished_at, updated_at) >= now() - (${hours}::int * interval '1 hour')
 		),
-		run_level as (
-			select
-				run_id,
-				'run_failed'::text as kind,
-				'Run failed'::text as label,
-				coalesce(finished_at, updated_at) as occurred_at,
-				cost_usd::text as cost_usd
-			from run_window
-			where status = 'failed'
-		),
 		tool_level as (
 			select
-				rw.run_id,
+				tw.run_id,
 				'tool_failed'::text as kind,
 				coalesce(span->>'toolName', span->>'kind', 'tool')::text as label,
 				coalesce(
 					(span->>'startedAt')::timestamptz,
-					rw.finished_at,
-					rw.updated_at
+					tw.finished_at,
+					tw.updated_at
 				) as occurred_at,
-				rw.cost_usd::text as cost_usd
-			from run_window rw,
-				lateral jsonb_array_elements(rw.trace) as span
+				tw.cost_usd::text as cost_usd
+			from trace_window tw,
+				lateral jsonb_array_elements(tw.trace) as span
 			where span->>'kind' = 'tool_call' and (span->>'success')::boolean is false
 		)
 		select * from run_level
