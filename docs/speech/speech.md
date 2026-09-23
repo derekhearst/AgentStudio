@@ -27,17 +27,19 @@ Dictation (speaking to AgentStudio) is the reverse direction and is not covered 
 2. The reply is rewritten as speakable text and split into chunks. The first chunk is short (up to 400 characters) so the audio starts quickly. Later chunks are up to 2,000 characters.
 3. The first chunk is sent to the server. A spinner shows on the button while it is prepared.
 4. The server checks the user's budget limits, asks OpenRouter to synthesise the chunk as MP3 with the user's model and voice, and records the cost in the usage ledger.
-5. The chunk plays. While it plays, the next chunk is already being requested, so there is usually no gap between chunks.
+5. The chunk plays. As soon as it has started playing, the next chunk is requested, so there is usually no gap between chunks.
 6. When the last chunk ends, the button returns to its normal state.
 
-Pressing the button again at any point stops playback straight away and cancels any request still in progress. Starting another reply stops the current one: only one reply plays at a time. Opening another conversation, or leaving the chat for another page, also stops it, because its button is no longer on screen to stop it with.
+While a reply is being read, a **Stop** button also shows next to the Auto-read switch above the message box. The speaker button only shows while the pointer is over its message, so this is the way to stop a long reply after moving the pointer away or scrolling past it.
+
+Pressing either button stops playback straight away and cancels any request still in progress. Starting another reply stops the current one: only one reply plays at a time. Opening another conversation, or leaving the chat for another page, also stops it, because its button is no longer on screen to stop it with.
 
 ### Auto-read (hands-free)
 
 1. The user turns on **Auto-read** above the message box. The switch shows "Auto-read on".
 2. The user sends a message (typed or dictated) as normal.
 3. When the turn finishes and the reply has been saved, the reply is read aloud automatically, using the same steps as above.
-4. While an auto-read reply is playing, a **Stop** button appears next to the switch.
+4. While the reply is playing, a **Stop** button appears next to the switch (it appears for a reply started from its speaker button too).
 5. Turning the switch off also stops a reply that auto-read started. It does not stop a reply the user started with its own speaker button.
 
 A reply is **not** read automatically when:
@@ -53,7 +55,7 @@ If the browser refuses to play audio, or the server refuses the request, the rea
 
 1. The user opens **Settings > Model & AI**.
 2. **Read-aloud Model** lists OpenRouter's speech models with their price per million characters (or "free").
-3. **Read-aloud Voice** lists the voices the chosen model offers. Changing to a model that does not offer the current voice switches to that model's first voice.
+3. **Read-aloud Voice** lists the voices the chosen model offers. Changing to a model that does not offer the current voice switches to that model's first voice. Some models do not publish a list of voices. For those the voice becomes a text box, and it starts empty, which means the model's own default voice. (A voice kept from the previous model would almost always be refused.)
 4. The play button next to the voice reads a short sample sentence with the model and voice currently on screen, so the user can hear a voice before saving it. The sample is charged like any other read-aloud request.
 5. **Save** stores the choice. **Reset** returns both settings to the defaults.
 
@@ -87,7 +89,13 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
   - Emphasis, table borders, HTML tags and similar formatting are removed.
   - Inline code such as a function name is read as written.
 - **Cost.** OpenRouter does not report the cost of a speech request, so the cost is worked out as characters × the model's catalogue price. A model with no price in the catalogue is recorded at $0 and marked as unpriced. For speech rows, the ledger's "tokens in" column holds the character count.
-- **Stopping part-way.** Stop cancels any request still in progress, and the server cancels its call to OpenRouter too. A chunk that was already prepared has been paid for, though. Besides the rest of the chunk that was playing, at most one more chunk (up to 2,000 characters) can have been paid for and not heard.
+- **Stopping part-way.** Stop cancels the browser's requests straight away. What that saves depends on how far the server had got:
+  - If the server had not yet sent the chunk to OpenRouter, it notices that the listener has gone and does not send it. Nothing is paid.
+  - If OpenRouter already had the chunk, the server lets it finish and records it in the ledger. OpenRouter charges in full for a request like this even when it is cancelled, so cancelling would not save anything and the charge would be missing from the ledger.
+  - The server can only tell that the listener has gone when AgentStudio runs as the built server (the Docker image, or `bun build/index.js`). Under the development server (`bun run dev`) every chunk that was asked for is synthesised and recorded.
+
+  So besides the rest of the chunk that was playing, at most one more chunk (up to 2,000 characters) can have been paid for and not heard.
+- **When playback fails.** The next chunk is requested only once the current one is actually playing. If the browser refuses to play a reply, or cannot play the audio, only its short first chunk (up to 400 characters) has been paid for. A failure part-way through a reply cancels the chunk requested for later, with the same savings as Stop.
 - **Errors the user sees.**
 
 | Situation | What the user is told |
@@ -100,7 +108,7 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
 | No API key on the server | That read-aloud needs `OPENROUTER_API_KEY` |
 | The browser blocks playback | To press play on the reply |
 
-- **Browser playback rules.** Browsers only let a page start sound after the user has interacted with it, and iPhones only on audio that was first started by a tap. Turning on Auto-read and pressing any speaker button both count, so auto-read works from then on. If a browser still blocks it, the reason is shown next to the switch.
+- **Browser playback rules.** Browsers only let a page start sound after the user has interacted with it, and iPhones only on audio that was first started by a tap. Turning on Auto-read and pressing any speaker button both count. This permission lasts only until the page is reloaded, but the Auto-read switch is remembered. So while Auto-read is on, the first tap or key press on the page after a reload (typically sending the next message) gives permission again, and the reply to that message can be read. If a browser still blocks it, the reason is shown next to the switch.
 
 ## Where it lives
 
@@ -111,4 +119,5 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
 | Playback, chunking and the auto-read preference | `src/lib/speech/speech-player.svelte.ts`, `src/lib/speech/speech.ts` |
 | Settings pickers | `src/lib/speech/SpeechVoicePicker.svelte`, inside the Model & AI panel |
 | Endpoint | `POST /api/tts` (`src/routes/api/tts/+server.ts`) |
+| Noticing that the listener has gone | `src/lib/server/client-disconnect.ts` |
 | OpenRouter client, pricing, budget check, ledger | `src/lib/llm/tts.server.ts` |
