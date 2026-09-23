@@ -211,6 +211,7 @@ test.describe('memory/mining — extractor model id', () => {
 			roomIds: ['r'],
 			closetIds: ['c'],
 			excludedTurns: 0,
+			timedOutTurns: 0,
 			excludedByRule: [],
 			extractorFallback: true,
 		}))

@@ -40,6 +40,13 @@ export type BuiltinExclusionRule = {
  * Credential-shaped content. Each rule is deliberately narrow: a false positive costs one
  * forgotten turn, a false negative costs a secret memorised forever and replayed into
  * every future prompt.
+ *
+ * Each is also linear in the length of the text, because the whole of every turn is checked
+ * and a check that runs out of time drops the turn. A rule that can start at many places in
+ * one run of characters, and scan to the end of the run from each, is quadratic: the
+ * connection-string scheme and the JWT's first segment both were, and 120,000 characters of
+ * `a.` or `eyJ-` took over a second. The scheme is now at most 32 characters, and a JWT must
+ * start its run.
  */
 export const BUILTIN_EXCLUSION_RULES: BuiltinExclusionRule[] = [
 	{
@@ -77,12 +84,28 @@ export const BUILTIN_EXCLUSION_RULES: BuiltinExclusionRule[] = [
 		name: 'JSON web token',
 		description: 'three base64url segments in JWT shape',
 		kind: 'regex',
-		pattern: '\\beyJ[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\b',
+		pattern: '(?<![A-Za-z0-9_\\-])eyJ[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\b',
 	},
 	{
 		name: 'Connection string credentials',
 		description: 'scheme://user:password@host URLs (Postgres, Redis, Mongo, …)',
 		kind: 'regex',
+		pattern: '\\b[a-z][a-z0-9+.\\-]{0,31}://[^\\s/:@]+:[^\\s/@]{3,}@',
+	},
+]
+
+/**
+ * Built-in patterns that have since been replaced, by rule name. Seeding never overwrites a
+ * user's row, so `ensureBuiltinExclusionRules` moves a built-in row still holding one of these
+ * exact texts to the current pattern — and leaves alone a row the user has reworded.
+ */
+export const SUPERSEDED_BUILTIN_PATTERNS: Array<{ name: string; pattern: string }> = [
+	{
+		name: 'JSON web token',
+		pattern: '\\beyJ[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\.[A-Za-z0-9_\\-]{8,}\\b',
+	},
+	{
+		name: 'Connection string credentials',
 		pattern: '\\b[a-z][a-z0-9+.\\-]*://[^\\s/:@]+:[^\\s/@]{3,}@',
 	},
 ]

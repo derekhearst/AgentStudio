@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test'
 import { acquireGlobalStateLock, getActiveUserId, getSql, uniquePrefix } from './helpers'
 import { stubOpenRouter, type OpenRouterStub } from './openrouter-stub'
 import {
+	BUILTIN_EXCLUSION_RULES,
+	SUPERSEDED_BUILTIN_PATTERNS,
 	compileBuiltinExclusionRules,
 	compileExclusionRules,
 	findExclusionMatch,
@@ -24,6 +26,13 @@ import { scanForExclusion, scanForExclusions } from '../src/lib/memory/exclusion
  */
 
 const builtins = compileBuiltinExclusionRules()
+
+/**
+ * Held by specs that change the active user's rules, or depend on them not changing: a change
+ * releases every turn set aside by a timed-out check (`exclusionRulesChanged`). The palace UI
+ * spec that saves a rule takes it too.
+ */
+const RULE_CHANGES_LOCK = 'memory-exclusion-rule-changes'
 
 test.describe('memory/exclusion-scan — same answers as the reference matcher', () => {
 	const samples = [
@@ -103,6 +112,61 @@ test.describe('memory/exclusion-scan — bounded', () => {
 			expect(ticks, 'the event loop kept turning while the regex was stuck').toBeGreaterThan(5)
 		} finally {
 			clearInterval(ticker)
+		}
+	})
+
+	test('long dotted and dashed runs get an answer, not a timeout, from the built-in rules', async () => {
+		// Two built-ins read to the end of a run from every place in it they could start, which
+		// is quadratic: 120,000 characters of `a.` took over a second, so the whole turn counted
+		// as a credential and was dropped for good.
+		for (const text of ['a.'.repeat(60_000), 'a-'.repeat(60_000), 'eyJ-'.repeat(30_000)]) {
+			const startedAt = Date.now()
+			expect(await scanForExclusion(text, builtins), text.slice(0, 8)).toBeNull()
+			expect(Date.now() - startedAt, text.slice(0, 8)).toBeLessThan(500)
+		}
+	})
+})
+
+test.describe('memory/exclusions — built-in patterns that were replaced', () => {
+	test('a seeded row still holding the old text is moved to the new one; a reworded row is left alone', async () => {
+		// Seeding never overwrites a row, so without this every palace seeded before the fix
+		// kept the quadratic pattern.
+		const release = await acquireGlobalStateLock(RULE_CHANGES_LOCK)
+		const userId = await getActiveUserId()
+		const { ensureBuiltinExclusionRules } = await import('../src/lib/memory/exclusions.server')
+		const sql = getSql()
+		const name = 'Connection string credentials'
+		const current = BUILTIN_EXCLUSION_RULES.find((rule) => rule.name === name)!.pattern
+		const old = SUPERSEDED_BUILTIN_PATTERNS.find((rule) => rule.name === name)!.pattern
+		const patternNow = async () => {
+			const [row] = await sql<{ pattern: string }[]>`
+				select pattern from memory_exclusion_rules where user_id = ${userId} and name = ${name}
+			`
+			return row.pattern
+		}
+		await ensureBuiltinExclusionRules(userId)
+		const [original] = await sql<{ pattern: string; builtin: boolean }[]>`
+			select pattern, builtin from memory_exclusion_rules where user_id = ${userId} and name = ${name}
+		`
+		try {
+			await sql`
+				update memory_exclusion_rules set pattern = ${old}, builtin = true
+				where user_id = ${userId} and name = ${name}
+			`
+			await ensureBuiltinExclusionRules(userId)
+			expect(await patternNow()).toBe(current)
+
+			// Still a working rule, so a spec mining in parallel loses nothing meanwhile.
+			const reworded = `${current}(?:)`
+			await sql`update memory_exclusion_rules set pattern = ${reworded} where user_id = ${userId} and name = ${name}`
+			await ensureBuiltinExclusionRules(userId)
+			expect(await patternNow()).toBe(reworded)
+		} finally {
+			await sql`
+				update memory_exclusion_rules set pattern = ${original.pattern}, builtin = ${original.builtin}
+				where user_id = ${userId} and name = ${name}
+			`
+			await release()
 		}
 	})
 })
@@ -195,9 +259,66 @@ test.describe('memory/mining — exclusion scan in the miner', () => {
 
 		expect(Date.now() - startedAt).toBeLessThan(30_000)
 		expect(result.excludedTurns).toBe(1)
+		expect(result.timedOutTurns, 'dropped because the check ran out of time').toBe(1)
 		expect(result.excludedByRule).toEqual([`${prefix} slow rule`])
 		expect(result.drawerIds).toHaveLength(1)
 		const embedded = stub.callsTo('/embeddings').flatMap((call) => (call.body?.input as string[]) ?? [])
 		expect(embedded.some((text) => text.includes(marker))).toBe(false)
+	})
+
+	test('a turn whose check runs out of time is only set aside: no hit, and a change to the rules lets it back', async () => {
+		// A timed-out check was tombstoned as `excluded_by_rule` and counted as a hit, so a
+		// harmless paste a slow rule choked on was out of memory for good — under a rule it never
+		// matched, and even after the rule was fixed.
+		const releaseRuleChanges = await acquireGlobalStateLock(RULE_CHANGES_LOCK)
+		stub = stubOpenRouter()
+		const userId = await getActiveUserId()
+		const marker = token()
+		const sql = getSql()
+		const [rule] = await sql<{ id: string }[]>`
+			insert into memory_exclusion_rules (user_id, name, kind, pattern)
+			values (${userId}, ${`${prefix} slow rule`}, 'regex', ${`${marker}(a+)+$`})
+			returning id
+		`
+		const [conversation] = await sql<{ id: string }[]>`
+			insert into conversations (title, user_id, model, total_tokens, total_cost)
+			values (${`${prefix} chat`}, ${userId}, 'anthropic/claude-sonnet-4', 0, '0')
+			returning id
+		`
+		const [message] = await sql<{ id: string }[]>`
+			insert into messages (conversation_id, role, content, sequence)
+			values (${conversation.id}, 'user'::message_role, ${`${marker}${'a'.repeat(40)}!`}, 1)
+			returning id
+		`
+		const tombstoneOf = async () =>
+			(await sql<{ reason: string }[]>`select reason from memory_message_tombstones where message_id = ${message.id}`)[0]
+				?.reason ?? null
+		const hitsOf = async () =>
+			(await sql<{ hit_count: number }[]>`select hit_count from memory_exclusion_rules where id = ${rule.id}`)[0].hit_count
+		try {
+			const { mineConversation } = await import('../src/lib/memory/memory.server')
+			const { exclusionRulesChanged } = await import('../src/lib/memory/exclusions.server')
+
+			const first = await mineConversation({ conversationId: conversation.id })
+			expect(first).toMatchObject({ excludedTurns: 1, timedOutTurns: 1, drawerIds: [] })
+			expect(await tombstoneOf(), 'set aside, not excluded').toBe('exclusion_timed_out')
+			expect(await hitsOf(), 'the rule never matched, so it is not a hit').toBe(0)
+
+			// Reworded so it answers in time. Saving it releases the turn for another look.
+			await sql`update memory_exclusion_rules set pattern = ${`${marker}a+!`} where id = ${rule.id}`
+			await exclusionRulesChanged(userId)
+			expect(await tombstoneOf()).toBeNull()
+
+			const second = await mineConversation({ conversationId: conversation.id })
+			expect(second).toMatchObject({ excludedTurns: 1, timedOutTurns: 0 })
+			// Now it really matched: excluded for good, and counted.
+			expect(await tombstoneOf()).toBe('excluded_by_rule')
+			expect(await hitsOf()).toBe(1)
+			expect(stub.calls, 'nothing reached the extractor or the embeddings').toHaveLength(0)
+		} finally {
+			// Its messages and their tombstones go with it.
+			await sql`delete from conversations where id = ${conversation.id}`
+			await releaseRuleChanges()
+		}
 	})
 })

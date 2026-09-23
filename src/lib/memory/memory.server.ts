@@ -35,6 +35,7 @@ export async function mineConversation(opts: {
 		roomIds: [],
 		closetIds: [],
 		excludedTurns: 0,
+		timedOutTurns: 0,
 		excludedByRule: [],
 		extractorFallback: false,
 	}

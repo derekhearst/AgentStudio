@@ -59,6 +59,7 @@ const emptyResult = (): MineResult => ({
 	roomIds: [],
 	closetIds: [],
 	excludedTurns: 0,
+	timedOutTurns: 0,
 	excludedByRule: [],
 	extractorFallback: false,
 })

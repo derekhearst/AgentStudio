@@ -12,10 +12,12 @@ import { db } from '$lib/db.server'
 import { memoryExclusionRules } from '$lib/memory/memory.schema'
 import {
 	BUILTIN_EXCLUSION_RULES,
+	SUPERSEDED_BUILTIN_PATTERNS,
 	compileExclusionRule,
 	type CompiledExclusionRule,
 } from '$lib/memory/exclusions'
 import { scanForExclusion, type ExclusionScanMatch } from '$lib/memory/exclusion-scan.server'
+import { releaseTimedOutTurns } from '$lib/memory/tombstones.server'
 import { logger } from '$lib/observability/logger'
 
 export {
@@ -43,6 +45,11 @@ export {
 /**
  * Seed the credential rules for a user. Idempotent: conflicts on (user_id, name) are
  * ignored, so a user who disabled or reworded a built-in keeps their version.
+ *
+ * A built-in row still holding a pattern that has since been replaced (see
+ * `SUPERSEDED_BUILTIN_PATTERNS`) is moved to the current one; only that exact old text is
+ * matched, so a reworded rule is left alone, and the switch is never touched. Moving one is a
+ * change to the rules like any other, so the turns set aside by a timed-out check are released.
  */
 export async function ensureBuiltinExclusionRules(userId: string): Promise<void> {
 	await db
@@ -59,6 +66,42 @@ export async function ensureBuiltinExclusionRules(userId: string): Promise<void>
 			})),
 		)
 		.onConflictDoNothing({ target: [memoryExclusionRules.userId, memoryExclusionRules.name] })
+
+	let moved = 0
+	for (const old of SUPERSEDED_BUILTIN_PATTERNS) {
+		const current = BUILTIN_EXCLUSION_RULES.find((rule) => rule.name === old.name)
+		if (!current || current.pattern === old.pattern) continue
+		const rows = await db
+			.update(memoryExclusionRules)
+			.set({ pattern: current.pattern, updatedAt: new Date() })
+			.where(
+				and(
+					eq(memoryExclusionRules.userId, userId),
+					eq(memoryExclusionRules.builtin, true),
+					eq(memoryExclusionRules.name, old.name),
+					eq(memoryExclusionRules.pattern, old.pattern),
+				),
+			)
+			.returning({ id: memoryExclusionRules.id })
+		moved += rows.length
+	}
+	if (moved > 0) await exclusionRulesChanged(userId)
+}
+
+/**
+ * Call after any change to a user's rules — a rule saved, switched, deleted, or a built-in
+ * moved to a new pattern. Releases the turns set aside because their check ran out of time
+ * (`releaseTimedOutTurns`): the rule that was too slow may be gone or fixed, so they are
+ * checked again on their conversation's next pass. Best-effort: the change itself has
+ * already been saved, and a failure here only leaves those turns set aside a while longer.
+ */
+export async function exclusionRulesChanged(userId: string): Promise<void> {
+	try {
+		const released = await releaseTimedOutTurns(userId)
+		if (released > 0) logger.info('[memory] released turns whose exclusion check had timed out', { released })
+	} catch (error) {
+		logger.warn('[memory] failed to release turns whose exclusion check had timed out', { err: error })
+	}
 }
 
 /** Load every enabled rule for a user, compiled and ready to match. */

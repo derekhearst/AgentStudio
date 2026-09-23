@@ -52,6 +52,12 @@ export type MineResult = {
 	drawerIds: string[]
 	/** Turns dropped by an exclusion rule before embedding/insert. */
 	excludedTurns: number
+	/**
+	 * Of `excludedTurns`, those dropped because their check ran out of time rather than because
+	 * a rule matched. They are set aside, not excluded for good: the next change to the user's
+	 * rules, or Mine pending, lets the miner check them again.
+	 */
+	timedOutTurns: number
 	/** Names of the rules that fired, for the job result + activity feed. */
 	excludedByRule: string[]
 	/**
@@ -233,6 +239,7 @@ export async function mineSession(opts: {
 			closetIds: [],
 			drawerIds: [],
 			excludedTurns: 0,
+			timedOutTurns: 0,
 			excludedByRule: [],
 			extractorFallback: false,
 		}
@@ -260,12 +267,22 @@ export async function mineSession(opts: {
 	const firedRuleIds: Array<string | null> = []
 	const firedRuleNames: string[] = []
 	const excludedMessageIds: string[] = []
+	const timedOutMessageIds: string[] = []
+	let timedOutTurns = 0
 	for (const [index, turn] of opts.session.turns.entries()) {
 		const match = matches[index]
 		if (match) {
-			firedRuleIds.push(match.ruleId)
 			firedRuleNames.push(match.ruleName)
-			if (turn.sourceMessageId) excludedMessageIds.push(turn.sourceMessageId)
+			// A check that ran out of time never saw the rule match, so it is not a hit for it,
+			// and the turn is only set aside: excluding it for good would lose a harmless paste
+			// to a rule it never matched, with no way back once the rule is fixed.
+			if (match.timedOut) {
+				timedOutTurns += 1
+				if (turn.sourceMessageId) timedOutMessageIds.push(turn.sourceMessageId)
+			} else {
+				firedRuleIds.push(match.ruleId)
+				if (turn.sourceMessageId) excludedMessageIds.push(turn.sourceMessageId)
+			}
 			logger.info('[memory] exclusion rule dropped a turn before mining', {
 				rule: match.ruleName,
 				sample: match.sample,
@@ -279,14 +296,18 @@ export async function mineSession(opts: {
 
 	const excludedTurns = firedRuleNames.length
 	const excludedByRule = [...new Set(firedRuleNames)]
-	if (excludedTurns > 0) {
-		await recordExclusionHits(firedRuleIds)
-		// A conversation is mined again after every exchange; without a tombstone the same
-		// dropped turn would be re-checked, and re-counted against its rule, every time.
-		await tombstoneMessages(userId, excludedMessageIds, 'excluded_by_rule').catch((error) => {
-			logger.warn('[memory] failed to tombstone excluded turns', { err: error })
-		})
-	}
+	if (firedRuleIds.length > 0) await recordExclusionHits(firedRuleIds)
+	// A conversation is mined again after every exchange; without a tombstone the same dropped
+	// turn would be re-checked, and re-counted against its rule, every time. A timed-out turn
+	// gets one too — or its conversation would never count as mined, and every pass would spend
+	// the full time limit on it again — but under its own reason, which a change to the rules
+	// or Mine pending clears (`releaseTimedOutTurns`).
+	await tombstoneMessages(userId, excludedMessageIds, 'excluded_by_rule').catch((error) => {
+		logger.warn('[memory] failed to tombstone excluded turns', { err: error })
+	})
+	await tombstoneMessages(userId, timedOutMessageIds, 'exclusion_timed_out').catch((error) => {
+		logger.warn('[memory] failed to set aside turns whose exclusion check timed out', { err: error })
+	})
 
 	if (keptTurns.length === 0) {
 		return {
@@ -295,6 +316,7 @@ export async function mineSession(opts: {
 			closetIds: [],
 			drawerIds: [],
 			excludedTurns,
+			timedOutTurns,
 			excludedByRule,
 			extractorFallback: false,
 		}
@@ -398,6 +420,7 @@ export async function mineSession(opts: {
 		closetIds: [...closetIdsSet],
 		drawerIds,
 		excludedTurns,
+		timedOutTurns,
 		excludedByRule,
 		extractorFallback: extraction.fallback,
 	}
@@ -415,6 +438,7 @@ export async function mineSessions(opts: {
 		closetIds: [],
 		drawerIds: [],
 		excludedTurns: 0,
+		timedOutTurns: 0,
 		excludedByRule: [],
 		extractorFallback: false,
 	}
@@ -425,6 +449,7 @@ export async function mineSessions(opts: {
 		totals.closetIds.push(...result.closetIds)
 		totals.drawerIds.push(...result.drawerIds)
 		totals.excludedTurns += result.excludedTurns
+		totals.timedOutTurns += result.timedOutTurns
 		totals.excludedByRule.push(...result.excludedByRule)
 		totals.extractorFallback ||= result.extractorFallback
 	}

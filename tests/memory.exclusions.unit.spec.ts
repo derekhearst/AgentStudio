@@ -9,6 +9,7 @@ import {
 	findNestedQuantifier,
 	MAX_PATTERN_LENGTH,
 	redactSample,
+	SUPERSEDED_BUILTIN_PATTERNS,
 	validateExclusionPattern,
 } from '../src/lib/memory/exclusions'
 
@@ -69,6 +70,43 @@ test.describe('memory/exclusions — built-in credential rules', () => {
 	test('a "password reset" mention is not treated as a secret assignment', () => {
 		// The rule requires a value after `=`/`:`/`is`, so prose about passwords survives.
 		expect(findExclusionMatch('Can you walk me through the password reset flow?', builtins)).toBeNull()
+	})
+
+	test('connection strings with a long or unusual scheme are still caught', () => {
+		for (const content of [
+			'mongodb+srv://admin:s3cretpw@cluster0.abcde.mongodb.net/db',
+			'REDIS=redis+sentinel://default:hunter22@cache:26379/0',
+			'git+ssh://git:tok3n@github.com/org/repo',
+		]) {
+			expect(findExclusionMatch(content, builtins)?.ruleName, content).toBe('Connection string credentials')
+		}
+	})
+})
+
+test.describe('memory/exclusions — built-in rules take time in proportion to the text', () => {
+	// The whole of every turn is checked, and a check over its time limit drops the turn for
+	// good. `\b[a-z][a-z0-9+.\-]*://` started at every word boundary of a run like `a.a.a.…` and
+	// read to the end of the run from each, and a JWT's first segment did the same on
+	// `eyJ-eyJ-…`: 120,000 characters took over a second, and a harmless paste was lost.
+	const runs: Array<[string, string]> = [
+		['a.', 'a.'.repeat(60_000)],
+		['a-', 'a-'.repeat(60_000)],
+		['eyJ-', 'eyJ-'.repeat(30_000)],
+	]
+	for (const [label, text] of runs) {
+		test(`120,000 characters of "${label}${label}…" are checked in a fraction of the limit`, () => {
+			const startedAt = performance.now()
+			expect(findExclusionMatch(text, builtins)).toBeNull()
+			expect(performance.now() - startedAt).toBeLessThan(200)
+		})
+	}
+
+	test('a replaced built-in pattern names a current rule, and differs from it', () => {
+		for (const old of SUPERSEDED_BUILTIN_PATTERNS) {
+			const current = BUILTIN_EXCLUSION_RULES.find((rule) => rule.name === old.name)
+			expect(current, old.name).toBeDefined()
+			expect(current?.pattern, old.name).not.toBe(old.pattern)
+		}
 	})
 })
 

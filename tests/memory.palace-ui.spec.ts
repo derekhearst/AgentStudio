@@ -2,7 +2,14 @@ import { expect, test, type Page, type Request, type Route } from '@playwright/t
 // SvelteKit's own wire format for remote-function results; used to answer a few calls in
 // place of the server where letting them through would touch other specs' data.
 import { stringify } from 'devalue'
-import { authenticateContext, getActiveUserId, getSql, uniquePrefix, waitForHydration } from './helpers'
+import {
+	acquireGlobalStateLock,
+	authenticateContext,
+	getActiveUserId,
+	getSql,
+	uniquePrefix,
+	waitForHydration,
+} from './helpers'
 import { noModelCredentialsRequested } from './server-env'
 
 /**
@@ -180,6 +187,8 @@ test.describe('memory/palace-ui — exclusion rule list', () => {
 		const prefix = uniquePrefix('mem-ui-edit-rule')
 		const userId = await getActiveUserId()
 		const sql = getSql()
+		// Saving a rule releases the turns other specs set aside (memory.exclusion-scan.spec.ts).
+		const release = await acquireGlobalStateLock('memory-exclusion-rule-changes')
 		try {
 			await sql`
 				insert into memory_exclusion_rules (user_id, name, kind, pattern, enabled)
@@ -197,6 +206,7 @@ test.describe('memory/palace-ui — exclusion rule list', () => {
 			expect(row).toEqual({ enabled: false, description: 'reworded' })
 		} finally {
 			await cleanupPalace(prefix)
+			await release()
 		}
 	})
 })

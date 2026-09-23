@@ -29,11 +29,13 @@ import {
 	compileExclusionRules,
 	describeSavedRuleProblem,
 	ensureBuiltinExclusionRules,
+	exclusionRulesChanged,
 	MAX_PATTERN_LENGTH,
 	scanForExclusion,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions.server'
 import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
+import { releaseTimedOutTurns } from '$lib/memory/tombstones.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { jobs } from '$lib/jobs/jobs.schema'
 import { enqueueJobWithOutcome } from '$lib/jobs/jobs.server'
@@ -282,6 +284,11 @@ const saveExclusionRuleSchema = z.object({
 	enabled: z.boolean().optional(),
 })
 
+/**
+ * Every change to a user's rules — here, on delete and on toggle — releases the turns set
+ * aside because their check ran out of time (`exclusionRulesChanged`), so a rule fixed after
+ * it choked on a paste does not keep that paste out of memory for good.
+ */
 export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const invalid = validateExclusionPattern(input.kind, input.pattern)
@@ -301,6 +308,7 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 			.where(and(eq(memoryExclusionRules.id, input.id), eq(memoryExclusionRules.userId, user.id)))
 			.returning({ id: memoryExclusionRules.id })
 		if (!updated) return { ok: false as const, error: 'Rule not found.' }
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const, id: updated.id }
 	}
 
@@ -317,6 +325,7 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 				builtin: false,
 			})
 			.returning({ id: memoryExclusionRules.id })
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const, id: created.id }
 	} catch {
 		return { ok: false as const, error: 'A rule with that name already exists.' }
@@ -338,6 +347,7 @@ export const deleteMemoryExclusionRuleCommand = command(exclusionRuleIdSchema, a
 	await db
 		.delete(memoryExclusionRules)
 		.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+	await exclusionRulesChanged(user.id)
 	return { ok: true as const }
 })
 
@@ -349,6 +359,7 @@ export const toggleMemoryExclusionRuleCommand = command(
 			.update(memoryExclusionRules)
 			.set({ enabled, updatedAt: new Date() })
 			.where(and(eq(memoryExclusionRules.id, id), eq(memoryExclusionRules.userId, user.id)))
+		await exclusionRulesChanged(user.id)
 		return { ok: true as const }
 	},
 )
@@ -392,9 +403,13 @@ export const testMemoryExclusionRulesCommand = command(
  *
  * `enqueued` counts jobs this call actually created; a conversation whose mining job was
  * already queued counts under `alreadyQueued`, not as new work.
+ *
+ * Turns set aside because their exclusion check ran out of time are released first, so this
+ * is also how a user retries them — a check that timed out on a busy machine may well finish.
  */
 export const mineAllPendingCommand = command(async () => {
 	const user = requireAuthenticatedRequestUser()
+	await releaseTimedOutTurns(user.id)
 
 	const [{ scanned }] = await db
 		.select({ scanned: countDistinct(conversations.id) })
