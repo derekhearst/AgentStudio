@@ -42,11 +42,24 @@ function countRemoteCalls(page: Page) {
 	}
 }
 
-/** Answer calls to one remote function with `value`, as the server would. */
+/**
+ * Answer calls to one remote function with `value`, as the server would.
+ *
+ * A command's caller reads the result from `_`. A query's does not: the client files a query's
+ * value from the single-flight map `q`, keyed by `<hash>/<name>/<payload>`, and a response
+ * without it leaves the query resolved to `undefined`. So a query (a GET) gets both.
+ */
 async function answerRemote(page: Page, name: string, value: unknown, onCall?: () => void) {
 	await page.route(new RegExp(`/_app/remote/[^/]+/${name}(\\?|$)`), (route: Route) => {
 		onCall?.()
-		return route.fulfill({ json: { type: 'result', data: stringify({ _: value }) } })
+		const request = route.request()
+		const data: Record<string, unknown> = { _: value }
+		if (request.method() === 'GET') {
+			const url = new URL(request.url())
+			const id = url.pathname.slice(url.pathname.indexOf('/_app/remote/') + '/_app/remote/'.length)
+			data.q = { [`${id}/${url.searchParams.get('payload') ?? ''}`]: { v: value } }
+		}
+		return route.fulfill({ json: { type: 'result', data: stringify(data) } })
 	})
 }
 
