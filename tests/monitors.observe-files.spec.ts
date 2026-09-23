@@ -162,6 +162,74 @@ test.describe('monitors/observe-files — Glob and Grep', () => {
 		const one = await observeFileTool(sandbox, 'Grep', { pattern: 'ERROR', head_limit: 1 })
 		expect(one).toEqual(['projects/p1/logs/build.log'])
 	})
+
+	test('a linked directory is neither listed nor walked, by Glob or by Grep', async () => {
+		// `fs.glob` follows links to directories, so a link to `/` let a `**/*` monitor list
+		// file names anywhere on the disk. A junction needs no privileges on Windows; elsewhere
+		// the type is ignored and this is an ordinary directory symlink.
+		const link = join(sandbox, 'linked')
+		await symlink(outside, link, 'junction')
+		const { observeFileTool } = await import('../src/lib/monitors/observe-files.server')
+		try {
+			for (const pattern of ['**/*', '**/*.log', '*', 'linked', 'linked/*', 'linked/**/*']) {
+				const listed = (await observeFileTool(sandbox, 'Glob', { pattern })) as string[]
+				expect(
+					listed.filter((path) => path.startsWith('linked')),
+					`Glob ${pattern} stays out of the link`,
+				).toEqual([])
+			}
+			expect(await observeFileTool(sandbox, 'Grep', { pattern: 'outside the sandbox' })).toEqual([])
+			expect(
+				await observeFileTool(sandbox, 'Grep', { pattern: 'outside the sandbox', glob: 'linked/**/*' }),
+				'naming the link in the glob does not get through it either',
+			).toEqual([])
+		} finally {
+			await rm(link, { recursive: false, force: true })
+		}
+	})
+})
+
+test.describe('monitors/observe-files — a Grep cannot freeze the server', () => {
+	let dir: string
+	test.beforeAll(async () => {
+		dir = await mkdtemp(join(tmpdir(), 'monitor-grep-limits-'))
+		// A run of `a`s ending in something else: `(a+)+$` backtracks exponentially on it.
+		await writeFile(join(dir, 'evil.txt'), `${'a'.repeat(40)}b\n`)
+		await writeFile(join(dir, 'long.txt'), `${'x'.repeat(15_000)}NEEDLE\nshort NEEDLE\n`)
+	})
+	test.afterAll(async () => {
+		await rm(dir, { recursive: true, force: true })
+	})
+
+	test('a catastrophic pattern fails the check on time, and the event loop keeps running meanwhile', async () => {
+		const { observeFileTool } = await import('../src/lib/monitors/observe-files.server')
+		let ticks = 0
+		const ticker = setInterval(() => (ticks += 1), 50)
+		const started = Date.now()
+		try {
+			await expect(
+				observeFileTool(dir, 'Grep', { pattern: '(a+)+$', path: 'evil.txt' }, { grepTimeoutMs: 1_000 }),
+			).rejects.toThrow(/took longer than 1s/)
+		} finally {
+			clearInterval(ticker)
+		}
+		expect(Date.now() - started, 'the time limit, not the regex, decides when it ends').toBeLessThan(5_000)
+		expect(ticks, 'the matching ran off the event loop').toBeGreaterThan(5)
+	})
+
+	test('a search that would read too much fails instead of reading on', async () => {
+		const { observeFileTool } = await import('../src/lib/monitors/observe-files.server')
+		await expect(observeFileTool(dir, 'Grep', { pattern: 'NEEDLE' }, { grepMaxTotalBytes: 100 })).rejects.toThrow(
+			/would read more than 100 bytes/,
+		)
+	})
+
+	test('a very long line is matched on its first 10,000 characters', async () => {
+		const { observeFileTool } = await import('../src/lib/monitors/observe-files.server')
+		expect(
+			await observeFileTool(dir, 'Grep', { pattern: 'NEEDLE', path: 'long.txt', output_mode: 'content' }),
+		).toEqual([{ path: 'long.txt', line: 2, text: 'short NEEDLE' }])
+	})
 })
 
 test.describe('monitors/observe-files — through the evaluator', () => {
