@@ -5,6 +5,7 @@ import { agents } from '$lib/agents/agents.schema'
 import { computeNextRunAt } from '$lib/automations/engine'
 import { DEFAULT_TIMEZONE } from '$lib/automations/cron'
 import { getLatestRunSummaries } from '$lib/automations/automation-runs.server'
+import { UserInputError } from '$lib/server/user-input-error'
 
 export async function listAutomationsForUser(userId: string) {
 	const rows = await db
@@ -104,7 +105,7 @@ export async function createAutomationRecord(input: {
 }) {
 	const now = new Date()
 	const timezone = input.timezone ?? DEFAULT_TIMEZONE
-	const nextRunAt = computeNextRunAt(input.cronExpression, now, timezone)
+	const nextRunAt = scheduleOrReject(input.cronExpression, now, timezone)
 	const [created] = await db
 		.insert(automations)
 		.values({
@@ -168,7 +169,7 @@ export async function updateAutomationRecord(
 			// A row disabled by the failure policy has a stale `next_run_at` in the past;
 			// re-deriving it here means re-enabling actually resumes the schedule.
 			if (!existing.enabled && patch.cronExpression === undefined && patch.timezone === undefined) {
-				updates.nextRunAt = computeNextRunAt(
+				updates.nextRunAt = scheduleOrReject(
 					existing.cronExpression,
 					new Date(),
 					existing.timezone ?? DEFAULT_TIMEZONE,
@@ -189,7 +190,7 @@ export async function updateAutomationRecord(
 	if (patch.timezone !== undefined) updates.timezone = patch.timezone
 	if (patch.cronExpression !== undefined) updates.cronExpression = patch.cronExpression
 	if (patch.cronExpression !== undefined || patch.timezone !== undefined) {
-		updates.nextRunAt = computeNextRunAt(
+		updates.nextRunAt = scheduleOrReject(
 			patch.cronExpression ?? existing.cronExpression,
 			new Date(),
 			patch.timezone ?? existing.timezone ?? DEFAULT_TIMEZONE,
@@ -202,6 +203,19 @@ export async function updateAutomationRecord(
 		.where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
 		.returning()
 	return updated
+}
+
+/**
+ * The next run of a schedule someone just typed. The cron parser's errors name the field and
+ * the reason (`Invalid cron hour field "25": value 25 is out of range 0-23`) precisely so the
+ * form can show them, which only happens when they travel as a `UserInputError`.
+ */
+function scheduleOrReject(cronExpression: string, from: Date, timezone: string): Date {
+	try {
+		return computeNextRunAt(cronExpression, from, timezone)
+	} catch (err) {
+		throw new UserInputError(err instanceof Error ? err.message : String(err))
+	}
 }
 
 export async function deleteAutomationRecord(userId: string, automationId: string) {

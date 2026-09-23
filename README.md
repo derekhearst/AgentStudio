@@ -196,10 +196,17 @@ Notes:
 - Runtime spec: `docs/runtime/spec.md`
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
+- Automations: `docs/automations/automations.md`
+- Monitors: `docs/monitors/monitors.md`
+- Background jobs: `docs/jobs/jobs.md`
 - UI spec: `docs/ui/spec.md`
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
+
+## Background Jobs
+
+Scheduled automations, monitor checks, PR CI polling, memory mining, research runs and workspace cleanup run on a durable job queue in PostgreSQL. Every server process runs a worker and the scheduler by default; `bun run worker` starts a worker without the web tier, for deployments that scale them separately. Workers are configured with optional `JOBS_WORKER_*` environment variables (queues, job types, poll interval, lease length, worker id, shutdown drain time), and `JOBS_WORKER_ENABLED=0` / `JOBS_SCHEDULER_ENABLED=0` turn them off. Job history is at `/settings/jobs`. See [docs/jobs/jobs.md](docs/jobs/jobs.md) for how the queue behaves and the full variable list.
 
 ## Projects
 
@@ -243,7 +250,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/chat/[id]` Chat detail
 - `/cost` Cost dashboard
 - `/agents` Agent management
-- `/automations` Scheduled automation workflows
-- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/spec.md))
+- `/automations` Scheduled automation workflows ([docs](docs/automations/automations.md))
+- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration, including the read-only System checklist

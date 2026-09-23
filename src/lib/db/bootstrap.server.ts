@@ -14,7 +14,10 @@
  *      SKILL.md repo-discovered rows.
  *   5. Registers job handlers (research, memory mining, evaluations, workspace gc,
  *      automations, metrics sampler, runs reaper, logs retention).
- *   6. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0.
+ *   6. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0, configured
+ *      from the JOBS_WORKER_* env vars (see jobs/worker-config.ts), and records their handles
+ *      in db/process-state.server.ts — so a standalone worker can drain them on shutdown, and
+ *      a dev-mode re-evaluation of db.server.ts can stop them before starting new ones.
  *   7. Kicks off the skill-embedding backfill in the background.
  *
  * Each step is fail-isolated: a single broken seeder or handler-registration call
@@ -41,6 +44,8 @@ import {
 	resetAppSchemas,
 } from '$lib/db/migrations.server'
 import { schema } from '$lib/db/schema.server'
+import { adoptBackgroundJobs, isCurrentBootstrapGeneration } from '$lib/db/process-state.server'
+import { workerOptionsFromEnv } from '$lib/jobs/worker-config'
 import type postgres from 'postgres'
 
 type Client = ReturnType<typeof postgres>
@@ -54,10 +59,12 @@ const createSchemaDb = (client: Client) => drizzle(client, { schema })
 export type BootstrapInput = {
 	client: Client
 	databaseUrl: string
+	/** From `beginBootstrapGeneration()`; a bootstrap overtaken by a newer one starts no jobs. */
+	generation: number
 }
 
 export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
-	const { client, databaseUrl } = input
+	const { client, databaseUrl, generation } = input
 
 	try {
 		const createdDatabase = await ensureDatabaseExists(databaseUrl)
@@ -114,7 +121,7 @@ export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
 		await provisionOwnerFromEnvironment(client)
 		await runSeeders(client)
 		await registerJobHandlers()
-		startWorkerAndScheduler()
+		await startWorkerAndScheduler(generation)
 		kickoffBackgroundBackfills()
 	} catch (err) {
 		console.error('[db] Bootstrap failed — database may be unavailable:', err)
@@ -322,36 +329,47 @@ async function registerJobHandlers(): Promise<void> {
  * Start the in-process worker + scheduler. Both opt-out via env vars
  * (JOBS_WORKER_ENABLED=0, JOBS_SCHEDULER_ENABLED=0) so a one-shot migration
  * script doesn't accidentally claim jobs.
+ *
+ * Awaited by the bootstrap, so once `ensureDatabaseReady()` resolves the handles are in
+ * `backgroundJobs()`. Each start checks the generation right before it happens — with no
+ * await in between — so a bootstrap that a newer one overtook starts nothing.
  */
-function startWorkerAndScheduler(): void {
+async function startWorkerAndScheduler(generation: number): Promise<void> {
 	if (process.env.JOBS_WORKER_ENABLED === '0') return
 
-	void (async () => {
-		try {
-			const { startJobWorker } = await import('$lib/jobs/worker.server')
-			const worker = startJobWorker({ pollIntervalMs: 2000, leaseTtlMs: 120_000 })
-			console.log(`[db] Started in-process job worker (id=${worker.workerId})`)
-		} catch (err) {
-			console.warn('[db] Job worker start failed (non-fatal):', err)
-		}
-	})()
+	try {
+		const { startJobWorker } = await import('$lib/jobs/worker.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const options = workerOptionsFromEnv()
+		const worker = startJobWorker(options)
+		adoptBackgroundJobs(generation, { worker })
+		const filters = [
+			options.queues ? `queues=${options.queues.join(',')}` : null,
+			options.types ? `types=${options.types.join(',')}` : null,
+		].filter(Boolean)
+		console.log(
+			`[db] Started in-process job worker (id=${worker.workerId}, poll=${options.pollIntervalMs}ms, lease=${options.leaseTtlMs}ms${filters.length > 0 ? `, ${filters.join(', ')}` : ''})`,
+		)
+	} catch (err) {
+		console.warn('[db] Job worker start failed (non-fatal):', err)
+	}
 
 	if (process.env.JOBS_SCHEDULER_ENABLED === '0') return
 
-	void (async () => {
-		try {
-			const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
-			startScheduler()
-			const scheduled = listScheduledJobs()
-			if (scheduled.length > 0) {
-				console.log(
-					`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
-				)
-			}
-		} catch (err) {
-			console.warn('[db] Scheduler start failed (non-fatal):', err)
+	try {
+		const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const scheduler = startScheduler()
+		adoptBackgroundJobs(generation, { scheduler })
+		const scheduled = listScheduledJobs()
+		if (scheduled.length > 0) {
+			console.log(
+				`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
+			)
 		}
-	})()
+	} catch (err) {
+		console.warn('[db] Scheduler start failed (non-fatal):', err)
+	}
 }
 
 /**

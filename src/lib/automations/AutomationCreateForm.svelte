@@ -2,6 +2,7 @@
 	import { createAutomationCommand } from '$lib/automations'
 	import { COMMON_TIME_ZONES, DEFAULT_TIMEZONE, isValidTimeZone } from '$lib/automations/cron'
 	import { getAgentChoices } from '$lib/agents'
+	import { remoteErrorMessage } from '$lib/ui/remote-error'
 
 	type AutomationMode = 'chat_followup' | 'research' | 'maintenance'
 	type AutomationOutputTarget = 'chat_session' | 'review_inbox'
@@ -42,6 +43,8 @@
 			prompt: string
 			enabled: boolean
 			conversationMode: 'new_each_run' | 'reuse'
+			mode?: AutomationMode
+			outputTarget?: AutomationOutputTarget
 			selectedAgentId: string
 		} | null
 		onCreated: (message: string) => void
@@ -73,6 +76,10 @@
 		prompt = seed.prompt
 		enabled = seed.enabled
 		conversationMode = seed.conversationMode
+		// A copy that silently fell back to chat_followup would replay a research or
+		// maintenance prompt into a chat thread instead.
+		mode = seed.mode ?? 'chat_followup'
+		outputTarget = seed.outputTarget ?? 'chat_session'
 		selectedAgentId = seed.selectedAgentId
 	})
 
@@ -116,8 +123,9 @@
 			})
 			description = ''
 			onCreated('Automation created successfully.')
-		} catch {
-			onError('Failed to create automation. Check values and try again.')
+		} catch (err) {
+			// A bad schedule comes back naming the field and the reason; show that.
+			onError(remoteErrorMessage(err, 'Failed to create automation. Check values and try again.'))
 		} finally {
 			saving = false
 		}

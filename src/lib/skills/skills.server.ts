@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, ilike, or, sql, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { skillFiles, skills } from '$lib/skills/skills.schema'
-import { emitActivity } from '$lib/activity/activity.server'
+import { emitActivityInBackground } from '$lib/activity/activity.server'
 import { embedOne, toPgVector } from '$lib/memory/embeddings.server'
 import { logger } from '$lib/observability/logger'
 import {
@@ -37,7 +37,7 @@ export async function createSkill(
 		.insert(skills)
 		.values({ name, description, content, tags: tags ?? [], category: category ?? null })
 		.returning()
-	void emitActivity('skill_created', `Skill created: ${name}`, {
+	emitActivityInBackground('skill_created', `Skill created: ${name}`, {
 		entityId: skill.id,
 		entityType: 'skill',
 	})
@@ -136,7 +136,7 @@ export async function upsertSkillFromSource(input: {
 			.returning({ id: skills.id })
 		skillId = row.id
 		created = true
-		void emitActivity('skill_created', `Skill created from SKILL.md: ${input.name}`, {
+		emitActivityInBackground('skill_created', `Skill created from SKILL.md: ${input.name}`, {
 			entityId: skillId,
 			entityType: 'skill',
 		})
