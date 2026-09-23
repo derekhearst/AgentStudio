@@ -187,14 +187,18 @@
 					{#each result.invocations as inv (inv.id)}
 						{@const isOpen = expanded.has(inv.id)}
 						<li class="card card-body bg-base-100 border-base-300/60 rounded-xl border">
+							<!--
+								Wraps on a phone. On one line the badges, duration and timestamp took the
+								whole width and the hook name — the one thing a row is for — shrank to nothing.
+							-->
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+								class="flex w-full flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-left text-sm hover:bg-base-200/40"
 								onclick={() => toggleExpand(inv.id)}
 							>
 								<span class="badge badge-xs {eventTone(inv.event)}">{inv.event}</span>
 								<span class="badge badge-xs badge-outline">{inv.hookKind}</span>
-								<span class="line-clamp-1 flex-1 font-mono text-xs leading-tight">{inv.hookRef}</span>
+								<span class="line-clamp-1 min-w-40 flex-1 break-all font-mono text-xs leading-tight">{inv.hookRef}</span>
 								{#if !inv.success}
 									<span class="badge badge-xs badge-error">failed</span>
 								{/if}
