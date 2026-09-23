@@ -89,8 +89,9 @@ export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['run_subagent
  * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
  *
  * `./stream.server` hands them over before either gate — the PreToolUse hook and
- * `canUseTool` — so no approval setting or permission mode ever reaches them. Here rather
- * than there so the settings approval list and the MCP endpoint can leave them out without
- * keeping a copy of their own.
+ * `canUseTool` — so no approval setting or permission mode ever reaches them. This is the
+ * set the settings approval list and the MCP endpoint leave out. The engine still keeps its
+ * own copy for that bypass; `tests/engine.stream-approvals.spec.ts` drives the engine and
+ * fails if the tools it actually hands over ever differ from this set.
  */
 export const HOST_OWNED_TOOLS: ReadonlySet<string> = new Set(['ask_user'])

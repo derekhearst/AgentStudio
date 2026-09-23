@@ -1,6 +1,4 @@
 import { expect, test } from '@playwright/test'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { authenticateContext } from './helpers'
 import { ENGINE_EXCLUDED_TOOLS, HOST_OWNED_TOOLS } from '../src/lib/engine/builtin-tools'
 import { allToolNames } from '../src/lib/tools/tool-schemas'
@@ -30,22 +28,14 @@ import { BUILTIN_TOOLS, MANDATORY_APPROVAL_TOOLS } from '../src/lib/tools/tools'
 test.describe('settings/tool-approval — the list is the engine surface', () => {
 	test('it lists exactly the registry tools the engine registers and gates', () => {
 		// `buildToolServer` registers every registry tool outside ENGINE_EXCLUDED_TOOLS for an
-		// unscoped run, and the engine's gate sees all of them but HOST_OWNED_TOOLS — the same
-		// set `runEngineStream` reads to skip its PreToolUse hook and `canUseTool`. A setting
-		// for anything else could never take effect.
+		// unscoped run, and the engine's gate sees all of them but HOST_OWNED_TOOLS, which
+		// `runEngineStream` hands to the host before its PreToolUse hook and `canUseTool`. A
+		// setting for anything else could never take effect. That the engine hands over
+		// exactly this set is pinned where the engine is driven: engine.stream-approvals.
 		const gated = allToolNames
 			.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && !HOST_OWNED_TOOLS.has(name))
 			.sort()
 		expect(BUILTIN_TOOLS.map((t) => t.name)).toEqual(gated)
-	})
-
-	test('the engine reads the host-owned set from builtin-tools, not a copy of its own', () => {
-		// A second hand-written set in the engine could drift from the one this list is
-		// filtered by, and the test above would not notice. Source-level, because importing
-		// the stream module from the Playwright runtime pulls in the SDK.
-		const source = readFileSync(resolve(process.cwd(), 'src/lib/engine/stream.server.ts'), 'utf8')
-		expect(source).toMatch(/import \{ HOST_OWNED_TOOLS \} from '\.\/builtin-tools'/)
-		expect(source).not.toMatch(/const HOST_OWNED_TOOLS\b/)
 		expect(HOST_OWNED_TOOLS.has('ask_user')).toBe(true)
 	})
 
