@@ -281,6 +281,7 @@ These tools are not always on. They are enabled only for repo-backed coding and 
 - Redaction covers credentials embedded in connection strings (`scheme://user:password@host`), not only `key=value` shapes, and keeps the scheme, user and host so the line stays diagnosable.
 - Redaction must not touch ordinary build output. A spec pins innocent log shapes as byte-identical; tightening a pattern without keeping that green is a regression.
 - A fix run is started by a human pressing "Fix it", never automatically by a red check.
+- Connecting GitHub only ever sends the user back to a page inside the app. The connect link accepts an optional `return` page; anything that is not a plain path on the app (a full web address, `//other-site`, or a path with backslashes or hidden characters) is replaced with the Projects page, and the value is checked again before the final redirect. Without this, a crafted link could use the app to bounce a visitor, and whatever the link carried, to another site.
 
 ## Roles & Permissions
 

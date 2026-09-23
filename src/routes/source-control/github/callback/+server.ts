@@ -7,6 +7,7 @@ import {
 	exchangeCodeForToken,
 	fetchGithubUser,
 	getGithubOAuthCredentials,
+	safeReturnPath,
 } from '$lib/source-control/github-oauth.server'
 import { encryptSecret } from '$lib/source-control/encryption.server'
 import { upsertConnection } from '$lib/source-control/source-control.server'
@@ -29,7 +30,8 @@ import { logger } from '$lib/observability/logger'
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const user = requireAuthenticatedRequestUser()
-	const returnTo = cookies.get(GITHUB_OAUTH_RETURN_COOKIE) ?? '/projects'
+	// Checked again here as well as when the cookie is set: this value becomes a redirect.
+	const returnTo = safeReturnPath(cookies.get(GITHUB_OAUTH_RETURN_COOKIE))
 
 	function fail(reason: string): never {
 		cookies.delete(GITHUB_OAUTH_STATE_COOKIE, { path: '/source-control/github' })
