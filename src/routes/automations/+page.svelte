@@ -225,7 +225,7 @@
 			<div class="alert alert-success py-2 text-sm">{createMessage}</div>
 		{/if}
 
-		<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+		<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
 			<div>
 				{#if loading}
 					<div class="flex justify-center card card-body bg-base-100 border-base-300 rounded-2xl border py-16">

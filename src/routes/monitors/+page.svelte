@@ -160,7 +160,7 @@
 			<div role="alert" class="alert alert-success py-2 text-sm">{notice}</div>
 		{/if}
 
-		<div class="grid gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+		<div class="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
 			<div class="space-y-3">
 				{#if loading}
 					<div class="card card-body border-base-300 flex items-center justify-center rounded-2xl border bg-base-100 py-16">
