@@ -5,8 +5,36 @@ import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { automations } from '$lib/automations/automation.schema'
 import { computeNextRunAt } from '$lib/automations/engine'
 import { logger } from '$lib/observability/logger'
+import {
+	AVAILABLE_AGENT_STATUS,
+	PAUSED_AGENT_STATUS,
+	agentAvailability,
+	isAgentPaused,
+	pauseRefusal,
+} from '$lib/agents/agent-status'
 
 export type AgentStatus = (typeof agents.$inferSelect)['status']
+
+/**
+ * Every agent as the model sees it through `list_agents`: the full id every agent tool takes,
+ * built-ins included and listed first. Before this there was no way for the model to learn an
+ * id at all — the Plan agent's handoff (`request_plan_approval`) takes a full UUID, and so do
+ * `update_agent`, `pause_agent` and `resume_agent`.
+ */
+export async function listAgentRoster() {
+	const rows = await db
+		.select({
+			id: agents.id,
+			name: agents.name,
+			role: agents.role,
+			kind: agents.kind,
+			builtinKey: agents.builtinKey,
+			status: agents.status,
+		})
+		.from(agents)
+		.orderBy(sql`${agents.builtinKey} IS NULL`, asc(agents.createdAt))
+	return rows.map(({ status, ...agent }) => ({ ...agent, availability: agentAvailability(status) }))
+}
 
 /** Every agent, with usage aggregated over `userId`'s own conversations. */
 export async function listAgentsWithCounts(userId: string) {
@@ -224,7 +252,13 @@ export async function updateAgentRecord(
 	return updated ?? null
 }
 
-export async function setAgentStatus(agentId: string, status: AgentStatus) {
+/**
+ * Write an agent's status and record the change in the audit trail. `actorUserId` is the
+ * person who pressed Pause or Resume; the model's `pause_agent` / `resume_agent` tools pass
+ * none, and their rows say so. Unguarded — callers deciding pause or resume go through
+ * `setAgentPaused`, which applies the rule on who may be paused.
+ */
+export async function setAgentStatus(agentId: string, status: AgentStatus, actorUserId: string | null = null) {
 	const [before] = await db.select({ status: agents.status }).from(agents).where(eq(agents.id, agentId)).limit(1)
 	const [updated] = await db.update(agents).set({ status }).where(eq(agents.id, agentId)).returning()
 	if (!updated) return null
@@ -232,9 +266,11 @@ export async function setAgentStatus(agentId: string, status: AgentStatus) {
 	if (beforeStatus !== status) {
 		void (async () => {
 			try {
-				const { auditAgentStatusChanged } = await import('$lib/governance')
+				// The server module, not the `$lib/governance` barrel: the barrel also carries the
+				// domain's remote functions, which only load inside SvelteKit.
+				const { auditAgentStatusChanged } = await import('$lib/governance/governance.server')
 				await auditAgentStatusChanged({
-					actorUserId: null,
+					actorUserId,
 					agentId,
 					beforeStatus,
 					afterStatus: status,
@@ -245,4 +281,37 @@ export async function setAgentStatus(agentId: string, status: AgentStatus) {
 		})()
 	}
 	return updated
+}
+
+export type SetAgentPausedResult =
+	| { ok: true; agent: typeof agents.$inferSelect }
+	| { ok: false; reason: 'not_found' | 'not_pausable'; message: string }
+
+/**
+ * Pause or resume an agent (#66) — the one path the Pause button and the model's tools share,
+ * so a built-in cannot be paused by either. See `$lib/agents/agent-status` for what pausing
+ * means and why only user-created agents may be paused.
+ *
+ * Resuming an agent that is not paused changes nothing, rather than writing `active` over
+ * `idle` and leaving an audit row for a change nobody made.
+ */
+export async function setAgentPaused(
+	agentId: string,
+	paused: boolean,
+	actorUserId: string | null = null,
+): Promise<SetAgentPausedResult> {
+	const [agent] = await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
+	if (!agent) return { ok: false, reason: 'not_found', message: 'Agent not found' }
+
+	if (paused) {
+		const refusal = pauseRefusal(agent)
+		if (refusal) return { ok: false, reason: 'not_pausable', message: refusal }
+		if (isAgentPaused(agent.status)) return { ok: true, agent }
+	} else if (!isAgentPaused(agent.status)) {
+		return { ok: true, agent }
+	}
+
+	const updated = await setAgentStatus(agentId, paused ? PAUSED_AGENT_STATUS : AVAILABLE_AGENT_STATUS, actorUserId)
+	if (!updated) return { ok: false, reason: 'not_found', message: 'Agent not found' }
+	return { ok: true, agent: updated }
 }

@@ -177,7 +177,12 @@ export function maybeGenerateTitle(input: {
 				{ role: 'user', content: input.userContent.trim() },
 				{ role: 'assistant', content: input.assistantContent },
 			])
-			await db.update(conversations).set({ title }).where(eq(conversations.id, input.conversationId))
+			// `updatedAt` too: it is how an open sidebar learns the list changed (#79), and the
+			// title lands after the turn's own update, when nothing else will say so.
+			await db
+				.update(conversations)
+				.set({ title, updatedAt: new Date() })
+				.where(eq(conversations.id, input.conversationId))
 		} catch {
 			// Non-critical — title stays as default.
 		}

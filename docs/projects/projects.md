@@ -20,7 +20,7 @@ Projects are user-scoped (each user sees only their own), are browsed from the `
 
 Every project carries a `repo_kind`:
 
-- **none** — database row only, no directory on disk. Useful as a label/grouping; the agent has nowhere project-specific to write.
+- **none** — no repository. The project still gets a directory the first time something is written for it: a knowledge file, or a file an agent writes during a chat bound to the project.
 - **local** — `git init`'d at the project's sandbox path (`<SANDBOX_WORKSPACE>/<userId>/projects/<projectId>`) with a README and an initial commit. No remote.
 - **imported** — cloned from a remote (GitHub or any plain clone URL) into the same sandbox path, paired with a `repositories` sidecar row remembering where it came from.
 
@@ -47,12 +47,21 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 ### Create a project
 
 1. Open `/projects` and click **+ New project**.
-2. Give it a name and a kind, then pick how it should exist on disk. Each choice is a tab in the dialog:
-   - no repo (database row only),
-   - a new local repo, or
-   - an import from the connected GitHub account or a clone URL.
-3. The **From GitHub** tab lists the connected account's repositories. **Refresh** asks GitHub for the list again, so a repository created a moment ago shows up without closing the dialog.
-4. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
+2. Pick a tab for how it should exist on disk:
+   - **Empty** — no repository,
+   - **Local repo** — a new local repository,
+   - **From GitHub** or **From URL** — an import from the connected GitHub account or a clone URL.
+3. Give it a name and a kind. Switching tabs keeps what you have typed. (The form used to reset on every tab change and jump back to **Empty**, so only empty projects could be created.)
+4. The **From GitHub** tab lists the connected account's repositories. **Refresh** asks GitHub for the list again, so a repository created a moment ago shows up without closing the dialog.
+5. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
+
+### Add knowledge files
+
+1. Open the project and use the knowledge panel to upload a file — a datasheet, a spec, an exported thread.
+2. The file is stored in the project's directory under `.agentstudio/knowledge/`, and the agent is told its name in every chat bound to the project. It reads the file with its normal file tools.
+3. Remove a file from the same panel.
+
+A project holds up to 50 knowledge files of up to 20MB each. The server itself refuses any upload larger than its `BODY_SIZE_LIMIT` setting, which the production image sets to 25MB. An upload over that limit is refused with a message that names the limit and the setting, rather than the old, misleading "Expected a multipart upload". Before the image set it, the server's default of 512KB applied, and every file over half a megabyte failed.
 
 ### Work in a project
 
@@ -83,7 +92,9 @@ Once trusted, the agent cannot quietly rewrite what was reviewed. Changing `.cla
 
 ### Delete a project
 
-Delete from the `/projects` list. Deleting removes the database row, and for `local` / `imported` projects the sandbox directory with it. There is no soft delete for projects.
+Delete from the `/projects` list. Deleting removes the database row and the project's directory with everything in it — the repository if there is one, knowledge files, and anything the agent wrote there. This applies to every kind of project; a project with no repository used to keep its directory, and its knowledge files stayed on disk for good. There is no soft delete for projects.
+
+The confirmation says what goes with the project, for every kind: a project with no repository warns that its files, knowledge files and anything agents wrote there will be removed, and a local or imported project adds its git repository to that list.
 
 ## Roles & permissions
 
@@ -117,7 +128,7 @@ Everything else the agent does inside a project goes through the ordinary filesy
 
 ## Edge cases
 
-- **Legacy `none` projects** — projects created before repos existed have no directory. They still list and bind fine; the agent simply has no project-local place to write.
+- **Legacy `none` projects** — projects created before repos existed may have no directory yet. They still list and bind fine; the directory appears when something is first written for the project.
 - **Clone timeouts** — a large import can take tens of seconds. The row is inserted first and rolled back on failure, so a timeout shows as "project disappeared" rather than a half-cloned directory.
 - **Deleting a user** — cascades through their projects. Sandbox directories are removed by the project delete path, not by the database.
 - **A repo that links out of itself** — an imported repo can contain symbolic links, and so can anything the agent's shell creates. If the project's `.agentstudio` knowledge folder turns out to be a link to somewhere outside the project, knowledge uploads and deletes are refused and the knowledge list shows as empty. The same check stops the "keep knowledge out of git" note from being written through a linked `.git/info` folder.

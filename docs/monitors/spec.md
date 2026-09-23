@@ -78,6 +78,8 @@ Anything that writes — `Bash`, `Write`, `push_branch` — is absent by constru
 | `push`               | Writes an in-app notification row and sends a web push                                                            |
 | `run_automation`     | Runs one of the owner's own automations once (see Business rules)                                                 |
 
+A paused agent (#66) is not run by either agent-running action. `start_conversation` refuses and falls back to a review item, so what the monitor saw still reaches the owner; `run_automation` queues the run as usual, and the automation records it as skipped (`blocked`) because its agent is paused. See [../agents/agents.md](../agents/agents.md).
+
 ## User flows
 
 ### Creating a monitor

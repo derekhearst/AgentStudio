@@ -5,7 +5,9 @@
  *   - `key: value`
  *   - `key: [a, b, c]`           inline arrays
  *   - `key:`                     followed by indented `  - item` lines (dash-list)
- *   - quoted scalars             surrounding `"…"` or `'…'` are stripped
+ *   - quoted scalars             surrounding `"…"` or `'…'` are stripped; inside double
+ *                                quotes `\"`, `\\`, `\n`, `\r` and `\t` are unescaped, and
+ *                                inside single quotes `''` is one `'` (YAML's own rules)
  *
  * Unsupported (callers must avoid):
  *   - nested maps
@@ -53,7 +55,7 @@ export function extractFrontmatter(content: string): {
 			const items: string[] = []
 			i++
 			while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
-				items.push(lines[i].replace(/^\s*-\s+/, '').trim().replace(/^["']|["']$/g, ''))
+				items.push(unquoteScalar(lines[i].replace(/^\s*-\s+/, '').trim()))
 				i++
 			}
 			frontmatter[key] = items
@@ -64,10 +66,10 @@ export function extractFrontmatter(content: string): {
 			const inner = rawValue.slice(1, -1)
 			frontmatter[key] = inner
 				.split(',')
-				.map((s) => s.trim().replace(/^["']|["']$/g, ''))
+				.map((s) => unquoteScalar(s.trim()))
 				.filter(Boolean)
 		} else {
-			frontmatter[key] = rawValue.replace(/^["']|["']$/g, '')
+			frontmatter[key] = unquoteScalar(rawValue)
 		}
 		i++
 	}
@@ -114,13 +116,40 @@ export function serializeFrontmatter(frontmatter: Record<string, unknown>): stri
 	return lines.join('\n')
 }
 
+/** Escapes inside a double-quoted scalar, both ways. A backslash must be escaped first. */
+const DOUBLE_QUOTE_ESCAPES: Record<string, string> = { '\\': '\\', '"': '"', n: '\n', r: '\r', t: '\t' }
+
+/**
+ * A scalar as written → its value. Double quotes are unescaped and single quotes undoubled,
+ * the way YAML reads them. Only the outer quotes used to be stripped, so an exported value
+ * with an embedded `"` came back as `\"` and gained another backslash on every export and
+ * re-import.
+ */
+function unquoteScalar(raw: string): string {
+	if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+		return raw.slice(1, -1).replace(/\\(["\\nrt])/g, (_, c: string) => DOUBLE_QUOTE_ESCAPES[c])
+	}
+	if (raw.length >= 2 && raw.startsWith("'") && raw.endsWith("'")) {
+		return raw.slice(1, -1).replace(/''/g, "'")
+	}
+	// Lenient, as before: a stray quote at either end is dropped.
+	return raw.replace(/^["']|["']$/g, '')
+}
+
 function quoteIfNeeded(value: string): string {
 	const trimmed = value.trim()
 	if (trimmed === '') return '""'
-	// Quote if the value contains characters that would break YAML parsing in the inline form.
-	if (/[:#,\[\]{}&*!|>'"%@`]/.test(trimmed) || /^\s/.test(value) || /\s$/.test(value)) {
-		// Prefer double quotes; escape any embedded double quotes.
-		return `"${trimmed.replace(/"/g, '\\"')}"`
+	// Quote if the value contains characters that would break YAML parsing in the inline form,
+	// or a line break, which a plain scalar cannot hold at all.
+	if (/[:#,\[\]{}&*!|>'"%@`\n\r\t]/.test(trimmed) || /^\s/.test(value) || /\s$/.test(value)) {
+		// Double quotes, escaped the way `unquoteScalar` reads them back.
+		const escaped = trimmed
+			.replace(/\\/g, '\\\\')
+			.replace(/"/g, '\\"')
+			.replace(/\n/g, '\\n')
+			.replace(/\r/g, '\\r')
+			.replace(/\t/g, '\\t')
+		return `"${escaped}"`
 	}
 	return trimmed
 }

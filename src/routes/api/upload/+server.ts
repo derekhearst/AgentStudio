@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { getUploadDir } from '$lib/server/config'
+import { bodyTooLargeMessage, isBodyTooLarge } from '$lib/server/body-limit'
 
 /**
  * Chat attachment uploads.
@@ -46,7 +47,16 @@ const ALLOWED_TYPES = new Set([
 export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!locals.user) return json({ error: 'Unauthorized' }, { status: 401 })
 
-	const formData = await request.formData()
+	let formData: FormData
+	try {
+		formData = await request.formData()
+	} catch (error) {
+		// adapter-node refuses a body over BODY_SIZE_LIMIT before this runs, and the refusal
+		// arrives here as a failed read. Say so, with the real limit — it is below the 100MB
+		// video allowance unless the operator raised it ($lib/server/body-limit).
+		if (isBodyTooLarge(error, request)) return json({ error: bodyTooLargeMessage() }, { status: 413 })
+		return json({ error: 'Expected a multipart upload' }, { status: 400 })
+	}
 	const file = formData.get('file') as File | null
 	if (!file) {
 		return json({ error: 'No file provided' }, { status: 400 })

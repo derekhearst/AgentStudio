@@ -11,6 +11,14 @@
 	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
 	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
 	import AgentConfigEditor from '$lib/agents/AgentConfigEditor.svelte'
+	import { setAgentPausedFromPage } from '$lib/agents/agent-pause'
+	import {
+		AGENT_PAUSED_HELP,
+		agentPauseAction,
+		agentStatusHint,
+		agentStatusLabel,
+		isAgentPaused,
+	} from '$lib/agents/agent-status'
 	import {
 		agentColor,
 		agentInitials,
@@ -44,6 +52,14 @@
 	}
 
 	const liveEntry = $derived(liveStream())
+
+	// #66 — one status, from the shared rule: Available or Paused.
+	const paused = $derived(isAgentPaused(data?.agent.status))
+	const statusLabel = $derived(agentStatusLabel(data?.agent.status))
+	const statusHint = $derived(data ? agentStatusHint(data.agent) : '')
+	const pauseAction = $derived(data ? agentPauseAction(data.agent) : null)
+	let statusBusy = $state(false)
+	let statusError = $state<string | null>(null)
 
 	const maxToolCount = $derived(
 		data?.toolUsage.length ? Math.max(...data.toolUsage.map((t) => t.count)) : 1,
@@ -98,6 +114,20 @@
 		return updated ?? null
 	}
 
+	async function togglePaused() {
+		if (!data || !pauseAction) return
+		statusBusy = true
+		statusError = null
+		try {
+			const updated = await setAgentPausedFromPage(data.agent.id, pauseAction === 'pause')
+			if (data && updated) data = { ...data, agent: updated }
+		} catch (err) {
+			statusError = remoteErrorMessage(err, pauseAction === 'pause' ? 'Could not pause this agent.' : 'Could not resume this agent.')
+		} finally {
+			statusBusy = false
+		}
+	}
+
 	function connectMonitor() {
 		eventSource?.close()
 		eventSource = new EventSource('/api/agents/monitor')
@@ -114,6 +144,23 @@
 	}
 </script>
 
+<!--
+	Passed only when there is a control to show: PageHeader gives `actions` its own row on a
+	phone, and a built-in's would otherwise be an empty bar.
+-->
+{#snippet statusActions()}
+	<button
+		type="button"
+		class="btn btn-xs {pauseAction === 'resume' ? 'btn-primary' : 'btn-outline'}"
+		disabled={statusBusy}
+		title={pauseAction === 'resume' ? 'Make this agent available again' : AGENT_PAUSED_HELP}
+		onclick={() => void togglePaused()}
+	>
+		{#if statusBusy}<span class="loading loading-spinner loading-xs"></span>{/if}
+		{pauseAction === 'resume' ? 'Resume' : 'Pause'}
+	</button>
+{/snippet}
+
 <div class="flex h-full min-h-0 flex-col">
 	<PageHeader
 		title={data?.agent.name ?? 'Agent'}
@@ -121,10 +168,11 @@
 		backHref="/agents"
 		subtitle={data ? `${data.agent.role}` : ''}
 		live={!!liveEntry}
+		actions={pauseAction ? statusActions : undefined}
 	>
 		{#snippet chips()}
 			{#if data}
-				<span class="console-chip {data.agent.status === 'active' ? 'is-run' : ''}">{data.agent.status}</span>
+				<span class="console-chip {paused ? 'is-warn' : ''}" title={statusHint}>{statusLabel}</span>
 				{#if liveEntry}
 					<span class="console-chip is-run">
 						<span class="pulse-dot"></span>
@@ -158,6 +206,9 @@
 	{@const live = liveEntry}
 
 	<section class="space-y-5">
+		{#if statusError}
+			<div role="alert" class="alert alert-error py-2 text-sm">{statusError}</div>
+		{/if}
 
 		<!-- ── Hero card ────────────────────────────────────────────────── -->
 		<div class="relative overflow-hidden rounded-2xl border border-base-300 bg-base-100">
@@ -184,7 +235,8 @@
 					{:else}
 						<span
 							class="absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-base-100
-								{data.agent.status === 'active' ? 'bg-success' : data.agent.status === 'paused' ? 'bg-warning' : 'bg-base-content/20'}"
+								{paused ? 'bg-warning' : 'bg-success'}"
+							title={statusLabel}
 						></span>
 					{/if}
 				</div>
@@ -193,9 +245,14 @@
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-start gap-2">
 						<h2 class="text-2xl font-bold leading-tight">{data.agent.name}</h2>
-						<span
-							class="badge badge-sm mt-1 {data.agent.status === 'active' ? 'badge-success' : data.agent.status === 'paused' ? 'badge-warning' : 'badge-ghost'}"
-						>{data.agent.status}</span>
+						<span class="badge badge-sm mt-1 {paused ? 'badge-warning' : 'badge-success'}" title={statusHint}
+							>{statusLabel}</span
+						>
+						{#if data.agent.builtinKey}
+							<span class="badge badge-sm badge-ghost mt-1">Built-in</span>
+						{:else if data.agent.kind === 'evaluator'}
+							<span class="badge badge-sm badge-ghost mt-1">Evaluator</span>
+						{/if}
 						{#if live}
 							<span class="badge badge-sm badge-primary mt-1 gap-1">
 								<span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current"></span>
@@ -205,6 +262,9 @@
 					</div>
 					<p class="mt-1 text-sm text-base-content/65">{data.agent.role}</p>
 					<p class="mt-0.5 font-mono text-xs text-base-content/40">{modelShortName(data.agent.model)}</p>
+					{#if paused}
+						<p class="mt-2 text-xs text-warning" role="note">{AGENT_PAUSED_HELP}</p>
+					{/if}
 				</div>
 
 				<!-- Right: last active -->

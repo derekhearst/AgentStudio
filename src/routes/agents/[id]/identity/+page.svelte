@@ -79,7 +79,7 @@
 		const ok = await confirmDialog({
 			title: 'Unlink this identity skill?',
 			message:
-				'The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills.',
+				'The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills, and Promote to skill links it again with its content as you left it.',
 			confirmLabel: 'Unlink',
 			variant: 'warning'
 		});

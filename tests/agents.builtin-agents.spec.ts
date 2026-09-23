@@ -1,12 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, getSql } from './helpers'
+import { authenticateContext, getSql, uniquePrefix } from './helpers'
 
 /**
  * Built-in agents seeder.
  *
  * The four agents (chat / research / plan / autonomous) are seeded by `seedBuiltinAgents`
  * with stable UUIDs. Persona text lives in `agents.system_prompt` (no longer in a separate
- * `system/mode-*` skill); `identity_skill_id` is always NULL after migration 0059.
+ * `system/mode-*` skill). Migration 0059 unlinked those; an operator may since have promoted
+ * a built-in's persona to an identity skill of their own, and a re-seed keeps that link.
  *
  * Source of truth for IDs: src/lib/agents/builtin-agents.server.ts.
  */
@@ -41,7 +42,7 @@ async function reseedBuiltinAgents() {
 }
 
 test.describe('agents/builtin — four built-in agents are seeded with stable IDs', () => {
-	test('all four built-in agents exist with builtin_key and identity_skill_id NULL', async ({ page, context }) => {
+	test('all four built-in agents exist with builtin_key and no link to a system/ skill', async ({ page, context }) => {
 		test.setTimeout(60_000)
 		await authenticateContext(context)
 		await ensureBootstrap(page)
@@ -62,11 +63,19 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		expect(byKey.plan?.id).toBe(BUILTIN_AGENT_IDS.plan)
 		expect(byKey.autonomous?.id).toBe(BUILTIN_AGENT_IDS.autonomous)
 
-		// All built-ins now use system_prompt directly — identity_skill_id is always NULL.
-		expect(byKey.chat?.identity_skill_id).toBeNull()
-		expect(byKey.research?.identity_skill_id).toBeNull()
-		expect(byKey.plan?.identity_skill_id).toBeNull()
-		expect(byKey.autonomous?.identity_skill_id).toBeNull()
+		// No built-in points at a legacy system/ skill or at one that is gone. A link the
+		// operator made (Promote to skill on the identity page) is theirs to keep.
+		const linked = rows.map((r) => r.identity_skill_id).filter((id): id is string => id !== null)
+		if (linked.length > 0) {
+			const skillRows = await sql<{ id: string; name: string }[]>`
+				select id::text as id, name from skills where id::text in ${sql(linked)}
+			`
+			const nameById = new Map(skillRows.map((r) => [r.id, r.name]))
+			for (const id of linked) {
+				expect(nameById.has(id), `identity skill ${id} must exist`).toBe(true)
+				expect(nameById.get(id)!.startsWith('system/')).toBe(false)
+			}
+		}
 
 		// system_prompt must contain the canonical persona text, not the migration-0055
 		// 'Seeded at boot.' placeholder.
@@ -93,8 +102,10 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 		await ensureBootstrap(page)
 
 		const sql = getSql()
+		// The seeder spec below links a throwaway `system/E2E:` skill for a moment; that one is
+		// not a leftover of the removed namespace.
 		const [{ count }] = await sql<{ count: number }[]>`
-			select count(*)::int as count from skills where name like 'system/%'
+			select count(*)::int as count from skills where name like 'system/%' and name not like 'system/E2E:%'
 		`
 		expect(count, 'no skill rows should match the system/ namespace').toBe(0)
 	})
@@ -187,4 +198,99 @@ test.describe('agents/builtin — four built-in agents are seeded with stable ID
 			await reseedBuiltinAgents()
 		}
 	})
+
+	/*
+	 * Every boot runs the seeder, and every deploy is a boot. It used to replace the whole
+	 * config with `{ toolPolicy }` and null the identity link, so a deploy undid the
+	 * operator's hook bindings, research overrides and promoted identity skill on each
+	 * built-in. Only the tool policy is the seeder's to refresh.
+	 */
+	test('operator config and a linked identity skill survive a re-seed; the tool policy is refreshed', async ({ page, context }, testInfo) => {
+		test.skip(testInfo.project.name !== 'desktop', 'database behaviour; one project is enough')
+		test.setTimeout(60_000)
+		await authenticateContext(context)
+		await ensureBootstrap(page)
+
+		const sql = getSql()
+		const prefix = uniquePrefix('builtin-reseed')
+		const original = await readPlanRow()
+		try {
+			const [skill] = await sql<{ id: string }[]>`
+				insert into skills (name, description, content, enabled)
+				values (${`${prefix}-identity`}, 'Plan identity', 'You plan.', true)
+				returning id::text as id
+			`
+			const operatorConfig = {
+				hooks: { after_run: [`${prefix}-hook`] },
+				research: { enabled: false },
+				// A stale policy the seeder must overwrite.
+				toolPolicy: { kind: 'unrestricted' },
+			}
+			await sql`
+				update agents
+				set config = config || ${sql.json(operatorConfig)}, identity_skill_id = ${skill.id}
+				where id::text = ${BUILTIN_AGENT_IDS.plan}
+			`
+
+			await reseedBuiltinAgents()
+
+			const after = await readPlanRow()
+			expect(after.config.hooks).toEqual(operatorConfig.hooks)
+			expect(after.config.research).toEqual(operatorConfig.research)
+			expect((after.config.toolPolicy as { kind?: string }).kind, 'the tool policy is code-owned').toBe('readOnly')
+			expect(after.identity_skill_id, 'an operator identity skill stays linked').toBe(skill.id)
+
+			// A link to a skill that no longer exists is healed rather than left dangling.
+			await sql`delete from skills where id::text = ${skill.id}`
+			await reseedBuiltinAgents()
+			expect((await readPlanRow()).identity_skill_id).toBeNull()
+
+			// So is a link to the removed system/ namespace.
+			const [legacy] = await sql<{ id: string }[]>`
+				insert into skills (name, description, content, enabled)
+				values (${`system/${prefix}`}, 'legacy mode skill', 'old', true)
+				returning id::text as id
+			`
+			await sql`update agents set identity_skill_id = ${legacy.id} where id::text = ${BUILTIN_AGENT_IDS.plan}`
+			await reseedBuiltinAgents()
+			expect((await readPlanRow()).identity_skill_id).toBeNull()
+		} finally {
+			// Put back what the operator had, minus anything a crashed earlier run left behind.
+			const restoredHooks = stripTestHookRefs(original.config.hooks)
+			const restored = { ...original.config }
+			if (restoredHooks) restored.hooks = restoredHooks
+			else delete restored.hooks
+			const keepLink =
+				original.identity_skill_id &&
+				(await sql`select 1 from skills where id::text = ${original.identity_skill_id} and name not like 'E2E:%'`).length > 0
+			await sql`
+				update agents
+				set config = ${sql.json(restored as Parameters<typeof sql.json>[0])},
+					identity_skill_id = ${keepLink ? original.identity_skill_id : null}
+				where id::text = ${BUILTIN_AGENT_IDS.plan}
+			`
+			await sql`delete from skills where name like ${`${prefix}%`} or name like ${`system/${prefix}%`}`
+			await reseedBuiltinAgents()
+		}
+	})
 })
+
+async function readPlanRow() {
+	const sql = getSql()
+	const [row] = await sql<{ config: Record<string, unknown>; identity_skill_id: string | null }[]>`
+		select config, identity_skill_id::text as identity_skill_id from agents where id::text = ${BUILTIN_AGENT_IDS.plan}
+	`
+	return row
+}
+
+/** Hook bindings without refs a test wrote (they carry the `E2E:` prefix); null when none remain. */
+function stripTestHookRefs(hooks: unknown): Record<string, string[]> | null {
+	if (!hooks || typeof hooks !== 'object') return null
+	const kept: Record<string, string[]> = {}
+	for (const [event, refs] of Object.entries(hooks as Record<string, unknown>)) {
+		if (!Array.isArray(refs)) continue
+		const real = refs.filter((ref): ref is string => typeof ref === 'string' && !ref.startsWith('E2E:'))
+		if (real.length > 0) kept[event] = real
+	}
+	return Object.keys(kept).length > 0 ? kept : null
+}

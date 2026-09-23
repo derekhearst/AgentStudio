@@ -110,10 +110,29 @@ Rules that keep this honest:
 1. A single image is capped at roughly 3.7 MB of original file size. Larger images are refused with a warning asking the user to resize, because sending them would fail at the model boundary.
 2. If a file cannot be delivered — wrong image format, too large, unreadable from storage, no workspace to stage it in, or a missing reader tool — the assistant's reply opens with a short "Attachment warning" block naming the file and the reason. The warning is saved with the message, so it is still there after a reload.
 3. The same rules apply whether the conversation is on a Claude model or a third-party model routed through the gateway. A gateway model that cannot see images will simply not use them; nothing about the delivery path changes.
+4. Files attached on the new-chat page (`/`) go with the first message, exactly as if they had been attached inside the conversation. The new-chat page used to upload them, show them, and then send only the text.
+
+### Starting a conversation from the new-chat page
+
+The new-chat page (`/`) greets the owner by the display name they gave during first-run setup ("Good morning, Alex"). If no name was given, the greeting is just "Good morning".
+
+Sending from the new-chat page works like this:
+
+1. The page creates the conversation and adds it to the sidebar straight away.
+2. It opens the conversation, handing over the typed message and any attached files.
+3. The conversation page waits until it has loaded the conversation, then removes the message from the address bar and sends it.
+
+The order matters. The message leaves the address bar before the reply starts, so reloading the page or restoring the tab while the reply streams does not send it a second time. It also leaves the browser history, so going to another page and pressing Back returns to the conversation without the message, even when the first send failed before anything was saved. A conversation that already has messages, or a turn already running, never gets the handed-over message again. And moving to another page while the first reply streams keeps you there: the conversation page no longer jumps back to the chat when the reply finishes.
+
+Attached files are handed over inside the open tab, not through the address. If the tab is reloaded before the message is sent, the files are not attached. They stay uploaded and can be attached again.
 
 ### Session list, filtering, and grouping
 
 The left session list is the primary navigation surface for chat history.
+
+The list stays current on its own. A new chat appears as soon as it is created, the generated title replaces "New conversation" a moment after the first reply, and the order follows the most recent activity. This works for chats started in another tab, on another device, or by an automation too: the page's live-status connection reports when the list has changed, at most every couple of seconds, and the list is reloaded.
+
+Each row shows a snippet of the conversation's latest reply. Only the listed conversations' latest replies are read, one per conversation. The list used to read every reply ever written, by every user, on every page load.
 
 - Users can filter the list by agent so they can quickly switch between sessions associated with different agent personalities.
 - The filter supports two scopes:
@@ -222,8 +241,26 @@ How the controls that exist today behave:
 - **Coming back to a running turn.** Opening a conversation whose turn is still running — after a reload, or from another tab — shows that turn streaming again, with its tool and approval cards and the Stop button. Text written before you came back appears once the turn finishes.
 - **One turn at a time.** A message sent while a turn is still running is not sent. The page says so, keeps the message for Retry, and shows the running turn instead.
 - **Allow / Deny.** An approval card only shows a call as approved or denied once the server has recorded the answer. If it could not be recorded (the approval timed out, or was answered in another tab), the card keeps its buttons and says why.
+- **Answering a question.** When the agent asks a question (`ask_user`), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
+- **Switching conversations mid-turn.** Opening another conversation while a reply is streaming shows only the other conversation. Nothing from the first one comes along: not its reply, its tool cards, its Stop button, its error message or its Retry. Leaving is not a Stop. The first turn keeps running, saves its own reply, and shows again with Stop when you go back to it.
+- **A turn that ends in an error.** Some turns end in an error after the reply was already saved, for example when the agent reaches its maximum number of steps or the model provider is overloaded. The page shows the error and keeps the one saved reply. It used to save a second, partial copy of the same reply.
 - **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it. The chips go away when the turn's stream ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
 - **Pinned checklist.** The panel above the composer shows the main agent's latest plan. When the agent hands a step to a subagent, the subagent's own checklist does not replace it.
+
+### Context meter
+
+The context meter above the composer, and the same figure in the right rail, estimate how much of the model's context window the conversation fills. It adds up:
+
+| Part | Where the figure comes from |
+| --- | --- |
+| System prompt | Measured by the server when it builds the prompt for a turn. Before any turn has run on the page, a fixed allowance stands in |
+| Tool definitions | A fixed allowance |
+| Messages | Estimated from the text of every message in the conversation |
+| Tool results | Estimated from the saved output of every tool call. Each reply's output is counted once, from its saved steps when it has them |
+
+Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page asks the agent to summarise the conversation first if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure.
+
+A reply saved after Stop or an error keeps its tool output in two places. The meter counts it once, so a stopped turn with a large command output does not read as twice its size or set off that summary early.
 
 ### Mobile and compact layout
 
@@ -259,6 +296,8 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Project grouping never duplicates a session across groups; each session appears exactly once under its current `projectId` or `No Project`.
 - Run tree nodes are derived from durable `runs` lineage (`id`, `parentRunId`, `sessionId`) and are never inferred from transient UI state.
 - An attachment on a message is either delivered to the model or warned about on that message. There is no path that accepts a file and silently ignores it.
+- A turn's reply is saved once. A reply the server saved is never saved again from the page as a partial copy, and a partial saved on Stop always goes into the conversation the turn belongs to.
+- Messages keep their order when two writers add to a conversation at the same moment (a Stop saving what was written so far while the turn saves its final reply, or a background run). The one that loses the race takes the next position and is still saved.
 - A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
 - Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
 

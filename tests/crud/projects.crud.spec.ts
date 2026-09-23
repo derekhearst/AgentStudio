@@ -19,22 +19,6 @@ import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expect
  */
 
 test.describe('/projects — CRUD lifecycle', () => {
-	test('the New project modal stays on the tab that was clicked', async ({ page, context }) => {
-		await authenticateContext(context)
-		await page.goto('/projects')
-		await waitForHydration(page)
-		await page.getByRole('button', { name: '+ New project' }).click()
-		await expect(page.getByRole('button', { name: 'Create empty project' })).toBeVisible()
-
-		// The modal's re-seed effect depended on the current tab, so every tab click re-ran it
-		// and put the modal straight back on Empty.
-		await page.getByRole('button', { name: 'Local repo', exact: true }).click()
-		await expect(page.getByRole('button', { name: 'Create local project' })).toBeVisible()
-		await page.getByRole('button', { name: 'From URL', exact: true }).click()
-		await expect(page.getByRole('button', { name: 'Clone & create' })).toBeVisible()
-		await expect(page.getByRole('button', { name: 'Create empty project' })).toHaveCount(0)
-	})
-
 	test('create project → open detail → delete project', async ({ page, context }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('crud-projects')
@@ -96,6 +80,65 @@ test.describe('/projects — CRUD lifecycle', () => {
 				await expect(page.locator('div.group').filter({ hasText: projectName })).toHaveCount(0)
 
 				await expectNoHorizontalOverflow(page)
+			})
+		} finally {
+			await cleanupExtendedPrefix(prefix)
+		}
+	})
+
+	/*
+	 * The modal's reset effect used to read the tab it had just written, so clicking any tab
+	 * re-ran it: the tab snapped back to "Empty" and the typed name was wiped. Only an empty
+	 * project could ever be created from the page. This drives the tabs and then creates a
+	 * local-repo project, which was impossible before.
+	 */
+	test('switching tabs keeps the chosen tab and what was typed; a local project can be created', async ({ page, context }) => {
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('crud-projects-tabs')
+		await cleanupExtendedPrefix(prefix)
+		await authenticateContext(context)
+		const sql = getSql()
+		const projectName = `${prefix} Local`
+
+		try {
+			await withErrorCapture(page, async () => {
+				await page.goto('/projects')
+				await waitForHydration(page)
+				await page.getByRole('button', { name: '+ New project' }).click()
+				const nameInput = page.getByPlaceholder('e.g. Efoil Rebuild')
+				await nameInput.fill(projectName)
+
+				await page.getByRole('button', { name: 'From URL', exact: true }).click()
+				await expect(page.getByPlaceholder('https://github.com/owner/repo · any clone URL')).toBeVisible()
+				await expect(page.getByRole('button', { name: 'Create empty project' })).toHaveCount(0)
+				await expect(nameInput).toHaveValue(projectName)
+
+				await page.getByRole('button', { name: 'Local repo', exact: true }).click()
+				const createLocal = page.getByRole('button', { name: 'Create local project' })
+				await expect(createLocal).toBeVisible()
+				await expect(nameInput).toHaveValue(projectName)
+
+				await createLocal.click()
+				const created = await pollDb(
+					() => sql<{ id: string; repo_kind: string }[]>`
+						select id, repo_kind::text as repo_kind from projects where name = ${projectName}
+					`,
+					(rows) => rows.length === 1,
+					{ description: 'local project created via UI', timeoutMs: 30_000 },
+				)
+				expect(created[0].repo_kind).toBe('local')
+
+				// Delete through the page so the project's directory goes with it.
+				await page.goto('/projects')
+				await waitForHydration(page)
+				const projectCard = page.locator('div.group').filter({ hasText: projectName }).first()
+				await projectCard.getByRole('button', { name: 'Delete project' }).click()
+				await answerConfirmDialog(page, 'Delete')
+				await pollDb(
+					() => sql<{ count: number }[]>`select count(*)::int as count from projects where id = ${created[0].id}`,
+					(rows) => rows[0]?.count === 0,
+					{ description: 'local project deleted from DB' },
+				)
 			})
 		} finally {
 			await cleanupExtendedPrefix(prefix)

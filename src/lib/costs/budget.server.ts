@@ -131,6 +131,63 @@ export async function checkBudgetLimits(ctx: BudgetCheckContext, now = new Date(
 	}
 }
 
+export type BudgetHeadroom = {
+	id: string
+	scope: BudgetScope
+	scopeId: string | null
+	period: BudgetPeriod
+	limitUsd: number
+	spendUsd: number
+	/** spend / limit. Over 1 means the limit is exceeded. */
+	pct: number
+	action: BudgetAction
+}
+
+/**
+ * Whether `checkBudgetLimits` can ever apply a limit outside a single run: a global limit
+ * always, an agent limit to its agent. A project limit is skipped there (usage rows carry no
+ * project yet), and an agent limit with no agent matches nothing.
+ */
+function isStandingEnforcedLimit(limit: BudgetLimitRow): boolean {
+	if (limit.period === 'run') return false
+	return limit.scope === 'global' || (limit.scope === 'agent' && limit.scopeId !== null)
+}
+
+/**
+ * #38 — how much of each enabled limit is spent right now, tightest first.
+ *
+ * Only the limits enforcement actually applies (`isStandingEnforcedLimit`), with spend read
+ * exactly the way enforcement reads it (`spendForLimit`), so the `/activity` strip can never
+ * say "40% used" about a limit that is already blocking runs, nor warn about one that never
+ * blocks anything. Run-scoped and per-run limits are left out: they have no standing period
+ * to report against. An empty list means no enforced limits are set.
+ */
+export async function listBudgetHeadroom(userId: string, now = new Date()): Promise<BudgetHeadroom[]> {
+	const rows = (await db
+		.select()
+		.from(budgetLimits)
+		.where(and(eq(budgetLimits.userId, userId), eq(budgetLimits.enabled, true)))) as BudgetLimitRow[]
+
+	const standing = rows.filter(isStandingEnforcedLimit)
+	const headroom = await Promise.all(
+		standing.map(async (limit) => {
+			const spendUsd = await spendForLimit(limit, now)
+			const limitUsd = parseFloat(limit.limitUsd)
+			return {
+				id: limit.id,
+				scope: limit.scope,
+				scopeId: limit.scopeId,
+				period: limit.period,
+				limitUsd,
+				spendUsd,
+				pct: limitUsd > 0 ? spendUsd / limitUsd : 0,
+				action: limit.action,
+			}
+		}),
+	)
+	return headroom.sort((a, b) => b.pct - a.pct)
+}
+
 /**
  * Record a budget threshold event into the immutable alerts log. Idempotent at the (limit,
  * trigger, period-start) level: if an alert already exists for this period/trigger, this is

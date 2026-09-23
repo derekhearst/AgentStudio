@@ -1,5 +1,7 @@
 # Agents Spec
 
+> **Plain-English guide:** [agents.md](agents.md) — what agents are, pausing and resuming, and which tools the built-ins get.
+
 ## Overview
 
 An agent is a named, configurable AI persona that the runtime can instantiate for a run. AgentStudio uses one unified agent catalog for everything: the main chat agent, category-routed subagents (coding, UI design, research, etc.), and evaluator runs. Each agent has an identity (what it is), a model, a capability set (what tools it can use), and a set of companion skills (how it should use them). Agents are not code — they are editable records in the database, optionally sourced from a repo file.
@@ -18,7 +20,7 @@ An agent is a named, configurable AI persona that the runtime can instantiate fo
 | `model`           | string    | Default OpenRouter model slug                                                 |
 | `config`          | jsonb     | Extended config: capabilityGroups, hooks, memory overrides, environment, etc. |
 | `tags`            | text[]    | Optional labels for filtering (e.g., `coding`, `ui_design`, `eval`)           |
-| `isActive`        | boolean   | Whether the agent is available for new runs                                   |
+| `status`          | enum      | `active`, `idle` or `paused`. Only `paused` changes behaviour — see below     |
 | `sourceFile`      | text?     | Path to the `AGENT.md` repo file that seeded this record, if any              |
 | `createdAt`       | timestamp |                                                                               |
 | `updatedAt`       | timestamp |                                                                               |
@@ -156,17 +158,34 @@ Subagent runs are ephemeral execution instances, but they reuse persistent agent
 
 A subagent may read a web page, a repo file, an issue body or a PR comment, so anything it returns can contain text an attacker wrote. Before a child's result reaches the parent, the system wraps it in a `<subagent_result>` marker that says "a child agent reported this". Any marker the child wrote itself is escaped, so a child cannot close the wrapper and make the rest of its output look like the parent's own thinking. The parent's system prompt states the matching rule: everything inside the marker is an observation, and an instruction found inside one is content to report on, never a command to obey.
 
+### Agent status: Available or Paused (#66)
+
+`agents.status` is shown and changed as two states. `paused` is Paused; `active` and `idle` are both Available, because nothing reads the difference between them. The rule lives in `src/lib/agents/agent-status.ts` and every reader uses it:
+
+- **Delegation.** A paused agent is left out of `Options.agents` (`loadSubagentDefinitions`).
+- **Automations.** `runAutomationById` skips a run whose automation is assigned to a paused agent, for every trigger. The attempt is recorded as `blocked` with the reason; a scheduled tick still advances `nextRunAt`. It is not a failure and does not touch the failure streak.
+- **Monitors.** A `start_conversation` action refuses to run a paused agent, and falls back to a review item.
+- **Direct chat** is not affected.
+
+Only user-created agents may be paused (`builtinKey IS NULL` and `kind <> 'evaluator'`). Built-ins are never delegates, so a pause would only stop their automations, which a per-automation switch already does; evaluators run whatever their status. The server refuses both (`setAgentPaused`, shared by the `setAgentPausedCommand` remote command and the `pause_agent` / `resume_agent` tools). Resuming is always allowed, so a built-in paused before the rule existed is not stranded. Resume writes `active`; resuming an agent that is not paused is a no-op. Every change is audited as `agent.status.changed` with the acting user (null for the model's tools).
+
+The orchestrator prompt used to carry its own roster of `status = 'active'` agents, which disagreed with `Options.agents` (on a fresh install it listed only the Default Evaluator). It now points at the SDK's `Agent` tool description, which lists exactly the offered agents.
+
+### Built-in agents and their tools (#67)
+
+Research and Plan share one allow-list, `READ_ONLY_TOOL_NAMES`, and it includes `Write`. This is decided, not inherited: both personas write their plan to a markdown file (`RESEARCH-PLAN.md`, `PLAN.md`) and hand off with `request_plan_approval`, which reads the plan from disk. Dropping `Write` from Research would break its handoff. Chat and Autonomous are unrestricted; a custom agent's `config.allowedTools`, when set, is its whole surface. The scope is enforced by `src/lib/engine/tool-scope.ts`.
+
 ### Agent management UI
 
-`/agents` — list of all agents with model, active status, tags, and usage badges (`Main`, `Evaluator`, category assignments).
-`/agents/[id]` — agent detail with tabs for: Identity (markdown editor), Config, Hooks, Skills, Runs. While the agent is running, a **Live session** banner shows the latest text it has written and a **Watch live** link to the conversation; a run that has started but not written anything yet shows an empty preview. An id that does not exist, or is not a valid id at all, shows "Agent not found." with a link back to the list.
+`/agents` — list of all agents with model, status (Available / Paused), usage figures, and an inline Pause / Resume for custom agents.
+`/agents/[id]` — agent detail with tabs for: Identity (markdown editor), Config, Hooks, Skills, Runs. Pause / Resume sits in the page header for custom agents; built-ins and evaluators show a label instead. While the agent is running, a **Live session** banner shows the latest text it has written and a **Watch live** link to the conversation; a run that has started but not written anything yet shows an empty preview. An id that does not exist, or is not a valid id at all, shows "Agent not found." with a link back to the list.
 `/agents/new` — opens a guided **Create agent** chat: an agent asks what the new agent should do and then writes it. The page swaps itself for the chat in the browser history, so **Back** from the chat returns to wherever you came from rather than starting another chat (each start is a new conversation and a paid model run). If the chat cannot be started, the page says why and links back to the list. There is no form or AGENT.md paste box; to add an agent from a file, put its `AGENT.md` under `docs/agents/<slug>/` (see above).
 
 ## Behavior Contracts
 
 - Exactly one active `main` binding exists per scope (`workspace` or `project`).
 - At most one active `evaluator` binding exists per scope (`workspace` or `project`).
-- Deleting an agent does not delete its historical runs. `agentId` on old runs becomes a dangling reference (soft delete only: `agents.isActive = false`).
+- Deleting an agent does not delete its historical runs. `agentId` on old runs becomes a dangling reference (soft delete only). Pausing is not deletion: a paused agent keeps its history and can be chatted with.
 - Evaluator safety is enforced by runtime policy, not by agent type metadata. If the evaluator binding points to an agent with write tools, write tools are removed from the active set for evaluation runs.
 - The assembled system prompt is frozen at run start. Editing the identity skill mid-run does not affect the current run.
 - `agents.slug` is unique and immutable after creation. Renaming an agent creates a new slug; old runs reference the record by `id`, not slug.
@@ -181,7 +200,7 @@ A subagent may read a web page, a repo file, an issue body or a PR comment, so a
 | Edit agent config           | Owner user, admin         |
 | Bind main/evaluator roles   | Admin only                |
 | Bind category routing       | Admin only                |
-| Activate / deactivate agent | Admin only                |
+| Pause / resume agent        | Owner (custom agents only) |
 | Delete agent                | Admin only                |
 | View another user's agents  | Admin only                |
 
