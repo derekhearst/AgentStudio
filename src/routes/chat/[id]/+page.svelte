@@ -19,7 +19,7 @@
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
-	import { consoleState, resetConsoleState } from '$lib/chat-console/console-state.svelte';
+	import { consoleState, resetConsoleState, setChangedFiles } from '$lib/chat-console/console-state.svelte';
 	import { changedFilesInThread } from '$lib/chat-console/changed-files';
 	import { openLeft } from '$lib/chat-console/mobile-drawer-state.svelte';
 	import { toggleRailFromHeader } from '$lib/chat-console/preview-state.svelte';
@@ -1370,11 +1370,9 @@
 	});
 
 	$effect(() => {
-		consoleState.changedFiles = changedFilesInThread({
-			messages,
-			liveBlocks: streamingBlocks,
-			liveMessageId: pendingMessageId,
-		});
+		setChangedFiles(
+			changedFilesInThread({ messages, liveBlocks: streamingBlocks, liveMessageId: pendingMessageId }),
+		);
 	});
 
 	/** The run on screen, for the "running" chip's link to its timeline (/runs/[id]). */

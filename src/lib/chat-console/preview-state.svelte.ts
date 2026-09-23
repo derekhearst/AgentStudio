@@ -138,7 +138,7 @@ export async function hydrateRailOpen() {
 		const stored = await getRailOpen();
 		if (!openTouched) previewState.open = stored;
 	} catch {
-		openLoaded = false; // try again on the next chat; stay collapsed meanwhile
+		openLoaded = false; // try again the next time the rail mounts; stay collapsed meanwhile
 	}
 }
 

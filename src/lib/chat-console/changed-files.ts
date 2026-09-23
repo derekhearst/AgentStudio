@@ -127,6 +127,24 @@ export function collectChangedFiles(blockLists: Iterable<BlockList | null | unde
 		.map(({ order: _order, ...file }) => file)
 }
 
+/**
+ * Whether two lists show the same rows. The chat page refolds on every streamed token, and
+ * this lets it keep the list it already has, so the rail does not redraw for nothing.
+ */
+export function sameChangedFiles(a: ReadonlyArray<ChangedFile>, b: ReadonlyArray<ChangedFile>): boolean {
+	if (a.length !== b.length) return false
+	return a.every((f, i) => {
+		const g = b[i]
+		return (
+			f.path === g.path &&
+			f.changeType === g.changeType &&
+			f.additions === g.additions &&
+			f.deletions === g.deletions &&
+			f.edits === g.edits
+		)
+	})
+}
+
 /** The fields of a chat message this reads: its id, and the blocks saved on its metadata. */
 export type ChangedFileSourceMessage = { id: string; metadata?: unknown }
 

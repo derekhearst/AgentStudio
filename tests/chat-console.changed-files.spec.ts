@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { changedFilesInThread, collectChangedFiles } from '../src/lib/chat-console/changed-files'
+import { changedFilesInThread, collectChangedFiles, sameChangedFiles } from '../src/lib/chat-console/changed-files'
 
 /**
  * #14 — the rail's Files tab: "changed in this chat".
@@ -16,6 +16,7 @@ import { changedFilesInThread, collectChangedFiles } from '../src/lib/chat-conso
  *   - only successful `file_edit` blocks count: other tools, failed or denied calls,
  *     malformed details and writes that changed nothing are left out
  *   - the thread fold: the live turn counts until the message it was saved as has loaded
+ *   - `sameChangedFiles`, which spares the rail a redraw on every streamed token
  */
 
 function edit(
@@ -155,5 +156,21 @@ test.describe('changedFilesInThread', () => {
 
 	test('an empty chat has no changed files', () => {
 		expect(changedFilesInThread({ messages: [], liveBlocks: [], liveMessageId: null })).toEqual([])
+	})
+})
+
+test.describe('sameChangedFiles', () => {
+	const base = collectChangedFiles([[saved(edit('/w/a.ts', 2, 1)), saved(edit('/w/b.ts', 1, 0))]])
+
+	test('a refold of the same blocks is the same list', () => {
+		const again = collectChangedFiles([[saved(edit('/w/a.ts', 2, 1)), saved(edit('/w/b.ts', 1, 0))]])
+		expect(again).not.toBe(base)
+		expect(sameChangedFiles(base, again)).toBe(true)
+	})
+
+	test('a new edit, a new count or a new order is a different list', () => {
+		expect(sameChangedFiles(base, collectChangedFiles([[saved(edit('/w/a.ts', 2, 1))]]))).toBe(false)
+		expect(sameChangedFiles(base, collectChangedFiles([[saved(edit('/w/a.ts', 3, 1)), saved(edit('/w/b.ts', 1, 0))]]))).toBe(false)
+		expect(sameChangedFiles(base, collectChangedFiles([[saved(edit('/w/b.ts', 1, 0)), saved(edit('/w/a.ts', 2, 1))]]))).toBe(false)
 	})
 })

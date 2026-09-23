@@ -6,13 +6,25 @@
 // stats footer are gone: tool activity lives on the run page (/runs/[id]), and the context
 // ring and cost sit in the chat's own topbar, so none of that has to cross the layout.
 
-import type { ChangedFile } from './changed-files';
+import { untrack } from 'svelte';
+import { sameChangedFiles, type ChangedFile } from './changed-files';
 
 export const consoleState = $state({
 	conversationId: null as string | null,
 	/** The Files tab: what the agent changed in this chat, newest first. */
 	changedFiles: [] as ChangedFile[],
 });
+
+/**
+ * Replace the Files list, unless it would show exactly the same rows.
+ *
+ * The chat page calls this from an effect that re-runs on every streamed token. The current
+ * list is read untracked, so that effect does not come to depend on what it writes.
+ */
+export function setChangedFiles(next: ChangedFile[]) {
+	const current = untrack(() => consoleState.changedFiles);
+	if (!sameChangedFiles(current, next)) consoleState.changedFiles = next;
+}
 
 /**
  * Forget the conversation — called when its chat page goes away.
