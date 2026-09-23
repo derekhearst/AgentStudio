@@ -1,6 +1,7 @@
 import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit'
 import { and, arrayContains, sql } from 'drizzle-orm'
 import { getSessionUser, isProvisioned } from '$lib/auth/auth.server'
+import { refuseAnonymousRemoteCall } from '$lib/auth/remote-gate.server'
 import { db, ensureDatabaseReady } from '$lib/db.server'
 import { users } from '$lib/auth/auth.schema'
 import { skills } from '$lib/skills/skills.schema'
@@ -41,6 +42,8 @@ async function cleanupLegacyCapabilitySkills() {
 const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks', '/api/health']
 
 function isPublicPath(pathname: string) {
+	// `/_app` here is the static bundle. Remote functions (`/_app/remote/…`) never get this
+	// far: `handle` settles them first, because their pathname is not the real one.
 	if (pathname.startsWith('/_app') || pathname.startsWith('/favicon')) {
 		return true
 	}
@@ -65,6 +68,13 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 	event.locals.user = user
 	event.locals.authenticated = user !== null
+
+	// Remote-function calls are gated on their real request path and settled here. Every
+	// check below reads `event.url.pathname`, which for a remote call is a client-supplied
+	// header — see src/lib/auth/remote-gate.ts.
+	const remoteRefusal = refuseAnonymousRemoteCall(event)
+	if (remoteRefusal) return remoteRefusal
+	if (event.isRemoteRequest) return resolve(event)
 
 	const provisioned = await isProvisioned()
 
