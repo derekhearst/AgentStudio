@@ -1,6 +1,5 @@
-import { asc, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { agents } from '$lib/agents/agents.schema'
 import { skills } from '$lib/skills/skills.schema'
 import { expandFragments } from '$lib/agents/fragment-expand'
 import { logger } from '$lib/observability/logger'
@@ -56,28 +55,29 @@ async function lookupFragmentByName(name: string): Promise<string | null> {
 }
 
 /**
- * Build the orchestrator system prompt with the current agent roster.
+ * How the orchestrator learns who it can delegate to (#66).
+ *
+ * This used to be a roster of its own: every agent with `status = 'active'`, named by an
+ * eight-character id prefix. Nothing sets a custom agent `active` except resuming it, so on
+ * a fresh install the roster listed only the Default Evaluator — which is never offered for
+ * delegation — and left out every agent the same run did pass to the SDK. The prompt and
+ * `Options.agents` disagreed, and the id prefix was not a name the delegation tool accepts.
+ *
+ * The SDK already describes each `Options.agents` entry in the `Agent` tool's own
+ * description, keyed by the name it takes as `subagent_type`. So the prompt points there
+ * instead of keeping a second list that can drift from it. Built before the run's agents are
+ * loaded, which is why it cannot name them itself.
+ */
+export const ORCHESTRATOR_DELEGATION_NOTE =
+	"Delegation: the agents you can hand work to are listed in the Agent tool's description, each under the name you pass as `subagent_type`. Those are the only agents that exist for this. If none are listed, do the work yourself."
+
+/**
+ * Build the orchestrator system prompt: the identity, plus where to find the agents it may
+ * delegate to.
  */
 export async function buildOrchestratorPrompt(): Promise<string> {
-	const [identity, roster] = await Promise.all([
-		loadOrchestratorIdentity(),
-		db
-			.select({ id: agents.id, name: agents.name, role: agents.role, status: agents.status })
-			.from(agents)
-			.where(eq(agents.status, 'active'))
-			.orderBy(asc(agents.name)),
-	])
-
-	const sections = [identity]
-
-	if (roster.length > 0) {
-		const rosterLines = roster.map((a) => `- **${a.name}** (${a.id.slice(0, 8)}): ${a.role}`)
-		sections.push(`Available agents:\n${rosterLines.join('\n')}`)
-	} else {
-		sections.push('No specialized agents are currently active. Handle all tasks directly.')
-	}
-
-	return sections.join('\n\n')
+	const identity = await loadOrchestratorIdentity()
+	return [identity, ORCHESTRATOR_DELEGATION_NOTE].join('\n\n')
 }
 
 /**

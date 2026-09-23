@@ -2,8 +2,7 @@ import { and, asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { automations } from '$lib/automations/automation.schema'
 import { agents } from '$lib/agents/agents.schema'
-import { computeNextRunAt } from '$lib/automations/engine'
-import { DEFAULT_TIMEZONE } from '$lib/automations/cron'
+import { DEFAULT_TIMEZONE, computeNextRunAt } from '$lib/automations/cron'
 import { getLatestRunSummaries } from '$lib/automations/automation-runs.server'
 import { UserInputError } from '$lib/server/user-input-error'
 
@@ -24,6 +23,8 @@ export async function listAutomationsForUser(userId: string) {
 			updatedAt: automations.updatedAt,
 			agentId: automations.agentId,
 			agentName: agents.name,
+			// #66 — a paused agent's automations are skipped, so the card says so.
+			agentStatus: agents.status,
 			mode: automations.mode,
 			outputTarget: automations.outputTarget,
 			// #31 — failure state, so the card can distinguish "you turned this off" from

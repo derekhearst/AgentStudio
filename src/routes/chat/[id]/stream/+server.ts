@@ -79,6 +79,7 @@ import {
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
+import { createChatRunHooks } from '$lib/hooks/chat-run-hooks.server'
 import { logger } from '$lib/observability/logger'
 
 type StreamPayload = {
@@ -351,6 +352,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	/** Keeps the row's `updatedAt` fresh while frames flow, so the stuck-run reaper leaves it be. */
 	const heartbeat = createRunHeartbeat(run.id)
 
+	/** The hook bus for this turn: agent hook bindings and the built-in hooks (#144). */
+	const hooks = createChatRunHooks({
+		runId: run.id,
+		conversationId: body.conversationId,
+		userId: user.id,
+		agentId: agent.id,
+	})
+
 	/*
 	 * #36 — attachments used to be declared on the payload and then never read,
 	 * so an uploaded screenshot reached the database and the composer but never
@@ -478,6 +487,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// Every frame counts, `tool_progress` included: it is the SDK's own heartbeat for
 				// a call still running, which is all a long build produces.
 				heartbeat.beat()
+				hooks.frame(event, payload)
 				if (NON_PERSISTED.has(event)) {
 					send(encodeSseFrame(event, payload))
 					return
@@ -501,6 +511,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			streamController = controller
 
 			try {
+				hooks.runStarted()
 				await emit('context_stats', {
 					runId: run.id,
 					tokenEstimate: assembled.estimatedTokens,
@@ -709,6 +720,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					error: summary.error,
 					lastDelta: summary.text.slice(-500),
 				})
+				hooks.runFinished({ success: !summary.error, costUsd: parseFloat(messageCost), error: summary.error })
 
 				enqueueMemoryMineJob({
 					settings: currentSettings,
@@ -747,6 +759,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
 				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
 				await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: errorMessage })
+				hooks.runFinished({ success: false, costUsd: null, error: errorMessage })
 				await emit('done', { error: errorMessage })
 				closeStream(controller)
 			} finally {

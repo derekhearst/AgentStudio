@@ -24,7 +24,9 @@
  *   evaluators     spawned by the runtime after a run with a structured-output contract
  *                  (#14). A `Task` call would not honour it.
  *   the run's own  delegating to yourself is a loop with extra steps.
- *   paused         `agents.status`, the one place it means anything — see the pure module.
+ *   paused         the user benched it (#66). Filtered in SQL so a paused agent does not
+ *                  take one of the `MAX_SUBAGENTS` places; the pure module re-checks with the
+ *                  shared rule from `$lib/agents/agent-status`.
  *
  * ## Only orchestrators delegate
  *
@@ -36,6 +38,7 @@
 import { and, desc, isNull, ne } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents as agentsTable } from '$lib/agents/agents.schema'
+import { PAUSED_AGENT_STATUS } from '$lib/agents/agent-status'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { logger } from '$lib/observability/logger'
 import { buildAgentDefinitions, type EngineAgentDefinition } from './agent-definitions'
@@ -86,7 +89,7 @@ export async function loadSubagentDefinitions(
 					isNull(agentsTable.builtinKey),
 					ne(agentsTable.kind, 'evaluator'),
 					ne(agentsTable.id, input.parentAgentId),
-					ne(agentsTable.status, 'paused'),
+					ne(agentsTable.status, PAUSED_AGENT_STATUS),
 				),
 			)
 			.orderBy(desc(agentsTable.createdAt))

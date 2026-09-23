@@ -14,6 +14,7 @@
 	import { listFragmentImports } from '$lib/agents/fragment-expand';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type Identity = NonNullable<Awaited<ReturnType<typeof getAgentIdentityQuery>>>;
 
@@ -33,7 +34,9 @@
 		loading = true;
 		error = null;
 		try {
-			identity = await getAgentIdentityQuery(agentId);
+			// Fresh: this also runs after Unlink, and a cached read still showed the skill
+			// as linked.
+			identity = await fetchFresh(getAgentIdentityQuery(agentId));
 			draft = identity?.skill?.content ?? identity?.agent.systemPrompt ?? '';
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load agent';
@@ -76,7 +79,7 @@
 		const ok = await confirmDialog({
 			title: 'Unlink this identity skill?',
 			message:
-				'The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills.',
+				'The agent will fall back to its legacy systemPrompt. The skill itself stays in /skills, and Promote to skill links it again with its content as you left it.',
 			confirmLabel: 'Unlink',
 			variant: 'warning'
 		});

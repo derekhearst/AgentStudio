@@ -16,6 +16,7 @@ import type { ContextSlot } from '$lib/context/slots.server'
 import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
+import { builtinHandoffNote } from '$lib/agents/builtin-agents.server'
 import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
@@ -109,14 +110,19 @@ export async function buildMemoryRecallSlot(input: {
  * posture slot at priority 95 — under the orchestrator identity at 100, above
  * the project context at 80. Returns null for the `chat` built-in (which IS
  * the default orchestrator persona) and for custom agents.
+ *
+ * Plan and Research also get the handoff facts (`builtinHandoffNote`): the ids
+ * `request_plan_approval` needs, which the operator-owned persona cannot be
+ * trusted to carry.
  */
 export async function buildBuiltinAgentPostureSlot(agent: AgentRow): Promise<ContextSlot | null> {
 	if (!agent.builtinKey || agent.builtinKey === 'chat') return null
 	const posture = await loadAgentIdentityContent(agent)
+	const handoff = builtinHandoffNote(agent.builtinKey)
 	return {
 		name: `agent_${agent.builtinKey}`,
 		priority: 95,
-		content: posture,
+		content: handoff ? `${posture}\n\n${handoff}` : posture,
 	}
 }
 

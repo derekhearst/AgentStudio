@@ -2,25 +2,29 @@
 
 ## Overview
 
-The Research domain lets a user kick off a thorough, cited investigation that runs in the background while they keep working. The user switches the chat to the **Research agent**, asks a substantive question, reviews the proposed sub-questions in the right sidebar, clicks **Approve**, and ~10–15 minutes later receives a notification with a finished, cited report.
+The Research domain covers two ways of getting a thorough, cited answer to a question.
 
-Two flows produce a research run today:
+1. **Research in a chat (primary)** — The user switches the chat to the **Research agent** and asks a substantive question. The Research agent writes a research plan to a file, posts it, and asks the user to approve handing the work to another agent — the Chat agent unless the user asks for a different one. On approval the conversation switches to that agent, which reads the plan and carries out the research in the chat, with web search, page reading and PDF reading, and answers with citations.
+2. **Background research runs** — A research-mode automation (or any caller of `startResearchCommand`) creates a research run. A background job plans sub-questions, searches, reads pages, looks for gaps and writes a cited report. The user gets a notification when it is done and reads the report at `/research/{id}`.
 
-1. **Agent-driven (primary)** — User asks the Research agent a question; it calls `propose_research_plan` with sub-questions; the user approves in the sidebar; a background research job runs.
-2. **Direct (legacy)** — Programmatic callers (automations, the `/research` index page form) invoke `startResearchCommand` to enqueue a run without an approval gate. The orchestrator generates its own sub-questions in this path.
+The two do not overlap: approving a Research agent's plan does not start a background run, and a background run never asks for approval.
 
-Both flows converge on the same orchestrator (`runResearchLoop`) and the same `research` row, so the trace UI and the research feed see one unified shape.
+The Research agent hands off exactly the way the Plan agent does. See [Agents — Hand a plan over from Plan or Research](../agents/agents.md#hand-a-plan-over-from-plan-or-research) for the shared handoff, and [Agents — Built-in agents and their tools](../agents/agents.md#built-in-agents-and-their-tools) for what it may use.
+
+The Research agent used to have its own `propose_research_plan` tool: the plan appeared in the right sidebar with Approve and Decline, and approving started a background run. That tool and its sidebar flow are gone; the Research agent now writes a plan file and hands off like Plan. There is no separate "research runner" agent.
 
 ## Key concepts and entities
 
-- **Research run** — One investigation, top-level row in the `research` table. Carries status, the sub-question plan, the final report, cumulative cost, and links back to the originating conversation and chat run.
-- **Sub-questions** — A list of 4–8 concrete, googleable questions that decompose the user's query. Either user-approved (agent-driven flow) or planner-generated (direct flow).
-- **Research source** — Each web page or PDF the orchestrator fetched. Stores the extracted text (capped at ~50k characters), title, URL, and a flag that flips to `true` once the synthesis stage cites the source in the final report.
-- **Research step** — Append-only trace of every action: plan generated, search issued, page fetched, reflection round, synthesis emitted. Drives the live trace UI.
-- **Cited report** — The final markdown deliverable. Contains an executive summary, 4–8 thematic sections, inline `[N]` citations resolving to `researchSources`, and a sources list at the bottom.
-- **Notification** — Fires on successful completion: an in-app `notifications` row plus, when VAPID keys are configured, a web push to subscribed devices linking to `/research/{id}`.
+- **Research plan file** — The markdown file the Research agent writes, usually `RESEARCH-PLAN.md`. It holds a one- or two-sentence summary, 4–8 concrete sub-questions and an optional rationale. The agent also posts the plan in its reply, so the user can read it without opening the file.
+- **Handoff** — The Research agent's call to `request_plan_approval` with the plan file and the full id of the agent that should do the research. The user approves or denies it on a card in the chat.
+- **Research run** — One background investigation, a row in the `research` table. Carries status, the sub-question plan, the final report, cumulative cost, and links back to the originating conversation and chat run. Only background runs create one; research done in a chat lives in the conversation.
+- **Sub-questions** — 4–8 concrete, searchable questions that break the user's question down. In a chat the Research agent writes them into its plan file. In a background run the planner step generates them.
+- **Research source** — Each web page or PDF a background run fetched. Stores the extracted text (capped at ~50k characters), title, URL, and a flag that flips to `true` once the synthesis stage cites the source in the final report.
+- **Research step** — Append-only trace of every action in a background run: plan generated, search issued, page fetched, reflection round, synthesis emitted. Drives the live trace UI.
+- **Cited report** — The final markdown deliverable of a background run. Contains an executive summary, 4–8 thematic sections, inline `[N]` citations resolving to `researchSources`, and a sources list at the bottom.
+- **Notification** — Fires when a background run completes: an in-app `notifications` row plus, when VAPID keys are configured, a web push to subscribed devices linking to `/research/{id}`.
 
-## Status lifecycle
+## Status lifecycle (background runs)
 
 `planning → searching → fetching → reflecting → synthesizing → complete`
 
@@ -28,55 +32,59 @@ Failure transitions to `failed` (with `error` populated). User cancellation tran
 
 ## User flows
 
-### A) Agent-driven plan-then-approve
+### A) Research in a chat: plan, approve, hand off
 
-1. User opens a chat, picks the **Research** agent in the AgentSelector.
-2. User types a substantive question and sends it.
-3. The Research agent generates a plan via the `propose_research_plan` tool (summary + 4–8 sub-questions + optional rationale).
-4. The chat runtime pauses on the `propose_research_plan` tool call (it's in `MANDATORY_APPROVAL_TOOLS`). The plan appears in the right sidebar with **Approve** and **Decline** buttons.
-5. The user picks one of three paths:
-   - **Approve** — The tool unblocks; the handler creates a `research` row with `plan` pre-seeded, enqueues a `research_run` job, and returns a tool result with the new `researchId`. The agent emits a one-line "Research started" message; the sidebar flips to the Running state and starts polling the detail query every 3 seconds.
-   - **Decline** — The tool unblocks with a denied result. The agent reads "Tool execution was denied by user" and waits for the user's next input.
-   - **Reply in the chat** — The composer detects a pending plan, automatically calls Decline, then sends the user's reply as the next turn. The agent reads the feedback (along with the denied tool result) and proposes a revised plan.
-6. While the run is in flight, the sidebar shows the live status, sub-question list, source count, and a Cancel button. The user can navigate to `/research/[id]` for the full live trace.
-7. When the orchestrator hits `complete`, the job handler writes a notification row and (when configured) sends a web push to the user's subscribed devices. The sidebar flips to the Complete state with an "Open report" link. The cited report is also listed on `/research` as a research-typed item.
+1. The user opens a chat and picks the **Research** agent in the agent selector.
+2. The user asks a substantive question.
+3. The Research agent writes its plan to a markdown file with `Write` — usually `RESEARCH-PLAN.md` — and posts the same plan in its reply.
+4. It calls `request_plan_approval` with the file's path and the full id of the agent that should carry out the research. That is the Chat agent unless the user asked for another one. The Chat agent's id is always given to it; for any other agent it looks the id up with `list_agents`.
+5. An approval card appears in the chat. It always appears, whatever the chat's approval settings.
+   - **Approve** — The plan file is read (the handoff fails if the file does not exist), the conversation switches to the chosen agent, and a note in the conversation tells that agent which plan file was approved. That agent reads the plan and does the research in the chat, using `web_search`, `web_fetch` and `pdf_read`, then answers with citations.
+   - **Deny** — The Research agent stays. The user usually replies with what to change; the agent rewrites the plan file and asks again.
+6. The research and its answer stay in the conversation. No research run is created, nothing is added to `/research`, and no notification is sent.
 
-### B) Direct creation (legacy / programmatic)
+For a trivial lookup (a definition, a current price, a single fact) the Research agent skips the plan and answers directly with `web_search`. It does the same when the user asks for a quick answer.
 
-1. A caller invokes `startResearchCommand({ query, conversationId?, runId?, model? })` — used by the `/research` index page's form, automations, and any other server-side entry point that doesn't go through the chat agent.
-2. A `research` row is created with empty `plan` and a `research_run` job is enqueued.
-3. The orchestrator runs all five phases including the planner LLM call (since `plan` is empty).
-4. Same completion path as the agent-driven flow.
+### B) Background research run
+
+1. A **research-mode automation** fires, on its schedule or from **Run now**. It creates a `research` row with the automation's prompt as the question, links it to the automation's conversation, and queues a `research_run` job at priority 100.
+   `startResearchCommand({ query, conversationId?, runId?, model? })` does the same for an interactive caller, at priority 150. The chat composer has a **Research** button built to call it, but the chat page does not currently turn that button on.
+2. The job worker runs the orchestrator (`runResearchLoop`): it plans sub-questions, searches for each, reads the best pages, looks for gaps and searches again, then writes the cited report.
+3. When the run completes, the user gets an in-app notification and, when configured, a web push. The report is at `/research/{id}` and listed on `/research`. If the run is linked to a conversation, it also shows in that chat's right-hand rail under **Research**, with its status and progress while it runs.
 
 ### C) Discussion of completed reports
 
-The Research agent isn't only an initiator — once a report is in the conversation context, the agent answers follow-up questions about the findings without re-proposing a plan. It cites sources, distinguishes "established / contested / speculative" claims, and surfaces disagreements between sources rather than flattening them.
+The Research agent isn't only an initiator. Once a report or earlier findings are in the conversation, it answers follow-up questions directly without writing a new plan. It cites sources, distinguishes "established / contested / speculative" claims, and surfaces disagreements between sources rather than flattening them.
 
 ## Roles and permissions
 
-- **Owner (per row)** — Set on creation from the requesting user. All read/cancel operations enforce ownership at the remote-function boundary; cross-user access returns 403-equivalent errors.
-- **Research agent** — Has read-only tool access (`READ_ONLY_TOOL_NAMES` allowlist). Can call `propose_research_plan`, `web_search`, `web_fetch`, `pdf_read`, and other read-only tools. Apart from writing its plan file it cannot edit files or run shell — for those, the user switches to the Chat or Autonomous agent.
-- **Mandatory approval** — `propose_research_plan` is in `MANDATORY_APPROVAL_TOOLS`, meaning the runtime requires explicit user approval regardless of per-user `approvalRequiredTools` settings. In detached/automation runs without an approval surface, the tool fails closed.
+- **Owner (per row)** — Set on creation from the requesting user. All read and cancel operations on research runs enforce ownership at the remote-function boundary; cross-user access returns 403-equivalent errors.
+- **Research agent** — Shares one allow-list of tools with the Plan agent (`READ_ONLY_TOOL_NAMES`): `web_search`, `web_fetch`, `pdf_read`, reading and searching files, `list_agents` and other read-only tools. On top of those it has `Write`, so it can write its plan file (a deliberate decision, issue #67), and `request_plan_approval`. It cannot run shell commands, edit files in place, push code or open pull requests.
+- **Handoff approval** — `request_plan_approval` is in `MANDATORY_APPROVAL_TOOLS`, so the user must approve every handoff, in every permission mode. In automation runs and other runs with nobody to approve, it fails closed.
+- **The agent that does the research** — Usually Chat, which has full tool access. Its own approval settings apply to what it does after the handoff.
 - **Job worker** — Picks up `research_run` jobs from the durable queue and runs `runResearchLoop`. Cancellation flows through both the worker's `checkCancellation` callback and a direct check of the `research.status` column on every phase boundary.
 
 ## Integrations
 
-- **LLM (chat.server / OpenRouter)** — Used in three phases: planner (only when `plan` is empty), reflection (per round), and synthesizer. Cost is logged per-call to the usage ledger; the cumulative spend is rolled up onto `research.costUsd`.
-- **Web search + fetch** — `web_search` returns ~8 hits per sub-question; `web_fetch` reads up to `maxFetchChars` per page. Fan-out is capped at `PARALLEL_FETCH_CONCURRENCY × urlsPerQuestion` so wall-clock stays sane.
-- **Job queue (`jobs` table)** — `research_run` is the registered handler. Priority defaults to 150 (above background work). Lease/heartbeat lifecycle is the standard durable-job pattern.
-- **Notifications (`notifications`, `pushSubscriptions` tables)** — In-app row created on every successful completion; web push fires when VAPID keys are present.
+- **LLM (chat.server / OpenRouter)** — Background runs use it in three phases: planner, reflection (per round), and synthesizer. Cost is logged per call to the usage ledger; the cumulative spend is rolled up onto `research.costUsd`. Research in a chat is ordinary chat turns, billed like any other.
+- **Web search + fetch** — `web_search` returns ~8 hits per sub-question; `web_fetch` reads up to `maxFetchChars` per page. In a background run, fan-out is capped at `PARALLEL_FETCH_CONCURRENCY × urlsPerQuestion` so wall-clock stays sane.
+- **Job queue (`jobs` table)** — `research_run` is the registered handler. Interactive runs use priority 150 and research-mode automations 100, so a scheduled report never gets ahead of one the user started. Lease/heartbeat lifecycle is the standard durable-job pattern.
+- **Notifications (`notifications`, `pushSubscriptions` tables)** — In-app row created on every successful background run; web push fires when VAPID keys are present.
 - **Research feed (`/research`)** — Reads research rows directly and projects them as `kind: 'research'` items alongside generated images. The research detail page at `/research/[id]` is the canonical view of a run.
+- **Agents** — The Research agent's handoff uses the agents domain's `request_plan_approval` and `list_agents`; see [docs/agents/agents.md](../agents/agents.md).
 
 ## Business rules
 
-- **Plan size**: 2–12 sub-questions accepted by the tool schema; the orchestrator caps at `config.maxSubQuestions` (default 8) on the planner-generated path.
-- **Sub-question shape**: each must be 1–300 characters and concrete (the agent's identity skill instructs it to avoid vague "what is X?" questions).
-- **Source cap**: the reflection loop bails when `researchSources` count reaches `config.maxTotalSources` (default 32) so a model that hallucinates infinite gaps can't run away with the cost.
+- **Plan first, act after approval**: in a chat, the Research agent writes and posts a plan and waits for approval before any research is carried out. The agent that does the work starts by reading the approved plan file.
+- **Every handoff is approved by the user**: there is no setting that skips the approval card, and a run with no one to approve it cannot hand off.
+- **The plan file must exist**: approving a handoff whose plan file was never written fails, and the conversation stays with the Research agent.
+- **Sub-question count**: the Research agent is told to write 4–8 sub-questions; this is guidance, not enforced. A background run's planner is capped at `config.maxSubQuestions` (default 8).
+- **Sub-question shape**: each should be concrete and searchable; the agent's instructions steer it away from vague "what is X?" questions.
+- **Source cap**: a background run's reflection loop stops when `researchSources` reaches `config.maxTotalSources` (default 32), so a model that keeps finding gaps can't run away with the cost.
 - **Reflection rounds**: capped at `config.maxReflectionRounds` (default 3). An empty gap list ends the loop early.
 - **Per-source extracted text cap**: ~50k chars by default (`config.maxFetchChars`). Content beyond is truncated; the source row sets `truncated=true`.
 - **Public web only**: page reads go through the same egress guard as the `web_fetch` tool (see [tools spec — Web access safety](../tools/spec.md#web-access-safety-the-egress-guard)). A search hit that points at, or redirects to, a private, loopback or cloud-metadata address fails that fetch instead of becoming a source. Each page is read in its own throwaway browser session, so parallel fetches cannot mix up each other's pages.
-- **Cited only**: the synthesizer is required to cite every factual claim with `[N]`. Sources not referenced in the final report stay with `citedInReport=false` in the table — useful for audit / improvement, hidden from the report by default.
-- **Pre-seeded plan**: when `research.plan` is non-empty at the start of `runResearchLoop`, Phase 1 is skipped and the plan is used as-is. Recorded as a step with `payload.phase = 'preapproved'` so the trace UI is honest about source.
-- **Refine-via-reply**: while a `propose_research_plan` is awaiting approval, sending a chat message in the composer auto-Declines the plan first. The agent receives a "denied" tool result followed by the user's new turn and can propose a revised plan in the next round.
+- **Cited only**: a background run's synthesizer must cite every factual claim with `[N]`. Sources not referenced in the final report stay with `citedInReport=false` in the table — useful for audit and improvement, hidden from the report by default.
+- **Pre-seeded plan**: when a research row already has sub-questions at the start of `runResearchLoop`, the planner step is skipped and those are used, recorded as a step with `payload.phase = 'preapproved'`. Nothing creates such a row today; the removed `propose_research_plan` flow did.
 - **Cancellation**: idempotent — `cancelResearchCommand` flips `research.status` and cancels the underlying `research_run` job. The runner notices both signals at the next safe boundary.
-- **Notification on success only**: failed/canceled runs do NOT fire a notification (the user already knows; the sidebar shows the failure state if open).
+- **Notification on success only**: failed and canceled background runs do not send a notification.

@@ -14,6 +14,9 @@ import {
 	shouldIncludeSystemSkill,
 } from './skills-system.server'
 import { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
+import { z } from 'zod'
+import { UserInputError } from '$lib/server/user-input-error'
+import { parseSkillPackage, parseSkillSource, serializeSkillSource } from './skill-source'
 
 // Re-export so external callers ($lib/skills/skills.server) keep working after the split.
 export { backfillSkillEmbeddings, refreshSkillEmbedding } from './skills-embeddings.server'
@@ -104,10 +107,10 @@ export async function upsertSkillFromSource(input: {
 
 	if (existing) {
 		if (isSystemSkillId(existing.id)) {
-			throw new Error('System skill is read-only')
+			throw new UserInputError('System skill is read-only')
 		}
 		if (input.mode === 'create') {
-			throw new Error(`A skill named "${input.name}" already exists. Use overwrite mode to replace it.`)
+			throw new UserInputError(`A skill named "${input.name}" already exists. Use overwrite mode to replace it.`)
 		}
 	}
 
@@ -186,6 +189,93 @@ export async function upsertSkillFromSource(input: {
 
 	void refreshSkillEmbedding(skillId)
 	return { id: skillId, created, updated }
+}
+
+/** What a resource file must look like to be imported — the same limits the import command's input has. */
+export const skillResourceSchema = z.object({
+	name: z.string().trim().min(1, 'is empty').max(200, 'is longer than 200 characters'),
+	description: z.string().trim().max(500, 'is longer than 500 characters').optional(),
+	content: z.string().min(1, 'is empty'),
+})
+
+/**
+ * A skill as a SKILL.md package: the document and its resource files. The export dialog
+ * joins them into the one text it copies with `serializeSkillPackage`.
+ *
+ * Everything the import path reads back is carried — `category` included. It was left
+ * out, and an overwrite import writes `category: null` when the frontmatter has none, so
+ * exporting an identity or hook skill and importing it again dropped it out of the
+ * always-included set.
+ */
+export async function exportSkillPackage(id: string) {
+	const skill = await getSkillById(id)
+	if (!skill) return null
+	const skillMd = serializeSkillSource({
+		name: skill.name,
+		description: skill.description,
+		content: skill.content,
+		category: skill.category,
+		tags: skill.tags,
+		enabled: skill.enabled,
+	})
+	const resources = skill.files.map((f) => ({
+		name: f.name,
+		description: f.description ?? '',
+		content: f.content,
+	}))
+	return { name: skill.name, skillMd, resources }
+}
+
+/**
+ * Import pasted text: a plain SKILL.md, or a whole package with its resource files
+ * (`parseSkillPackage`). Resources passed explicitly win over any in the text. A plain
+ * SKILL.md with none leaves an existing skill's files as they are on overwrite.
+ */
+export async function importSkillPackage(input: {
+	source: string
+	mode: 'create' | 'overwrite'
+	resources?: Array<{ name: string; description?: string; content: string }>
+}) {
+	const { parsed, resources } = readSkillPackage(input)
+	const result = await upsertSkillFromSource({
+		mode: input.mode,
+		name: parsed.frontmatter.name,
+		description: parsed.frontmatter.description,
+		content: parsed.body,
+		category: parsed.frontmatter.category,
+		tags: parsed.frontmatter.tags,
+		enabled: parsed.frontmatter.enabled,
+		resources,
+	})
+	return { id: result.id, name: parsed.frontmatter.name, created: result.created, updated: result.updated }
+}
+
+/**
+ * Parse and check the pasted text before anything is written. Every refusal here is one the
+ * person pasting can fix — a header without `name`, a resource file missing its closing line,
+ * an empty resource file — so it is raised as a `UserInputError` and the Import dialog shows
+ * the reason. As plain Errors they reached the page as a 500 and read "Import failed".
+ */
+function readSkillPackage(input: { source: string; resources?: Array<{ name: string; description?: string; content: string }> }) {
+	let pkg: ReturnType<typeof parseSkillPackage>
+	let parsed: ReturnType<typeof parseSkillSource>
+	try {
+		pkg = parseSkillPackage(input.source)
+		parsed = parseSkillSource(pkg.source)
+	} catch (err) {
+		throw new UserInputError(err instanceof Error ? err.message : String(err))
+	}
+	if (input.resources) return { parsed, resources: input.resources }
+	if (pkg.resources.length === 0) return { parsed, resources: undefined }
+	const checked = z.array(skillResourceSchema).safeParse(pkg.resources)
+	if (!checked.success) {
+		const issue = checked.error.issues[0]
+		const [index, field] = issue?.path ?? []
+		const name = typeof index === 'number' ? pkg.resources[index]?.name?.trim() : ''
+		const which = name ? `"${name}"` : `number ${Number(index) + 1}`
+		throw new UserInputError(`Resource file ${which}: ${String(field ?? 'entry')} ${issue?.message ?? 'is not valid'}`)
+	}
+	return { parsed, resources: checked.data }
 }
 
 export async function getSkillById(id: string) {

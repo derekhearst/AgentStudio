@@ -56,6 +56,9 @@ test.describe('ui/confirm-dialog', () => {
 			const dialog = page.getByRole('alertdialog')
 			await expect(dialog).toBeVisible()
 			await expect(dialog).toContainText('This cannot be undone.')
+			// A project with no repository still loses its directory — knowledge files included —
+			// so it is warned too. It used to be told only that the delete could not be undone.
+			await expect(dialog).toContainText('knowledge files and anything agents wrote there')
 
 			await answerConfirmDialog(page, 'Delete', { decline: true })
 

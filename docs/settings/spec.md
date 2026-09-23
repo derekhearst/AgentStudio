@@ -82,6 +82,8 @@ One row per user. Created with defaults when the user first accesses settings.
 
 - **`getSettings(userId)`** — returns the user's settings, creating defaults if the row does not exist. All callers use this — never query `appSettings` directly.
 - **`updateSettings(userId, patch)`** — accepts a partial patch and merges it. JSONB fields are merged at the top level (not deep-merged). Callers must pass the full JSONB object for any nested field they want to change.
+- **Reset** puts every setting back to its default — the default model, the transcription model, notifications, budget, context, tools and memory — in one step. Settings added later are included automatically, because Reset works from the same list of defaults that a new user starts with.
+- After **Save** or **Reset**, other pages read the new values straight away. For example, a chat started from the home page uses the default model you just saved, not the one from before.
 - Settings are consumed by multiple domains at runtime: `contextConfig` by context assembly, `budgetConfig` by cost enforcement, `memoryConfig` by memory recall, `toolConfig` by tool execution, `notificationPrefs` by notification dispatch.
 
 ## Settings UI
@@ -95,6 +97,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Tools** — approval-required list
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
+- **Job queue** (`/settings/jobs`) and **Hook invocations** (`/settings/hooks`) — admin views of background work. **Refresh** fetches the latest rows from the server, and if they cannot be loaded the page shows the reason instead of a spinner.
 - **System** (read-only) — a checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway, and each integration (OpenRouter, web search, GitHub, webhooks, push, external cron). Each row says whether it is in place and names the environment variable that controls it, never its value. These are deploy-time settings, not stored in `appSettings` — first run collects only the owner account (see [../auth/auth.md](../auth/auth.md)).
 
 

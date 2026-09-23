@@ -71,6 +71,14 @@ const BACKOFF_SCHEDULE_MS = [60_000, 300_000] as const
 export const AUTOMATION_MAX_BACKOFF_MS = 900_000
 
 /**
+ * Days of `automation_runs` history kept; the dispatch tick prunes older rows on the hour.
+ * Anything that reads the ledger over a window can only see this far back — the usage
+ * digest (#38) caps its window here and stops comparing against a previous window that is
+ * no longer fully kept.
+ */
+export const AUTOMATION_RUN_RETENTION_DAYS = 30
+
+/**
  * True when a tick whose `attempt`-th try just failed should be retried at all.
  * `attempt` is 1-based; the last allowed attempt returns false.
  */

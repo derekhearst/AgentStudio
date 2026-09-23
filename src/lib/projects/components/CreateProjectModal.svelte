@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { untrack } from 'svelte'
 	import {
 		createProjectCommand,
 		listGithubImportCandidatesQuery,
 		listProjectsQuery,
 	} from '$lib/projects/projects.remote'
+	import { fetchFresh } from '$lib/ui/fresh-query'
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number]
 	type GithubCandidate = Awaited<ReturnType<typeof listGithubImportCandidatesQuery>>['candidates'][number]
@@ -51,9 +53,17 @@
 	let githubError = $state<string | null>(null)
 	let githubFilter = $state('')
 
+	// Re-seed each time the modal opens, and only then: `open` is the one value this effect
+	// may track. The reset used to read `modalTab` and `githubCandidates` after writing them,
+	// so every tab click and every GitHub list that arrived re-ran it — snapping the tab back
+	// to `initialTab` and wiping what had been typed, which left the Local, GitHub and URL
+	// tabs impossible to use. `initialTab` is read untracked: it matters at open time only.
 	$effect(() => {
 		if (!open) return
-		// Re-seed when the modal opens. `initialTab` may have changed between opens.
+		untrack(resetForm)
+	})
+
+	function resetForm() {
 		modalTab = initialTab
 		creating = false
 		formError = null
@@ -63,7 +73,7 @@
 		formDefaultBranch = 'main'
 		formCloneUrl = ''
 		if (modalTab === 'github' && githubCandidates.length === 0) void loadGithubCandidates()
-	})
+	}
 
 	const filteredGithub = $derived(
 		githubFilter.trim()
@@ -75,7 +85,9 @@
 		githubLoading = true
 		githubError = null
 		try {
-			const res = await listGithubImportCandidatesQuery()
+			// Fresh: the Refresh button calls this too, and a cached read handed back the list
+			// the modal already showed.
+			const res = await fetchFresh(listGithubImportCandidatesQuery())
 			githubCandidates = res.candidates
 			if (res.errorMessage) githubError = res.errorMessage
 		} catch (e) {

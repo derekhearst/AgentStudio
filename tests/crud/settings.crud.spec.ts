@@ -29,10 +29,11 @@ test.describe('/settings — CRUD lifecycle', () => {
 		const [snapshot] = await sql<
 			{
 				default_model: string
+				transcription_model: string
 				budget_config: { dailyLimit: number | null; monthlyLimit: number | null } | null
 				memory_config: { topK: number; enabled: boolean } | null
 			}[]
-		>`select default_model, budget_config, memory_config from app_settings where user_id = ${userId}`
+		>`select default_model, transcription_model, budget_config, memory_config from app_settings where user_id = ${userId}`
 
 		try {
 			await withErrorCapture(page, async () => {
@@ -82,14 +83,28 @@ test.describe('/settings — CRUD lifecycle', () => {
 					{ description: 'audit_events row for settings.updated' },
 				)
 
+				// A non-default transcription model, set behind the page's back. Reset used to
+				// name the fields it reset one by one and skipped this one.
+				const sentinelTranscriptionModel = `${prefix}/audio-model`
+				// DEFAULT_SETTINGS.transcriptionModel. Written out rather than imported: the
+				// defaults live in settings.server.ts, and importing that module from this worker
+				// would open a database pool and run the bootstrap.
+				const defaultTranscriptionModel = 'google/gemini-2.5-flash'
+				await sql`
+					update app_settings set transcription_model = ${sentinelTranscriptionModel}
+					where user_id = ${userId}
+				`
+
 				// ── Reset: click Reset
 				await page.getByRole('button', { name: 'Reset' }).click()
 				await pollDb(
-					() => sql<{ budget_config: { dailyLimit: number | null } | null }[]>`
-						select budget_config from app_settings where user_id = ${userId}
+					() => sql<{ budget_config: { dailyLimit: number | null } | null; transcription_model: string }[]>`
+						select budget_config, transcription_model from app_settings where user_id = ${userId}
 					`,
-					(rows) => rows[0]?.budget_config?.dailyLimit !== sentinelDaily,
-					{ description: 'reset wiped the sentinel daily limit' },
+					(rows) =>
+						rows[0]?.budget_config?.dailyLimit !== sentinelDaily &&
+						rows[0]?.transcription_model === defaultTranscriptionModel,
+					{ description: 'reset wiped the sentinel daily limit and transcription model' },
 				)
 
 				// Audit invariant: settings.reset row written
@@ -115,13 +130,12 @@ test.describe('/settings — CRUD lifecycle', () => {
 				await sql`
 					update app_settings
 					set default_model = ${snapshot.default_model},
+					    transcription_model = ${snapshot.transcription_model},
 					    budget_config = ${sql.json(snapshot.budget_config ?? {})},
 					    memory_config = ${sql.json(snapshot.memory_config ?? {})}
 					where user_id = ${userId}
 				`
 			}
-			// Suppress unused-var warning
-			void prefix
 		}
 	})
 })
