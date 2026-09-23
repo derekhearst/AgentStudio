@@ -7,9 +7,8 @@ import type { MonitorRow } from './monitors.schema'
 import {
 	buildModelQuestionPrompt,
 	buildObservation,
-	evaluateComparison,
-	extractPath,
 	monitorConditionSchema,
+	observeToolResult,
 	parseYesNo,
 	stableStringify,
 	MONITOR_DEFAULT_MODEL,
@@ -53,19 +52,7 @@ export async function evaluateMonitorCondition(monitor: MonitorRow, now = new Da
 	try {
 		if (condition.kind === 'tool_result') {
 			const raw = await runObservationTool(monitor.userId, condition.tool, condition.args)
-			const extracted = extractPath(raw, condition.extract)
-			const candidate = buildObservation(extracted, false, undefined, now)
-			const comparison = evaluateComparison({
-				compare: condition.compare,
-				current: candidate,
-				previous: monitor.lastObservation ?? null,
-				expected: condition.value,
-			})
-			return {
-				outcome: 'observed',
-				met: comparison.met,
-				observation: { ...candidate, met: comparison.met, note: comparison.reason },
-			}
+			return observeToolResult(condition, raw, monitor.lastObservation ?? null, now)
 		}
 
 		// ── model path ──

@@ -33,7 +33,10 @@ export const MONITOR_HARD_MAX_CHECKS = 2_000
 export const MONITOR_MAX_CONSECUTIVE_ERRORS = 5
 /** Errored checks back off geometrically, but never past this multiple of the interval. */
 export const MONITOR_MAX_ERROR_BACKOFF_MULTIPLIER = 8
-/** How much of an observed value we keep on the row. The hash covers the whole thing. */
+/**
+ * How much of an observed value we keep on the row, for display. The hash covers the whole
+ * thing, and so do the comparisons — this cap is about row size, not about what is seen.
+ */
 export const MONITOR_OBSERVATION_MAX_CHARS = 4_000
 /** How much fetched context we hand the cheap model. Keeps the yes/no call cheap. */
 export const MONITOR_MODEL_CONTEXT_MAX_CHARS = 12_000
@@ -158,7 +161,10 @@ export function validateActionConfig(action: MonitorAction, config: MonitorActio
 // ─────────── Observation ───────────
 
 export type MonitorObservation = {
-	/** Normalized, truncated rendering of what was seen. Shown in the UI. */
+	/**
+	 * Normalized rendering of what was seen, cut at `MONITOR_OBSERVATION_MAX_CHARS`. For
+	 * display only: a comparison reads the full value, which is never stored.
+	 */
 	value: string
 	/** Hash of the FULL normalized value — the change-detection key. */
 	hash: string
@@ -215,7 +221,11 @@ export function hashValue(input: string): string {
 }
 
 export function buildObservation(raw: unknown, met: boolean, note?: string, now = new Date()): MonitorObservation {
-	const full = stableStringify(raw)
+	return observationFromText(stableStringify(raw), met, note, now)
+}
+
+/** `buildObservation` for a value already rendered by `stableStringify`. */
+export function observationFromText(full: string, met: boolean, note?: string, now = new Date()): MonitorObservation {
 	const truncated = full.length > MONITOR_OBSERVATION_MAX_CHARS
 	return {
 		value: truncated ? `${full.slice(0, MONITOR_OBSERVATION_MAX_CHARS)}…` : full,
@@ -260,6 +270,13 @@ export type ComparisonInput = {
 	previous: MonitorObservation | null
 	/** Operand for equals / contains / matches. */
 	expected?: string
+	/**
+	 * The full normalized value, when the caller has it. `current.value` is cut at
+	 * `MONITOR_OBSERVATION_MAX_CHARS` with a trailing "…", so comparing against it would miss
+	 * anything past the cut — a `not_contains "Out of stock"` whose phrase sits at character
+	 * 9,000 fired on the first check — and `equals` could never match a long value.
+	 */
+	fullValue?: string
 }
 
 export type ComparisonResult = { met: boolean; reason: string }
@@ -274,7 +291,7 @@ export type ComparisonResult = { met: boolean; reason: string }
  */
 export function evaluateComparison(input: ComparisonInput): ComparisonResult {
 	const { compare, current, previous, expected } = input
-	const value = current.value
+	const value = input.fullValue ?? current.value
 	switch (compare) {
 		case 'changed': {
 			if (!previous) return { met: false, reason: 'baseline recorded — first observation never fires' }
@@ -329,6 +346,51 @@ function normalizeScalar(value: string): string {
 function isEmptyRendering(value: string): boolean {
 	const trimmed = value.trim()
 	return trimmed === '' || trimmed === '""' || trimmed === 'null' || trimmed === '[]' || trimmed === '{}'
+}
+
+export type ToolResultObservation =
+	| { outcome: 'observed'; observation: MonitorObservation; met: boolean }
+	| { outcome: 'error'; message: string }
+
+/**
+ * The `tool_result` half of a check once the tool has answered: narrow the result, compare
+ * it, and build the observation to store. Pure, so the rules are pinned without a tool call.
+ *
+ * Two rules live here:
+ *   - the comparison reads the FULL value; only the stored `value` is truncated;
+ *   - an `extract` path that is not in the result is an ERROR, not an observation of
+ *     "null". The create form pre-fills `text` (right for `web_fetch`), and a tool whose
+ *     result has no `text` would otherwise observe the literal "null" on every check —
+ *     a `changed` monitor never fires and quietly burns its budget, a `not_equals` one
+ *     fires on the first check. An explicit `null` at the path is still a real value.
+ */
+export function observeToolResult(
+	condition: ToolResultCondition,
+	raw: unknown,
+	previous: MonitorObservation | null,
+	now = new Date(),
+): ToolResultObservation {
+	const extracted = extractPath(raw, condition.extract)
+	if (extracted === undefined && condition.extract?.trim()) {
+		return {
+			outcome: 'error',
+			message: `extract path "${condition.extract.trim()}" was not found in the ${condition.tool} result`,
+		}
+	}
+	const full = stableStringify(extracted)
+	const candidate = observationFromText(full, false, undefined, now)
+	const comparison = evaluateComparison({
+		compare: condition.compare,
+		current: candidate,
+		previous,
+		expected: condition.value,
+		fullValue: full,
+	})
+	return {
+		outcome: 'observed',
+		met: comparison.met,
+		observation: { ...candidate, met: comparison.met, note: comparison.reason },
+	}
 }
 
 /**

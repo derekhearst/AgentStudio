@@ -12,6 +12,7 @@ import {
 	hashValue,
 	isTerminalStatus,
 	monitorConditionSchema,
+	observeToolResult,
 	parseYesNo,
 	shouldFire,
 	stableStringify,
@@ -24,7 +25,9 @@ import {
 	MONITOR_MAX_INTERVAL_SECONDS,
 	MONITOR_MIN_INTERVAL_SECONDS,
 	MONITOR_MODEL_CONTEXT_MAX_CHARS,
+	MONITOR_OBSERVATION_MAX_CHARS,
 	type MonitorObservation,
+	type ToolResultCondition,
 } from '../src/lib/monitors/condition'
 
 /**
@@ -156,6 +159,93 @@ test.describe('monitors/condition — comparisons', () => {
 		expect(() => evaluateComparison({ compare: 'matches', current, expected: '([', previous: null })).toThrow(
 			/invalid regular expression/i,
 		)
+	})
+
+	test('comparisons read the full value, not the stored cut', () => {
+		// The stored value stops at MONITOR_OBSERVATION_MAX_CHARS and ends in "…"; the text
+		// the monitor is watching for can sit anywhere after that.
+		const page = `${'lorem ipsum '.repeat(750)}Out of stock${' dolor'.repeat(100)}`
+		expect(page.indexOf('Out of stock')).toBeGreaterThan(MONITOR_OBSERVATION_MAX_CHARS)
+		const stored = observation(page)
+		expect(stored.value).not.toContain('Out of stock')
+
+		const compare = (compare: 'contains' | 'not_contains' | 'matches' | 'equals', expected: string) =>
+			evaluateComparison({ compare, current: stored, previous: null, expected, fullValue: page }).met
+
+		expect(compare('contains', 'out of stock'), 'found past the cut').toBe(true)
+		expect(compare('not_contains', 'Out of stock'), 'still out of stock — must not fire').toBe(false)
+		expect(compare('matches', 'dolor$'), 'an anchor at the real end, not at the "…"').toBe(true)
+		expect(compare('equals', page), 'a long value can equal its operand').toBe(true)
+	})
+})
+
+// ─────────── observing a tool result ───────────
+
+test.describe('monitors/condition — observeToolResult', () => {
+	const webFetch = (extract: string | undefined, compare: 'changed' | 'not_contains' | 'not_equals', value?: string) =>
+		monitorConditionSchema.parse({
+			kind: 'tool_result',
+			tool: 'web_fetch',
+			args: { url: 'https://example.com/product' },
+			extract,
+			compare,
+			value,
+		}) as ToolResultCondition
+
+	test('a phrase past the storage cut is seen, and the stored value is still cut', () => {
+		const text = `${'Product details. '.repeat(600)}Out of stock`
+		const result = observeToolResult(
+			webFetch('text', 'not_contains', 'Out of stock'),
+			{ title: 'Widget', text, fetchedAt: NOW.toISOString() },
+			null,
+			NOW,
+		)
+		expect(result.outcome).toBe('observed')
+		if (result.outcome !== 'observed') return
+		expect(result.met, 'the item is still out of stock').toBe(false)
+		expect(result.observation.truncated).toBe(true)
+		expect(result.observation.value.length).toBeLessThanOrEqual(MONITOR_OBSERVATION_MAX_CHARS + 1)
+		expect(result.observation.hash).toBe(hashValue(text))
+	})
+
+	test('an extract path that is not in the result is an error, not the value "null"', () => {
+		// list_pull_requests returns an array; the form used to leave `extract: "text"` in place
+		// when the tool changed, and every check then observed the literal "null".
+		const condition = monitorConditionSchema.parse({
+			kind: 'tool_result',
+			tool: 'list_pull_requests',
+			args: { owner: 'acme', repo: 'widgets' },
+			extract: 'text',
+			compare: 'not_equals',
+			value: 'x',
+		}) as ToolResultCondition
+		const result = observeToolResult(condition, [{ number: 412, title: 'Fix it' }], null, NOW)
+		expect(result.outcome).toBe('error')
+		if (result.outcome !== 'error') return
+		expect(result.message).toContain('"text"')
+		expect(result.message).toContain('list_pull_requests')
+	})
+
+	test('an explicit null at the path is a real observation', () => {
+		const condition = monitorConditionSchema.parse({
+			kind: 'tool_result',
+			tool: 'get_pull_request',
+			args: { pullRequestId: '00000000-0000-0000-0000-000000000000' },
+			extract: 'mergedAt',
+			compare: 'not_empty',
+		}) as ToolResultCondition
+		const result = observeToolResult(condition, { number: 412, mergedAt: null }, null, NOW)
+		expect(result.outcome).toBe('observed')
+		if (result.outcome !== 'observed') return
+		expect(result.met, 'not merged yet').toBe(false)
+	})
+
+	test('no extract compares the whole result', () => {
+		const result = observeToolResult(webFetch(undefined, 'changed'), { text: 'hello' }, null, NOW)
+		expect(result.outcome).toBe('observed')
+		if (result.outcome !== 'observed') return
+		expect(result.observation.value).toBe('{"text":"hello"}')
+		expect(result.met, 'first check of `changed` is a baseline').toBe(false)
 	})
 })
 

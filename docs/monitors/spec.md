@@ -39,7 +39,12 @@ Monitors deliberately cannot change anything while they watch. They observe with
 - `changed` — fires when the value differs from the last observation. **The first check only records a baseline and never fires**; without that rule every monitor would fire the instant it was created.
 - `equals`, `not_equals`, `contains`, `not_contains`, `matches` (regex), `not_empty` — test the value directly.
 
-Narrowing matters. A whole `web_fetch` result carries a `fetchedAt` timestamp that changes every single check, so `extract: "text"` is usually what you want.
+Narrowing matters. A whole `web_fetch` result carries a `fetchedAt` timestamp that changes every single check, so `extract: "text"` is usually what you want. The creation form suggests `text` for `web_fetch` only; for every other tool it starts empty, meaning "compare the whole result".
+
+Two rules about what a comparison sees:
+
+- **It sees the whole value.** Only the first 4,000 characters of an observation are stored and shown as the last observation, to keep the row small. The comparison itself reads everything the tool returned, so "does not contain *Out of stock*" is judged against the whole page, not just its top.
+- **A missing path is an error.** If `extract` names a field the tool's result does not have — `text` on a pull-request list, say — the check fails with "extract path … was not found" rather than quietly observing the word `null` on every check. It goes down the normal error path, so a monitor pointed at the wrong field retires as `failed` after five checks and says why. A field that is present but empty (`null`) is still a real observation.
 
 **`model_question`** fetches context with the same read-only tools, then asks a cheap model a yes/no question about it — "have all the checks on this PR finished?", "does this page now mention a shipping date?". This is what makes monitors general, and it is the only part that costs money per check, so it is gated (below).
 
