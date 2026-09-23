@@ -12,12 +12,13 @@
  *   - drawers flagged `pinned` are force-added to the pool even when they fall outside
  *     the vector top-N, and receive a configurable additive boost.
  *
- * The HNSW index on `memory_drawers.embedding` covers every user's drawers, and pgvector
+ * The HNSW index on `memory_drawers.embedding` covers every drawer in the table, and pgvector
  * applies the WHERE clause (this user, recallable) *after* the index scan, which by default
- * returns only `hnsw.ef_search` (40) rows. In a shared database those 40 were mostly other
- * users' drawers, so a user with a small palace could get a handful of candidates or none.
- * `nearestRecallable` lets the scan keep going until the pool is full, and falls back to an
- * exact search over the user's own drawers when it still comes up short.
+ * returns only `hnsw.ef_search` (40) rows. When those 40 were mostly drawers recall must skip
+ * (never-recall ones, or another palace's in a shared database), a palace could get a handful
+ * of candidates or none. `nearestRecallable` searches a small palace exactly, lets the scan of
+ * a bigger one keep going until the pool is full, and falls back to the exact search when it
+ * still comes up short.
  *
  * Returns ranked drawer rows joined back to room/closet/wing for context, each carrying
  * its component scores so a bad recall can be explained after the fact.
@@ -91,6 +92,14 @@ type Executor = typeof db | Parameters<Parameters<(typeof db)['transaction']>[0]
 /** pgvector's ceiling for `hnsw.ef_search`. */
 const MAX_EF_SEARCH = 1000
 
+/**
+ * A palace with at most this many recallable drawers is searched exactly, without the index.
+ * Comparing the query with a couple of thousand vectors is cheap; walking the shared index for
+ * a pool it can never fill (a palace smaller than the pool) costs up to `hnsw.max_scan_tuples`
+ * (20,000 by default) on every recall before the exact search runs anyway.
+ */
+export const EXACT_SEARCH_MAX_DRAWERS = 2_000
+
 let iterativeScanSupport: Promise<boolean> | null = null
 
 /**
@@ -117,24 +126,34 @@ function supportsIterativeScan(): Promise<boolean> {
 /**
  * The `limit` recallable drawers nearest `vec`, by cosine distance.
  *
- * First through the HNSW index, told to keep scanning until `limit` rows pass the filter
- * (`hnsw.iterative_scan`, pgvector 0.8+; `relaxed_order` is fine because recall re-scores and
- * re-sorts everything) and to consider at least `limit` candidates (`hnsw.ef_search`). Both
- * are set for the transaction only (`set_config(…, true)`, i.e. `SET LOCAL`), so they never
- * outlive it on a pooled connection.
+ * A palace of at most `exactAtMost` recallable drawers (`countUpTo` counts them, stopping one
+ * past that) is searched exactly, straight away. Adding `+ 0` to the distance is what makes it
+ * exact: the index can only serve `ORDER BY embedding <=> …` as written, so the planner reads
+ * the user's rows and sorts.
  *
- * If that still returns fewer than `limit` — pgvector older than 0.8, or a user whose drawers
- * sit beyond the scan's tuple budget among everyone else's — the answer comes from an exact
- * search over this user's drawers instead. Adding `+ 0` to the distance is what makes it
- * exact: the index can only serve `ORDER BY embedding <=> …` as written, so the planner uses
- * the user's b-tree and sorts. A user with fewer recallable drawers than `limit` takes this
- * path every time, which for a palace that small is cheap.
+ * A bigger one goes through the HNSW index, told to keep scanning until `limit` rows pass the
+ * filter (`hnsw.iterative_scan`, pgvector 0.8+; `relaxed_order` is fine because recall
+ * re-scores and re-sorts everything) and to consider at least `limit` candidates
+ * (`hnsw.ef_search`). Both are set for the transaction only (`set_config(…, true)`, i.e.
+ * `SET LOCAL`), so they never outlive it on a pooled connection. If that still returns fewer
+ * than `limit` — pgvector older than 0.8, or recallable drawers sitting beyond the scan's
+ * tuple budget among ones recall must skip — the answer comes from the exact search instead.
+ *
+ * Exported for the specs, which drive each branch.
  */
-async function nearestRecallable<T>(
-	query: (orderBy: SQL, run: Executor) => Promise<T[]>,
-	vec: string,
-	limit: number,
-): Promise<T[]> {
+export async function nearestRecallable<T>(opts: {
+	query: (orderBy: SQL, run: Executor) => Promise<T[]>
+	countUpTo: (atMost: number) => Promise<number>
+	vec: string
+	limit: number
+	exactAtMost?: number
+}): Promise<T[]> {
+	const { query, vec, limit } = opts
+	const exactAtMost = opts.exactAtMost ?? EXACT_SEARCH_MAX_DRAWERS
+	const exact = () => query(sql`(${memoryDrawers.embedding} <=> ${vec}::vector) + 0`, db)
+
+	if ((await opts.countUpTo(exactAtMost + 1)) <= exactAtMost) return exact()
+
 	const iterative = await supportsIterativeScan()
 	const efSearch = Math.min(MAX_EF_SEARCH, Math.max(40, limit))
 	const viaIndex = await db.transaction(async (tx) => {
@@ -143,7 +162,17 @@ async function nearestRecallable<T>(
 		return query(sql`${memoryDrawers.embedding} <=> ${vec}::vector`, tx)
 	})
 	if (viaIndex.length >= limit) return viaIndex
-	return query(sql`(${memoryDrawers.embedding} <=> ${vec}::vector) + 0`, db)
+	return exact()
+}
+
+/**
+ * How many rows match `where` in `memory_drawers`, counting no further than `atMost` — so the
+ * question "is this palace small?" costs the same for a palace of a million drawers.
+ */
+async function countDrawersUpTo(where: SQL | undefined, atMost: number): Promise<number> {
+	const capped = db.select({ one: sql`1` }).from(memoryDrawers).where(where).limit(atMost).as('capped')
+	const [row] = await db.select({ n: sql<number>`count(*)::int` }).from(capped)
+	return Number(row?.n ?? 0)
 }
 
 function buildTsQuery(query: string): string {
@@ -212,11 +241,12 @@ export async function recall(userId: string, query: string, options: RecallOptio
 			.orderBy(orderBy)
 			.limit(limit)
 
-	const rows = await nearestRecallable(
-		(orderBy, run) => drawersWhere(recallable, orderBy, opts.candidatePoolSize, run),
+	const rows = await nearestRecallable({
+		query: (orderBy, run) => drawersWhere(recallable, orderBy, opts.candidatePoolSize, run),
+		countUpTo: (atMost) => countDrawersUpTo(recallable, atMost),
 		vec,
-		opts.candidatePoolSize,
-	)
+		limit: opts.candidatePoolSize,
+	})
 
 	// Pinned drawers are the user saying "always consider this". A boost alone would not
 	// deliver that, because a drawer outside the vector top-N never enters the pool at

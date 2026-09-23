@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { and, eq, like, sql as dsql } from 'drizzle-orm'
 import { acquireGlobalStateLock, getActiveUserId, getSql, uniquePrefix } from './helpers'
 import { stubOpenRouter, type OpenRouterStub } from './openrouter-stub'
 
@@ -117,37 +118,101 @@ async function makeCloset(userId: string) {
 
 /** The query vector the stub hands recall: every component 1. */
 const QUERY_VECTOR = Array.from({ length: 1536 }, () => 1)
+const QUERY_VECTOR_TEXT = `[${QUERY_VECTOR.join(',')}]`
 
-test.describe('memory/recall — candidates in a shared index', () => {
+/**
+ * 2,000 never-recall drawers exactly at the query vector, and three recallable ones further
+ * out (half their components match it), under `prefix`. Analysed afterwards, so the planner
+ * decides with the rows it will actually meet.
+ */
+async function seedCrowdedIndex(userId: string) {
+	const closetId = await makeCloset(userId)
+	const sql = getSql()
+	await sql`
+		insert into memory_drawers (closet_id, user_id, content, token_count, embedding, never_recall)
+		select ${closetId}, ${userId}, ${`${prefix} noise `} || g::text, 1, array_fill(1::real, array[1536])::vector, true
+		from generate_series(1, 2000) g
+	`
+	const wanted = [`${prefix} wanted 1`, `${prefix} wanted 2`, `${prefix} wanted 3`]
+	for (const content of wanted) {
+		await sql`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding)
+			values (
+				${closetId}, ${userId}, ${content}, 1,
+				(select array_agg(case when g <= 768 then 1::real else 0::real end order by g)
+				 from generate_series(1, 1536) g)::vector
+			)
+		`
+	}
+	await sql`analyze memory_drawers`
+	return wanted
+}
+
+/** Whether the installed pgvector has `hnsw.iterative_scan` (0.8+). */
+async function pgvectorHasIterativeScan() {
+	const [row] = await getSql()<{ extversion: string }[]>`select extversion from pg_extension where extname = 'vector'`
+	const [major = 0, minor = 0] = String(row?.extversion ?? '0.0')
+		.split('.')
+		.map(Number)
+	return major > 0 || minor >= 8
+}
+
+const HNSW_INDEX = 'memory_drawers_embedding_hnsw_idx'
+
+test.describe('memory/recall — candidates in a crowded index', () => {
+	/*
+	 * The HNSW index holds every drawer, and recall's filter (this user, not never-recall, has an
+	 * embedding) is applied after the index scan, which returned `hnsw.ef_search` = 40 rows. When
+	 * the 40 nearest were all drawers recall must skip, the filter emptied the pool and recall
+	 * came back with nothing.
+	 *
+	 * The drawers to skip here are never-recall ones. Another user's would be the same problem
+	 * in a shared database, but this instance holds exactly one user (`users_singleton`), so
+	 * none can be seeded.
+	 *
+	 * In a table this small the planner may rather read the user's rows and sort — an exact
+	 * search, which never shows the problem — where a large table picks the index. A spec that
+	 * means the index path holds the planner to it (`enable_sort = off`, for its transaction
+	 * only) and checks with EXPLAIN that it got it, so it cannot pass by testing something else.
+	 */
 	test.setTimeout(120_000)
 
-	test("the user's drawers are found when the index neighbourhood is full of drawers recall must skip", async () => {
-		// The HNSW index covers everyone's drawers, and the recall filter (this user, not
-		// never-recall) is applied after the scan, which returned `hnsw.ef_search` = 40 rows. Here
-		// the 40 nearest are all never-recall — as another user's drawers would be — so the
-		// filter emptied the pool and recall came back with nothing.
+	test('the query recall used to run, held to the index, loses the drawers it should find', async () => {
+		// The scenario, reproduced. If this ever finds them, the specs below prove nothing.
+		const userId = await getActiveUserId()
+		const wanted = await seedCrowdedIndex(userId)
+		const iterative = await pgvectorHasIterativeScan()
+
+		const { plan, found } = await getSql().begin(async (tx) => {
+			await tx`set local enable_sort = off`
+			await tx`select set_config('hnsw.ef_search', '40', true)`
+			if (iterative) await tx`select set_config('hnsw.iterative_scan', 'off', true)`
+			const plan = await tx<{ 'QUERY PLAN': string }[]>`
+				explain select content from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null
+				order by embedding <=> ${QUERY_VECTOR_TEXT}::vector
+				limit 50
+			`
+			const found = await tx<{ content: string }[]>`
+				select content from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null
+				order by embedding <=> ${QUERY_VECTOR_TEXT}::vector
+				limit 50
+			`
+			return { plan: plan.map((row) => row['QUERY PLAN']).join('\n'), found }
+		})
+
+		expect(plan, 'served by the HNSW index').toContain(HNSW_INDEX)
+		const contents = found.map((row) => row.content)
+		expect(wanted.filter((content) => contents.includes(content)).length).toBeLessThan(wanted.length)
+	})
+
+	test("recall finds a small palace's drawers however crowded the index is", async () => {
+		// A palace this small is searched exactly, so what the index would have returned no
+		// longer matters.
 		stub = stubOpenRouter({ embeddings: () => [QUERY_VECTOR] })
 		const userId = await getActiveUserId()
-		const closetId = await makeCloset(userId)
-		const sql = getSql()
-		// 2,000 drawers pointing exactly at the query.
-		await sql`
-			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, never_recall)
-			select ${closetId}, ${userId}, ${`${prefix} noise `} || g::text, 1, array_fill(1::real, array[1536])::vector, true
-			from generate_series(1, 2000) g
-		`
-		// Three recallable ones further out: half their components match the query.
-		const wanted = [`${prefix} wanted 1`, `${prefix} wanted 2`, `${prefix} wanted 3`]
-		for (const content of wanted) {
-			await sql`
-				insert into memory_drawers (closet_id, user_id, content, token_count, embedding)
-				values (
-					${closetId}, ${userId}, ${content}, 1,
-					(select array_agg(case when g <= 768 then 1::real else 0::real end order by g)
-					 from generate_series(1, 1536) g)::vector
-				)
-			`
-		}
+		const wanted = await seedCrowdedIndex(userId)
 
 		const { recall } = await import('../src/lib/memory/retrieval.server')
 		const recalled = await recall(userId, 'zzqx', { topK: 100, candidatePoolSize: 50 })
@@ -157,7 +222,122 @@ test.describe('memory/recall — candidates in a shared index', () => {
 		expect(contents.some((content) => content.startsWith(`${prefix} noise`)), 'never-recall stays out').toBe(false)
 	})
 
+	test('through the index, the scan keeps going until the pool is full', async () => {
+		// The path a big palace takes. Held to the index as above, the scan must not stop at
+		// the 40 never-recall drawers nearest the query.
+		const userId = await getActiveUserId()
+		const wanted = await seedCrowdedIndex(userId)
+		const { db } = await import('../src/lib/db.server')
+		const { memoryDrawers } = await import('../src/lib/memory/memory.schema')
+		const { nearestRecallable } = await import('../src/lib/memory/retrieval.server')
+		const where = and(
+			eq(memoryDrawers.userId, userId),
+			eq(memoryDrawers.neverRecall, false),
+			dsql`${memoryDrawers.embedding} is not null`,
+			// Other specs' drawers sit at the query vector too; only this spec's are counted.
+			like(memoryDrawers.content, `${prefix}%`),
+		)
+
+		const paths: string[] = []
+		let plan = ''
+		const rows = await nearestRecallable({
+			query: async (orderBy, run) => {
+				const statement = dsql`
+					select ${memoryDrawers.content} as content from ${memoryDrawers}
+					where ${where} order by ${orderBy} limit ${wanted.length}
+				`
+				if (run === db) {
+					paths.push('exact')
+				} else {
+					paths.push('index')
+					await run.execute(dsql`set local enable_sort = off`)
+					const explained = await run.execute<{ 'QUERY PLAN': string }>(dsql`explain ${statement}`)
+					plan = [...explained].map((row) => row['QUERY PLAN']).join('\n')
+				}
+				return [...(await run.execute<{ content: string }>(statement))]
+			},
+			// Too big to search exactly, so the index is tried first.
+			countUpTo: async () => 1,
+			exactAtMost: 0,
+			vec: QUERY_VECTOR_TEXT,
+			limit: wanted.length,
+		})
+
+		expect(paths[0]).toBe('index')
+		expect(plan, 'served by the HNSW index').toContain(HNSW_INDEX)
+		// By the iterative scan (pgvector 0.8+) or, failing that, the exact search after it.
+		expect(paths.length).toBeLessThanOrEqual(2)
+		expect(rows.map((row) => row.content).sort()).toEqual([...wanted].sort())
+	})
+
+	test('the pinned lookup recall used to run, held to the index, loses a far pinned drawer', async () => {
+		// Why the pinned lookup is exact (`+ 0`). On a table this small the planner answers the
+		// old query from the (user_id, pinned) b-tree and a sort, which finds every pinned drawer
+		// — so the recall-level spec below passes with or without the fix. Held to the index, as
+		// the planner may choose once the table is large, the old query stops at the 40 drawers
+		// nearest the query and a far pinned drawer is never seen; the exact form cannot use the
+		// index at all.
+		const userId = await getActiveUserId()
+		const closetId = await makeCloset(userId)
+		const sql = getSql()
+		await sql`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, never_recall)
+			select ${closetId}, ${userId}, ${`${prefix} noise `} || g::text, 1, array_fill(1::real, array[1536])::vector, true
+			from generate_series(1, 500) g
+		`
+		const [pinned] = await sql<{ id: string }[]>`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, pinned)
+			values (${closetId}, ${userId}, ${`${prefix} pinned`}, 1, array_fill(-1::real, array[1536])::vector, true)
+			returning id
+		`
+		await sql`analyze memory_drawers`
+		const iterative = await pgvectorHasIterativeScan()
+
+		const planText = (rows: { 'QUERY PLAN': string }[]) => rows.map((row) => row['QUERY PLAN']).join('\n')
+		const { before, after } = await sql.begin(async (tx) => {
+			await tx`set local enable_sort = off`
+			await tx`select set_config('hnsw.ef_search', '40', true)`
+			if (iterative) await tx`select set_config('hnsw.iterative_scan', 'off', true)`
+			// The old lookup: ordered by the distance as written, which the index can serve.
+			const oldPlan = await tx<{ 'QUERY PLAN': string }[]>`
+				explain select id from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null and pinned = true
+				order by embedding <=> ${QUERY_VECTOR_TEXT}::vector
+				limit 25
+			`
+			const oldRows = await tx<{ id: string }[]>`
+				select id from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null and pinned = true
+				order by embedding <=> ${QUERY_VECTOR_TEXT}::vector
+				limit 25
+			`
+			// Recall's lookup now: the same, ordered by the distance `+ 0`.
+			const newPlan = await tx<{ 'QUERY PLAN': string }[]>`
+				explain select id from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null and pinned = true
+				order by (embedding <=> ${QUERY_VECTOR_TEXT}::vector) + 0
+				limit 25
+			`
+			const newRows = await tx<{ id: string }[]>`
+				select id from memory_drawers
+				where user_id = ${userId} and never_recall = false and embedding is not null and pinned = true
+				order by (embedding <=> ${QUERY_VECTOR_TEXT}::vector) + 0
+				limit 25
+			`
+			return {
+				before: { plan: planText(oldPlan), ids: oldRows.map((row) => row.id) },
+				after: { plan: planText(newPlan), ids: newRows.map((row) => row.id) },
+			}
+		})
+
+		expect(before.plan, 'the old query, served by the HNSW index').toContain(HNSW_INDEX)
+		expect(before.ids).not.toContain(pinned.id)
+		expect(after.plan, 'the exact form cannot use it').not.toContain(HNSW_INDEX)
+		expect(after.ids).toContain(pinned.id)
+	})
+
 	test('a pinned drawer is considered however far it is from the query', async () => {
+		// A regression guard for the whole path, not evidence for the fix: see the spec above.
 		stub = stubOpenRouter({ embeddings: () => [QUERY_VECTOR] })
 		const userId = await getActiveUserId()
 		const closetId = await makeCloset(userId)
@@ -180,6 +360,62 @@ test.describe('memory/recall — candidates in a shared index', () => {
 		const found = recalled.find((drawer) => drawer.drawerId === pinned.id)
 		expect(found, 'pinned drawers are force-added to the pool').toBeDefined()
 		expect(found?.pinnedBoost).toBeGreaterThan(0)
+	})
+})
+
+test.describe('memory/recall — which search nearestRecallable runs', () => {
+	/**
+	 * Stand-in queries that record which search they were asked for — the exact one runs on the
+	 * pool (`db`), the index one inside nearestRecallable's transaction — and return rows named
+	 * after it: as many as the palace holds for the exact search, `indexReturns` for the index.
+	 */
+	async function drive(opts: { recallable: number; indexReturns: number; limit?: number }) {
+		const { db } = await import('../src/lib/db.server')
+		const { nearestRecallable } = await import('../src/lib/memory/retrieval.server')
+		const limit = opts.limit ?? 50
+		const paths: string[] = []
+		const countedUpTo: number[] = []
+		const rows = await nearestRecallable({
+			query: async (_orderBy, run) => {
+				const path = run === db ? 'exact' : 'index'
+				paths.push(path)
+				const n = path === 'index' ? opts.indexReturns : Math.min(limit, opts.recallable)
+				return Array.from({ length: n }, (_, i) => `${path} ${i}`)
+			},
+			countUpTo: async (atMost) => {
+				countedUpTo.push(atMost)
+				return Math.min(atMost, opts.recallable)
+			},
+			vec: QUERY_VECTOR_TEXT,
+			limit,
+		})
+		return { paths, rows, countedUpTo }
+	}
+
+	test('a small palace is searched exactly, without walking the index first', async () => {
+		// Every new palace is smaller than the pool (50, or 20 with rerank). Through the index it
+		// could never fill it, so every chat turn walked up to `hnsw.max_scan_tuples` (20,000)
+		// index tuples and then ran the exact search anyway.
+		const { EXACT_SEARCH_MAX_DRAWERS } = await import('../src/lib/memory/retrieval.server')
+		const small = await drive({ recallable: 12, indexReturns: 12 })
+		expect(small.paths).toEqual(['exact'])
+		expect(small.countedUpTo, 'the count stops one past the threshold').toEqual([EXACT_SEARCH_MAX_DRAWERS + 1])
+
+		expect((await drive({ recallable: EXACT_SEARCH_MAX_DRAWERS, indexReturns: 50 })).paths).toEqual(['exact'])
+		expect((await drive({ recallable: EXACT_SEARCH_MAX_DRAWERS + 1, indexReturns: 50 })).paths).toEqual(['index'])
+	})
+
+	test('a bigger palace goes through the index, and stops there when the pool is full', async () => {
+		const { paths, rows } = await drive({ recallable: 10_000, indexReturns: 50 })
+		expect(paths).toEqual(['index'])
+		expect(rows).toHaveLength(50)
+	})
+
+	test('a bigger palace whose index scan comes up short gets the exact search instead', async () => {
+		const { paths, rows } = await drive({ recallable: 10_000, indexReturns: 7 })
+		expect(paths).toEqual(['index', 'exact'])
+		expect(rows).toHaveLength(50)
+		expect(rows[0]).toBe('exact 0')
 	})
 })
 
