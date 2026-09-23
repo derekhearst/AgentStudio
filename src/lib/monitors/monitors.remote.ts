@@ -1,6 +1,8 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { z } from 'zod'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { withUserInputErrors } from '$lib/server/user-input-error'
 import {
 	monitorActionConfigSchema,
 	monitorActionSchema,
@@ -65,20 +67,22 @@ export const listMonitorsQuery = query(
 export const createMonitorCommand = command(createSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const now = new Date()
-	return createMonitor(
-		{
-			userId: user.id,
-			agentId: input.agentId ?? null,
-			name: input.name,
-			condition: input.condition,
-			action: input.action,
-			actionConfig: input.actionConfig,
-			intervalSeconds: input.intervalSeconds,
-			deadlineAt: input.deadlineDays ? new Date(now.getTime() + input.deadlineDays * 24 * 60 * 60 * 1000) : null,
-			maxChecks: input.maxChecks,
-			oneShot: input.oneShot,
-		},
-		now,
+	return withUserInputErrors(() =>
+		createMonitor(
+			{
+				userId: user.id,
+				agentId: input.agentId ?? null,
+				name: input.name,
+				condition: input.condition,
+				action: input.action,
+				actionConfig: input.actionConfig,
+				intervalSeconds: input.intervalSeconds,
+				deadlineAt: input.deadlineDays ? new Date(now.getTime() + input.deadlineDays * 24 * 60 * 60 * 1000) : null,
+				maxChecks: input.maxChecks,
+				oneShot: input.oneShot,
+			},
+			now,
+		),
 	)
 })
 
@@ -103,7 +107,7 @@ export const extendMonitorCommand = command(
 	}),
 	async ({ id, additionalDays, additionalChecks }) => {
 		const user = requireAuthenticatedRequestUser()
-		return extendMonitor(user.id, id, { additionalDays, additionalChecks })
+		return withUserInputErrors(() => extendMonitor(user.id, id, { additionalDays, additionalChecks }))
 	},
 )
 
@@ -118,7 +122,7 @@ export const updateMonitorCommand = command(
 	}),
 	async ({ id, ...patch }) => {
 		const user = requireAuthenticatedRequestUser()
-		return updateMonitorSettings(user.id, id, patch)
+		return withUserInputErrors(() => updateMonitorSettings(user.id, id, patch))
 	},
 )
 
@@ -129,8 +133,8 @@ export const updateMonitorCommand = command(
 export const checkMonitorNowCommand = command(idSchema, async ({ id }) => {
 	const user = requireAuthenticatedRequestUser()
 	const monitor = await getMonitorForUser(user.id, id)
-	if (!monitor) throw new Error('Monitor not found')
-	if (monitor.status !== 'active') throw new Error(`Monitor is ${monitor.status} — only an active monitor can be checked`)
+	if (!monitor) error(404, 'Monitor not found')
+	if (monitor.status !== 'active') error(409, `Monitor is ${monitor.status} — only an active monitor can be checked`)
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	const job = await enqueueJob({
 		type: 'monitor_check',

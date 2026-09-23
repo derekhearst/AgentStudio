@@ -9,7 +9,7 @@ An agent in a chat has two kinds of tools:
 - **Claude's own tools**, which come with the Claude Agent SDK: reading, writing and editing files (`Read`, `Write`, `Edit`), finding files (`Glob`, `Grep`), running commands (`Bash`), and handing work to another agent (`Agent`).
 - **AgentStudio's tools**, about 45 of them, which do things only this app can do: its web search, projects, source control, agents, automations, monitors, skills, and image and video generation.
 
-This page is about AgentStudio's tools. [`spec.md`](spec.md) describes an earlier design (capability groups and `enable_capability`) that is no longer how the app works.
+This page is about AgentStudio's tools. [`spec.md`](spec.md) describes an earlier design (capability groups and `enable_capability`) that is no longer how the app works, apart from its sections on web access safety and web tool limits, which are current.
 
 ## Key concepts
 
@@ -92,6 +92,7 @@ The conversation's permission mode (Plan only, Ask, Accept edits, Bypass) applie
 - A tool the engine does not offer cannot be called in a chat, whatever the settings say.
 - `push_branch`, `create_pull_request` and `request_plan_approval` always need approval, and refuse to run where nobody can approve them, such as an automation.
 - File tools and commands stay inside the run's workspace.
+- The web tools (`web_fetch`, `pdf_read`, `browser_screenshot`) reach the public internet and nothing else: an address on this machine, a private network or a cloud metadata service is refused, including when a page redirects to one. Each browser call opens its own session and closes it afterwards, so `browser_screenshot` always needs a URL. See [spec.md](spec.md#web-access-safety-the-egress-guard).
 
 ### Unattended runs on the old loop
 

@@ -4,7 +4,8 @@
  * sandbox folder, in one idempotent command.
  *
  *   bun run db:bootstrap                    create what is missing; change nothing that exists
- *   bun run db:bootstrap --reset            drop the database first (everything in it is lost)
+ *   bun run db:bootstrap --reset            drop the database first (everything in it is lost;
+ *                                           only a name ending in dev, test or ci, never "prod")
  *   bun run db:bootstrap --reset-password   set the owner's password even if one exists
  *
  * Options:
@@ -25,7 +26,8 @@
 
 import { mkdir } from 'node:fs/promises'
 import { parseArgs } from 'node:util'
-import { databaseNameOf, dropDatabase } from './drop-database'
+import { getTargetDatabaseName } from '../src/lib/db/migrations.server.ts'
+import { dropDatabase } from './drop-database'
 
 if (process.env.NODE_ENV === 'production') {
 	console.error('[bootstrap] Refusing to run with NODE_ENV=production — this script is for development and CI.')
@@ -69,11 +71,23 @@ process.env.AUTH_PASSWORD = ''
 process.env.JOBS_WORKER_ENABLED = '0'
 process.env.JOBS_SCHEDULER_ENABLED = '0'
 
-const targetDb = databaseNameOf(databaseUrl)
+let targetDb: string
+try {
+	targetDb = getTargetDatabaseName(databaseUrl)
+} catch (err) {
+	console.error(`[bootstrap] ${err instanceof Error ? err.message : String(err)}`)
+	process.exit(1)
+}
 console.log(`[bootstrap] Database: ${targetDb}`)
 
 if (args.reset) {
-	await dropDatabase(databaseUrl, (line) => console.log(`[bootstrap] ${line}`))
+	try {
+		// Refuses, before connecting, any database that is not a disposable dev/test/ci one.
+		await dropDatabase(databaseUrl, (line) => console.log(`[bootstrap] ${line}`))
+	} catch (err) {
+		console.error(`[bootstrap] ${err instanceof Error ? err.message : String(err)}`)
+		process.exit(1)
+	}
 }
 
 try {

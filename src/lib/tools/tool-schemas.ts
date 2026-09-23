@@ -10,6 +10,7 @@ import {
 	MONITOR_MAX_DEADLINE_DAYS,
 	MONITOR_MAX_INTERVAL_SECONDS,
 	MONITOR_MIN_INTERVAL_SECONDS,
+	MONITOR_OBSERVABLE_TOOLS,
 } from '../monitors/condition'
 
 /**
@@ -28,7 +29,9 @@ export const toolSchemas = {
 		overwrite: z.boolean().default(false),
 	}),
 	file_info: z.object({ path: z.string().min(1) }),
-	browser_screenshot: z.object({ url: z.string().url().optional() }),
+	// Required: every screenshot loads its page in a fresh browser context, so there is no
+	// "current page" to capture without one.
+	browser_screenshot: z.object({ url: z.string().url().max(2048) }),
 	web_fetch: z.object({
 		url: z.string().min(1).max(2048),
 		maxChars: z.number().int().min(1000).max(100_000).default(50_000).optional(),
@@ -269,7 +272,7 @@ export const toolDescriptions: Record<ToolName, string> = {
 	delete_file: 'Delete a file or directory (recursive deletes require explicit recursive=true).',
 	move_file: 'Move or rename a file/directory within the sandbox workspace.',
 	file_info: 'Get file or directory metadata (size, modified time, permissions).',
-	browser_screenshot: 'Take a screenshot of a web page.',
+	browser_screenshot: 'Take a screenshot of a web page (HTTP/HTTPS only; private and loopback addresses are blocked). Returns the image so you can see the rendered page.',
 	web_fetch: 'Fetch the full text content of a web page (HTTP/HTTPS only). Returns { title, url, text, fetchedAt } with the body text trimmed to maxChars (default 50,000). Blocks private/loopback addresses to prevent SSRF. Use this when web_search snippets are insufficient and you need to read the actual page content.',
 	pdf_read: 'Extract text from a PDF — accepts an HTTP/HTTPS URL OR an absolute path to a PDF the agent has already written into its sandbox workspace. Uses pdftotext (poppler-utils) under the hood; returns { source, text, charCount, truncated, pageHint }. Same SSRF protection as web_fetch for URLs. Use this for whitepapers, datasheets, regulatory filings, or research-attached PDFs that web_fetch can\'t parse.',
 	list_projects: 'List the user\'s projects (durable work surfaces, each with its own sandbox working directory). Returns id, name, slug, kind, description for each project.',
@@ -296,7 +299,9 @@ export const toolDescriptions: Record<ToolName, string> = {
 	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',
 	delete_automation: 'Delete an automation by id.',
 	create_monitor:
-		'Watch for something to happen and act when it does — the "wake me when X changes" counterpart to create_automation\'s "run this every N". Two condition kinds. `{kind:"tool_result", tool, args, extract, compare}` runs a read-only tool on each check and compares the result: compare="changed" fires when the value differs from the last observation (the FIRST check only records a baseline, it never fires), and equals/contains/matches/not_empty test the value directly. Use `extract` (a dotted path like "text" or "0.status") to narrow the result — comparing a whole web_fetch result is useless because it carries a timestamp that changes every check. `{kind:"model_question", question, context}` fetches context with read-only tools and asks a cheap model a yes/no question about it; use it only when no deterministic comparison will do, because it costs tokens on every check and is subject to the budget gate. Observable tools are read-only: web_fetch, web_search, search_files, file_read, file_info, list_directory, git_status, git_log, git_diff, list_pull_requests, get_pull_request, list_projects. `action` is what happens on the firing edge: start_conversation (needs actionConfig.prompt — opens a conversation seeded with that prompt plus what was observed and runs the agent), review_item, push, or run_automation (needs actionConfig.automationId). Firing is debounced to one action per false→true transition, and `oneShot` (default true) retires the monitor after the first. EVERY monitor expires: `deadlineDays` is capped at 30 and defaults to the cap, `maxChecks` caps total spend (default 200), and whichever runs out first ends it. Say what you created and when it will expire.',
+		'Watch for something to happen and act when it does — the "wake me when X changes" counterpart to create_automation\'s "run this every N". Two condition kinds. `{kind:"tool_result", tool, args, extract, compare}` runs a read-only tool on each check and compares the result: compare="changed" fires when the value differs from the last observation (the FIRST check only records a baseline, it never fires), and equals/contains/matches/not_empty test the value directly. Use `extract` (a dotted path like "text" or "0.status") to narrow the result — comparing a whole web_fetch result is useless because it carries a timestamp that changes every check. `{kind:"model_question", question, context}` fetches context with read-only tools and asks a cheap model a yes/no question about it; use it only when no deterministic comparison will do, because it costs tokens on every check and is subject to the budget gate. Observable tools are read-only: ' +
+		MONITOR_OBSERVABLE_TOOLS.join(', ') +
+		'. Read/Grep/Glob take the same arguments you would pass them (Read {file_path, offset?, limit?}; Grep {pattern, path?, glob?, output_mode?, "-i"?, head_limit?}; Glob {pattern, path?}) with paths relative to the user\'s sandbox root, so a project file is "projects/<projectId>/<file>"; Read yields the file text itself, so compare it without an extract. `action` is what happens on the firing edge: start_conversation (needs actionConfig.prompt — opens a conversation seeded with that prompt plus what was observed and runs the agent), review_item, push, or run_automation (needs actionConfig.automationId). Firing is debounced to one action per false→true transition, and `oneShot` (default true) retires the monitor after the first. EVERY monitor expires: `deadlineDays` is capped at 30 and defaults to the cap, `maxChecks` caps total spend (default 200), and whichever runs out first ends it. Say what you created and when it will expire.',
 	list_monitors:
 		'List the current user\'s monitors with what each one is watching, its status (active/paused/fired/expired/exhausted/failed/canceled), the last observed value, when it was last checked and when it next will be, how much of its check budget is spent, and its deadline. Pass openOnly=true for just the active and paused ones. Read-only.',
 	cancel_monitor: 'Cancel a monitor by id. Terminal — it stops being checked immediately and cannot be resumed; create a new one instead.',

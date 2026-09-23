@@ -16,8 +16,9 @@ import {
 	memoryRooms,
 	memoryWings,
 } from '$lib/memory/memory.schema'
-import { recallForUser } from '$lib/memory/memory.server'
+import { listConversationsWithUnminedMessages, recallForUser } from '$lib/memory/memory.server'
 import {
+	deleteDrawer,
 	editDrawerContent,
 	forgetConversationMemories,
 	listMinedConversations,
@@ -34,7 +35,7 @@ import {
 import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
 import { messages, conversations } from '$lib/sessions/sessions.schema'
 import { jobs } from '$lib/jobs/jobs.schema'
-import { enqueueJob } from '$lib/jobs/jobs.server'
+import { enqueueJobWithOutcome } from '$lib/jobs/jobs.server'
 import { analyzeReorganization, applyReorganization } from '$lib/memory/reorganize.server'
 
 export type MemoryDrawerAaak = {
@@ -179,7 +180,7 @@ export const searchMemoryQuery = query(searchSchema, async ({ query: q, topK, us
 
 export const deleteMemoryDrawerCommand = command(drawerIdSchema, async ({ id }) => {
 	const user = requireAuthenticatedRequestUser()
-	await db.delete(memoryDrawers).where(and(eq(memoryDrawers.id, id), eq(memoryDrawers.userId, user.id)))
+	await deleteDrawer({ userId: user.id, drawerId: id })
 	return { ok: true }
 })
 
@@ -369,68 +370,50 @@ export const testMemoryExclusionRulesQuery = query(
 )
 
 /**
- * Manual reorganize trigger — finds every conversation owned by the caller that has at
- * least one message but is not yet represented in the palace (no room rolls up to it),
- * and enqueues a `memory_mine` job for each. The job's `mine:<conversationId>` dedupe
- * key collapses repeats with anything already in flight, and `mineConversation` skips
- * messages that already have a drawer — so this is safe to spam.
+ * Manual "Mine pending" — enqueues a `memory_mine` job for every conversation of the caller's
+ * that still holds a message the miner would pick up (no drawer, no tombstone). The
+ * `mine:<conversationId>` dedupe key collapses onto a mining job already queued for that
+ * conversation, and `mineConversation` only mines what is new — so this is safe to spam.
+ *
+ * `enqueued` counts jobs this call actually created; a conversation whose mining job was
+ * already queued counts under `alreadyQueued`, not as new work.
  */
 export const mineAllPendingCommand = command(async () => {
 	const user = requireAuthenticatedRequestUser()
 
-	// All conversations owned by the user that already contain at least one message.
-	const candidates = await db
-		.selectDistinct({ id: conversations.id })
+	const [{ scanned }] = await db
+		.select({ scanned: countDistinct(conversations.id) })
 		.from(conversations)
 		.innerJoin(messages, eq(messages.conversationId, conversations.id))
 		.where(eq(conversations.userId, user.id))
-
-	// Conversations that already have a room — these are "covered". We re-enqueue them
-	// anyway because new messages may have arrived after the last mine; mineConversation
-	// skips already-mined messages so this is cheap.
-	const covered = new Set<string>()
-	if (candidates.length > 0) {
-		const rows = await db
-			.select({ conversationId: memoryRooms.conversationId })
-			.from(memoryRooms)
-			.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
-			.where(
-				and(
-					eq(memoryWings.userId, user.id),
-					inArray(
-						memoryRooms.conversationId,
-						candidates.map((c) => c.id),
-					),
-				),
-			)
-		for (const row of rows) {
-			if (row.conversationId) covered.add(row.conversationId)
-		}
-	}
+	const pending = await listConversationsWithUnminedMessages(user.id)
 
 	let enqueued = 0
+	let alreadyQueued = 0
 	let skipped = 0
-	for (const candidate of candidates) {
+	for (const conversationId of pending) {
 		try {
-			await enqueueJob({
+			const { created } = await enqueueJobWithOutcome({
 				type: 'memory_mine',
 				queue: 'default',
 				priority: 75,
-				dedupeKey: `mine:${candidate.id}`,
-				payload: { conversationId: candidate.id },
+				dedupeKey: `mine:${conversationId}`,
+				payload: { conversationId },
 				userId: user.id,
-				sessionId: candidate.id,
+				sessionId: conversationId,
 			})
-			enqueued += 1
+			if (created) enqueued += 1
+			else alreadyQueued += 1
 		} catch {
 			skipped += 1
 		}
 	}
 
 	return {
-		conversationsScanned: candidates.length,
-		alreadyMined: covered.size,
+		conversationsScanned: scanned,
+		alreadyMined: scanned - pending.length,
 		enqueued,
+		alreadyQueued,
 		skipped,
 	}
 })

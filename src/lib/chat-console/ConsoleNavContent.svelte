@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getConversations } from '$lib/chat';
+	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
 	import { page } from '$app/state';
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
@@ -45,7 +46,6 @@
 		variant?: 'sidebar' | 'drawer';
 	} = $props();
 
-	let conversations = $state<Conversation[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
 	/**
 	 * Belt and braces alongside the layout's chromeless routes: `getCredits` is an
@@ -56,6 +56,14 @@
 	 */
 	const authenticated = $derived(page.data?.authenticated === true);
 	let creditsBalance = $derived(authenticated ? await getCredits() : null);
+
+	/*
+	 * Read reactively rather than copied out once (#79): this nav lives for the whole session,
+	 * so a list read on mount never showed a new chat, a generated title or a new order. A
+	 * failed read (no session yet) is just an empty list, as before.
+	 */
+	const conversationsQuery = $derived(browser && authenticated ? getConversations() : null);
+	const conversations = $derived<Conversation[]>(conversationsQuery?.current ?? []);
 
 	function formatUsd(value: number): string {
 		if (value >= 100) return `$${value.toFixed(0)}`;
@@ -79,21 +87,10 @@
 	let groupBy = $state<'Project' | 'Status' | 'Environment' | 'Date' | 'None'>('Date');
 	let sortBy = $state<'Recency' | 'Name' | 'Project'>('Recency');
 
-	$effect(() => {
-		void loadConversations();
-	});
-
-	async function loadConversations() {
-		try {
-			conversations = await getConversations();
-		} catch {
-			// remote query may fail before auth — silently no-op for the sidebar
-		}
-	}
-
 	onMount(() => {
 		if (!browser) return;
 		const source = new EventSource('/api/chat/monitor');
+		onConversationListChange(source, () => getConversations().refresh());
 		source.onmessage = (event) => {
 			try {
 				const runs = JSON.parse(event.data) as LiveRun[];

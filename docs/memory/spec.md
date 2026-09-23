@@ -66,6 +66,17 @@ The atomic unit of memory. One drawer per verbatim message or note.
 | `sourceMessageId` | uuid?        | FK to the original session message if applicable     |
 | `createdAt`       | timestamp    |                                                      |
 
+### `memoryMessageTombstones` table
+
+Messages the miner must not mine again. A drawer marks its own message as mined; a tombstone covers the messages that have no drawer on purpose.
+
+| Column      | Type      | Description                                                            |
+| ----------- | --------- | ---------------------------------------------------------------------- |
+| `messageId` | uuid      | Primary key; FK to `messages`, cascades on delete                      |
+| `userId`    | uuid      | FK to `users`                                                          |
+| `reason`    | text      | `drawer_deleted`, `conversation_forgotten`, or `excluded_by_rule`      |
+| `createdAt` | timestamp |                                                                        |
+
 ### `memoryKgEntities` table
 
 Entities extracted from conversations and stored in the knowledge graph.
@@ -106,7 +117,7 @@ When a chat session ends (run reaches `completed`), the `after_run` built-in hoo
 4. Creates `memoryDrawers` with verbatim content + embeddings + AAAK indexes
 5. Updates the temporal knowledge graph with new or superseded relations
 
-Mining is idempotent: re-mining the same session produces the same drawers (deduped by `sourceMessageId`).
+Mining is incremental and idempotent: the job runs again after every exchange (the job's `mine:<conversationId>` dedupe key only collapses onto a mining job that is still queued or running), and it skips any message that already has a drawer (by `sourceMessageId`) or a row in `memory_message_tombstones`. A tombstone is written when the user deletes a drawer (`drawer_deleted`), forgets the conversation (`conversation_forgotten`, one per message it held at the time), or when an exclusion rule drops the turn (`excluded_by_rule`) — so re-mining never resurrects what the user removed, and never re-counts a blocked turn against its rule. Tombstones cascade away with their message.
 
 ### AAAK index
 

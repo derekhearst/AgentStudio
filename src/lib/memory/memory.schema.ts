@@ -70,7 +70,12 @@ export const memoryRooms = pgTable(
 		occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
 		createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	},
-	(t) => [index('memory_rooms_wing_idx').on(t.wingId), index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt)],
+	(t) => [
+		index('memory_rooms_wing_idx').on(t.wingId),
+		index('memory_rooms_occurred_idx').on(t.wingId, t.occurredAt),
+		// Backs the ON DELETE SET NULL from conversations, which otherwise scans the table.
+		index('memory_rooms_conversation_idx').on(t.conversationId),
+	],
 )
 
 export const memoryClosets = pgTable(
@@ -122,6 +127,10 @@ export const memoryDrawers = pgTable(
 		index('memory_drawers_closet_idx').on(t.closetId),
 		index('memory_drawers_user_occurred_idx').on(t.userId, t.occurredAt),
 		index('memory_drawers_user_pinned_idx').on(t.userId, t.pinned),
+		// Two hot paths look drawers up by source message: the per-turn mining job's
+		// "already mined?" check, and the ON DELETE SET NULL that runs once per message when
+		// a conversation is deleted. Without this each was a full scan of the table.
+		index('memory_drawers_source_message_idx').on(t.sourceMessageId),
 		// HNSW index for cosine semantic search; added by hand-edited migration.
 		index('memory_drawers_embedding_hnsw_idx').using('hnsw', t.embedding.op('vector_cosine_ops')),
 		index('memory_drawers_content_tsv_idx').using('gin', sql`to_tsvector('english', ${t.content})`),
@@ -237,6 +246,29 @@ export const memoryKgRelations = pgTable(
 		index('memory_kg_relations_to_idx').on(t.toEntityId, t.validFrom),
 	],
 )
+
+/**
+ * Tombstones — messages the miner must not mine again. A conversation is re-mined after every
+ * exchange, and the miner treats a message as done when a drawer still points at it; without
+ * a tombstone, a drawer the user deleted, or a conversation they forgot, came straight back
+ * on the next turn. A turn an exclusion rule dropped is tombstoned too, so re-mining does not
+ * re-count it against the rule.
+ *
+ * Keyed on the message, so deleting the conversation (which deletes its messages) clears
+ * them. Existing drawers need no tombstone: the drawer itself marks its message as mined.
+ */
+export type MemoryTombstoneReason = 'drawer_deleted' | 'conversation_forgotten' | 'excluded_by_rule'
+
+export const memoryMessageTombstones = pgTable('memory_message_tombstones', {
+	messageId: uuid('message_id')
+		.primaryKey()
+		.references(() => messages.id, { onDelete: 'cascade' }),
+	userId: uuid('user_id')
+		.notNull()
+		.references(() => users.id, { onDelete: 'cascade' }),
+	reason: text('reason').$type<MemoryTombstoneReason>().notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
 
 export type MemoryWing = typeof memoryWings.$inferSelect
 export type MemoryRoom = typeof memoryRooms.$inferSelect

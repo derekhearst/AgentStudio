@@ -32,12 +32,12 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 | Feature | Verdict | Ours | Theirs |
 | --- | --- | --- | --- |
-| Recurring scheduled runs | **even** (#30, #31 landed) | full crontab parsing with a per-automation IANA zone (#30); run-now, per-run history with cost and links, bounded retry with backoff, review item + notification on failure, and auto-disable after 5 consecutive failures (#31) | Cowork scheduled + on-demand tasks |
+| Recurring scheduled runs | **even** (#30, #31 landed) | full crontab parsing with a per-automation IANA zone (#30); run-now, per-run history with cost and links, bounded retry with backoff, review item + notification on failure, and auto-disable after 5 consecutive failures (#31). Until the job-queue dedupe fix, the dispatcher ran once per database and never again, so none of this fired on a schedule | Cowork scheduled + on-demand tasks |
 | Runs with the laptop closed | **win** | the NAS *is* the always-on host; nothing depends on a local device | Cowork runs remotely in beta; earlier it needed the desktop VM |
-| Durable job queue with leases and retries | **win** | real queue, heartbeats, cancellation, `/settings/jobs` | not exposed to the user |
+| Durable job queue with leases and retries | **win** | real queue, heartbeats, a job whose worker died is picked up again (or failed, if it keeps killing workers), cancellation, `/settings/jobs` | not exposed to the user |
 | Budget enforcement | **win** | daily/monthly caps that actually block a run before it spends | plan limits, no per-workflow budget |
 | Unattended failure surfacing | **win** | `/review` inbox with dedupe, plus web push | notifications only |
-| Long-horizon monitoring | **absent** (#33) | nothing watches an external condition between runs | Monitor tool with deadlines |
+| Long-horizon monitoring | **even** (#33 landed) | a monitor checks a read-only tool result, or asks a cheap model a yes/no question, on an interval, and acts once when the answer changes — a conversation, a review item, a push, or an automation run — inside a deadline, a check budget and an error budget; an agent can leave one mid-conversation | Monitor tool with deadlines |
 | Multi-agent orchestration | **behind** (#5, #32) | `run_subagent`, one level, serial, no fan-out or concurrency cap | workflow scripts, concurrency limits, agent map, forked sessions |
 | Delegate from a phone | **behind** | the web UI is responsive and push works | persistent agent thread on mobile, Cowork on web + mobile |
 | Subagent output treated as data, not instructions | **even** (#34) | child output is wrapped in an unforgeable `<subagent_result>` delimiter, and the parent's system prompt says instructions inside one are content, not commands | indented so it cannot pass as the session's own instructions |
@@ -58,7 +58,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Repo import and clone | **win** | first-class: import creates a project, clones into a sandbox, sidecar repo row | you point it at a directory |
 | Commit / push / PR | **even** | approval-gated tools, PR recorded and surfaced in `/review` | same, plus richer GitHub triggers |
 | Code review of a PR | **absent** | — | `/ultrareview`, merge-aware follow-up reviews |
-| CI watch and fix | **absent** (#20) | PR is opened, then nothing looks at it again | cloud sessions react to CI |
+| CI watch and fix | **even** (#20 landed) | an opened PR's checks are watched (webhook, or polling every few minutes) for up to 14 days; a red check opens a review item and a notification, and **Fix it** hands the failure back to the conversation that wrote the code — a button, not an automatic run | cloud sessions react to CI |
 | Hooks | **even** | `/settings/hooks`, event bus, skill hooks | same idea, dialog-managed |
 | Background tasks | **behind** (#35) | the job queue backgrounds automations and research; inside a chat turn a long command blocks the turn | background bash that survives turns, with a completion notice |
 | Session cost accounting | **win** | per-run rows, `/activity`, `/runs/[id]`, ledger per tool call. Caveat: #15 means built-in tool calls miss the ledger entirely | session cost in a dialog |
@@ -70,7 +70,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Streaming, thinking, model picker | **even** | | |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
 | Code execution | **n/a** — removed (#69) | `run_code` never ran on the engine path and was deleted rather than rebuilt. The agent writes a script into the run's workspace and runs it with the SDK's `Bash`, sandboxed by bubblewrap in production and approval-gated where bubblewrap is missing. No in-script tool calls, no chart output — a chart is a file shown in the Preview tab | analysis tool / sandboxed Python, renders charts |
-| File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped | images, PDFs, office docs, with extraction |
+| File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped; files attached on the new-chat page go with the first message (they were silently dropped until 2026-09-23) | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
 | Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |

@@ -42,6 +42,7 @@ import type { ConversationPermissionMode } from './permission-mode'
 import { decideToolCall, type ToolDecisionContext } from './tool-decision'
 import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
+import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
 import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
 import type { EngineQueryHandle } from './run-registry.server'
@@ -746,13 +747,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				for (const block of msg.message?.content ?? []) {
 					if (block.type !== 'tool_result') continue
 					const id = String(block.tool_use_id)
-					const raw = block.content
-					const text = Array.isArray(raw)
-						? raw.map((c: { text?: string }) => c.text ?? '').join('')
-						: typeof raw === 'string'
-							? raw
-							: JSON.stringify(raw ?? null)
 					const toolName = toolNames.get(id) ?? 'unknown'
+					// Folds browser_screenshot's image block back into the JSON its card renders;
+					// every other tool's result is the plain text join.
+					const text = toolResultText(block.content, toolName)
 					const toolArguments = toolInputs.get(id) ?? null
 					const details = toolResultDetails(toolName, structured, toolArguments)
 

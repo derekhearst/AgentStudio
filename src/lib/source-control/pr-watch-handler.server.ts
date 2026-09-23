@@ -60,6 +60,8 @@ export function registerPullRequestWatchJobHandlers(): void {
 			type: 'pr_watch_dispatch',
 			queue: 'maintenance',
 			priority: 30,
+			// Collapses onto a tick that is still queued or running; once it finishes, the
+			// next tick gets a job of its own.
 			dedupeKey: 'pr_watch:dispatch',
 			payload: {},
 		}),

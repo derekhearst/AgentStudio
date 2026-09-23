@@ -50,7 +50,9 @@ test.describe('automations/output-routing — review_inbox target', () => {
 		await ensureNoBlockingBudget(userId)
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, output_target, next_run_at)
 				values (
@@ -60,7 +62,7 @@ test.describe('automations/output-routing — review_inbox target', () => {
 					${'Say hello in one word.'},
 					'maintenance'::automation_mode,
 					'review_inbox'::automation_output_target,
-					${past}
+					${notDue}
 				)
 				returning id
 			`
@@ -102,7 +104,9 @@ test.describe('automations/output-routing — chat_session default', () => {
 		await ensureNoBlockingBudget(userId)
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			// outputTarget defaults to chat_session — don't set it explicitly so we exercise the default path.
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
@@ -112,7 +116,7 @@ test.describe('automations/output-routing — chat_session default', () => {
 					'0 9 * * *',
 					${'Say hello in one word.'},
 					'maintenance'::automation_mode,
-					${past}
+					${notDue}
 				)
 				returning id
 			`

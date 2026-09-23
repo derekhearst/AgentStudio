@@ -453,8 +453,9 @@ export async function dispatchPullRequestWatch(now = new Date()): Promise<Dispat
 
 	if (watchable.length > 0) {
 		const { enqueueJob } = await import('$lib/jobs/jobs.server')
-		// Minute-bucketed dedupe key: a double tick (two schedulers, a manual cron hit)
-		// collapses onto one job row rather than double-polling the API.
+		// Minute-bucketed dedupe key, `forever`: a double tick (two schedulers, a manual cron
+		// hit) collapses onto one job row rather than double-polling the API, even when the
+		// first poll has already finished.
 		const bucket = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString()
 		for (const { pr, repo } of watchable) {
 			try {
@@ -464,6 +465,7 @@ export async function dispatchPullRequestWatch(now = new Date()): Promise<Dispat
 					// Background work, but a late CI report is a stale CI report.
 					priority: 55,
 					dedupeKey: `pr_watch:${pr.id}:${bucket}`,
+					dedupeScope: 'forever',
 					payload: { pullRequestId: pr.id },
 					runId: pr.runId ?? undefined,
 					userId: repo.userId ?? undefined,

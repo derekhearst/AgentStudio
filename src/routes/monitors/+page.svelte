@@ -13,6 +13,7 @@
 	import MonitorCard from '$lib/monitors/MonitorCard.svelte';
 	import MonitorCreateForm from '$lib/monitors/MonitorCreateForm.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type Result = Awaited<ReturnType<typeof listMonitorsQuery>>;
 	type MonitorRow = Result['monitors'][number];
@@ -50,7 +51,7 @@
 			notice = await run();
 			await load();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'That did not work.';
+			error = remoteErrorMessage(err, 'That did not work.');
 		} finally {
 			busyId = null;
 		}
