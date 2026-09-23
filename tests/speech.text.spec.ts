@@ -18,6 +18,7 @@ import {
 	SPEECH_MODEL_ID_PATTERN,
 	SPEECH_VOICE_PATTERN,
 	splitForSpeech,
+	startTurn,
 	toSpeakableText,
 	TTS_MAX_CHARACTERS,
 } from '../src/lib/speech/speech'
@@ -132,30 +133,53 @@ test.describe('speech/splitForSpeech — chunks under the cap', () => {
 })
 
 test.describe('speech/repliesToSpeak — what auto-read reads when a turn ends', () => {
-	const known = new Set(['a1'])
+	/** A conversation `c1` that held one reply, `a1`, when the turn started. */
+	const before = [
+		{ id: 'u1', role: 'user', conversationId: 'c1', content: 'hi' },
+		{ id: 'a1', role: 'assistant', conversationId: 'c1', content: 'old reply' },
+	]
+	const turn = startTurn('c1', before)
+
+	test('the turn remembers its conversation and the replies already in it', () => {
+		expect(turn.conversationId).toBe('c1')
+		expect([...turn.known]).toEqual(['a1'])
+		// A brand-new conversation starts with nothing known, so its first reply is read.
+		expect(startTurn('c9', []).known.size).toBe(0)
+	})
 
 	test('only replies that are new since the turn began', () => {
 		const messages = [
-			{ id: 'u1', role: 'user', content: 'hi' },
-			{ id: 'a1', role: 'assistant', content: 'old reply' },
-			{ id: 'u2', role: 'user', content: 'again' },
-			{ id: 'a2', role: 'assistant', content: 'new reply' },
+			...before,
+			{ id: 'u2', role: 'user', conversationId: 'c1', content: 'again' },
+			{ id: 'a2', role: 'assistant', conversationId: 'c1', content: 'new reply' },
 		]
-		expect(repliesToSpeak(known, messages).map((m) => m.id)).toEqual(['a2'])
+		expect(repliesToSpeak(turn, messages).map((m) => m.id)).toEqual(['a2'])
+	})
+
+	test('a turn that ends after the page moved to another conversation reads none of it', () => {
+		// The chat page is reused: the turn started in c1, the user opened c2, then the turn
+		// ended and the page reloaded — c2's whole history is "unknown" to the turn, not new.
+		const other = [
+			{ id: 'b1', role: 'assistant', conversationId: 'c2', content: 'an old answer in c2' },
+			{ id: 'b2', role: 'assistant', conversationId: 'c2', content: 'another' },
+		]
+		expect(repliesToSpeak(turn, other)).toEqual([])
 	})
 
 	test('a reply saved as partial — Stop, or a failure — is not read', () => {
-		const messages = [{ id: 'a2', role: 'assistant', content: 'half an ans', metadata: { partial: true, stoppedByUser: true } }]
-		expect(repliesToSpeak(known, messages)).toEqual([])
+		const messages = [
+			{ id: 'a2', role: 'assistant', conversationId: 'c1', content: 'half an ans', metadata: { partial: true, stoppedByUser: true } },
+		]
+		expect(repliesToSpeak(turn, messages)).toEqual([])
 	})
 
 	test('empty replies (tool-only turns) and optimistic drafts are skipped', () => {
 		const messages = [
-			{ id: 'a2', role: 'assistant', content: '   ' },
-			{ id: 'a3', role: 'assistant', content: 'draft', optimistic: true },
-			{ id: 'a4', role: 'assistant', content: null },
+			{ id: 'a2', role: 'assistant', conversationId: 'c1', content: '   ' },
+			{ id: 'a3', role: 'assistant', conversationId: 'c1', content: 'draft', optimistic: true },
+			{ id: 'a4', role: 'assistant', conversationId: 'c1', content: null },
 		]
-		expect(repliesToSpeak(known, messages)).toEqual([])
+		expect(repliesToSpeak(turn, messages)).toEqual([])
 	})
 })
 

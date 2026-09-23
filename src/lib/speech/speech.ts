@@ -5,8 +5,8 @@
  * table pipes and every character of a URL, so `toSpeakableText` turns it into prose first.
  * `splitForSpeech` then cuts that prose into pieces the synthesis endpoint accepts, on
  * sentence boundaries so the joins are not audible, with a short first piece so playback
- * starts quickly. `repliesToSpeak` picks which replies a finished turn produced, for
- * auto-read.
+ * starts quickly. `startTurn` / `repliesToSpeak` pick which replies a finished turn produced,
+ * for auto-read.
  *
  * No `$lib` imports and no DOM: specs import this directly in the plain Playwright loader.
  */
@@ -284,21 +284,35 @@ export function splitForSpeech(
 type SpeakableMessage = {
 	id: string
 	role: string
+	conversationId: string
 	content?: string | null
 	optimistic?: boolean
 	metadata?: unknown
 }
 
+/** What was on screen when a turn started: its conversation, and the replies already in it. */
+export type TurnStart = { conversationId: string; known: ReadonlySet<string> }
+
+export function startTurn(conversationId: string, messages: readonly SpeakableMessage[]): TurnStart {
+	return {
+		conversationId,
+		known: new Set(messages.filter((m) => m.role === 'assistant').map((m) => m.id)),
+	}
+}
+
 /**
  * Which replies a finished turn produced, for auto-read.
  *
- * `known` holds the assistant message ids that existed when the turn started. A reply saved
- * as `partial` is a turn that was stopped or failed part-way: reading half an answer aloud
- * after the user pressed Stop is the opposite of what they asked for.
+ * Only replies in the turn's own conversation that were not already there when it started.
+ * The chat page is reused from one conversation to the next, so a turn can end after the
+ * page has moved on — the other conversation's history is not new, and must not be read.
+ * A reply saved as `partial` is a turn that was stopped or failed part-way: reading half an
+ * answer aloud after the user pressed Stop is the opposite of what they asked for.
  */
-export function repliesToSpeak<T extends SpeakableMessage>(known: ReadonlySet<string>, messages: readonly T[]): T[] {
+export function repliesToSpeak<T extends SpeakableMessage>(turn: TurnStart, messages: readonly T[]): T[] {
 	return messages.filter((message) => {
-		if (message.role !== 'assistant' || known.has(message.id) || message.optimistic) return false
+		if (message.role !== 'assistant' || message.optimistic) return false
+		if (message.conversationId !== turn.conversationId || turn.known.has(message.id)) return false
 		const metadata = message.metadata && typeof message.metadata === 'object' ? (message.metadata as Record<string, unknown>) : null
 		if (metadata?.partial === true) return false
 		return Boolean(message.content?.trim())

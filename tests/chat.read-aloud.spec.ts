@@ -92,6 +92,52 @@ test('the speaker pill reads a reply without its code, and stops when pressed ag
 	}
 })
 
+test('opening another conversation stops a reply being read', async ({ page }) => {
+	test.setTimeout(90_000)
+	const prefix = uniquePrefix('chat-read-aloud-leave')
+	await cleanupPrefixedRecords(prefix)
+	await authenticateContext(page.context())
+	const userId = await getActiveUserId()
+	const first = await seedConversation(prefix, { userId, assistantMessage: `${prefix} first conversation reply.` })
+	const second = await seedConversation(prefix, { userId, assistantMessage: `${prefix} second conversation reply.` })
+	// Long enough to still be playing when we come back, had nothing stopped it.
+	await scriptSpeech(page, wavAnswer(20))
+
+	/** In-app navigation: the chat page is reused rather than reloaded, as from the sidebar. */
+	const openInApp = async (id: string) => {
+		await page.evaluate((href) => {
+			const link = document.createElement('a')
+			link.href = href
+			document.body.appendChild(link)
+			link.click()
+			link.remove()
+		}, `/chat/${id}`)
+		await page.waitForURL(`**/chat/${id}`)
+		await expect(page.getByText(`${prefix} ${id === first.id ? 'first' : 'second'} conversation reply.`).first()).toBeVisible({
+			timeout: 30_000,
+		})
+	}
+
+	try {
+		await page.goto(`/chat/${first.id}`, { waitUntil: 'domcontentloaded' })
+		await waitForHydration(page)
+		const pill = page.getByTestId('speak-button').filter({ visible: true }).first()
+		await expect(pill).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
+		await pill.click()
+		await expect(pill).toHaveAttribute('data-state', 'playing', { timeout: 15_000 })
+
+		// Its speaker button is gone from the screen, so nothing there could stop it any more.
+		await openInApp(second.id)
+		await openInApp(first.id)
+		await expect(page.getByTestId('speak-button').filter({ visible: true }).first()).toHaveAttribute('data-state', 'idle', {
+			timeout: 5_000,
+		})
+	} finally {
+		await page.unrouteAll({ behavior: 'ignoreErrors' })
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
 test('a long reply is fetched in order, a short piece first, and each piece under the cap', async ({ page }) => {
 	test.setTimeout(90_000)
 	const prefix = uniquePrefix('chat-read-aloud-long')

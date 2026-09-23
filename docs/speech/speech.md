@@ -30,7 +30,7 @@ Dictation (speaking to AgentStudio) is the reverse direction and is not covered 
 5. The chunk plays. While it plays, the next chunk is already being requested, so there is usually no gap between chunks.
 6. When the last chunk ends, the button returns to its normal state.
 
-Pressing the button again at any point stops playback straight away and cancels any request still in progress. Starting another reply stops the current one: only one reply plays at a time.
+Pressing the button again at any point stops playback straight away and cancels any request still in progress. Starting another reply stops the current one: only one reply plays at a time. Opening another conversation, or leaving the chat for another page, also stops it, because its button is no longer on screen to stop it with.
 
 ### Auto-read (hands-free)
 
@@ -45,6 +45,7 @@ A reply is **not** read automatically when:
 - the user pressed Stop on the turn, or the turn failed part-way (the half-finished reply is saved, but it is not read);
 - the reply has no text, for example a turn that only ran tools;
 - the reply was already on screen before the turn started. Opening an old conversation never reads it.
+- the user opened another conversation before the turn finished. The reply is saved as usual and can be played from its speaker button later, but nothing from the conversation now on screen is read.
 
 If the browser refuses to play audio, or the server refuses the request, the reason appears next to the switch.
 

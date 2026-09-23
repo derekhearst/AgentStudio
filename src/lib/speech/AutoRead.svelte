@@ -10,20 +10,28 @@
 	 *
 	 * The switch is per device (see `autoRead`) and starts off. Turning it on also primes the
 	 * audio element from that tap, which is what lets a reply that arrives later start talking.
+	 *
+	 * The page is reused across conversations, so this also owns what happens on leaving one:
+	 * a reply still being read stops (its speaker button is no longer on screen to stop it),
+	 * and a turn that ends after the move reads nothing from the conversation now shown.
 	 */
 	import { onMount, untrack } from 'svelte';
-	import { repliesToSpeak } from './speech';
+	import { page } from '$app/state';
+	import { repliesToSpeak, startTurn, type TurnStart } from './speech';
 	import { autoRead, speechPlayer } from './speech-player.svelte';
 
 	type Reply = {
 		id: string;
 		role: string;
+		conversationId: string;
 		content?: string | null;
 		optimistic?: boolean;
 		metadata?: unknown;
 	};
 
 	let { messages, streaming }: { messages: readonly Reply[]; streaming: boolean } = $props();
+
+	const conversationId = $derived(page.params.id ?? '');
 
 	// The preference lives in localStorage, which the server render cannot see; showing it
 	// only after mount keeps the first client render identical to the server's.
@@ -34,8 +42,8 @@
 	const enabled = $derived(mounted && autoRead.enabled);
 	const reading = $derived(speechPlayer.activePurpose === 'autoplay');
 
-	/** Assistant replies that existed when the running turn began; null between turns. */
-	let known: Set<string> | null = null;
+	/** The running turn's conversation and the replies it already held; null between turns. */
+	let turn: TurnStart | null = null;
 	/** The reply auto-read last tried, so a failure to read it can be shown here. */
 	let lastReadId = $state<string | null>(null);
 	const failure = $derived(lastReadId ? speechPlayer.errorOf(lastReadId) : null);
@@ -44,12 +52,12 @@
 		const live = streaming;
 		untrack(() => {
 			if (live) {
-				known ??= new Set(messages.filter((m) => m.role === 'assistant').map((m) => m.id));
+				turn ??= startTurn(conversationId, messages);
 				return;
 			}
-			if (!known) return;
-			const fresh = repliesToSpeak(known, messages);
-			known = null;
+			if (!turn) return;
+			const fresh = repliesToSpeak(turn, messages);
+			turn = null;
 			if (!autoRead.enabled || fresh.length === 0) return;
 			lastReadId = fresh[fresh.length - 1].id;
 			void speechPlayer.play(
@@ -58,6 +66,19 @@
 				{ purpose: 'autoplay' },
 			);
 		});
+	});
+
+	// Leaving the conversation, for another one or another page, stops a reply being read
+	// from it, and drops its failure notice. Only replies: the settings preview is not this
+	// page's to stop.
+	$effect(() => {
+		void conversationId;
+		return () =>
+			untrack(() => {
+				const purpose = speechPlayer.activePurpose;
+				if (purpose === 'message' || purpose === 'autoplay') speechPlayer.stop();
+				lastReadId = null;
+			});
 	});
 
 	function toggle() {
