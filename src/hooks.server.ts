@@ -39,7 +39,9 @@ async function cleanupLegacyCapabilitySkills() {
 // `/api/webhooks` is unauthenticated by design — third-party providers (GitHub, …) POST
 // here without session cookies. The handlers verify provider signatures themselves so the
 // path-level skip is safe; never broaden this prefix without an explicit signature check.
-const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks', '/api/health']
+// `/api/cron` is public for the same reason: an external scheduler has no session, so the
+// handler checks a session OR the CRON_SECRET bearer itself, and refuses when neither holds.
+const PUBLIC_PATH_PREFIXES = ['/login', '/setup', '/demo', '/api/webhooks', '/api/health', '/api/cron']
 
 function isPublicPath(pathname: string) {
 	// `/_app` here is the static bundle. Remote functions (`/_app/remote/…`) never get this

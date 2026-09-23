@@ -35,7 +35,8 @@ import {
  *
  * The cron route (`/api/cron`) still works as an external trigger — it just calls the same
  * `checkAndRunAutomations` enqueue path. Useful for environments that prefer external cron
- * over the in-process scheduler.
+ * over the in-process scheduler: send `Authorization: Bearer $CRON_SECRET` (see
+ * `cron-trigger.ts`; with no secret configured only a signed-in session can fire it).
  *
  * #31 — failure handling lives HERE rather than in the generic queue retry, and the handler
  * deliberately does not rethrow. Two reasons:

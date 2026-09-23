@@ -62,6 +62,9 @@ export function stripModelCredentials(env: Record<string, string>): Record<strin
 	return env
 }
 
+/** The `/api/cron` bearer secret the test server runs with, unless the environment sets one. */
+export const E2E_CRON_SECRET = 'e2e-test-cron-secret-do-not-use-in-prod'
+
 /**
  * The environment the test dev server must run with.
  *
@@ -92,6 +95,8 @@ export function testServerEnv(base: NodeJS.ProcessEnv = process.env): Record<str
 	// A test-only constant so the webhook endpoint tests always run end-to-end. Operators
 	// can override via .env or the shell env to point at a real secret.
 	env.GITHUB_WEBHOOK_SECRET = base.GITHUB_WEBHOOK_SECRET ?? 'e2e-test-webhook-secret-do-not-use-in-prod'
+	// Same idea for the external cron trigger, so its bearer path is tested end-to-end.
+	env.CRON_SECRET = base.CRON_SECRET ?? E2E_CRON_SECRET
 
 	// The dev server gets a normal pool, explicitly.
 	//

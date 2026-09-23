@@ -183,6 +183,26 @@ request must not be held open that long. Two guarantees:
 
 Double-clicking is harmless — manual runs within the same minute collapse into one job.
 
+### External trigger
+
+Automations normally run from the scheduler built into the server, which checks for due
+automations every minute. An operator who turns that scheduler off
+(`JOBS_SCHEDULER_ENABLED=0`) can drive the same check from outside by calling
+`POST /api/cron`, for example from a system cron job. Each call does what one scheduler tick
+does: queue every due automation, clean up expired run workspaces, and embed any skills that
+are missing an embedding.
+
+The route accepts two kinds of caller:
+
+| Caller | How it proves itself |
+| ------ | -------------------- |
+| A signed-in person (or a test) | The normal session cookie |
+| An external scheduler | The header `Authorization: Bearer <CRON_SECRET>` |
+
+With no `CRON_SECRET` configured, only a signed-in session is accepted. Anything else gets a
+`401 Unauthorized` — never a redirect to the login page, so a misconfigured scheduler sees a
+clear failure instead of an apparent success.
+
 ### Retries, backoff, and giving up
 
 A failed tick is retried on an explicit escalating schedule rather than the queue's generic

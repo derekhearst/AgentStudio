@@ -78,6 +78,7 @@ cp .env.example .env
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
+- `CRON_SECRET` (optional; lets an external scheduler fire `POST /api/cron` with `Authorization: Bearer <secret>` when the in-process scheduler is turned off; unset → only a signed-in session can fire it)
 
 Database note:
 

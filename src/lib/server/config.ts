@@ -12,7 +12,7 @@
  * Use the helpers below in domain code:
  *   - `requireOpenRouterApiKey()` — throws a uniform error if unset.
  *   - `getSandboxRoot()` — returns the sandbox root with documented default.
- *   - `getCronSecret()` — returns the trimmed secret, or `undefined`.
+ *   - `getCronSecret()` — returns the trimmed `/api/cron` bearer secret, or `undefined`.
  *
  * For one-off vars, prefer adding a typed accessor here over reading inline.
  */
@@ -66,7 +66,10 @@ export function getSearxngUsername(): string {
 	return readEnv('SEARXNG_USERNAME') ?? 'derek'
 }
 
-/** Returns the cron-trigger shared secret, or `undefined` when cron auth is disabled. */
+/**
+ * The bearer secret an external scheduler sends to `POST /api/cron`, or `undefined` — in
+ * which case only a signed-in session can fire the route.
+ */
 export function getCronSecret(): string | undefined {
 	return readEnv('CRON_SECRET')
 }
