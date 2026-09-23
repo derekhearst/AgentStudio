@@ -2,8 +2,9 @@
  * Exclusion rules — DB-backed half.
  *
  * The matching engine and the built-in credential patterns are pure and live in
- * `exclusions.ts`; this module owns seeding, loading, and hit accounting, and re-exports
- * the pure API so callers only need one import.
+ * `exclusions.ts`; the time-limited matcher production code uses lives in
+ * `exclusion-scan.server.ts`. This module owns seeding, loading, and hit accounting, and
+ * re-exports both so callers only need one import.
  */
 
 import { and, eq, sql } from 'drizzle-orm'
@@ -21,7 +22,6 @@ export {
 	MAX_PATTERN_LENGTH,
 	compileExclusionRule,
 	compileExclusionRules,
-	findExclusionMatch,
 	redactSample,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions'
@@ -31,6 +31,12 @@ export type {
 	ExclusionKind,
 	ExclusionMatch,
 } from '$lib/memory/exclusions'
+export {
+	EXCLUSION_SCAN_TIMEOUT_MS,
+	scanForExclusion,
+	scanForExclusions,
+	type ExclusionScanMatch,
+} from '$lib/memory/exclusion-scan.server'
 
 /**
  * Seed the credential rules for a user. Idempotent: conflicts on (user_id, name) are

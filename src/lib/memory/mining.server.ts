@@ -21,9 +21,9 @@ import { embed } from '$lib/memory/embeddings.server'
 import { encodeAaak, type AaakTags } from '$lib/memory/aaak.server'
 import {
 	ensureBuiltinExclusionRules,
-	findExclusionMatch,
 	loadCompiledExclusionRules,
 	recordExclusionHits,
+	scanForExclusions,
 	type CompiledExclusionRule,
 } from '$lib/memory/exclusions.server'
 import { tombstoneMessages } from '$lib/memory/tombstones.server'
@@ -246,12 +246,20 @@ export async function mineSession(opts: {
 		return [] as CompiledExclusionRule[]
 	})
 
+	// The whole of every turn, on a worker thread with a time limit: a user's regex cannot
+	// freeze the server, and a secret past the first 40,000 characters is still caught. A turn
+	// whose check runs out of time counts as matched.
+	const matches = await scanForExclusions(
+		opts.session.turns.map((turn) => turn.content),
+		exclusionRules,
+	)
+
 	const keptTurns: MiningTurn[] = []
 	const firedRuleIds: Array<string | null> = []
 	const firedRuleNames: string[] = []
 	const excludedMessageIds: string[] = []
-	for (const turn of opts.session.turns) {
-		const match = exclusionRules.length > 0 ? findExclusionMatch(turn.content, exclusionRules) : null
+	for (const [index, turn] of opts.session.turns.entries()) {
+		const match = matches[index]
 		if (match) {
 			firedRuleIds.push(match.ruleId)
 			firedRuleNames.push(match.ruleName)
@@ -259,6 +267,7 @@ export async function mineSession(opts: {
 			logger.info('[memory] exclusion rule dropped a turn before mining', {
 				rule: match.ruleName,
 				sample: match.sample,
+				timedOut: match.timedOut,
 				conversationId: opts.session.conversationId ?? null,
 			})
 			continue

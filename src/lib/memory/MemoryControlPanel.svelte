@@ -13,7 +13,7 @@
 		listMemoryExclusionRulesQuery,
 		listMinedConversationsQuery,
 		saveMemoryExclusionRuleCommand,
-		testMemoryExclusionRulesQuery,
+		testMemoryExclusionRulesCommand,
 		toggleMemoryExclusionRuleCommand,
 		type MemoryExclusionRuleRow,
 		type MemoryMinedConversationRow,
@@ -43,7 +43,7 @@
 
 	// --- rule tester -----------------------------------------------------------
 	let sample = $state('');
-	let testResult = $state<{ matched: boolean; ruleName?: string; sample?: string } | null>(null);
+	let testResult = $state<{ matched: boolean; ruleName?: string; sample?: string; timedOut?: boolean } | null>(null);
 	let testing = $state(false);
 
 	let busyConversationId = $state<string | null>(null);
@@ -149,11 +149,7 @@
 		if (testing || sample.trim().length === 0) return;
 		testing = true;
 		try {
-			testResult = (await testMemoryExclusionRulesQuery({ sample })) as {
-				matched: boolean;
-				ruleName?: string;
-				sample?: string;
-			};
+			testResult = await testMemoryExclusionRulesCommand({ sample });
 		} finally {
 			testing = false;
 		}
@@ -248,6 +244,9 @@
 								<div class="rule__desc">{rule.description}</div>
 							{/if}
 							<code class="rule__pattern">{rule.pattern}</code>
+							{#if rule.problem}
+								<p class="rule__problem">{rule.problem} It still runs, but a turn it cannot finish checking in time is dropped.</p>
+							{/if}
 						</li>
 					{:else}
 						<li class="control-panel__empty">No exclusion rules yet.</li>
@@ -310,7 +309,12 @@
 							{testing ? 'Checking…' : 'Check'}
 						</button>
 						{#if testResult}
-							{#if testResult.matched}
+							{#if testResult.matched && testResult.timedOut}
+								<span class="rule-test__hit"
+									>Blocked: “{testResult.ruleName}” could not finish checking this in time, so it would be treated as a
+									match.</span
+								>
+							{:else if testResult.matched}
 								<span class="rule-test__hit">Blocked by “{testResult.ruleName}” (matched {testResult.sample})</span>
 							{:else}
 								<span class="rule-test__miss">No rule matches — this would be mined.</span>
@@ -558,6 +562,12 @@
 	.rule__desc {
 		font-size: 10.5px;
 		color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	}
+
+	.rule__problem {
+		margin: 0;
+		font-size: 10.5px;
+		color: var(--color-warning);
 	}
 
 	.rule__pattern {

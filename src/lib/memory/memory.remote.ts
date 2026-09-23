@@ -28,8 +28,8 @@ import {
 import {
 	compileExclusionRules,
 	ensureBuiltinExclusionRules,
-	findExclusionMatch,
 	MAX_PATTERN_LENGTH,
+	scanForExclusion,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions.server'
 import { listDrawerRecallEvents } from '$lib/memory/recall-log.server'
@@ -247,7 +247,7 @@ export const listDrawerRecallEventsQuery = query(drawerIdSchema, async ({ id }) 
 export const listMemoryExclusionRulesQuery = query(async () => {
 	const user = requireAuthenticatedRequestUser()
 	await ensureBuiltinExclusionRules(user.id)
-	return db
+	const rows = await db
 		.select({
 			id: memoryExclusionRules.id,
 			name: memoryExclusionRules.name,
@@ -262,6 +262,9 @@ export const listMemoryExclusionRulesQuery = query(async () => {
 		.from(memoryExclusionRules)
 		.where(eq(memoryExclusionRules.userId, user.id))
 		.orderBy(desc(memoryExclusionRules.builtin), memoryExclusionRules.name)
+	// What the editor would refuse today — a rule saved before a validation change still runs,
+	// under the scanner's time limit, and the list says why it should be rewritten.
+	return rows.map((row) => ({ ...row, problem: validateExclusionPattern(row.kind, row.pattern) }))
 })
 
 const saveExclusionRuleSchema = z.object({
@@ -347,8 +350,12 @@ export const toggleMemoryExclusionRuleCommand = command(
 /**
  * Dry-run the live rule set against sample text. Lets a user check a new pattern before
  * trusting it with their secrets — and check that an existing rule catches what they think.
+ *
+ * A command, not a query: the sample is often a real secret, and a query sends its argument
+ * in the URL of a GET, where proxy access logs keep it. A command sends it in a POST body.
+ * It stores and caches nothing, so there is nothing to refresh afterwards.
  */
-export const testMemoryExclusionRulesQuery = query(
+export const testMemoryExclusionRulesCommand = command(
 	z.object({ sample: z.string().max(4000) }),
 	async ({ sample }) => {
 		const user = requireAuthenticatedRequestUser()
@@ -363,9 +370,11 @@ export const testMemoryExclusionRulesQuery = query(
 			})
 			.from(memoryExclusionRules)
 			.where(and(eq(memoryExclusionRules.userId, user.id), eq(memoryExclusionRules.enabled, true)))
-		const match = findExclusionMatch(sample, compileExclusionRules(rows))
+		// The same time-limited matcher the miner uses, so a slow rule cannot freeze the server
+		// from here either.
+		const match = await scanForExclusion(sample, compileExclusionRules(rows))
 		if (!match) return { matched: false as const }
-		return { matched: true as const, ruleName: match.ruleName, sample: match.sample }
+		return { matched: true as const, ruleName: match.ruleName, sample: match.sample, timedOut: match.timedOut }
 	},
 )
 
