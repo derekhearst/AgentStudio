@@ -3,11 +3,11 @@ import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, runEvents } from '$lib/runs/runs.schema'
 import { ACTIVE_CHAT_RUN_STATES } from '$lib/runs/runs.server'
-import { encodeSseFrame } from '$lib/runtime/sse-codec'
+import { createRunReplayStream } from '$lib/runs/run-replay-stream'
 import { POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
 
-export const GET: RequestHandler = async ({ params, url, locals }) => {
+export const GET: RequestHandler = async ({ params, url, locals, request }) => {
 	if (!locals.user) {
 		return json({ error: 'Unauthorized' }, { status: 401 })
 	}
@@ -36,81 +36,27 @@ export const GET: RequestHandler = async ({ params, url, locals }) => {
 	}
 
 	const runId = run.id
-	const isActive = (await isRunActive(runId)) !== null
-
-	const readable = new ReadableStream<Uint8Array>({
-		async start(controller) {
-			let clientConnected = true
-			const enqueue = (chunk: Uint8Array) => {
-				if (!clientConnected) return
-				try {
-					controller.enqueue(chunk)
-				} catch {
-					clientConnected = false
-				}
-			}
-
-			let lastSeq = since
-
-			// Replay missed events
-			try {
-				const replay = await db
-					.select()
+	const readable = createRunReplayStream({
+		since,
+		activeAtStart: (await isRunActive(runId)) !== null,
+		pollIntervalMs: POLL_INTERVAL_MS,
+		// The stream's own `cancel` covers a reader that goes away; this covers a request the
+		// platform aborts before the body is ever read.
+		signal: request.signal,
+		source: {
+			eventsAfter: (after) =>
+				db
+					.select({ seq: runEvents.seq, type: runEvents.type, payload: runEvents.payload })
 					.from(runEvents)
-					.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
-					.orderBy(asc(runEvents.seq))
-				for (const ev of replay) {
-					enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
-					lastSeq = ev.seq
-				}
-			} catch (err) {
-				logger.error('[chat/stream/resume] replay failed', {
-					runId,
-					error: err instanceof Error ? err.message : String(err),
-				})
-				enqueue(encodeSseFrame('done', { error: 'Resume replay failed' }))
-				if (clientConnected) controller.close()
-				return
-			}
-
-			// If the run was already terminal when we started, send a synthetic done and close.
-			if (!isActive) {
-				enqueue(encodeSseFrame('done', { resumed: true, terminal: true }))
-				if (clientConnected) controller.close()
-				return
-			}
-
-			// Tail new events until terminal state.
-			while (clientConnected) {
-				const tail = await db
-					.select()
-					.from(runEvents)
-					.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
-					.orderBy(asc(runEvents.seq))
-				for (const ev of tail) {
-					enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
-					lastSeq = ev.seq
-				}
-
-				if ((await isRunActive(runId)) === null) {
-					// Drain any final events that landed between our last poll and the state flip.
-					const final = await db
-						.select()
-						.from(runEvents)
-						.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, lastSeq)))
-						.orderBy(asc(runEvents.seq))
-					for (const ev of final) {
-						enqueue(encodeSseFrame(ev.type, ev.payload, ev.seq))
-						lastSeq = ev.seq
-					}
-					break
-				}
-
-				await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-			}
-
-			if (clientConnected) controller.close()
+					.where(and(eq(runEvents.runId, runId), gt(runEvents.seq, after)))
+					.orderBy(asc(runEvents.seq)),
+			isActive: async () => (await isRunActive(runId)) !== null,
 		},
+		onReplayError: (err) =>
+			logger.error('[chat/stream/resume] replay failed', {
+				runId,
+				error: err instanceof Error ? err.message : String(err),
+			}),
 	})
 
 	return new Response(readable, {

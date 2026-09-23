@@ -34,6 +34,7 @@ import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
 import {
 	buildApprovalRequiredSet,
@@ -287,10 +288,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		const answers = await awaitQuestionAnswers(run.id, token)
 
-		await db
-			.update(chatRuns)
-			.set({ state: 'running', label: 'Generating response' })
-			.where(eq(chatRuns.id, run.id))
+		await markChatRunRunning(run.id)
 
 		if (!answers) return 'The user did not answer in time.'
 		return Object.entries(answers)
@@ -308,26 +306,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
 
 	/*
-	 * Set while the SDK session is live, so the stream's `cancel` can stop the run.
-	 *
-	 * Without this, "Stop" only aborted the browser's fetch: the server's loop kept pulling
-	 * from the CLI, which kept spending tokens and kept executing tools until the turn ended
-	 * on its own. The socket was the only thing that stopped.
+	 * Set while the SDK session is live. The handle is published in the run registry, which
+	 * is how Stop (`/chat/[id]/stop`), the dock's dismiss and the reaper reach this run from
+	 * a different request.
 	 */
 	let releaseRunHandle: (() => void) | null = null
-	let interruptSession: (() => Promise<void>) | null = null
 
 	/*
-	 * True once the client's connection is gone. `enqueue` on a cancelled controller throws,
-	 * and the run does not stop at the same instant the socket does — the interrupt still
-	 * has to travel to the CLI, produce a final `result`, and come back through persistence.
-	 * Every frame in that window would otherwise throw and turn an ordinary stop into a
+	 * True once the client's connection is gone. The run carries on without it — a reload,
+	 * a network blip or a proxy timeout is not a request to stop, and the client reconnects
+	 * through `stream/resume` — so every frame from then on has nowhere to go, and `enqueue`
+	 * on a cancelled controller throws. Unguarded, that turned a dropped connection into a
 	 * failed run with a `TypeError` where its reply should be.
 	 *
 	 * Run events keep being written either way: they are what `stream/resume` replays, so a
 	 * reconnecting client still sees the turn it walked away from.
 	 */
 	let clientGone = false
+
+	/** Keeps the row's `updatedAt` fresh while frames flow, so the stuck-run reaper leaves it be. */
+	const heartbeat = createRunHeartbeat(run.id)
 
 	/*
 	 * #36 — attachments used to be declared on the payload and then never read,
@@ -451,6 +449,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 
 			const emit = async (event: string, payload: unknown) => {
+				// Every frame counts, `tool_progress` included: it is the SDK's own heartbeat for
+				// a call still running, which is all a long build produces.
+				heartbeat.beat()
 				if (NON_PERSISTED.has(event)) {
 					send(encodeSseFrame(event, payload))
 					return
@@ -555,10 +556,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							)
 						},
 						onHandle: (handle) => {
-							// Published under the run id so a different request — the dock's
-							// dismiss — can stop this run too, not just this connection.
+							// Published under the run id so a different request — Stop, the
+							// dock's dismiss — can reach this run. The connection cannot.
 							releaseRunHandle = registerRunHandle(run.id, handle)
-							interruptSession = () => handle.interrupt()
 						},
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
@@ -598,12 +598,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 											{ state: 'waiting_tool_approval', label: `Awaiting approval: ${name}` },
 										)
 										const approved = await awaitApprovalDecision(run.id, token)
-										if (approved) {
-											await db
-												.update(chatRuns)
-												.set({ state: 'running', label: 'Generating response' })
-												.where(eq(chatRuns.id, run.id))
-										}
+										if (approved) await markChatRunRunning(run.id)
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
@@ -685,17 +680,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					conversationId: body.conversationId,
 				})
 
-				await db
-					.update(chatRuns)
-					.set({
-						state: summary.error ? 'failed' : 'completed',
-						label: summary.error ? 'Failed' : 'Completed',
-						error: summary.error,
-						lastDelta: summary.text.slice(-500),
-						lastHeartbeatAt: new Date(),
-						finishedAt: new Date(),
-					})
-					.where(eq(chatRuns.id, run.id))
+				// A no-op when the reaper or a dismiss already ended the run: canceled stays canceled.
+				await finishChatRun(run.id, {
+					state: summary.error ? 'failed' : 'completed',
+					label: summary.error ? 'Failed' : 'Completed',
+					error: summary.error,
+					lastDelta: summary.text.slice(-500),
+				})
 
 				enqueueMemoryMineJob({
 					settings: currentSettings,
@@ -733,10 +724,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
 				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
-				await db
-					.update(chatRuns)
-					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
-					.where(eq(chatRuns.id, run.id))
+				await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: errorMessage })
 				await emit('done', { error: errorMessage })
 				closeStream(controller)
 			} finally {
@@ -744,36 +732,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// later dismiss write to a CLI that has already exited.
 				releaseRunHandle?.()
 				releaseRunHandle = null
-				interruptSession = null
 			}
 		},
 
 		/**
-		 * The client went away — it hit Stop, navigated, or lost the connection.
+		 * The client went away — it navigated, reloaded, or lost the connection.
 		 *
-		 * `cancel` is the reliable signal for that: the browser aborting its fetch closes
-		 * the response, and the platform cancels this stream. Interrupting here is what
-		 * makes Stop actually stop, rather than merely stop *watching*: the CLI ends the
-		 * turn, the run loop sees an ordinary `result`, and the partial turn is persisted
-		 * and accounted like any other.
-		 *
-		 * Nothing is awaited on the caller's behalf beyond the interrupt itself — the
-		 * `start` body is still running and owns its own teardown.
+		 * That is not a request to stop, so the run carries on: its events keep going to
+		 * `run_events`, where `stream/resume` picks them up for a client that reconnects, and
+		 * the turn is persisted when it ends. Stop is a separate request (`/chat/[id]/stop`)
+		 * that interrupts the run through the registry. This used to interrupt on every
+		 * disconnect, so a reload or a network blip cut the turn short and the client's
+		 * automatic resume could only replay the truncated remains.
 		 */
-		async cancel() {
+		cancel() {
 			clientGone = true
-			const interrupt = interruptSession
-			if (!interrupt) return
-			try {
-				await interrupt()
-				logger.info('[chat/stream] client disconnected, interrupted the run', { runId: run.id })
-			} catch (error) {
-				// Commonest cause is benign: the turn finished as the connection dropped.
-				logger.warn('[chat/stream] interrupt after disconnect failed', {
-					runId: run.id,
-					error: String(error),
-				})
-			}
 		},
 	})
 

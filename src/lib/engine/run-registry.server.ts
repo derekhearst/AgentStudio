@@ -8,8 +8,9 @@
  * outside the `for await` loop could ever affect a running turn.
  *
  * A registry is what makes the handle reachable from a *different* request than the one
- * that started the run. That is the whole point: "stop" arrives as a separate HTTP call (or
- * as a dropped connection), not as a return value from the loop that is still running.
+ * that started the run. That is the whole point: "stop" arrives as a separate HTTP call
+ * (`/chat/[id]/stop`, the dock's dismiss), not as a return value from the loop that is still
+ * running. A dropped connection is deliberately not one — the run outlives it.
  *
  * ## What this deliberately is not
  *

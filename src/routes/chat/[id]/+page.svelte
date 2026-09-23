@@ -82,6 +82,7 @@
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
+	import { requestRunStop } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
@@ -600,6 +601,8 @@
 		finalizeCurrentThinkingBlock();
 		finalizeCurrentTextBlock();
 		stoppedByUser = true;
+		// Dropping the connection alone no longer stops the run (a reload must not), so say so.
+		void requestRunStop(conversationId, liveContextStats?.runId ?? null);
 		streamAbortController.abort();
 	}
 
