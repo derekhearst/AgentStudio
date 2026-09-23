@@ -167,14 +167,16 @@
 	const grouped = $derived.by((): Group[] => {
 		const pinned = showingArchive ? [] : sorted.filter((c) => c.pinnedAt);
 		const rest = pinned.length > 0 ? sorted.filter((c) => !c.pinnedAt) : sorted;
-		const groups = groupConversations(rest, pinned.length > 0)
-			.filter(([, items]) => items.length > 0)
-			.map(([label, items]) => ({ key: `group:${label}`, label, items }));
+		const groups = groupConversations(rest, pinned.length > 0).filter((group) => group.items.length > 0);
 		return pinned.length > 0 ? [{ key: 'pinned', label: 'Pinned', items: pinned }, ...groups] : groups;
 	});
 
-	function groupConversations(list: Conversation[], labelFlat: boolean): Array<[string, Conversation[]]> {
-		if (groupBy === 'None') return [[labelFlat ? 'Recent' : '', list]];
+	/*
+	 * Keyed by the day or the category rather than the label: day labels drop the year, so
+	 * the same date a year apart used to produce two groups with one key.
+	 */
+	function groupConversations(list: Conversation[], labelFlat: boolean): Group[] {
+		if (groupBy === 'None') return [{ key: 'group:flat', label: labelFlat ? 'Recent' : '', items: list }];
 		if (groupBy === 'Date') {
 			const m = new Map<string, { label: string; ts: number; items: Conversation[] }>();
 			for (const c of list) {
@@ -187,9 +189,9 @@
 					m.set(key, { label: dayLabel(c.updatedAt), ts: ds.getTime(), items: [c] });
 				}
 			}
-			return [...m.values()]
-				.sort((a, b) => b.ts - a.ts)
-				.map((g) => [g.label, g.items] as [string, Conversation[]]);
+			return [...m.entries()]
+				.sort(([, a], [, b]) => b.ts - a.ts)
+				.map(([key, g]) => ({ key: `day:${key}`, label: g.label, items: g.items }));
 		}
 		const fieldKey: keyof Conversation = groupBy === 'Project' ? 'category' : groupBy === 'Status' ? 'category' : 'category';
 		const m = new Map<string, Conversation[]>();
@@ -198,7 +200,7 @@
 			if (!m.has(key)) m.set(key, []);
 			m.get(key)!.push(c);
 		}
-		return [...m.entries()];
+		return [...m.entries()].map(([key, items]) => ({ key: `category:${key}`, label: key, items }));
 	}
 
 	/*
@@ -444,11 +446,8 @@
 							<time class="s" datetime={when.toISOString()} title={when.toLocaleString()}>{relativeShort(when)}</time>
 						</span>
 						{#if hit.match}
-							<span class="console-searchhit__snippet">
-								{#each splitSnippet(hit.match.snippet) as part, i (i)}
-									{#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
-								{/each}
-							</span>
+							<!-- One line on purpose: whitespace in the markup would pad every highlight. -->
+							<span class="console-searchhit__snippet">{#each splitSnippet(hit.match.snippet) as part, i (i)}{#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
 						{/if}
 					</a>
 				{/each}
