@@ -48,7 +48,7 @@
 	const searchLower = $derived(searchQuery.toLowerCase().trim());
 
 	const sections = [
-		{ id: 'model', label: 'Model & AI', color: 'primary', keywords: 'model ai default transcription voice audio' },
+		{ id: 'model', label: 'Model & AI', color: 'primary', keywords: 'model ai default transcription voice audio speech read aloud tts text-to-speech' },
 		{ id: 'context', label: 'Context Window', color: 'secondary', keywords: 'context window reserved response compact threshold compaction' },
 		{ id: 'tools', label: 'Tool Approval', color: 'secondary', keywords: 'tools sandbox coding skills agents image generation toggle approval' },
 		{ id: 'memory', label: 'Memory Palace', color: 'accent', keywords: 'memory palace recall mining embeddings rerank topk' },
@@ -167,6 +167,8 @@
 			const updated = await updateAppSettings({
 				defaultModel: settings.defaultModel,
 				transcriptionModel: settings.transcriptionModel,
+				ttsModel: settings.ttsModel,
+				ttsVoice: settings.ttsVoice,
 				theme: 'AgentStudio-night',
 				notificationPrefs: settings.notificationPrefs,
 				budgetConfig: settings.budgetConfig,
@@ -343,6 +345,14 @@
 								}}
 								onTranscriptionModelChange={(id) => {
 									if (settings) settings.transcriptionModel = id;
+								}}
+								ttsModel={settings.ttsModel}
+								ttsVoice={settings.ttsVoice}
+								onTtsModelChange={(id) => {
+									if (settings) settings.ttsModel = id;
+								}}
+								onTtsVoiceChange={(voice) => {
+									if (settings) settings.ttsVoice = voice;
 								}}
 							/>
 						</div>

@@ -1,6 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
+import { DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE } from '$lib/speech/speech'
 
 /**
  * Note on `dreamConfig` + `notificationPrefs.dreamSummary`:
@@ -13,6 +14,8 @@ import { appSettings } from '$lib/settings/settings.schema'
 export const DEFAULT_SETTINGS = {
 	defaultModel: 'claude-sonnet-5',
 	transcriptionModel: 'google/gemini-2.5-flash',
+	ttsModel: DEFAULT_TTS_MODEL,
+	ttsVoice: DEFAULT_TTS_VOICE,
 	notificationPrefs: {
 		taskCompleted: true,
 		needsInput: true,
@@ -56,6 +59,8 @@ export async function getOrCreateSettings(userId: string) {
 			userId,
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			transcriptionModel: DEFAULT_SETTINGS.transcriptionModel,
+			ttsModel: DEFAULT_SETTINGS.ttsModel,
+			ttsVoice: DEFAULT_SETTINGS.ttsVoice,
 			// notificationPrefs: schema's column-default fills in dreamSummary for legacy
 			// rows; we just don't expose it through this pipeline anymore.
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
@@ -73,6 +78,9 @@ export async function updateSettings(input: {
 	userId: string
 	defaultModel?: string
 	transcriptionModel?: string
+	ttsModel?: string
+	/** Empty string: the speech model's own default voice. */
+	ttsVoice?: string
 	theme?: string
 	notificationPrefs?: {
 		taskCompleted?: boolean
@@ -123,6 +131,8 @@ export async function updateSettings(input: {
 		.set({
 			defaultModel: input.defaultModel ?? current.defaultModel,
 			transcriptionModel: input.transcriptionModel ?? current.transcriptionModel,
+			ttsModel: input.ttsModel ?? current.ttsModel,
+			ttsVoice: input.ttsVoice ?? current.ttsVoice,
 			theme: 'AgentStudio-night',
 			notificationPrefs: {
 				...current.notificationPrefs,
@@ -171,7 +181,8 @@ export async function resetSettings(userId: string) {
 		.set({
 			// Every default, by spreading the one list of them. This used to name the fields
 			// one by one and missed `transcriptionModel`, so Reset said "Settings reset to
-			// defaults." and left the transcription model as it was.
+			// defaults." and left the transcription model as it was. The read-aloud model and
+			// voice (#27) are in the list, so they come back too.
 			...DEFAULT_SETTINGS,
 			updatedAt: new Date(),
 		})

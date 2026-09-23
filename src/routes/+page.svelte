@@ -14,6 +14,7 @@
 	import HomeChatTray from '$lib/chat/HomeChatTray.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { loadReasoningEffort, saveReasoningEffort, type ReasoningEffort } from '$lib/chat/reasoning-effort';
+	import { primeOnNextGesture } from '$lib/speech/speech-player.svelte';
 
 	let busy = $state(false);
 	let prompt = $state('');
@@ -136,6 +137,9 @@
 			source.close();
 		};
 	});
+
+	// #27 — with auto-read on, the send tap here lets the new conversation's first reply talk.
+	onMount(() => primeOnNextGesture());
 
 	function getGreeting() {
 		const hour = new Date().getHours();

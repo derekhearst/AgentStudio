@@ -16,6 +16,8 @@ One row per user. Created with defaults when the user first accesses settings.
 | `userId`             | uuid        | FK → `users` (nullable means global/unowned)      |
 | `defaultModel`       | text        | OpenRouter model ID for chat/agents               |
 | `transcriptionModel` | text        | OpenRouter model ID for audio transcription       |
+| `ttsModel`           | text        | OpenRouter speech model for read-aloud (default `hexgrad/kokoro-82m`) |
+| `ttsVoice`           | text        | Voice for that model (default `af_heart`); empty = the model's default voice |
 | `notificationPrefs`  | jsonb       | See notification prefs shape below                |
 | `budgetConfig`       | jsonb       | Daily / monthly spend limits                      |
 | `contextConfig`      | jsonb       | Compaction thresholds and model                   |
@@ -82,7 +84,7 @@ One row per user. Created with defaults when the user first accesses settings.
 
 - **`getSettings(userId)`** — returns the user's settings, creating defaults if the row does not exist. All callers use this — never query `appSettings` directly.
 - **`updateSettings(userId, patch)`** — accepts a partial patch and merges it. JSONB fields are merged at the top level (not deep-merged). Callers must pass the full JSONB object for any nested field they want to change.
-- **Reset** puts every setting back to its default — the default model, the transcription model, notifications, budget, context, tools and memory — in one step. Settings added later are included automatically, because Reset works from the same list of defaults that a new user starts with.
+- **Reset** puts every setting back to its default — the default model, the transcription model, the read-aloud model and voice, notifications, budget, context, tools and memory — in one step. Settings added later are included automatically, because Reset works from the same list of defaults that a new user starts with.
 - After **Save** or **Reset**, other pages read the new values straight away. For example, a chat started from the home page uses the default model you just saved, not the one from before.
 - Settings are consumed by multiple domains at runtime: `contextConfig` by context assembly, `budgetConfig` by cost enforcement, `memoryConfig` by memory recall, `toolConfig` by tool execution, `notificationPrefs` by notification dispatch.
 
@@ -90,7 +92,7 @@ One row per user. Created with defaults when the user first accesses settings.
 
 The `/settings` route provides a UI for all editable settings grouped by category:
 
-- **Models** — default model, transcription model
+- **Models** — default model, transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits

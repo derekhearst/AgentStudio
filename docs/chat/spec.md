@@ -266,6 +266,10 @@ A reply saved after Stop or an error keeps its tool output in two places. The me
 
 On mobile, the right panel collapses into a bottom sheet or tab drawer. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
 
+### Reading replies aloud
+
+Every assistant reply has a speaker button beside Copy. It reads the reply through `POST /api/tts`, skipping code blocks, and the same button stops it. An **Auto-read** switch above the composer (off by default, remembered per device) reads each new reply when its turn finishes. A turn that was stopped or failed is not read, and neither is a reply saved as "(no output)". The chat page only hands the switch its saved messages, whether a turn is running, its Stop flag and the error it is showing; playback lives in `src/lib/speech`. See [../speech/speech.md](../speech/speech.md).
+
 ### How replies are displayed safely
 
 Assistant replies, thinking, subagent results and `ask_user` questions are written by the model, and the model may be repeating text it picked up from a web page, a repository or a tool result. Someone who plants instructions there can try to make the model write HTML that would run inside the app, or an image link that quietly sends data to their server the moment the reply is shown. So replies are displayed as formatted markdown, but under these rules:

@@ -1,0 +1,322 @@
+import { randomUUID } from 'node:crypto'
+import { expect, test } from '@playwright/test'
+import { acquireGlobalStateLock, getActiveUserId, getSql, pollDb } from './helpers'
+
+/**
+ * #27 — the server half of read-aloud: `synthesizeSpeech` in `$lib/llm/tts.server`.
+ *
+ * Runs in the worker with `fetch` replaced, so nothing here reaches OpenRouter or spends
+ * anything. What it pins, each of which was wrong or missing before:
+ *   - a successful call is recorded in the ledger under `tts`, priced from the speech
+ *     catalogue (OpenRouter sends no cost header for speech, so the old header-only path
+ *     always recorded zero);
+ *   - a provider refusal comes back as a status and a message the user can act on — the
+ *     provider's own "Unknown voice …" — instead of a bare "TTS failed";
+ *   - empty or over-long text, a missing key, and a blocking budget limit are refused
+ *     before any upstream call is made;
+ *   - a listener who stopped before the provider was called costs nothing, and one who
+ *     stops after it has the request does not lose the ledger row for it: OpenRouter bills
+ *     a sent request in full either way. The route ties the signal to the listener's
+ *     connection (server.client-disconnect.spec.ts);
+ *   - an unreachable catalogue is not asked again for a minute, so it cannot add its timeout
+ *     to every chunk of a reply.
+ */
+
+const PRICE_PER_CHARACTER = 0.00001
+const CATALOGUE = {
+	data: [{ id: 'e2e/speech', name: 'E2E Speech', pricing: { prompt: String(PRICE_PER_CHARACTER) }, supported_voices: ['v1'] }],
+}
+
+type SpeechCall = { body: Record<string, unknown> }
+
+/** Replace `fetch`: the catalogue answers from CATALOGUE, speech from `speech()`. */
+function stubOpenRouter(speech: (init?: RequestInit) => Response | Promise<Response>): { calls: SpeechCall[]; restore: () => void } {
+	const realFetch = globalThis.fetch
+	const calls: SpeechCall[] = []
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = input instanceof Request ? input.url : String(input)
+		if (init?.signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+		if (url.includes('/models?output_modalities=speech')) return Response.json(CATALOGUE)
+		if (url.endsWith('/audio/speech')) {
+			calls.push({ body: JSON.parse(String(init?.body)) as Record<string, unknown> })
+			return speech(init)
+		}
+		return realFetch(input, init)
+	}) as typeof fetch
+	return { calls, restore: () => (globalThis.fetch = realFetch) }
+}
+
+function audio(generationId: string): Response {
+	return new Response(new Uint8Array([0xff, 0xf3, 0x64, 0xc4]), {
+		status: 200,
+		headers: { 'content-type': 'audio/mpeg', 'x-generation-id': generationId },
+	})
+}
+
+/*
+ * Every synthesis checks the user's budget limits, which are shared with the budget specs —
+ * and with this file's own budget test running in the other project. Take their lock for
+ * each test, so a $0 cap seeded elsewhere cannot refuse a synthesis here.
+ */
+let previousKey: string | undefined
+let releaseBudgetLock: (() => Promise<void>) | null = null
+test.beforeEach(async () => {
+	releaseBudgetLock = await acquireGlobalStateLock('budget-state')
+	// Each test's stub answers the catalogue itself; a list or a failure cached by the last one
+	// would decide the price instead.
+	const { _resetSpeechCatalog } = await import('../src/lib/llm/tts.server')
+	_resetSpeechCatalog()
+	previousKey = process.env.OPENROUTER_API_KEY
+	// Any non-empty value: fetch is stubbed, so the key never leaves the process.
+	process.env.OPENROUTER_API_KEY = previousKey?.trim() || 'e2e-placeholder'
+})
+test.afterEach(async () => {
+	if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY
+	else process.env.OPENROUTER_API_KEY = previousKey
+	await releaseBudgetLock?.()
+	releaseBudgetLock = null
+})
+
+test('a synthesis is sent as MP3 with the chosen voice, and recorded under tts at the catalogue price', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const userId = await getActiveUserId()
+	const sql = getSql()
+	const generationId = `gen-e2e-${randomUUID()}`
+	const stub = stubOpenRouter(() => audio(generationId))
+	try {
+		const result = await synthesizeSpeech({ text: '  Hello there.  ', model: 'e2e/speech', voice: 'v1', userId, purpose: 'message' })
+		expect(result.audio.byteLength).toBe(4)
+		expect(result.contentType).toBe('audio/mpeg')
+		expect(result.characters).toBe('Hello there.'.length)
+		expect(stub.calls).toEqual([
+			{ body: { model: 'e2e/speech', input: 'Hello there.', voice: 'v1', response_format: 'mp3' } },
+		])
+
+		const [row] = await pollDb(
+			() => sql<{ source: string; model: string; tokens_in: number; cost: string; user_id: string; metadata: Record<string, unknown> }[]>`
+				select source, model, tokens_in, cost, user_id, metadata from llm_usage where metadata->>'generationId' = ${generationId}
+			`,
+			(rows) => rows.length === 1,
+			{ description: 'the tts ledger row' },
+		)
+		expect(row.source).toBe('tts')
+		expect(row.model).toBe('e2e/speech')
+		expect(row.user_id).toBe(userId)
+		expect(row.tokens_in).toBe(12)
+		expect(Number(row.cost)).toBeCloseTo(12 * PRICE_PER_CHARACTER, 12)
+		expect(row.metadata).toMatchObject({ unit: 'characters', characters: 12, voice: 'v1', purpose: 'message', priced: true })
+	} finally {
+		stub.restore()
+		await sql`delete from llm_usage where metadata->>'generationId' = ${generationId}`
+	}
+})
+
+test('an empty voice is left out, and a model the catalogue does not price is recorded as unpriced', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const userId = await getActiveUserId()
+	const sql = getSql()
+	const generationId = `gen-e2e-${randomUUID()}`
+	const stub = stubOpenRouter(() => audio(generationId))
+	try {
+		await synthesizeSpeech({ text: 'Hi.', model: 'e2e/unlisted', voice: '  ', userId })
+		expect(stub.calls[0].body).toEqual({ model: 'e2e/unlisted', input: 'Hi.', response_format: 'mp3' })
+		const [row] = await pollDb(
+			() => sql<{ cost: string; metadata: Record<string, unknown> }[]>`
+				select cost, metadata from llm_usage where metadata->>'generationId' = ${generationId}
+			`,
+			(rows) => rows.length === 1,
+			{ description: 'the unpriced tts ledger row' },
+		)
+		expect(Number(row.cost)).toBe(0)
+		expect(row.metadata).toMatchObject({ priced: false, voice: null })
+	} finally {
+		stub.restore()
+		await sql`delete from llm_usage where metadata->>'generationId' = ${generationId}`
+	}
+})
+
+test('provider refusals become a status and a message the user can act on', async () => {
+	const { synthesizeSpeech, TtsError } = await import('../src/lib/llm/tts.server')
+	const cases: Array<{ answer: () => Response | Promise<Response>; status: number; message: RegExp }> = [
+		{
+			answer: () => Response.json({ error: { message: 'Unknown voice "zz". Supported voices: v1', code: 400 } }, { status: 400 }),
+			status: 422,
+			message: /Unknown voice "zz"\. Supported voices: v1/,
+		},
+		{
+			answer: () => Response.json({ error: { message: 'Model x/y does not exist', code: 400 } }, { status: 400 }),
+			status: 422,
+			message: /does not exist/,
+		},
+		{ answer: () => Response.json({ error: { message: 'No auth credentials found' } }, { status: 401 }), status: 502, message: /API key/ },
+		{ answer: () => Response.json({ error: { message: 'Insufficient credits' } }, { status: 402 }), status: 402, message: /Insufficient credits/ },
+		{ answer: () => new Response('slow down', { status: 429 }), status: 429, message: /rate-limiting/ },
+		{ answer: () => new Response('<html>oops</html>', { status: 503 }), status: 502, message: /HTTP 503/ },
+		{ answer: () => new Response(new Uint8Array(), { status: 200 }), status: 502, message: /no audio/ },
+		{
+			answer: () => {
+				throw new TypeError('fetch failed')
+			},
+			status: 502,
+			message: /Could not reach/,
+		},
+	]
+	for (const { answer, status, message } of cases) {
+		const stub = stubOpenRouter(answer)
+		try {
+			const failure = await synthesizeSpeech({ text: 'Hi.', model: 'e2e/speech', voice: 'v1', userId: null }).then(
+				() => null,
+				(err: unknown) => err,
+			)
+			expect(failure, `expected HTTP ${status}`).toBeInstanceOf(TtsError)
+			expect((failure as InstanceType<typeof TtsError>).status).toBe(status)
+			expect((failure as Error).message).toMatch(message)
+		} finally {
+			stub.restore()
+		}
+	}
+})
+
+test('a listener who stopped before the provider was called costs nothing', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const stub = stubOpenRouter(() => audio('unused'))
+	try {
+		await expect(
+			synthesizeSpeech({ text: 'Hi.', model: 'e2e/speech', userId: null, signal: AbortSignal.abort() }),
+		).rejects.toMatchObject({ status: 499 })
+		expect(stub.calls).toEqual([])
+	} finally {
+		stub.restore()
+	}
+})
+
+test('a Stop after the provider has the request lets it finish, and it is recorded', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const userId = await getActiveUserId()
+	const sql = getSql()
+	const generationId = `gen-e2e-${randomUUID()}`
+	const listener = new AbortController()
+	let providerSignalAborted: boolean | null = null
+	// The listener stops while the provider is still working on it.
+	const stub = stubOpenRouter(async (init) => {
+		listener.abort()
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		providerSignalAborted = init?.signal?.aborted ?? false
+		return audio(generationId)
+	})
+	try {
+		// OpenRouter bills a sent request in full either way, so cancelling it would only lose
+		// the ledger row for money that is spent regardless.
+		const result = await synthesizeSpeech({
+			text: 'Hello there.',
+			model: 'e2e/speech',
+			voice: 'v1',
+			userId,
+			purpose: 'message',
+			signal: listener.signal,
+		})
+		expect(result.audio.byteLength).toBe(4)
+		expect(providerSignalAborted).toBe(false)
+		const [row] = await pollDb(
+			() => sql<{ cost: string }[]>`select cost from llm_usage where metadata->>'generationId' = ${generationId}`,
+			(rows) => rows.length === 1,
+			{ description: 'the ledger row of a synthesis the listener stopped' },
+		)
+		expect(Number(row.cost)).toBeCloseTo(12 * PRICE_PER_CHARACTER, 12)
+	} finally {
+		stub.restore()
+		await sql`delete from llm_usage where metadata->>'generationId' = ${generationId}`
+	}
+})
+
+test('empty text, over-long text and a missing key are refused before any upstream call', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const { TTS_MAX_CHARACTERS } = await import('../src/lib/speech/speech')
+	const stub = stubOpenRouter(() => audio('unused'))
+	try {
+		await expect(synthesizeSpeech({ text: ' \n ', model: 'e2e/speech', userId: null })).rejects.toMatchObject({ status: 400 })
+		await expect(
+			synthesizeSpeech({ text: 'x'.repeat(TTS_MAX_CHARACTERS + 1), model: 'e2e/speech', userId: null }),
+		).rejects.toMatchObject({ status: 413 })
+		process.env.OPENROUTER_API_KEY = ''
+		await expect(synthesizeSpeech({ text: 'Hi.', model: 'e2e/speech', userId: null })).rejects.toMatchObject({
+			status: 503,
+			message: expect.stringContaining('OPENROUTER_API_KEY'),
+		})
+		expect(stub.calls).toEqual([])
+	} finally {
+		stub.restore()
+	}
+})
+
+test('a blocking budget limit refuses speech before the provider is called', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const userId = await getActiveUserId()
+	const sql = getSql()
+	const stub = stubOpenRouter(() => audio('unused'))
+	let limitId: string | null = null
+	try {
+		const [limit] = await sql<{ id: string }[]>`
+			insert into budget_limits (user_id, scope, period, limit_usd, action, enabled)
+			values (${userId}, 'global', 'day', '0', 'block', true)
+			returning id
+		`
+		limitId = limit.id
+		// Any priced speech projects above a $0 cap, whatever else was spent today.
+		await expect(synthesizeSpeech({ text: 'Hello there.', model: 'e2e/speech', userId })).rejects.toMatchObject({
+			status: 402,
+			message: expect.stringContaining('Budget limit reached'),
+		})
+		expect(stub.calls).toEqual([])
+	} finally {
+		stub.restore()
+		if (limitId) await sql`delete from budget_limits where id = ${limitId}`
+	}
+})
+
+test('an unreachable catalogue is asked again after a minute, not before every chunk', async () => {
+	const { listSpeechModels } = await import('../src/lib/llm/tts.server')
+	const realFetch = globalThis.fetch
+	const realNow = Date.now
+	let now = realNow()
+	let reachable = false
+	let asked = 0
+	Date.now = () => now
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const url = input instanceof Request ? input.url : String(input)
+		if (!url.includes('/models?output_modalities=speech')) return realFetch(input, init)
+		asked += 1
+		if (!reachable) throw new TypeError('fetch failed')
+		return Response.json(CATALOGUE)
+	}) as typeof fetch
+	const minutes = (n: number) => (now += n * 60_000)
+	try {
+		// Nothing cached: the failure is the answer until the minute is up, without asking again.
+		await expect(listSpeechModels()).rejects.toThrow('fetch failed')
+		minutes(0.5)
+		await expect(listSpeechModels()).rejects.toThrow('fetch failed')
+		expect(asked).toBe(1)
+
+		minutes(1)
+		reachable = true
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		expect(asked).toBe(2)
+
+		// An hour on, the refresh fails: the stale list is served, and the catalogue left alone
+		// for a minute.
+		minutes(61)
+		reachable = false
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		minutes(0.5)
+		expect((await listSpeechModels()).map((m) => m.id)).toEqual(['e2e/speech'])
+		expect(asked).toBe(3)
+
+		minutes(1)
+		reachable = true
+		await listSpeechModels()
+		expect(asked).toBe(4)
+	} finally {
+		Date.now = realNow
+		globalThis.fetch = realFetch
+	}
+})

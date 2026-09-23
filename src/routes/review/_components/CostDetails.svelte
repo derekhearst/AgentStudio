@@ -34,6 +34,7 @@
 		agent_synthesis: 'Agent Synthesis',
 		titlegen: 'Title Generation',
 		image_gen: 'Image Generation',
+		tts: 'Read Aloud',
 	};
 
 	function sourceLabel(src: string): string {

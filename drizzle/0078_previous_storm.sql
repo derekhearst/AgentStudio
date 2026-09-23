@@ -1,0 +1,2 @@
+ALTER TABLE "app_settings" ADD COLUMN "tts_model" text DEFAULT 'hexgrad/kokoro-82m' NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_settings" ADD COLUMN "tts_voice" text DEFAULT 'af_heart' NOT NULL;
