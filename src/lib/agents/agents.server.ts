@@ -180,7 +180,7 @@ export async function updateAgentRecord(
 		const existing = (current?.config ?? {}) as Record<string, unknown>
 		const nextConfig: Record<string, unknown> = { ...existing }
 		// Drop the legacy `capabilityGroups` field if a previous version of the agent had it.
-		// Tool Search Tool replaces capability groups; leaving them would be silently ignored.
+		// Capability groups were retired and nothing reads them; leaving them would be silently ignored.
 		delete nextConfig.capabilityGroups
 		if (patch.allowedTools !== undefined) {
 			if (patch.allowedTools.length === 0) {
