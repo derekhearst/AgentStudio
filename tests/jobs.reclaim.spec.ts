@@ -118,7 +118,7 @@ test.describe('jobs/reclaim — a running job whose lease lapsed', () => {
 		}
 	})
 
-	test('is failed rather than resumed when its worker died long ago', async () => {
+	test('is failed rather than resumed when its worker died long ago, without an inbox row', async () => {
 		const prefix = uniquePrefix('reclaim-abandoned')
 		const type = `${prefix}-t`
 		try {
@@ -130,6 +130,12 @@ test.describe('jobs/reclaim — a running job whose lease lapsed', () => {
 			const job = await readJob(id)
 			expect(job.status).toBe('failed')
 			expect(job.error?.message).toContain('too long ago to resume')
+
+			// Leftovers from a process long gone: a boot can retire dozens at once, so they are
+			// recorded on the job, not raised one inbox row apiece.
+			const sql = getSql()
+			const items = await sql<{ id: string }[]>`select id from review_items where job_id = ${id}`
+			expect(items).toEqual([])
 		} finally {
 			await cleanup(prefix)
 		}
@@ -173,15 +179,21 @@ test.describe('jobs/reclaim — a leased job whose lease lapsed', () => {
 })
 
 test.describe('jobs/reclaim — staleRunningJobVerdict', () => {
-	test('re-leases with attempts left and a recent lapse; fails otherwise', async () => {
+	test('re-leases with attempts left and a recent lapse; otherwise says which kind of dead it is', async () => {
 		const { staleRunningJobVerdict } = await import('../src/lib/jobs/jobs.server')
 		const minutes = (m: number) => m * 60_000
 
 		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseLapsedMs: minutes(2) })).toBeNull()
 		expect(staleRunningJobVerdict({ attemptCount: 2, maxAttempts: 3, leaseLapsedMs: minutes(59) })).toBeNull()
-		expect(staleRunningJobVerdict({ attemptCount: 3, maxAttempts: 3, leaseLapsedMs: minutes(2) })).toMatch(
-			/no attempts are left/,
+		expect(staleRunningJobVerdict({ attemptCount: 3, maxAttempts: 3, leaseLapsedMs: minutes(2) })?.outcome).toBe(
+			'out_of_attempts',
 		)
-		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseLapsedMs: minutes(61) })).toMatch(/too long ago/)
+		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseLapsedMs: minutes(61) })?.outcome).toBe(
+			'abandoned',
+		)
+		// Long gone AND out of attempts is still leftovers, not a live crash loop.
+		expect(staleRunningJobVerdict({ attemptCount: 3, maxAttempts: 3, leaseLapsedMs: minutes(720) })?.outcome).toBe(
+			'abandoned',
+		)
 	})
 })

@@ -185,23 +185,39 @@ type ClaimCandidate = {
 	lease_lapsed_seconds: number | null
 }
 
+export type StaleRunningJobVerdict = {
+	/**
+	 * `abandoned` — the lease lapsed over an hour ago: leftovers from a process that went away
+	 * long before this one came up. `out_of_attempts` — it died recently on its last attempt:
+	 * a live crash loop, worth a human's attention.
+	 */
+	outcome: 'abandoned' | 'out_of_attempts'
+	reason: string
+}
+
 /**
  * What to do with a candidate whose lease lapsed while it was `running`: its handler started
  * (beginJob already counted the attempt) and then the worker stopped heartbeating, which in
  * practice means the process died — a deploy, a crash, an OOM. Out of attempts means the
  * handler probably IS what kills the process, so re-leasing it would crash the next worker
- * too. Returns null to re-lease, or the reason to fail it.
+ * too. Returns null to re-lease, or why to fail it.
  */
 export function staleRunningJobVerdict(job: {
 	attemptCount: number
 	maxAttempts: number
 	leaseLapsedMs: number
-}): string | null {
-	if (job.attemptCount >= job.maxAttempts) {
-		return `The worker running this job stopped heartbeating on attempt ${job.attemptCount} of ${job.maxAttempts}, and no attempts are left.`
-	}
+}): StaleRunningJobVerdict | null {
 	if (job.leaseLapsedMs > ABANDONED_LEASE_MS) {
-		return `The worker running this job stopped heartbeating ${Math.round(job.leaseLapsedMs / 60_000)} minutes ago — too long ago to resume it safely.`
+		return {
+			outcome: 'abandoned',
+			reason: `The worker running this job stopped heartbeating ${Math.round(job.leaseLapsedMs / 60_000)} minutes ago — too long ago to resume it safely.`,
+		}
+	}
+	if (job.attemptCount >= job.maxAttempts) {
+		return {
+			outcome: 'out_of_attempts',
+			reason: `The worker running this job stopped heartbeating on attempt ${job.attemptCount} of ${job.maxAttempts}, and no attempts are left.`,
+		}
 	}
 	return null
 }
@@ -217,7 +233,8 @@ export function staleRunningJobVerdict(job: {
  * A lapsed `leased` job never started, so it is simply re-leased. A lapsed `running` job
  * started and then lost its worker mid-handler; it is re-leased too — beginJob counts the
  * new attempt — unless `staleRunningJobVerdict` says to fail it, in which case it is failed
- * with a `job_stuck` review item and the claim looks again. Before `running` was eligible
+ * (with a `job_stuck` review item when it is a live crash loop) and the claim looks again.
+ * Before `running` was eligible
  * here, a job whose worker died mid-handler stayed `running` forever, and for automations
  * that wedged the schedule: every tick's enqueue collided with the dead row.
  *
@@ -228,14 +245,14 @@ export async function claimNextJob(opts: ClaimJobOptions): Promise<JobRow | null
 		const outcome = await claimOnce(opts)
 		if (outcome.kind === 'claimed') return outcome.job
 		if (outcome.kind === 'empty') return null
-		await reportRetiredJob(outcome.job, outcome.reason)
+		await reportRetiredJob(outcome.job, outcome.verdict)
 	}
 	return null
 }
 
 type ClaimOutcome =
 	| { kind: 'claimed'; job: JobRow }
-	| { kind: 'retired'; job: JobRow; reason: string }
+	| { kind: 'retired'; job: JobRow; verdict: StaleRunningJobVerdict }
 	| { kind: 'empty' }
 
 async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
@@ -276,24 +293,24 @@ async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
 		// The lapse is computed in SQL: this client returns timestamps as raw strings, and the
 		// candidate filter above already judged "lapsed" by the database clock.
 		if (candidate.status === 'running' && candidate.lease_lapsed_seconds !== null) {
-			const reason = staleRunningJobVerdict({
+			const verdict = staleRunningJobVerdict({
 				attemptCount: Number(candidate.attempt_count),
 				maxAttempts: Number(candidate.max_attempts),
 				leaseLapsedMs: Number(candidate.lease_lapsed_seconds) * 1000,
 			})
-			if (reason) {
+			if (verdict) {
 				const [failed] = await tx
 					.update(jobs)
 					.set({
 						status: 'failed',
 						finishedAt: new Date(),
 						leaseExpiresAt: null,
-						error: { message: reason },
+						error: { message: verdict.reason },
 						updatedAt: new Date(),
 					})
 					.where(eq(jobs.id, candidate.id))
 					.returning()
-				return failed ? { kind: 'retired', job: failed, reason } : { kind: 'empty' }
+				return failed ? { kind: 'retired', job: failed, verdict } : { kind: 'empty' }
 			}
 		}
 
@@ -320,11 +337,21 @@ async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
 }
 
 /**
- * A job retired by the claim path gets the same visibility as one that exhausted its
- * retries: a review item and a lifecycle metric. Best-effort, like `failJob`'s.
+ * A crash loop gets the same visibility as a job that exhausted its retries: a review item
+ * and a lifecycle metric. An abandoned job gets the metric and a log line but no review item —
+ * the first boot after a long gap can retire dozens of them at once (a development database
+ * collects one every time the dev server restarts mid-job), and an inbox row apiece would
+ * bury anything real. Their `error` in /settings/jobs says what happened. Best-effort, like
+ * `failJob`'s.
  */
-async function reportRetiredJob(row: JobRow, reason: string): Promise<void> {
-	logger.warn('[jobs] retired a running job whose worker died', { jobId: row.id, type: row.type, reason })
+async function reportRetiredJob(row: JobRow, verdict: StaleRunningJobVerdict): Promise<void> {
+	void emitJobLifecycleMetric(row, 'failed')
+	if (verdict.outcome === 'abandoned') {
+		logger.info('[jobs] failed a long-abandoned running job', { jobId: row.id, type: row.type, reason: verdict.reason })
+		return
+	}
+	const reason = verdict.reason
+	logger.warn('[jobs] failed a running job whose worker kept dying', { jobId: row.id, type: row.type, reason })
 	try {
 		const { openReviewItem } = await import('$lib/observability/review.server')
 		await openReviewItem({
@@ -344,7 +371,6 @@ async function reportRetiredJob(row: JobRow, reason: string): Promise<void> {
 	} catch (err) {
 		logger.warn('[jobs] review item open failed (non-fatal)', { err })
 	}
-	void emitJobLifecycleMetric(row, 'failed')
 }
 
 /**

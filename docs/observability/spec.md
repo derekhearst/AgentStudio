@@ -69,7 +69,7 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 | `user_question`           | critical | `ask_user` tool call waiting for answer                     |
 | `evaluation_failure`      | warning  | Evaluator returned `fail` verdict                           |
 | `job_failure`             | warning  | Job exhausted all retry attempts                            |
-| `job_stuck`               | warning  | Job whose worker died mid-run and could not be resumed      |
+| `job_stuck`               | warning  | Job whose worker kept dying mid-run, out of attempts        |
 | `hook_failure`            | info     | A hook invocation returned an error                         |
 | `artifact_conflict`       | warning  | Two runs attempted concurrent artifact edits                |
 | `memory_conflict`         | info     | Memory mining produced a conflicting entity/relation        |

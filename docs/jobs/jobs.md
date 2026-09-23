@@ -35,7 +35,7 @@ The same pattern drives monitor checks, PR CI polling and workspace cleanup.
 1. A deploy, a crash or an out-of-memory kill stops the server while a job is running. Its heartbeats stop.
 2. About two minutes later the job's lease lapses.
 3. The next worker to look for work finds the job and runs it again, counting it as a new attempt.
-4. Two exceptions: if the job has already used all its attempts, the handler is probably what is killing the server, so the job is marked **failed** instead of being handed to another worker. And if the lease lapsed more than an hour ago — a server that was off overnight — the job is also marked failed rather than re-run against a world that has moved on. Either way a **Job stuck** item appears in the Review inbox.
+4. Two exceptions. If the job has already used all its attempts, the handler is probably what is killing the server, so the job is marked **failed** instead of being handed to another worker, and a **Job stuck** item appears in the Review inbox. And if the lease lapsed more than an hour ago — a server that was off overnight — the job is marked failed rather than re-run against a world that has moved on. Those leftovers are recorded on the job itself (its error in `/settings/jobs` says what happened) rather than in the inbox, because a server coming back after a long gap can find dozens of them at once.
 
 ### Stopping a standalone worker
 
@@ -58,7 +58,7 @@ Pressing Ctrl+C a second time exits immediately.
 ## Integrations
 
 - **PostgreSQL** holds the queue. Workers claim jobs with a row lock that skips rows another worker already holds, so any number of workers can share one database without running a job twice.
-- **Review inbox** — a job that fails for good opens a *Job failure* item; a job whose worker died and could not be resumed opens a *Job stuck* item.
+- **Review inbox** — a job that fails for good opens a *Job failure* item; a job whose worker kept dying until it ran out of attempts opens a *Job stuck* item.
 - **Metrics** — every finished job records its duration and outcome for the health dashboard.
 
 ## Business rules
