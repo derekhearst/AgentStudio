@@ -129,6 +129,18 @@ automation is 9am in both winter and summer. In the two edge hours:
 - **Fall back** — a schedule inside the hour that happens twice runs once, on the first pass,
   rather than firing twice.
 
+### Conversation mode
+
+A `chat_followup` automation writes each run into a conversation. **New each run** opens a
+fresh conversation every time. **Reuse thread** keeps writing into the same one, so the
+thread becomes a running log of every run.
+
+Each run hands the model the **most recent 12 messages** of that conversation as context,
+oldest first, followed by this run's prompt. In a reused thread that means the model always
+sees the last few runs — including the one right before it — which is what a prompt like
+"summarize what changed since the last run" needs. If the cut falls between a prompt and
+its reply, the orphaned reply is left out so the context starts on a prompt.
+
 ### Output routing
 
 An automation can route its output to:
