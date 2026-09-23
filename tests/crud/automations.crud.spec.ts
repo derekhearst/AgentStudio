@@ -8,7 +8,10 @@ import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expect
  * (no agentId) path is exercised so we don't need a seeded agent.
  *
  * Asserts the corresponding DB rows transition correctly + the cron expression
- * + prompt round-trip.
+ * + prompt round-trip — and that the page shows each result without a reload. It
+ * used to reload between every step, which hid that the page re-read a cached query
+ * after each command: a created automation did not appear, a toggled one kept its old
+ * button, and a deleted one stayed on screen.
  */
 
 test.describe('/automations — CRUD lifecycle', () => {
@@ -46,9 +49,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 				)
 				const automationId = created[0].id
 
-				// Card appears in the list (page reloads its data after create; reload to be safe)
-				await page.reload()
-				await waitForHydration(page)
+				// Card appears in the list — the page reloads its own data after create.
 				const card = page.locator('article').filter({ hasText: description })
 				await expect(card.first()).toBeVisible({ timeout: 10_000 })
 
@@ -62,9 +63,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 					{ description: 'automation flipped to disabled' },
 				)
 
-				// ── Update (toggle enabled): click Enable
-				await page.reload()
-				await waitForHydration(page)
+				// ── Update (toggle enabled): the card now offers Enable
 				const cardAfterDisable = page.locator('article').filter({ hasText: description })
 				await cardAfterDisable.first().getByRole('button', { name: 'Enable', exact: true }).click()
 				await pollDb(
@@ -73,10 +72,9 @@ test.describe('/automations — CRUD lifecycle', () => {
 					{ description: 'automation flipped back to enabled' },
 				)
 
-				// ── Delete
-				await page.reload()
-				await waitForHydration(page)
+				// ── Delete: the card is back to offering Disable
 				const cardAfterEnable = page.locator('article').filter({ hasText: description })
+				await expect(cardAfterEnable.first().getByRole('button', { name: 'Disable', exact: true })).toBeVisible()
 				await cardAfterEnable.first().getByRole('button', { name: 'Delete', exact: true }).click()
 				await answerConfirmDialog(page, 'Delete')
 				await pollDb(
@@ -85,9 +83,7 @@ test.describe('/automations — CRUD lifecycle', () => {
 					{ description: 'automation deleted from DB' },
 				)
 
-				// Card disappears from the list (reload to pick up the post-delete state)
-				await page.reload()
-				await waitForHydration(page)
+				// Card disappears from the list
 				const stillThere = page.locator('article').filter({ hasText: description })
 				await expect(stillThere).toHaveCount(0, { timeout: 5_000 })
 

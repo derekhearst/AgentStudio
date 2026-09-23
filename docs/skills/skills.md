@@ -19,6 +19,20 @@ A skill is a reusable set of instructions an agent can pull in when it needs the
 
 ## User flows
 
+### Find a skill
+
+1. Open `/skills`. A spinner shows while the list loads.
+2. Type in the search box to filter by name, description or tag. When nothing matches, the page says so and offers **Clear search**.
+3. "No skills yet" appears only when there really are none. If the list cannot be loaded, the page shows the reason instead.
+
+### Create a skill
+
+1. On `/skills`, press **+ New skill**.
+2. A guided chat opens. An agent asks what the skill is for, then writes it.
+3. If the chat cannot be started, the page shows the reason above the list.
+
+A skill can also come from an import (below) or from an agent using its skill tools.
+
 ### Export a skill
 
 1. Open the skill at `/skills/[id]` and press **Export**.

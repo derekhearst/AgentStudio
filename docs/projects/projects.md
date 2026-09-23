@@ -52,7 +52,8 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
    - **Local repo** — a new local repository,
    - **From GitHub** or **From URL** — an import from the connected GitHub account or a clone URL.
 3. Give it a name and a kind. Switching tabs keeps what you have typed. (The form used to reset on every tab change and jump back to **Empty**, so only empty projects could be created.)
-4. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
+4. The **From GitHub** tab lists the connected account's repositories. **Refresh** asks GitHub for the list again, so a repository created a moment ago shows up without closing the dialog.
+5. On save the project appears in the list. Imported projects clone in the background; a failed clone rolls the whole thing back.
 
 ### Add knowledge files
 
@@ -73,6 +74,7 @@ A project holds up to 50 knowledge files of up to 20MB each. The server itself r
 1. **Pull latest** fetches every branch from the remote and fast-forwards the checked-out branch when it is behind. If it cannot move the branch without losing something — local commits the remote does not have, edits the update would overwrite — it leaves the branch alone and the message under the buttons says why. The remote's branches are recorded either way.
 2. **Push** sends a branch to GitHub under the same name. The **--force-with-lease** box replaces the branch on GitHub only if nobody else has pushed to it since AgentStudio last pulled or pushed it; if someone has, the push is refused with a hint saying why. This works for a local project with no GitHub `origin` too: AgentStudio keeps its own record of what it last pushed where. A branch AgentStudio has never pulled or pushed is never force-pushed over.
 3. **Commit** uses the repository's own name and email, or `AgentStudio <agentstudio@local>` when the repository has none — the server's own git settings are never used.
+4. After every pull, commit, new branch, branch switch and push, the Repo tab reloads the repository's status from the server. The tab stays on screen while it does, with the action's result message at the top, so the reader keeps their place and any open diff. If the reload fails, the error appears above the repository as it was last loaded rather than in its place.
 
 All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder (or a submodule's) that would run a program are switched off rather than obeyed. Settings that would send the GitHub token elsewhere make pull and push refuse to run. When the runner cannot read the settings in full, it refuses the command rather than run it unprotected; the Repo tab then shows no status for the project until the settings are fixed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
 

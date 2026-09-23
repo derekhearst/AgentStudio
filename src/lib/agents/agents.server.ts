@@ -3,7 +3,7 @@ import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { automations } from '$lib/automations/automation.schema'
-import { computeNextRunAt } from '$lib/automations/engine'
+import { computeNextRunAt } from '$lib/automations/cron'
 import { logger } from '$lib/observability/logger'
 import {
 	AVAILABLE_AGENT_STATUS,

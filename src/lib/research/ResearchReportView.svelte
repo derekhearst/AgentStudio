@@ -6,6 +6,7 @@
 		cancelResearchCommand,
 	} from '$lib/research/research.remote';
 	import { splitReportIntoParts } from '$lib/research/report-render';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 
 	type Detail = NonNullable<Awaited<ReturnType<typeof getResearchDetailQuery>>>;
 	type Tab = 'report' | 'sources' | 'trace';
@@ -42,7 +43,10 @@
 
 	async function load(researchId: string) {
 		try {
-			detail = await getResearchDetailQuery(researchId);
+			// Fresh on every call. The first load runs inside the effect above, which keeps
+			// its cache entry alive for as long as this view is open — so the 3s poll kept
+			// re-reading the first snapshot, and a running report never moved.
+			detail = await fetchFresh(getResearchDetailQuery(researchId));
 			error = null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load research';
@@ -290,7 +294,7 @@
 									{step.kind}
 								</span>
 								{#if step.subQuestion}
-									<span class="line-clamp-1 flex-1 leading-snug">{step.subQuestion}</span>
+									<span class="line-clamp-1 min-w-[6rem] flex-1 leading-snug">{step.subQuestion}</span>
 								{:else}
 									<span class="flex-1"></span>
 								{/if}

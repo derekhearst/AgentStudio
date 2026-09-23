@@ -3,30 +3,24 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
-	import { formatCost } from '$lib/agents/agent-format'
+	import { formatCost, streamPreview, type AgentStreamEntry } from '$lib/agents/agent-format'
 	import { setAgentPausedFromPage } from '$lib/agents/agent-pause'
 	import { agentPauseAction, agentStatusHint, agentStatusLabel, isAgentPaused } from '$lib/agents/agent-status'
-	import { remoteErrorMessage } from '$lib/ui/remote-error'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { fetchFresh } from '$lib/ui/fresh-query'
+	import { remoteErrorMessage } from '$lib/ui/remote-error'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
 	const relativeTime = (date: Date | string | null) =>
 		relativeTimeBase(date, { style: 'capitalized' })
 
 	type AgentRow = Awaited<ReturnType<typeof listAgents>>[number]
-	/*
-	 * `lastDelta`, not `delta`, and nullable.
-	 *
-	 * /api/agents/monitor streams whatever `listActiveAgentRunsForUser` selects, which
-	 * names the column `lastDelta`. This type claimed `delta: string`, so the live preview
-	 * below read `undefined.length` and threw the moment any agent actually streamed —
-	 * taking the whole page down with it. The column is also null until the first token
-	 * arrives, so a run that has started but not spoken is the normal case, not an edge one.
-	 */
-	type StreamEntry = { conversationId: string; agentId: string; lastDelta: string | null }
+	// See `AgentStreamEntry` for why this is `lastDelta` and nullable.
+	type StreamEntry = AgentStreamEntry
 
 	let agents = $state<AgentRow[]>([])
 	let loading = $state(true)
+	let loadError = $state<string | null>(null)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 	let sortMode = $state<'last_active' | 'sessions' | 'cost'>('last_active')
 	let statusBusyId = $state<string | null>(null)
@@ -95,10 +89,17 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	// No `try` here used to mean a failed load spun forever.
 	async function loadAgents() {
 		loading = true
-		agents = await listAgents()
-		loading = false
+		loadError = null
+		try {
+			agents = await fetchFresh(listAgents())
+		} catch (err) {
+			loadError = remoteErrorMessage(err, 'Could not load agents.')
+		} finally {
+			loading = false
+		}
 	}
 
 	/**
@@ -178,6 +179,8 @@
 		<div class="flex justify-center py-16">
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
+	{:else if loadError}
+		<div role="alert" class="alert alert-error py-2 text-sm">{loadError}</div>
 	{:else if sortedAgents.length === 0}
 		<div class="rounded-2xl border border-dashed border-base-300 py-16 text-center text-sm text-base-content/50">
 			No agents yet. Ask the orchestrator to create one.
@@ -254,9 +257,7 @@
 										<span class="text-[10px] font-semibold uppercase tracking-widest text-primary/70">Streaming live</span>
 									</div>
 									<p class="line-clamp-3 break-all text-[11px] leading-relaxed text-base-content/70">
-										{(streaming.lastDelta ?? '').length > 400
-											? '…' + (streaming.lastDelta ?? '').slice(-400)
-											: (streaming.lastDelta ?? '')}
+										{streamPreview(streaming.lastDelta, 400)}
 									</p>
 									<span class="cursor-blink mt-0.5 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 								</div>

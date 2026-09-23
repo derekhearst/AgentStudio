@@ -12,6 +12,8 @@
 	import { getSettings } from '$lib/settings';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import KpiStrip from './_components/KpiStrip.svelte';
 	import RecentFailures from './_components/RecentFailures.svelte';
 	import LogsPanel from './_components/LogsPanel.svelte';
@@ -59,6 +61,19 @@
 	let loading = $state(false);
 	let logsLoading = $state(false);
 
+	/*
+	 * One entry per section, so each load clears only its own failure. A single shared
+	 * message meant a logs-filter change that failed stayed on screen after the next one
+	 * worked, and replaced whatever Refresh had said about the other sections.
+	 */
+	const SECTIONS = ['inbox', 'cost', 'platform health', 'logs', 'log sources', 'recent failures', 'budget', 'settings'] as const;
+	type Section = (typeof SECTIONS)[number];
+	let sectionErrors = $state<Partial<Record<Section, string>>>({});
+	const loadError = $derived.by(() => {
+		const failed = SECTIONS.filter((s) => sectionErrors[s]).map((s) => `${s} (${sectionErrors[s]})`);
+		return failed.length > 0 ? `Could not load ${failed.join(', ')}.` : null;
+	});
+
 	const warnErrorCount24h = $derived.by(() => {
 		if (!logSources) return 0;
 		// Total of warn+error rows across all sources in last 24h. The countLogsBySourceQuery
@@ -76,36 +91,46 @@
 
 	onMount(() => void loadAll());
 
+	/*
+	 * Every load on this page reads from the server, not the query cache (`fetchFresh`).
+	 * Refresh re-awaited the same eight queries with the same arguments and got back what
+	 * it already had, and resolving an inbox item left it on screen as "open", with its
+	 * buttons, inviting a second resolve.
+	 *
+	 * Each section loads on its own. This was one `Promise.all` with no `catch`, so a single
+	 * failing query — the budget status, say — left the whole dashboard on a spinner forever
+	 * and said nothing. Now the sections that loaded render, and the ones that did not are
+	 * named in an error above them.
+	 */
+	async function loadSection<T>(section: Section, load: Promise<T>, apply: (value: T) => void) {
+		try {
+			apply(await load);
+			sectionErrors[section] = undefined;
+		} catch (err) {
+			sectionErrors[section] = remoteErrorMessage(err, 'failed');
+		}
+	}
+
 	async function loadAll() {
 		loading = true;
-		try {
-			const [inboxRes, costRes, snapshotRes, logsRes, logSourcesRes, failuresRes, budgetRes, settingsRes] =
-				await Promise.all([
-					listReviewItemsQuery(buildInboxArgs()),
-					getCostSummary({ period }),
-					getOperationalSnapshotQuery(),
-					listAppLogsQuery(buildLogsArgs()),
-					countLogsBySourceQuery({ windowMinutes: 60 * 24 }),
-					listRecentFailuresQuery({ hours: 24, limit: 20 }),
-					getBudgetStatus(),
-					getSettings(),
-				]);
-			inbox = inboxRes;
-			cost = costRes;
-			snapshot = snapshotRes;
-			logs = logsRes;
-			logSources = logSourcesRes;
-			failures = failuresRes;
-			budget = budgetRes;
-			if (settingsRes?.budgetConfig) {
-				budgetConfig = {
-					dailyLimit: settingsRes.budgetConfig.dailyLimit ?? null,
-					monthlyLimit: settingsRes.budgetConfig.monthlyLimit ?? null,
-				};
-			}
-		} finally {
-			loading = false;
-		}
+		await Promise.all([
+			loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v)),
+			loadSection('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v)),
+			loadSection('platform health', fetchFresh(getOperationalSnapshotQuery()), (v) => (snapshot = v)),
+			loadSection('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v)),
+			loadSection('log sources', fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })), (v) => (logSources = v)),
+			loadSection('recent failures', fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })), (v) => (failures = v)),
+			loadSection('budget', fetchFresh(getBudgetStatus()), (v) => (budget = v)),
+			loadSection('settings', fetchFresh(getSettings()), (settingsRes) => {
+				if (settingsRes?.budgetConfig) {
+					budgetConfig = {
+						dailyLimit: settingsRes.budgetConfig.dailyLimit ?? null,
+						monthlyLimit: settingsRes.budgetConfig.monthlyLimit ?? null,
+					};
+				}
+			}),
+		]);
+		loading = false;
 	}
 
 	function buildInboxArgs() {
@@ -127,20 +152,17 @@
 	}
 
 	async function reloadCost() {
-		cost = await getCostSummary({ period });
+		await loadSection('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v));
 	}
 
 	async function reloadInbox() {
-		inbox = await listReviewItemsQuery(buildInboxArgs());
+		await loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v));
 	}
 
 	async function reloadLogs() {
 		logsLoading = true;
-		try {
-			logs = await listAppLogsQuery(buildLogsArgs());
-		} finally {
-			logsLoading = false;
-		}
+		await loadSection('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v));
+		logsLoading = false;
 	}
 
 	function toggle(section: 'failures' | 'logs' | 'cost' | 'health') {
@@ -169,10 +191,15 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
+	{#if loadError}
+		<div role="alert" class="alert alert-error py-2 text-sm">{loadError}</div>
+	{/if}
 	{#if !inbox}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
-		</div>
+		{#if !loadError}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else}
 		<!-- KPI strip -->
 		<KpiStrip

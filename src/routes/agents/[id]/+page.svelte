@@ -6,6 +6,8 @@
 	import { getAgent, updateAgentCommand } from '$lib/agents'
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
+	import { fetchFresh } from '$lib/ui/fresh-query'
+	import { isNotFoundError, remoteErrorMessage } from '$lib/ui/remote-error'
 	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
 	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
 	import AgentConfigEditor from '$lib/agents/AgentConfigEditor.svelte'
@@ -17,26 +19,25 @@
 		agentStatusLabel,
 		isAgentPaused,
 	} from '$lib/agents/agent-status'
-	import { remoteErrorMessage } from '$lib/ui/remote-error'
 	import {
 		agentColor,
 		agentInitials,
 		describeSchedule,
 		modelShortName,
 		relativeTime,
+		streamPreview,
+		type AgentStreamEntry,
 	} from '$lib/agents/agent-format'
 
 	type AgentData = NonNullable<Awaited<ReturnType<typeof getAgent>>>
-	/*
-	 * `lastDelta`, not `delta`, and nullable — the same fix the list page got. The monitor
-	 * streams `listActiveAgentRunsForUser` rows, so reading `delta.length` threw the moment
-	 * this agent had a live run, and the column is null until the first token arrives.
-	 */
-	type StreamEntry = { conversationId: string; agentId: string; lastDelta: string | null }
+	// Was `{ delta: string }`, which the monitor never sends: the live banner below threw
+	// on `undefined.length` as soon as this agent streamed. See `AgentStreamEntry`.
+	type StreamEntry = AgentStreamEntry
 
 	const agentId = $derived(page.params.id ?? '')
 	let data = $state<AgentData | null>(null)
 	let loading = $state(true)
+	let loadError = $state<string | null>(null)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 
 	let eventSource: EventSource | null = null
@@ -74,11 +75,25 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	/*
+	 * No `try` here used to mean any rejection spun forever — including the ordinary one:
+	 * `/agents/not-a-uuid` fails the query's id schema with a 400. That is "not found" to a
+	 * reader; anything else is shown as the error it is. A failure leaves any agent already
+	 * on screen where it is, under the error.
+	 */
 	async function loadData() {
 		loading = true
-		const result = await getAgent(agentId)
-		data = result ?? null
-		loading = false
+		loadError = null
+		try {
+			// Fresh, so coming back after saving the config below shows what was saved.
+			const result = await fetchFresh(getAgent(agentId))
+			data = result ?? null
+		} catch (err) {
+			if (isNotFoundError(err)) data = null
+			else loadError = remoteErrorMessage(err, 'Could not load this agent.')
+		} finally {
+			loading = false
+		}
 	}
 
 	async function handleConfigSave(input: {
@@ -170,13 +185,20 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4">
 
-{#if loading}
+{#if loadError && data}
+	<div role="alert" class="alert alert-error mb-4 py-2 text-sm">{loadError}</div>
+{/if}
+{#if loading && !data}
 	<div class="flex justify-center py-20">
 		<span class="loading loading-spinner loading-lg text-primary"></span>
 	</div>
 {:else if !data}
 	<div class="py-20 text-center">
-		<p class="text-sm text-base-content/50">Agent not found.</p>
+		{#if loadError}
+			<p role="alert" class="text-sm text-error">{loadError}</p>
+		{:else}
+			<p class="text-sm text-base-content/50">Agent not found.</p>
+		{/if}
 		<a class="btn btn-ghost btn-sm mt-4" href="/agents">← Back to agents</a>
 	</div>
 {:else}
@@ -264,7 +286,7 @@
 					<a href="/chat/{live.conversationId}" class="btn btn-xs btn-primary">Watch live →</a>
 				</div>
 				<p class="line-clamp-2 break-words text-xs leading-relaxed text-base-content/70">
-					{(live.lastDelta ?? '').length > 500 ? '…' + (live.lastDelta ?? '').slice(-500) : (live.lastDelta ?? '')}
+					{streamPreview(live.lastDelta, 500)}
 				</p>
 				<span class="cursor-blink mt-1 inline-block h-3 w-[2px] translate-y-0.5 bg-primary align-middle"></span>
 			</div>

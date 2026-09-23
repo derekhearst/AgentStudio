@@ -12,6 +12,10 @@ import { answerConfirmDialog, authenticateContext, cleanupExtendedPrefix, expect
  * Documents used to be a second half of this lifecycle (create artifact → edit → rollback
  * → soft-delete). Artifacts are gone: the agent writes real files into the project's
  * working directory, so the repo view owns that surface now.
+ *
+ * The list is checked straight after each mutation, without navigating: /projects
+ * re-read a cached query after create and delete, so the new project did not appear and
+ * the deleted one stayed until a full reload.
  */
 
 test.describe('/projects — CRUD lifecycle', () => {
@@ -43,6 +47,10 @@ test.describe('/projects — CRUD lifecycle', () => {
 				)
 				const projectId = projectRow[0].id
 
+				// The list shows it straight away.
+				const newCard = page.locator('div.group').filter({ hasText: projectName })
+				await expect(newCard.first()).toBeVisible({ timeout: 10_000 })
+
 				// ── Read project detail
 				await page.goto(`/projects/${projectId}`)
 				await waitForHydration(page)
@@ -69,6 +77,7 @@ test.describe('/projects — CRUD lifecycle', () => {
 					(rows) => rows[0]?.count === 0,
 					{ description: 'project deleted from DB' },
 				)
+				await expect(page.locator('div.group').filter({ hasText: projectName })).toHaveCount(0)
 
 				await expectNoHorizontalOverflow(page)
 			})

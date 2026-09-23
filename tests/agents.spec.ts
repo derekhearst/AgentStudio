@@ -4,12 +4,10 @@ import {
 	acquireGlobalStateLock,
 	authenticateContext,
 	cleanupPrefixedRecords,
-	getActiveUserId,
 	getBuiltinChatAgentId,
 	getSql,
 	pollDb,
 	seedAgent,
-	seedConversation,
 	uniquePrefix,
 	waitForHydration,
 } from './helpers'
@@ -46,7 +44,9 @@ test.afterEach(async () => {
  *     had been asserting against a table that has not existed for a long time.
  *
  * What the status *means* is pinned without a browser in agents.status.spec.ts and
- * automations.paused-agent.spec.ts. This file pins that the pages show it and change it.
+ * automations.paused-agent.spec.ts. This file pins that the pages show it and change it,
+ * and that Back from the guided creation chat gets past /agents/new. The pages staying up
+ * while an agent streams is agents.live-stream.spec.ts.
  */
 
 test('agents/new opens a guided creation chat rather than a form', async ({ page }) => {
@@ -58,6 +58,44 @@ test('agents/new opens a guided creation chat rather than a form', async ({ page
 	// prompt in the query string. The redirect is the whole behaviour of this route.
 	await page.waitForURL(/\/chat\/[0-9a-f-]+/, { timeout: 30_000 })
 	expect(page.url()).toMatch(/\/chat\/[0-9a-f-]+/)
+})
+
+/**
+ * /agents/new used to push the chat on top of itself. Back from the chat then landed on
+ * /agents/new, which created another conversation, started another model run and jumped
+ * forward again — Back could never get past it, and every attempt cost a run.
+ */
+test('Back from the guided creation chat returns to where you came from', async ({ page }) => {
+	const sql = getSql()
+	await authenticateContext(page.context())
+	// Counted from this page's own traffic, not by title in the database: other specs (and
+	// this file's run in the other project) open /agents/new too, and a count by title would
+	// include, then delete, their conversations.
+	let creates = 0
+	page.on('request', (request) => {
+		if (request.method() === 'POST' && /\/_app\/remote\/[^/]+\/createConversation$/.test(new URL(request.url()).pathname)) creates++
+	})
+	const chatIds = new Set<string>()
+	page.on('framenavigated', (frame) => {
+		const id = frame === page.mainFrame() ? /\/chat\/([0-9a-f-]+)/.exec(new URL(frame.url()).pathname)?.[1] : undefined
+		if (id) chatIds.add(id)
+	})
+
+	try {
+		await page.goto('/agents')
+		await waitForHydration(page)
+		await page.goto('/agents/new')
+		await page.waitForURL(/\/chat\/[0-9a-f-]+/, { timeout: 30_000 })
+
+		await page.goBack()
+		await expect(page).toHaveURL(/\/agents$/)
+		// Give a re-mounted /agents/new every chance to fire before counting.
+		await page.waitForTimeout(1_500)
+		await expect(page).toHaveURL(/\/agents$/)
+		expect(creates).toBe(1)
+	} finally {
+		for (const id of chatIds) await sql`delete from conversations where id = ${id}`
+	}
 })
 
 async function agentStatus(agentId: string) {
@@ -157,30 +195,6 @@ test('the list pauses and resumes an agent inline', async ({ page }) => {
 		await expect(card.getByText('Available', { exact: true })).toBeVisible()
 	} finally {
 		await getSql()`delete from audit_events where target_id = ${agent.id}`
-		await cleanupPrefixedRecords(prefix)
-	}
-})
-
-test('the detail page survives a live run that has not produced text yet', async ({ page }) => {
-	// The page read `live.delta.length`, but the monitor sends `lastDelta` — null until the
-	// first token. Any live run on the agent threw and took the page down.
-	const prefix = uniquePrefix('agent-live')
-	await cleanupPrefixedRecords(prefix)
-	await authenticateContext(page.context())
-	const sql = getSql()
-	const agent = await seedAgent(prefix, { status: 'idle' })
-	const conversation = await seedConversation(prefix, { agentId: agent.id })
-	await sql`
-		insert into chat_runs (conversation_id, user_id, agent_id, state, last_delta, started_at, last_heartbeat_at)
-		values (${conversation.id}, ${await getActiveUserId()}, ${agent.id}, 'running', null, now(), now())
-	`
-	const pageErrors: string[] = []
-	page.on('pageerror', (err) => pageErrors.push(err.message))
-	try {
-		await page.goto(`/agents/${agent.id}`)
-		await expect(page.getByText('Currently streaming')).toBeVisible({ timeout: 15_000 })
-		expect(pageErrors).toEqual([])
-	} finally {
 		await cleanupPrefixedRecords(prefix)
 	}
 })

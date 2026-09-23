@@ -91,3 +91,21 @@ export function describeSchedule(cron: string): string {
 	if (min === '*/5') return 'Every 5 minutes'
 	return cron
 }
+
+/**
+ * One row of the `/api/agents/monitor` SSE snapshot, as the agents pages read it.
+ *
+ * `lastDelta`, not `delta`, and nullable. The endpoint streams whatever
+ * `listActiveAgentRunsForUser` selects, which names the column `lastDelta`, and it is null
+ * until the first token arrives — so a run that has started but not spoken yet is the
+ * normal case. /agents and /agents/[id] each declared their own `{ delta: string }` and
+ * read `undefined.length` the moment an agent streamed, which took the page down; they
+ * share this one now so they cannot drift apart again.
+ */
+export type AgentStreamEntry = { conversationId: string; agentId: string; lastDelta: string | null }
+
+/** The tail of a live run's latest text, at most `max` characters, for a preview line. */
+export function streamPreview(lastDelta: string | null | undefined, max: number): string {
+	const text = lastDelta ?? ''
+	return text.length > max ? '…' + text.slice(-max) : text
+}

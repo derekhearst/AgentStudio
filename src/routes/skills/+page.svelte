@@ -4,7 +4,9 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
+	import { startGuidedCreationChat } from '$lib/chat/creation-flow';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
@@ -12,6 +14,20 @@
 	let search = $state('');
 	let skills = $state<SkillRow[]>([]);
 	let allSkills = $state<SkillRow[]>([]);
+	let loading = $state(true);
+	let loadError = $state<string | null>(null);
+	let starting = $state(false);
+	// Its own message: sharing `loadError` let a click clear a real load failure, and a
+	// failed start hid the "No skills yet" state it was started from.
+	let startError = $state<string | null>(null);
+
+	/*
+	 * Three different empty lists, which the page used to report as one. "No skills yet"
+	 * showed while the list was still loading and when a search matched nothing — to a
+	 * user with forty skills — and pointed at a guided creation chat nothing on the page
+	 * could start.
+	 */
+	const hasAnySkill = $derived(allSkills.some((s) => !s.name.startsWith('capability:')));
 
 	let filterTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -52,13 +68,41 @@
 		}
 	}
 
+	/** The guided chat the empty state has always promised: an agent interviews you, then writes the skill. */
+	async function startNewSkill() {
+		if (starting) return;
+		starting = true;
+		startError = null;
+		try {
+			await startGuidedCreationChat({ kind: 'skill' });
+		} catch (e) {
+			startError = remoteErrorMessage(e, 'Could not start the guided creation chat.');
+		} finally {
+			starting = false;
+		}
+	}
+
+	function clearSearch() {
+		search = '';
+		filterLocally();
+	}
+
 	onMount(() => {
 		void loadSkills();
 	});
 
+	// Fresh, not cached: this runs after an import, and on the way back from a skill that
+	// was just edited or deleted on its own page.
 	async function loadSkills() {
-		allSkills = await listSkillsQuery({ limit: 200 });
-		filterLocally();
+		loadError = null;
+		try {
+			allSkills = await fetchFresh(listSkillsQuery({ limit: 200 }));
+			filterLocally();
+		} catch (e) {
+			loadError = remoteErrorMessage(e, 'Could not load skills.');
+		} finally {
+			loading = false;
+		}
 	}
 
 	function filterLocally() {
@@ -94,6 +138,14 @@
 				<svg xmlns="http://www.w3.org/2000/svg" class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v14m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
 				Import
 			</button>
+			<button
+				class="btn btn-primary btn-xs"
+				onclick={startNewSkill}
+				disabled={starting}
+				title="Start a guided chat that creates a skill"
+			>
+				{starting ? 'Opening…' : '+ New skill'}
+			</button>
 		{/snippet}
 	</PageHeader>
 
@@ -110,13 +162,28 @@
 
 		<!-- Skill list (scrollable) -->
 		<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">
-	{#if skills.length === 0}
-		<div class="flex flex-col items-center gap-2 py-16 opacity-50">
-			<svg xmlns="http://www.w3.org/2000/svg" class="size-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+	{#if loadError}
+		<div role="alert" class="alert alert-error my-3 py-2 text-sm">{loadError}</div>
+	{/if}
+	{#if startError}
+		<div role="alert" class="alert alert-error my-3 py-2 text-sm">{startError}</div>
+	{/if}
+	{#if loading}
+		<div class="flex justify-center py-16">
+			<span class="loading loading-spinner loading-lg text-primary"></span>
+		</div>
+	{:else if skills.length === 0 && hasAnySkill}
+		<div class="flex flex-col items-center gap-2 py-16 text-center">
+			<p class="text-sm opacity-60">No skills match "{search.trim()}".</p>
+			<button class="btn btn-ghost btn-xs" onclick={clearSearch}>Clear search</button>
+		</div>
+	{:else if skills.length === 0 && !loadError}
+		<div class="flex flex-col items-center gap-2 py-16 text-center">
+			<svg xmlns="http://www.w3.org/2000/svg" class="size-12 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
 				<path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
 				<path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5"/>
 			</svg>
-			<p class="text-sm">No skills yet. Start a guided creation chat to create one.</p>
+			<p class="text-sm opacity-60">No skills yet. Start a guided chat with <span class="font-semibold">+ New skill</span>, or import a SKILL.md package.</p>
 		</div>
 	{:else}
 		<div class="space-y-2">

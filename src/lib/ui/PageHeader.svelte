@@ -27,6 +27,12 @@
 		showMenuButton?: boolean;
 		showRailButton?: boolean;
 	} = $props();
+
+	// Name the destination when a crumb points at it: "Back to Agents" says more than "Back".
+	const backLabel = $derived.by(() => {
+		const target = crumbs.findLast((c) => c.href === backHref);
+		return target ? `Back to ${target.label}` : 'Back';
+	});
 </script>
 
 <!-- Desktop topbar: breadcrumb + status chips + action icons -->
@@ -85,12 +91,19 @@
 				<path d="M4 6h16M4 12h16M4 18h16" />
 			</svg>
 		</button>
-	{:else if backHref}
+	{/if}
+	<!--
+		Beside the menu button, not instead of it. This was `{:else if backHref}`, and no page
+		turns the menu off, so below 80rem no detail page had a way back: the breadcrumbs
+		that carry the parent link live in the desktop topbar. In an installed PWA there is
+		no browser Back either.
+	-->
+	{#if backHref}
 		<a
 			href={backHref}
 			class="console-iconbtn"
-			aria-label="Back"
-			title="Back"
+			aria-label={backLabel}
+			title={backLabel}
 			style="width:32px;height:32px;border:1px solid var(--color-base-300);"
 		>
 			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">

@@ -384,6 +384,7 @@ The current implementation is a baseline, not a constraint. This domain may be r
 This domain follows the shared UX system in [../ui/spec.md](../ui/spec.md).
 
 - Surfaces in this domain must align with the shared desktop/mobile shell patterns.
+- On a wide screen (1280px and up) `/automations` shows the list on the left and the creation form in a column on the right that stays in view while the list scrolls. On narrower screens the form sits below the list. Creating, pausing or deleting an automation updates the list straight away, and the other cards stay where they are while it does, so you keep your place in a long list and any open History panel stays open.
 - Domain-specific states must be explicit in the UI (for example pending, running, blocked, completed) where applicable.
 - Blocking user decisions must use the shared action-card and inbox patterns where applicable.
 

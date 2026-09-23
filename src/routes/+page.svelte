@@ -9,6 +9,7 @@
 	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import HomeChatTray from '$lib/chat/HomeChatTray.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
@@ -67,7 +68,9 @@
 	});
 
 	async function loadDefaultModel() {
-		const settings = await getSettings();
+		// Fresh: a cached read could still hold the default model from before it was changed
+		// in /settings, and the next chat would start on the old one.
+		const settings = await fetchFresh(getSettings());
 		if (settings?.defaultModel) {
 			model = settings.defaultModel;
 		}

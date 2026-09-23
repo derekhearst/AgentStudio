@@ -12,6 +12,8 @@
 		type UsageDigestWindowDays,
 	} from '$lib/costs/usage-digest';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import UsageStrip from './_components/UsageStrip.svelte';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
@@ -20,6 +22,7 @@
 	let events = $state<ActivityRow[]>([]);
 	let filterType = $state<EventType | ''>('');
 	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	// #38 — the usage strip's window. A week by default: long enough to be a pattern, short
 	// enough that the previous week is a fair comparison.
@@ -96,13 +99,23 @@
 		void loadDigest(true);
 	}
 
+	// There was no `try` here at all: a failed load left `loading` true for good.
 	async function refresh() {
 		loading = true;
-		events = await listActivity({
-			type: filterType || undefined,
-			limit: 100,
-		});
-		loading = false;
+		error = null;
+		try {
+			// Fresh, so the Refresh button actually brings in new events.
+			events = await fetchFresh(
+				listActivity({
+					type: filterType || undefined,
+					limit: 100,
+				}),
+			);
+		} catch (err) {
+			error = remoteErrorMessage(err, 'Could not load activity.');
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function changeFilter(type: EventType | '') {
@@ -142,7 +155,9 @@
 <div class="flex h-full min-h-0 flex-col">
 	<PageHeader title="Activity feed" subtitle="What the agents did, then every event as it happened">
 		{#snippet actions()}
-			<button class="btn btn-ghost btn-xs" type="button" onclick={refreshAll}>Refresh</button>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={refreshAll} disabled={loading}>
+				{loading ? 'Loading…' : 'Refresh'}
+			</button>
 		{/snippet}
 	</PageHeader>
 
@@ -162,10 +177,19 @@
 			{/each}
 		</div>
 
-	{#if loading}
+	<!--
+		A failed refresh shows its error above the events it already had, rather than in their
+		place, and only the first load shows a spinner.
+	-->
+	{#if error}
+		<div role="alert" class="alert alert-error py-2 text-sm">{error}</div>
+	{/if}
+	{#if loading && events.length === 0}
 		<div class="flex justify-center p-8"><span class="loading loading-spinner loading-lg"></span></div>
 	{:else if events.length === 0}
-		<p class="text-sm text-base-content/70">No activity events yet.</p>
+		{#if !error}
+			<p class="text-sm text-base-content/70">No activity events yet.</p>
+		{/if}
 	{:else}
 		<div class="space-y-2">
 			{#each events as event (event.id)}

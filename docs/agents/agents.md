@@ -82,6 +82,16 @@ The automation cards on `/automations` show "(paused)" next to the agent's name,
 
 The assistant can also pause and resume agents itself with its `pause_agent` and `resume_agent` tools. The same rules apply, and the audit trail shows no person for those changes.
 
+### Create an agent
+
+1. Open `/agents/new`, or ask the assistant in any chat to make one.
+2. A guided **Create agent** chat opens. The assistant asks what the new agent should do, then creates it.
+3. `/agents/new` swaps itself for the chat in the browser history, so **Back** from the chat returns to wherever you came from. It used to start another chat instead, and each start is a new conversation and a paid model run.
+
+### Watch an agent work
+
+While an agent is running, its card on `/agents` and its own page show the latest text it has written, with a **Watch live** link to the conversation. A run that has started but not written anything yet shows an empty preview. (Both pages used to crash the moment an agent started running.)
+
 ### Hand a plan over from Plan or Research
 
 1. The user asks the Plan agent to plan a change, or the Research agent to research a question.
