@@ -47,23 +47,93 @@ export const MONITOR_DEFAULT_MODEL = 'anthropic/claude-haiku-4.5'
  * Tools a condition may observe with. Deliberately a read-only allowlist — a monitor runs
  * unattended on a timer with no human in the loop, so it may look at the world but never
  * change it. `Bash`, `Write`, `push_branch` and friends are absent by construction.
+ *
+ * Every entry must be something a monitor can actually run; the monitors spec checks that.
+ * `git_status` / `git_log` / `git_diff` are left out on purpose: they only run inside a
+ * per-run git worktree, and a monitor has no run and no worktree, so every check of one
+ * failed.
  */
 export const MONITOR_OBSERVABLE_TOOLS = [
 	'web_fetch',
 	'web_search',
-	'Grep',
 	'Read',
-	'file_info',
+	'Grep',
 	'Glob',
-	'git_status',
-	'git_log',
-	'git_diff',
+	'file_info',
 	'list_pull_requests',
 	'get_pull_request',
 	'list_projects',
 ] as const
 
 export type MonitorObservableTool = (typeof MONITOR_OBSERVABLE_TOOLS)[number]
+
+/**
+ * The Agent SDK's own file tools. The engine gives them to the model directly, so the
+ * in-house executor that runs every other observable tool has no handler for them — a monitor
+ * runs these itself, read-only, over its owner's sandbox (`observe-files.server.ts`).
+ */
+export const MONITOR_FILE_TOOLS = ['Read', 'Grep', 'Glob'] as const satisfies readonly MonitorObservableTool[]
+export type MonitorFileTool = (typeof MONITOR_FILE_TOOLS)[number]
+
+export function isMonitorFileTool(tool: string): tool is MonitorFileTool {
+	return (MONITOR_FILE_TOOLS as readonly string[]).includes(tool)
+}
+
+/** Largest file a monitor will read or search. A watcher is not a bulk reader. */
+export const MONITOR_FILE_MAX_BYTES = 2 * 1024 * 1024
+/** Most paths, matches or counts a file observation returns. */
+export const MONITOR_FILE_MAX_RESULTS = 1_000
+
+/**
+ * Arguments for the file tools, in the SDK's own shapes so a condition reads the way an agent
+ * would call the tool. Strict: an option this implementation does not support is rejected
+ * when the monitor is created, rather than silently ignored on every check. Paths are
+ * relative to the owner's sandbox (an absolute path must lie inside it).
+ */
+export const monitorFileToolArgsSchemas = {
+	Read: z.strictObject({
+		file_path: z.string().trim().min(1).max(1_000),
+		/** 1-based line to start from. */
+		offset: z.number().int().min(1).optional(),
+		/** How many lines to read. */
+		limit: z.number().int().min(1).max(100_000).optional(),
+	}),
+	Grep: z.strictObject({
+		/** A regular expression, matched line by line. */
+		pattern: z.string().min(1).max(1_000),
+		/** File or directory to search. Defaults to the whole sandbox. */
+		path: z.string().trim().min(1).max(1_000).optional(),
+		/** Only search files whose name matches, e.g. `*.log`. */
+		glob: z.string().trim().min(1).max(200).optional(),
+		output_mode: z.enum(['files_with_matches', 'content', 'count']).optional(),
+		'-i': z.boolean().optional(),
+		/** Cap on results; 0 means the maximum. Defaults to 250, as in the SDK. */
+		head_limit: z.number().int().min(0).max(MONITOR_FILE_MAX_RESULTS).optional(),
+	}),
+	Glob: z.strictObject({
+		pattern: z.string().trim().min(1).max(200),
+		/** Directory to match under. Defaults to the whole sandbox. */
+		path: z.string().trim().min(1).max(1_000).optional(),
+	}),
+} satisfies Record<MonitorFileTool, z.ZodType>
+
+/** Reject file-tool arguments at creation, pointing at the argument that is wrong. */
+function checkObservationArgs(
+	source: { tool: MonitorObservableTool; args: Record<string, unknown> },
+	ctx: z.RefinementCtx,
+	at: PropertyKey[],
+): void {
+	if (!isMonitorFileTool(source.tool)) return
+	const parsed = monitorFileToolArgsSchemas[source.tool].safeParse(source.args)
+	if (parsed.success) return
+	for (const issue of parsed.error.issues) {
+		ctx.addIssue({
+			code: 'custom',
+			message: `${source.tool} arguments: ${issue.message}`,
+			path: [...at, 'args', ...issue.path],
+		})
+	}
+}
 
 // ─────────── Condition schemas ───────────
 
@@ -80,10 +150,12 @@ export const monitorCompareSchema = z.enum([
 
 export type MonitorCompare = z.infer<typeof monitorCompareSchema>
 
-const observationSourceSchema = z.object({
-	tool: z.enum(MONITOR_OBSERVABLE_TOOLS),
-	args: z.record(z.string(), z.unknown()).default({}),
-})
+const observationSourceSchema = z
+	.object({
+		tool: z.enum(MONITOR_OBSERVABLE_TOOLS),
+		args: z.record(z.string(), z.unknown()).default({}),
+	})
+	.superRefine((source, ctx) => checkObservationArgs(source, ctx, []))
 
 export const toolResultConditionSchema = z.object({
 	kind: z.literal('tool_result'),
@@ -98,7 +170,7 @@ export const toolResultConditionSchema = z.object({
 	compare: monitorCompareSchema.default('changed'),
 	/** Operand for equals / contains / matches. Ignored by `changed` and `not_empty`. */
 	value: z.string().max(2_000).optional(),
-})
+}).superRefine((condition, ctx) => checkObservationArgs(condition, ctx, []))
 
 export const modelQuestionConditionSchema = z.object({
 	kind: z.literal('model_question'),

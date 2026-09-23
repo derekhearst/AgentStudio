@@ -48,7 +48,24 @@ Two rules about what a comparison sees:
 
 **`model_question`** fetches context with the same read-only tools, then asks a cheap model a yes/no question about it — "have all the checks on this PR finished?", "does this page now mention a shipping date?". This is what makes monitors general, and it is the only part that costs money per check, so it is gated (below).
 
-Observable tools, all read-only: `web_fetch`, `web_search`, `search_files`, `file_read`, `file_info`, `list_directory`, `git_status`, `git_log`, `git_diff`, `list_pull_requests`, `get_pull_request`, `list_projects`. Anything that writes — `shell`, `file_write`, `push_branch` — is absent by construction, and the schema rejects it.
+Observable tools, all read-only:
+
+| Tool | What a monitor sees |
+| ---- | ------------------- |
+| `web_fetch` | A page: `{ title, url, text, fetchedAt }` |
+| `web_search` | Search results |
+| `Read` | The text of one file (or the lines asked for with `offset` / `limit`), as plain text — compare it directly, no `extract` needed |
+| `Grep` | Files containing a pattern — as a list of paths (the default), one entry per matching line (`output_mode: "content"`), or a count per file (`"count"`) |
+| `Glob` | Paths matching a pattern such as `reports/*.pdf`, sorted |
+| `file_info` | A file's size and modified time |
+| `list_pull_requests`, `get_pull_request` | Pull requests on a connected repository |
+| `list_projects` | The user's projects |
+
+Anything that writes — `Bash`, `Write`, `push_branch` — is absent by construction, and the schema rejects it.
+
+**Files.** `Read`, `Grep` and `Glob` take the same arguments an agent passes them, and look at the owner's whole sandbox: paths are relative to it, so a project's build log is `projects/<project id>/build.log`. Nothing outside the sandbox can be reached, a symbolic link that points outside is refused, a file over 2 MB is not read, and at most 1,000 results come back. An argument the monitor does not support is rejected when the monitor is created, rather than ignored on every check.
+
+**No git tools.** `git_status`, `git_log` and `git_diff` only work inside a per-run git worktree, and a monitor has neither a run nor a worktree, so they are not offered. A monitor created before this change that still names one of them — or one of the file tools' old names, `file_read`, `search_files` and `list_directory` — fails its checks with a message saying the tool can no longer be observed, and should be canceled and recreated.
 
 ### Four actions
 
@@ -120,7 +137,7 @@ The `tool_result` path costs nothing beyond whatever the tool itself costs, whic
 | System                    | How monitors use it                                                                              |
 | ------------------------- | -------------------------------------------------------------------------------------------------- |
 | `jobs/`                   | `monitors_dispatch` (scheduled, 60s) and `monitor_check` (per monitor) — leases, retries, forensics |
-| `tools/`                  | Conditions observe through the normal `executeTool` path, so a monitor sees what an agent sees      |
+| `tools/`                  | Conditions observe through the normal `executeTool` path, so a monitor sees what an agent sees. The SDK file tools (`Read`, `Grep`, `Glob`) have no handler there — the engine gives them to the model directly — so the monitor runs those itself, read-only, over the owner's sandbox |
 | `costs/budget.server`     | The gate on the model path                                                                          |
 | `observability/review`    | `monitor_fired` items on the firing edge and on a retirement without firing                          |
 | `notifications/`          | In-app rows plus web push for the `push` action                                                     |

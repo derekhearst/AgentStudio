@@ -3,6 +3,7 @@
 		MONITOR_DEFAULT_MAX_CHECKS,
 		MONITOR_MAX_DEADLINE_DAYS,
 		MONITOR_OBSERVABLE_TOOLS,
+		monitorConditionSchema,
 		type MonitorAction,
 		type MonitorCompare,
 		type MonitorObservableTool
@@ -37,16 +38,14 @@
 		{ value: 'run_automation', label: 'Run an automation' }
 	];
 
-	const ARG_PLACEHOLDERS: Partial<Record<MonitorObservableTool, string>> = {
+	// File paths are relative to your sandbox; a project's files live under projects/<id>/.
+	const ARG_PLACEHOLDERS: Record<MonitorObservableTool, string> = {
 		web_fetch: '{ "url": "https://example.com/releases" }',
 		web_search: '{ "query": "acme widgets release" }',
-		Grep: '{ "pattern": "TODO", "path": "src" }',
 		Read: '{ "file_path": "notes.md" }',
+		Grep: '{ "pattern": "ERROR", "path": "logs", "glob": "*.log" }',
+		Glob: '{ "pattern": "reports/*.pdf" }',
 		file_info: '{ "path": "notes.md" }',
-		Glob: '{ "pattern": "**/*", "path": "." }',
-		git_status: '{}',
-		git_log: '{ "max": 5 }',
-		git_diff: '{}',
 		list_pull_requests: '{ "owner": "acme", "repo": "widgets" }',
 		get_pull_request: '{ "pullRequestId": "00000000-0000-0000-0000-000000000000" }',
 		list_projects: '{}'
@@ -137,6 +136,16 @@
 							question: question.trim(),
 							context: [{ tool: contextTool, args: parseArgs(contextArgsText, 'Context arguments') }]
 						};
+
+			// Checked here as well as on the server, so a wrong argument is named in the form
+			// rather than coming back as a bare "Bad Request".
+			const checked = monitorConditionSchema.safeParse(condition);
+			if (!checked.success) {
+				const issue = checked.error.issues[0];
+				throw new Error(
+					issue.path.length > 0 ? `${issue.message} (at ${issue.path.map(String).join('.')})` : issue.message
+				);
+			}
 
 			await createMonitorCommand({
 				name: name.trim(),

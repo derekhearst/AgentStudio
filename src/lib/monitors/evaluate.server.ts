@@ -4,14 +4,17 @@ import { chat } from '$lib/llm/chat.server'
 import { executeTool } from '$lib/tools/tools.server'
 import type { ToolName } from '$lib/tools/tool-schemas'
 import type { MonitorRow } from './monitors.schema'
+import { monitorSandboxRoot, observeFileTool } from './observe-files.server'
 import {
 	buildModelQuestionPrompt,
 	buildObservation,
+	isMonitorFileTool,
 	monitorConditionSchema,
 	observeToolResult,
 	parseYesNo,
 	stableStringify,
 	MONITOR_DEFAULT_MODEL,
+	MONITOR_OBSERVABLE_TOOLS,
 	type MonitorObservableTool,
 	type MonitorObservation,
 } from './condition'
@@ -43,9 +46,12 @@ export async function evaluateMonitorCondition(monitor: MonitorRow, now = new Da
 	try {
 		condition = monitorConditionSchema.parse(monitor.condition)
 	} catch (err) {
+		const retired = retiredToolIn(monitor.condition)
 		return {
 			outcome: 'error',
-			message: `stored condition is not valid: ${err instanceof Error ? err.message : String(err)}`,
+			message: retired
+				? `this monitor observes "${retired}", which monitors can no longer run — cancel it and create a new one`
+				: `stored condition is not valid: ${err instanceof Error ? err.message : String(err)}`,
 		}
 	}
 
@@ -107,9 +113,12 @@ export async function evaluateMonitorCondition(monitor: MonitorRow, now = new Da
 }
 
 /**
- * Run one read-only observation tool through the normal executor, so a monitor's view of the
- * world is exactly what an agent would see. No workspace options are passed: the monitor runs
- * detached, so tools resolve against the user's default sandbox.
+ * Run one read-only observation tool. The SDK file tools (`Read`, `Grep`, `Glob`) have no
+ * handler in the in-house executor — the engine gives them to the model directly — so the
+ * monitor runs those itself over the owner's sandbox (`observe-files.server.ts`). Everything
+ * else goes through the normal executor, so a monitor sees what an agent would. No workspace
+ * options are passed: the monitor runs detached, so tools resolve against the user's default
+ * sandbox.
  *
  * A tool that reports `success: false` throws — that is a failed check, not an observation of
  * "nothing". The distinction matters for `changed`: swallowing a fetch failure as an empty
@@ -120,9 +129,31 @@ async function runObservationTool(
 	tool: MonitorObservableTool,
 	args: Record<string, unknown>,
 ): Promise<unknown> {
+	if (isMonitorFileTool(tool)) {
+		try {
+			return await observeFileTool(monitorSandboxRoot(userId), tool, args)
+		} catch (err) {
+			throw new Error(`${tool} failed: ${err instanceof Error ? err.message : String(err)}`)
+		}
+	}
 	const result = await executeTool({ name: tool as ToolName, arguments: args }, userId)
 	if (!result.success) {
 		throw new Error(`${tool} failed: ${result.error ?? 'unknown tool error'}`)
 	}
 	return result.result
+}
+
+/**
+ * The first tool a stored condition names that is no longer on the observable list — the
+ * pre-SDK file tools (`file_read`, `search_files`, `list_directory`) and the `git_*`
+ * tools. Such a monitor can never check again, and the zod message alone does not say why.
+ */
+function retiredToolIn(condition: unknown): string | null {
+	if (!condition || typeof condition !== 'object') return null
+	const stored = condition as { tool?: unknown; context?: unknown }
+	const tools = [stored.tool, ...(Array.isArray(stored.context) ? stored.context.map((c) => (c as { tool?: unknown })?.tool) : [])]
+	for (const tool of tools) {
+		if (typeof tool === 'string' && !(MONITOR_OBSERVABLE_TOOLS as readonly string[]).includes(tool)) return tool
+	}
+	return null
 }

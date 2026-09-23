@@ -410,7 +410,7 @@ test.describe('monitors/condition — schema', () => {
 	})
 
 	test('compare defaults to `changed` when omitted', () => {
-		const parsed = monitorConditionSchema.parse({ kind: 'tool_result', tool: 'git_status', args: {} })
+		const parsed = monitorConditionSchema.parse({ kind: 'tool_result', tool: 'list_projects', args: {} })
 		expect(parsed.kind === 'tool_result' && parsed.compare).toBe('changed')
 	})
 
@@ -427,8 +427,8 @@ test.describe('monitors/condition — schema', () => {
 		expect(
 			describeCondition({ kind: 'tool_result', tool: 'web_fetch', args: {}, extract: 'text', compare: 'changed' }),
 		).toBe('web_fetch.text changes')
-		expect(describeCondition({ kind: 'tool_result', tool: 'git_status', args: {}, compare: 'not_empty' })).toBe(
-			'git_status is non-empty',
+		expect(describeCondition({ kind: 'tool_result', tool: 'list_projects', args: {}, compare: 'not_empty' })).toBe(
+			'list_projects is non-empty',
 		)
 		expect(
 			describeCondition({
@@ -472,13 +472,19 @@ test.describe('monitors — agent tool schema', () => {
 
 	test('create_monitor refuses a deadline past the 30-day ceiling at the schema boundary', async () => {
 		const { toolSchemas } = await import('../src/lib/tools/tool-schemas')
+		const condition = { kind: 'tool_result', tool: 'list_projects', args: {} }
 		const tooLong = toolSchemas.create_monitor.safeParse({
 			name: 'Forever',
-			condition: { kind: 'tool_result', tool: 'git_status', args: {} },
+			condition,
 			action: 'review_item',
 			deadlineDays: 365,
 		})
 		expect(tooLong.success).toBe(false)
+		// …and for the deadline, not because the rest of the call was wrong.
+		expect(
+			toolSchemas.create_monitor.safeParse({ name: 'A month', condition, action: 'review_item', deadlineDays: 30 })
+				.success,
+		).toBe(true)
 	})
 
 	test('the monitor lifecycle tools all exist', async () => {
