@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
+import { isAgentPaused } from '$lib/agents/agent-status'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
@@ -207,6 +208,11 @@ async function fireConversation(
 
 	const [agent] = await db.select().from(agents).where(eq(agents.id, agentId)).limit(1)
 	if (!agent) throw new Error(`agent ${agentId} not found`)
+	// #66 — a paused agent does no unattended work. Thrown rather than skipped quietly, so
+	// what the monitor saw still reaches a human: a failed action falls back to a review item.
+	if (isAgentPaused(agent.status)) {
+		throw new Error(`agent "${agent.name}" is paused — resume it on the Agents page to let this monitor start a conversation with it`)
+	}
 
 	const { getOrCreateSettings } = await import('$lib/settings/settings.server')
 	const settings = await getOrCreateSettings(monitor.userId)

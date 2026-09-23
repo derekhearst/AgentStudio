@@ -14,6 +14,7 @@ import {
 	startAutomationRun,
 } from './automation-runs.server'
 import { automationTriggerPolicy } from './failure-policy'
+import { findPausedAutomationAgent, skipAutomationForPausedAgent } from './paused-agent.server'
 
 export { computeNextRunAt } from './cron'
 
@@ -105,6 +106,19 @@ export async function runAutomationById(
 	}
 	if (!automation.enabled && !allowDisabled) {
 		throw new AutomationUnavailableError(automationId, 'disabled')
+	}
+
+	// #66 — a paused agent does no unattended work, whatever triggered the run. Ahead of the
+	// budget gate: nothing is about to be spent, and the operator's own switch is the more
+	// specific reason to report. See paused-agent.server.ts.
+	const pausedAgent = await findPausedAutomationAgent(automation.agentId)
+	if (pausedAgent) {
+		return await skipAutomationForPausedAgent(automation, pausedAgent, now, {
+			trigger,
+			attempt,
+			jobId: options.jobId ?? null,
+			preserveSchedule,
+		})
 	}
 
 	// Wave 5 #21 phase 5 — budget pre-check. Skip the run + bump nextRunAt + open a review
