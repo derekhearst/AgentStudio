@@ -17,7 +17,7 @@ Agent detail pages allow editing the assigned model and system prompt.
 
 ### Settings
 
-Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
+Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits. The daily and monthly budget limits block new chat and automation runs once spend reaches them and alert at 80% and 100% (see [`docs/cost/spec.md`](docs/cost/spec.md)); the notification switches decide which notifications are sent (see [`docs/notifications/spec.md`](docs/notifications/spec.md)).
 
 Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 

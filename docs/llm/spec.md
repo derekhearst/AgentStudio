@@ -78,6 +78,22 @@ Options accepted by `streamChat()`:
 | `listModels()`                              | Returns full model catalog from OpenRouter (1h cache)                    |
 | `getModel(id)`                              | Returns a single `ModelInfo` by ID                                       |
 | `calculateCost(model, tokensIn, tokensOut)` | Returns USD cost as a number using live pricing                          |
+| `toOpenRouterModelId(id)`                   | Translates a stored model id into the one OpenRouter knows (below)       |
+
+## Model ids
+
+The app stores Anthropic models the way the Claude Agent SDK names them: `claude-sonnet-5`, `claude-haiku-4-5`. That is what the chat engine needs. OpenRouter, which the rest of the app still calls directly (research, memory mining, reranking, monitors, the legacy runtime loop), only knows the vendor's prefix and a dotted version: `anthropic/claude-sonnet-5`, `anthropic/claude-haiku-4.5`.
+
+`chat()` and `streamChat()` therefore send every model id through `toOpenRouterModelId`, and the usage ledger looks prices up with it too:
+
+| Stored id | Sent to OpenRouter |
+| --- | --- |
+| `claude-sonnet-5` | `anthropic/claude-sonnet-5` |
+| `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-sonnet-4-5[1m]` | `anthropic/claude-haiku-4.5`, `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.5` |
+| `anthropic/claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
+| `openai/gpt-4o-mini`, or an alias such as `sonnet` | unchanged |
+
+Only ids it can map with certainty are changed; anything else goes to OpenRouter as written. Before 2026-09-23 the bare id was sent as-is, so every research run failed at its first planner call, and the few calls that did succeed were priced at nothing.
 
 ## Reasoning Support
 
@@ -109,7 +125,7 @@ OpenRouter availability is not treated as a special case. If the service is down
 
 ## Behavior Contracts
 
-- `calculateCost()` returns 0 if the model is not found in the catalog — never throws.
+- A call whose model has no catalogue price is never recorded as free without a word: the usage ledger marks the row unpriced and logs a warning (see [../cost/spec.md](../cost/spec.md)). A failed catalogue refresh keeps pricing from the previous copy.
 - `streamChat()` always calls `onUsage` before resolving, even if the response was empty.
 - Tool call arguments are accumulated across streaming chunks before `onToolCall` is fired.
 - Retry attempts are transparent to callers — `onToken`, `onToolCall`, and `onUsage` are only called for the successful attempt.

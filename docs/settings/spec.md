@@ -32,20 +32,25 @@ One row per user. Created with defaults when the user first accesses settings.
 
 ```ts
 {
-	taskCompleted: boolean // notify when task finishes
-	needsInput: boolean // notify when agent needs answer
-	agentErrors: boolean // notify on agent hard errors
+	taskCompleted: boolean // notify when a research report is finished
+	needsInput: boolean // notify when a chat run has waited a minute for an approval or an answer
+	agentErrors: boolean // notify when an automation fails for good, or a check fails on an agent's pull request
 }
 ```
+
+Every notification is sent through one place that reads these switches, so a switch that is off stops that kind of notification, in-app and push. Monitor pushes and budget alerts are not covered by a switch: the user turns those off where they set them up. See [../notifications/spec.md](../notifications/spec.md).
 
 **`budgetConfig`**
 
 ```ts
 {
-	dailyLimit: number | null // max USD spend per day (null = unlimited)
+	dailyLimit: number | null // max USD spend per day (null or 0 = unlimited)
 	monthlyLimit: number | null // max USD spend per month
+	limitIds?: { day?: string | null; month?: string | null } // the budget_limits rows these two became (set by the server)
 }
 ```
+
+Each limit is enforced as a budget limit (see [../cost/spec.md](../cost/spec.md)): a global limit for its period that blocks new chat and automation runs once spend reaches it, and warns at 80%. The server keeps those limits in step with these fields whenever settings are saved or reset, and again before every budget check. Clearing a limit switches its budget limit off rather than deleting it, so its alert history stays. Before 2026-09-23 these two fields only drew the progress bars in /review; nothing enforced them.
 
 **`contextConfig`**
 
@@ -91,7 +96,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Models** — default model, transcription model
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
-- **Budget** — daily/monthly limits
+- **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%
 - **Tools** — approval-required list
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection

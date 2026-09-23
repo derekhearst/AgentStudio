@@ -120,6 +120,7 @@ Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same
 - Deduplication is best-effort at enqueue time. If two workers try to lease the same job simultaneously, the database lease constraint prevents double-execution.
 - A job's `payload` is immutable after creation. Retry attempts use the same payload.
 - `canceled` jobs are soft-stopped: if a worker is already executing the job, it will finish the current execution unit but not commit a result.
+- `canceled` is final even for a job that was running when it was canceled. When its handler winds down — returning, or throwing at a cancel checkpoint — the job is neither marked completed nor failed, and it is never put back for a retry. A handler's cancel checkpoint (`checkCancellation`) throws a `JobCanceledError`, so the handler can tell "the user canceled" from any other error. Before 2026-09-23 a canceled job whose handler threw went to `retry_wait` and ran again from the start.
 
 ## Roles & Permissions
 

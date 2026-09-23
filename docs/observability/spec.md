@@ -75,13 +75,26 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 | `memory_conflict`         | info     | Memory mining produced a conflicting entity/relation        |
 | `policy_override_request` | critical | An actor requested a policy exception requiring approval    |
 | `budget_exceeded`         | warning  | A run was blocked or mid-run spending exceeded a hard limit |
+| `pull_request_checks_failed` | warning | A check failed on a pull request an agent opened            |
+
+The inbox's type filter offers every item type the database has, and the server accepts every one of them. (Before 2026-09-23 the server's list was a hand-kept copy that missed "PR checks failed": choosing it failed, and the list kept showing the previous filter's items under the new label.) If a reload of the list fails, the inbox says why above the list and that the items shown are from the previous filter.
 
 ### Inbox actions
 
 Each item type has a resolution action appropriate to the item:
 
-- **Approval request** — Approve or Deny buttons with optional comment. Resolution unblocks the run.
-- **User question** — Text input area to answer the agent's questions. Resolution unblocks the run.
+- **Approval request** — **Approve** and **Deny** buttons. The answer goes to the waiting run exactly as the chat's Allow/Deny card sends it, so the run carries on (or skips the tool) at once. Dismissing an approval request denies the tool call. It cannot be marked "resolved" without an answer.
+- **User question** — the same answer card the chat shows. The answers go to the waiting run, as if typed in the chat.
+
+Approval requests and user questions close by themselves once the prompt is settled, wherever that happens:
+
+| What happened | How the item closes |
+| --- | --- |
+| Approved, denied or answered, in the chat or in /review | Resolved, with the decision and who made it |
+| Nobody answered within five minutes, and the run went on without it | Dismissed, as timed out |
+| The run ended, was stopped or was reaped while the item was open | Dismissed, as expired, by the check that runs every five minutes with the stuck-run reaper |
+
+Answering from /review a run that has already stopped waiting is refused with a message saying so, and the item closes as expired. Before 2026-09-23 these items were never closed, so every approval added one more open item for good, and the inbox's Resolve and Dismiss only changed the item: a tool call "approved" from /review was still waiting in the run until it timed out and was denied.
 - **Evaluation failure** — View findings, choose: Retry task (spawns new attempt), Mark resolved (accept failure), Override to passed.
 - **Job failure** — View error, choose: Retry job, Cancel job, Dismiss.
 - **Artifact conflict** — View both versions, choose which to keep, merge manually, or open the artifact editor.
@@ -89,6 +102,15 @@ Each item type has a resolution action appropriate to the item:
 ### Run traces
 
 `/runs/[id]/trace` shows the step timeline for a run: each LLM call (with token counts and cost), each tool call (with duration and success/failure), each compaction event, and each hook invocation. Timeline is scrollable and expandable.
+
+### Recent failures
+
+The **Recent failures** panel on /review lists, for the last 24 hours:
+
+- **Every run that ended in failure** — chat turns, subagent runs and automation runs, from the runs table where each run records how it ended (the same source as the failed-runs count above it). Each row shows the first line of the run's error and opens the run's page.
+- **Every failed tool call a trace recorded** — these come from run traces, which only the older runtime loop writes, and open the trace.
+
+Before 2026-09-23 failed runs were read from run traces too. The chat engine writes no traces and the one writer never recorded a failure, so the panel said "No failures" beside a count showing them. A trace now also ends as `failed` when its run throws, instead of staying `running`.
 
 ### Operational dashboard
 
@@ -136,7 +158,7 @@ Verbosity is controlled by `LOG_LEVEL` (`debug`, `info`, `warn`, `error`); when 
 The logger writes to two sinks:
 
 1. **Console** — always, with an ISO timestamp and level prefix. The dev server still surfaces logs in stdout.
-2. **`app_logs` table** — every server-side entry, batched. Writes flush every 2s (or every 50 entries; `error` flushes immediately). The `[domain]` prefix on the message is also lifted into a separate `source` column for fast per-domain filtering. Writes are best-effort: a failed insert falls back to console output and disables the sink for the rest of the process — the call site never blocks.
+2. **`app_logs` table** — every server-side entry, batched. Writes flush every 2s (or every 50 entries; `error` flushes immediately). The `[domain]` prefix on the message is also lifted into a separate `source` column for fast per-domain filtering. Writes are best-effort and the call site never blocks. When an insert fails, that batch goes to the console and the sink pauses: it tries again after 5 seconds, doubling the wait after each failure in a row up to 5 minutes. Entries logged during the pause are kept (up to 1,000, oldest dropped first) and saved once the database answers, together with a warning saying how many entries only reached the console. Before 2026-09-23 one failed insert switched the sink off until the app restarted, so a database restart silenced `app_logs` and the /review Logs panel from then on.
 
 Operators browse logs at `/observability/logs` (admin-only, mobile-friendly). Filters: min level, source, free-text search across message + JSON context, time-since, row limit. The sidebar shows row counts per source for the last 15min/1h/6h/24h so you can spot a noisy domain without scanning.
 
