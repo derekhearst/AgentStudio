@@ -8,10 +8,18 @@ Every chat turn runs on the **engine**: the Claude Agent SDK, which drives the C
 
 | Backend | Which models | What it costs | Default |
 | --- | --- | --- | --- |
-| **Subscription** | Claude models | Nothing per token. The turn runs on the Claude subscription that Claude Code is signed in with. | Always on |
+| **Subscription** | The current Claude models Claude Code can run (see below) | Nothing per token. The turn runs on the Claude subscription that Claude Code is signed in with. | Always on |
 | **Gateway** | Any other model the gateway serves (Kimi, GPT, GLM, a local model…) | Billed per token by the gateway provider. | Off |
 
 The gateway is off unless the operator sets it up. With it off, only Claude models are offered anywhere a chat's model is chosen, so it is not possible to pick a model that cannot run.
+
+### Which Claude models are offered
+
+The subscription list is a fixed list of the Claude models the bundled Claude Code program can run: Claude Fable 5.1 and 5, Opus 5, 4.8, 4.7, 4.6 and 4.5, Sonnet 5, 4.6 and 4.5, and Haiku 4.5. It is taken from Claude Code's own model table, less the models Anthropic has retired (the Claude 3 family, Sonnet 4, Opus 4 and Opus 4.1).
+
+OpenRouter's catalogue is not used to decide this. It still lists retired Claude models, and some under names that are not Anthropic model ids at all: its "Claude Sonnet 4" is `anthropic/claude-sonnet-4`, which Claude Code would refuse on the first message. The catalogue only supplies a model's description and context size. Every subscription model is offered even when OpenRouter cannot be reached, because running one does not involve OpenRouter.
+
+When the app's Claude Code is upgraded and knows a new model, a developer adds it to the list (`SUBSCRIPTION_MODEL_IDS` in `src/lib/engine/model-backend.ts`). Until then the pickers do not offer it.
 
 The app's smaller features — conversation titles, memory, monitors' yes/no checks, evaluations, image and speech — do not use the engine. They call OpenRouter directly with `OPENROUTER_API_KEY` and are unaffected by anything on this page.
 
@@ -19,7 +27,7 @@ The app's smaller features — conversation titles, memory, monitors' yes/no che
 
 | Term | Meaning |
 | --- | --- |
-| **Engine model** | A model a chat turn can run on here: a Claude model, or a model the configured gateway serves. |
+| **Engine model** | A model a chat turn can run on here: a current Claude model, or a model the configured gateway serves that can use tools. |
 | **Model catalogue** | OpenRouter's public list of models with their names, context sizes and prices. The pickers use it for names and prices; the usage ledger uses it for prices. |
 | **Gateway** | A service that accepts requests in Anthropic's format and forwards them to another model. OpenRouter offers one at `https://openrouter.ai/api`; a self-hosted LiteLLM proxy is another. |
 | **Model id** | The name a model is asked for by. The engine spells Claude models the way Claude Code does (`claude-haiku-4-5`); OpenRouter spells the same model `anthropic/claude-haiku-4.5`. The app converts between them automatically. |
@@ -51,17 +59,17 @@ The **Transcription Model** picker is different: transcription calls OpenRouter 
 
 ### Sending a message on a model that cannot run
 
-1. The conversation's model is a non-Claude model, and no gateway is configured.
-2. The composer already shows **Unavailable** beside the model.
-3. On **Send**, the server refuses the turn straight away with a message naming the model and the two settings that would fix it. Nothing is saved — no message, no failed run — so the conversation is unchanged.
-4. Pick a Claude model and send again.
+1. The conversation's model cannot run here: a non-Claude model with no gateway configured, or a Claude model that has been retired (an older conversation on Claude Sonnet 4, say).
+2. The composer already shows **Unavailable** beside the model. Hovering over it says why.
+3. On **Send**, the server refuses the turn straight away. For a non-Claude model the message names the model and the two settings that would fix it; for a retired Claude model it says the model can no longer run. Nothing is saved — no message, no failed run — so the conversation is unchanged, and the message does not stay on screen as if it had been sent. **Retry** keeps the text.
+4. Pick a model from the list and send again.
 
 ### Turning the gateway on (operator)
 
 1. Set `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` in the server's environment (`.env`, or the host's environment for Docker).
 2. For OpenRouter: `LLM_GATEWAY_URL="https://openrouter.ai/api"`, and the token is an OpenRouter API key.
 3. Restart the server. Settings → System shows **Model gateway** as configured.
-4. The pickers now also list the models the gateway reports at `{LLM_GATEWAY_URL}/v1/models`, labelled **Gateway · paid**.
+4. The pickers now also list the models the gateway reports at `{LLM_GATEWAY_URL}/v1/models`, labelled **Gateway · paid**. A model OpenRouter's catalogue says cannot use tools, or cannot answer in text, is left out (see Business rules).
 
 To turn it off again, clear either variable and restart.
 
@@ -89,15 +97,17 @@ Nothing else from the server's environment reaches it, the same as for any turn 
 
 ## Business rules
 
-- **Claude always runs on the subscription.** Even when the gateway also serves Claude, a Claude model is never sent through it.
+- **Claude always runs on the subscription.** Even when the gateway also serves Claude, a Claude model is never sent through it — including a retired one, which is simply refused.
+- **Only current Claude models run.** A Claude model not on the subscription list is refused everywhere a model is used: it is not offered in a picker, a send on it is refused before anything is saved, a default model or agent model cannot be changed to it, and a subagent set to it uses its parent's model instead.
 - **Off by default.** No gateway settings means Claude only. Both `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` are needed; an empty value counts as unset.
 - **Only models the gateway serves are offered.** If the gateway's model list cannot be fetched, no gateway models are offered (the app retries a minute later) rather than guessing.
+- **Only gateway models that can use tools are offered.** Claude Code sends its tools with every request and expects a text answer. A model OpenRouter's catalogue lists without tool support, or that answers only in images or audio, would fail on the first message, so it is left out. A model the catalogue does not list at all (a local model behind LiteLLM) is offered, since nothing says it cannot run.
 - **Reasoning is off on gateway models.** Claude's adaptive thinking and effort levels are Anthropic features; whether a gateway passes them on to another model is unverified, so a gateway turn runs with thinking off and the composer's reasoning control is disabled.
 - **Cost.** A Claude turn records its tokens and $0. A gateway turn is priced from OpenRouter's catalogue over that turn's own tokens — input, output, and cached prompt tokens at the catalogue's cache prices where it lists them. The ledger row notes `backend: gateway` and where the price came from (`costBasis`): `catalogue`, or `cli-estimate` for a model the catalogue does not price (Claude Code's own estimate), or `unpriced` when there is neither. Claude Code's own estimate is not used when the catalogue has a price, because for a model it does not know it guesses at a Claude rate.
 - **Budgets apply.** Gateway turns count toward budget limits like any other metered spend.
 - **Tool use is weaker off Claude.** Claude Code is built for Claude models; OpenRouter says other models may not work correctly through it, and multi-step tool use is where they fall short. The gateway is a deliberate, labelled choice, never a default.
 - **Switching backends mid-conversation** keeps the same agent session. Whether every gateway model accepts a session that started on Claude has not been checked against a live gateway; if one refuses, start a new conversation for it.
-- **Stored ids are tidied.** A Claude model saved in OpenRouter's spelling (`anthropic/claude-haiku-4.5`) is stored and sent as `claude-haiku-4-5`.
+- **Stored ids are tidied.** A Claude model saved in OpenRouter's spelling (`anthropic/claude-haiku-4.5`) is stored and sent as `claude-haiku-4-5`. Tidying only fixes the spelling: whether the model can run is the subscription list's decision.
 
 ## Configuration
 

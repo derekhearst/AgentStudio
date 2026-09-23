@@ -582,7 +582,10 @@ unless one of those is the actual goal.
   row failed on the first message with no gateway configured.
 
 **What shipped.** The engine pickers list only runnable models, labelled Subscription or
-Gateway · paid; dotted Anthropic ids are stored in the CLI's spelling; a send, a default-model
+Gateway · paid. The Claude rows are a fixed list taken from the bundled CLI's model table, less
+the retired models, not OpenRouter's catalogue, which still carries retired Claude models and
+slugs that are no Anthropic id (`anthropic/claude-sonnet-4`); gateway rows the catalogue lists
+without tool support are left out. Dotted Anthropic ids are stored in the CLI's spelling; a send, a default-model
 save or an agent-model save naming an unrunnable model is refused before anything is written.
 The gateway works through OpenRouter's endpoint and stays off unless `LLM_GATEWAY_URL` and
 `LLM_GATEWAY_TOKEN` are set: its environment carries only the `ANTHROPIC_*` it needs, pins
