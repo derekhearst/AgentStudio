@@ -185,7 +185,9 @@
 	}
 </script>
 
-<div class="console-rowactions {open ? 'is-open' : ''}" bind:this={actionsEl}>
+<!-- Escape on the "⋯" button closes the menu too, before the drawer hears it. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="console-rowactions {open ? 'is-open' : ''}" bind:this={actionsEl} onkeydown={handleKeydown}>
 	<button
 		type="button"
 		class="console-rowactions__btn console-rowactions__quick"
