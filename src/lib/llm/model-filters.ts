@@ -9,10 +9,14 @@ import type { ModelInfo } from '$lib/llm/models.server'
 
 export type SortKey = 'name' | 'price' | 'context' | 'newest' | 'oldest'
 
-/** Provider prefix from a model id like `anthropic/claude-sonnet-4` → `anthropic`. */
+/**
+ * Provider prefix from a model id like `anthropic/claude-sonnet-4` → `anthropic`. A bare
+ * Claude id (`claude-sonnet-5`, as the engine picker lists them) is Anthropic's too.
+ */
 export function getCreator(id: string): string {
 	const slash = id.indexOf('/')
-	return slash > 0 ? id.slice(0, slash) : 'unknown'
+	if (slash > 0) return id.slice(0, slash)
+	return /^claude-/i.test(id) ? 'anthropic' : 'unknown'
 }
 
 /**

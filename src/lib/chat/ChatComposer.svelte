@@ -2,6 +2,7 @@
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
 	import AgentSelector, { type AgentChoice } from '$lib/chat/AgentSelector.svelte'
 	import Icon from '$lib/chat-console/Icon.svelte'
+	import { isClaudeModel } from '$lib/engine/model-backend'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
@@ -61,8 +62,10 @@
 
 	let reasoningMenuOpen = $state(false)
 	let reasoningRoot: HTMLDivElement | undefined = $state()
+	// A gateway run has thinking off whatever is picked (#9), so the control says so.
+	const reasoningAvailable = $derived(isClaudeModel(model))
 	const selectedReasoningLabel = $derived(
-		REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'off'
+		reasoningAvailable ? (REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'off') : 'off'
 	)
 
 	$effect(() => {
@@ -160,6 +163,7 @@
 				/>
 				<ModelSelector
 					value={model}
+					surface="engine"
 					variant="inline"
 					size="xs"
 					showChevron={true}
@@ -169,10 +173,10 @@
 					<button
 						type="button"
 						class="console-pill"
-						title="Reasoning effort"
+						title={reasoningAvailable ? 'Reasoning effort' : 'Reasoning is off for gateway models'}
 						aria-label="Reasoning effort"
 						aria-expanded={reasoningMenuOpen}
-						disabled={busy}
+						disabled={busy || !reasoningAvailable}
 						onclick={() => { reasoningMenuOpen = !reasoningMenuOpen }}
 					>
 						<span class="truncate">reasoning:{selectedReasoningLabel}</span>
