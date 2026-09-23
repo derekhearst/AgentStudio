@@ -1,17 +1,20 @@
 import { redirect, type Handle, type HandleServerError } from '@sveltejs/kit'
+import { dev } from '$app/environment'
 import { and, arrayContains, sql } from 'drizzle-orm'
 import { getSessionUser, isProvisioned } from '$lib/auth/auth.server'
 import { refuseAnonymousRemoteCall } from '$lib/auth/remote-gate.server'
+import { authDevBypassEnabled } from '$lib/auth/dev-bypass'
 import { db, ensureDatabaseReady } from '$lib/db.server'
 import { users } from '$lib/auth/auth.schema'
 import { skills } from '$lib/skills/skills.schema'
 import { logger } from '$lib/observability/logger'
 
-// Dev-mode auth bypass. Active only when NODE_ENV !== 'production' AND AUTH_DEV_BYPASS=1.
+// Dev-mode auth bypass. Active only in a dev build (`vite dev`), with NODE_ENV !== 'production'
+// AND AUTH_DEV_BYPASS=1 — a production build ignores the variable (see dev-bypass.ts).
 // When active, requests without a session cookie are auto-attached to the singleton user
 // row, skipping the /login redirect. Useful when you've lost the dev password or are
 // driving the app from a viewer that can't set cookies via DevTools.
-const AUTH_DEV_BYPASS = process.env.NODE_ENV !== 'production' && process.env.AUTH_DEV_BYPASS === '1'
+const AUTH_DEV_BYPASS = authDevBypassEnabled({ devBuild: dev, env: process.env })
 if (AUTH_DEV_BYPASS) {
 	logger.warn('[hooks] AUTH_DEV_BYPASS=1 — anonymous requests will auto-attach to the singleton user. Set AUTH_DEV_BYPASS=0 in .env to disable.')
 }
