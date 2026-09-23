@@ -29,7 +29,7 @@
 // The bootstrap also starts a worker by default — we let that worker do the work and just
 // keep this process alive so it doesn't exit. (Setting JOBS_WORKER_ENABLED=0 here would
 // disable the auto-start; we LEAVE it enabled because that's the bootstrap-managed worker.)
-import { db } from '$lib/db.server'
+import { db, ensureDatabaseReady } from '$lib/db.server'
 
 // Touch db so the import isn't tree-shaken (it has side effects).
 void db
@@ -38,6 +38,13 @@ const workerId = process.env.JOBS_WORKER_ID ?? `worker:${process.pid}`
 console.log(`[worker] standalone job worker process started (id=${workerId})`)
 console.log('[worker] DB bootstrap + handler registration + in-process worker loop running.')
 console.log('[worker] Send SIGINT or SIGTERM to drain + exit.')
+
+// A worker whose bootstrap failed has no handlers and no loop, and would otherwise idle
+// here forever looking alive. Exit instead, so the container's restart policy retries.
+ensureDatabaseReady().catch((err) => {
+	console.error('[worker] database bootstrap failed; exiting so the process is restarted:', err)
+	process.exit(1)
+})
 
 let shuttingDown = false
 function shutdown(reason: string) {

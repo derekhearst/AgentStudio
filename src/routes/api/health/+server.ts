@@ -1,6 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
 import { sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
+import { getJobWorkerStatus } from '$lib/db/bootstrap.server'
 import { getMigrationsFolder } from '$lib/db/migrations.server'
 import { logger } from '$lib/observability/logger'
 
@@ -21,9 +22,15 @@ import { logger } from '$lib/observability/logger'
  * shipped a migration that has not run. `appliedMigrations > bundledMigrations` means the
  * image is older than the database — the exact failure this endpoint was written for.
  *
+ * It also reports `jobWorker`. A process whose worker failed to start still serves every
+ * page, while memory mining, evaluations and automations pile up in `pending`; `failed`
+ * marks the deploy degraded so that shows up somewhere. (A failed database bootstrap never
+ * reaches this handler at all — `ensureDatabaseReady()` in hooks.server.ts rejects, and
+ * every request, this one included, is a 500.)
+ *
  * Deliberately unauthenticated (see PUBLIC_PATH_PREFIXES in hooks.server.ts) so it can be
- * polled by a uptime check that has no session. It exposes counts and a commit SHA, never
- * row contents, connection strings or environment values.
+ * polled by a uptime check that has no session. It exposes counts, statuses and a commit
+ * SHA, never row contents, connection strings, database names or environment values.
  */
 
 const MIGRATIONS_SCHEMA = 'drizzle'
@@ -69,7 +76,9 @@ export const GET: RequestHandler = async () => {
 	// Stamped into the image at build time by the publish workflow.
 	const commit = process.env.GIT_SHA ?? null
 
-	const healthy = databaseReachable && migrationsInSync
+	const jobWorker = getJobWorkerStatus()
+
+	const healthy = databaseReachable && migrationsInSync && jobWorker !== 'failed'
 
 	return json(
 		{
@@ -78,6 +87,7 @@ export const GET: RequestHandler = async () => {
 			migrationsInSync,
 			bundledMigrations,
 			appliedMigrations,
+			jobWorker,
 			commit,
 			checkedAt: new Date().toISOString(),
 		},

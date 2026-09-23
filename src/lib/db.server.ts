@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { handleDatabaseNotice } from '$lib/db/migrations.server'
 import { bootstrapDatabase } from '$lib/db/bootstrap.server'
+import { createBootstrapGate } from '$lib/db/readiness.server'
 
 // Load .env into process.env so server modules can read directly without depending on
 // SvelteKit's `$env/dynamic/private` virtual module. Bun auto-loads .env when invoking
@@ -91,13 +92,19 @@ const client = skipDatabaseInitialization ? null : createDatabaseClient(database
 // module's load to complete. All real callers (hooks.server.ts, every remote function
 // handler) already call `ensureDatabaseReady()` at the request boundary, so the promise
 // is awaited at the right time without blocking the module graph.
-const databaseReadyPromise =
+//
+// A failed bootstrap makes `ensureDatabaseReady()` reject rather than resolve, so requests
+// fail loudly instead of running against a half-initialised database. After a cooldown the
+// next caller retries — once, without the boot-time backoff, because a request is waiting.
+const bootstrapGate =
 	skipDatabaseInitialization || !client || !databaseUrl
-		? Promise.resolve()
-		: bootstrapDatabase({ client, databaseUrl })
+		? null
+		: createBootstrapGate((attempt) =>
+				bootstrapDatabase({ client, databaseUrl, retryDelaysMs: attempt === 0 ? undefined : [] }),
+			)
 
 export async function ensureDatabaseReady() {
-	await databaseReadyPromise
+	await bootstrapGate?.ensureReady()
 }
 
 export const db: Database = client ? createDatabase(client) : createUnavailableDatabase()
