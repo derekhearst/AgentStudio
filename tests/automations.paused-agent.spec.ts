@@ -62,10 +62,15 @@ test.describe('automations/paused-agent — the gate', () => {
 		const sql = getSql()
 		try {
 			const agent = await seedAgent(prefix, { name: `${prefix} Benched`, status: 'paused' })
-			const due = new Date(Date.now() - 5 * 60_000)
-			const automationId = await seedAutomation(userId, prefix, agent.id, due)
+			// The spec drives the tick itself, and `runAutomationById` does not look at nextRunAt.
+			// A slot a week out keeps the dev server's dispatcher from running the same
+			// automation behind the test's back, and lets the assertion below see the skipped
+			// tick move it to the next 09:00.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
+			const automationId = await seedAutomation(userId, prefix, agent.id, notDue)
 
-			const result = await runAutomationById(automationId, new Date(), { trigger: 'schedule' })
+			const tickAt = new Date()
+			const result = await runAutomationById(automationId, tickAt, { trigger: 'schedule' })
 			expect(result).toMatchObject({ blocked: true, reason: 'agent_paused', conversationId: null })
 
 			// Nothing ran: no conversation was opened and no message written.
@@ -79,12 +84,13 @@ test.describe('automations/paused-agent — the gate', () => {
 			expect(runs).toHaveLength(1)
 			expect(runs[0]).toMatchObject({ status: 'blocked', trigger: 'schedule', error: pausedAgentSkipMessage(`${prefix} Benched`) })
 
-			// The schedule moved on, so the dispatcher does not pick it up again next minute;
-			// "last run" did not, because it did not run; the failure streak is untouched.
+			// The schedule moved on, so the dispatcher does not pick the slot up again next
+			// minute; "last run" did not, because it did not run; the failure streak is untouched.
 			const [row] = await sql<{ next_run_at: Date; last_run_at: Date | null; consecutive_failures: number }[]>`
 				select next_run_at, last_run_at, consecutive_failures from automations where id = ${automationId}
 			`
-			expect(row.next_run_at.getTime()).toBeGreaterThan(Date.now())
+			expect(row.next_run_at.getTime(), 'rescheduled from this tick').toBeGreaterThan(tickAt.getTime())
+			expect(row.next_run_at.getTime(), 'to the next 09:00, not left on the seeded slot').toBeLessThan(notDue.getTime())
 			expect(row.last_run_at).toBeNull()
 			expect(row.consecutive_failures).toBe(0)
 		} finally {
@@ -123,15 +129,16 @@ test.describe('automations/paused-agent — the gate', () => {
 		const sql = getSql()
 		try {
 			const agent = await seedAgent(prefix, { status: 'paused' })
-			// `changed` records a baseline on its first check, so the scheduler cannot fire this
-			// one for real before cleanup.
+			// `changed` records a baseline on its first check, and the monitor is not due, so the
+			// dev server's dispatcher cannot fire this one for real before cleanup.
 			const monitor = await createMonitor({
 				userId,
 				name: `${prefix} watcher`,
-				condition: { kind: 'tool_result', tool: 'git_status', args: {}, compare: 'changed' },
+				condition: { kind: 'tool_result', tool: 'list_projects', args: {}, compare: 'changed' },
 				action: 'start_conversation',
 				actionConfig: { prompt: `${prefix} look at this`, agentId: agent.id },
 			})
+			await sql`update monitors set next_check_at = now() + interval '1 day' where id = ${monitor.id}`
 			const observation = { value: `${prefix} observed`, hash: 'h', observedAt: new Date().toISOString(), met: true }
 
 			const result = await dispatchMonitorAction(monitor, observation)
