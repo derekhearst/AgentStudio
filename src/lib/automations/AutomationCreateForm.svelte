@@ -2,6 +2,7 @@
 	import { createAutomationCommand } from '$lib/automations'
 	import { COMMON_TIME_ZONES, DEFAULT_TIMEZONE, isValidTimeZone } from '$lib/automations/cron'
 	import { getAgentChoices } from '$lib/agents'
+	import { isAgentPaused } from '$lib/agents/agent-status'
 	import { remoteErrorMessage } from '$lib/ui/remote-error'
 
 	type AutomationMode = 'chat_followup' | 'research' | 'maintenance'
@@ -163,7 +164,8 @@
 			<select class="select select-bordered" bind:value={selectedAgentId} oninput={clearMessage}>
 				<option value="orchestrator">Orchestrator (default)</option>
 				{#each agents as agent (agent.id)}
-					<option value={agent.id}>{agent.name} ({agent.status})</option>
+					<!-- #66 — only a paused agent is marked: idle and active both mean available. -->
+					<option value={agent.id}>{agent.name}{isAgentPaused(agent.status) ? ' (paused)' : ''}</option>
 				{/each}
 			</select>
 		</fieldset>

@@ -301,8 +301,9 @@ export const toolDescriptions: Record<ToolName, string> = {
 	video_generate:
 		'Generate a video from a text prompt via async OpenRouter video generation (Veo, Wan, etc.). Submits a job and waits up to `timeoutSeconds` for completion. Returns the job id, status, and (when ready) URLs to download. If the job is still in progress when the timeout hits, the response includes a poll URL the agent can call later.',
 	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
-	pause_agent: 'Pause an agent so it is not used for delegations.',
-	resume_agent: 'Resume a paused agent and mark it active again.',
+	pause_agent:
+		'Pause a user-created agent: it is no longer offered for delegation, and automations and monitors that use it are skipped. Direct chats with it still work. Built-in and evaluator agents cannot be paused.',
+	resume_agent: 'Resume a paused agent, so it is offered for delegation and its automations and monitors run again.',
 	create_automation: 'Create a recurring automation that triggers an agent prompt on a cron schedule.',
 	list_automations: 'List automations for the current user.',
 	update_automation: 'Update an existing automation schedule, prompt, mode, or enabled state.',
