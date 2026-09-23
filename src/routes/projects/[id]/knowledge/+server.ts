@@ -7,6 +7,7 @@ import {
 	saveKnowledgeFile,
 } from '$lib/projects/project-knowledge.server'
 import { logger } from '$lib/observability/logger'
+import { bodyTooLargeMessage, isBodyTooLarge } from '$lib/server/body-limit'
 
 /**
  * Upload and remove a project's knowledge files (#23).
@@ -16,6 +17,10 @@ import { logger } from '$lib/observability/logger'
  * directory for chat attachments, and these belong *inside the project's working
  * directory*, which is the entire point — the agent reads them with the same `Read` and
  * `Grep` it uses for source.
+ *
+ * The body limit is the server's, not this route's: adapter-node refuses anything over
+ * `BODY_SIZE_LIMIT` before the handler runs, so the production image sets it above
+ * `MAX_KNOWLEDGE_FILE_BYTES` (see `$lib/server/body-limit`).
  *
  * Ownership is checked on every method before the filesystem is touched. The path helpers
  * derive everything from the authenticated user's id and the project id, so a caller who
@@ -40,7 +45,10 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 		const form = await request.formData()
 		const entry = form.get('file')
 		file = entry instanceof File ? entry : null
-	} catch {
+	} catch (error) {
+		// The server refusing the size looks like a broken body from here. It used to be
+		// reported as one, so every file over adapter-node's limit read as malformed.
+		if (isBodyTooLarge(error, request)) return json({ error: bodyTooLargeMessage() }, { status: 413 })
 		return json({ error: 'Expected a multipart upload' }, { status: 400 })
 	}
 	if (!file) return json({ error: 'No file provided' }, { status: 400 })
