@@ -17,7 +17,7 @@ Agent detail pages allow editing the assigned model and system prompt.
 
 ### Activity and Usage
 
-`/activity` opens with a usage strip for the last 24 hours, 7 days or 30 days: runs and their failure rate, tokens (the real measure, since Claude subscription runs record $0) with metered dollars underneath, automation runs, the most-used tools and models, the review inbox, budget headroom, and a short list of anomalies such as a spend spike or an automation that started failing. Below it is the chronological activity feed. The same numbers can be sent every Monday as a weekly usage digest to the review inbox or a chat thread; it is opt-in and written by code, with no model call. See [docs/activity/spec.md](docs/activity/spec.md).
+`/activity` opens with a usage strip for the last 24 hours, 7 days or 30 days: runs and their failure rate, tokens (the real measure, since Claude subscription runs record $0) with metered dollars underneath, automation runs, the top models and agents (each with its metered dollars), the most-used tools, the review inbox, budget headroom, and a short list of anomalies such as a spend spike or an automation that started failing. Below it is the chronological activity feed. The same numbers can be sent every Monday as a weekly usage digest to the review inbox or a chat thread; it is opt-in and written by code, with no model call. See [docs/activity/spec.md](docs/activity/spec.md).
 
 ### Settings
 
