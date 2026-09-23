@@ -237,8 +237,12 @@ async function requireDefaultAgentId(userId: string, preferred: string | null): 
  * Run the agent detached. Nobody is streaming this — the operator pressed a button in
  * /review and will come back to the conversation — so the loop is bounded and no tool
  * needs an interactive approval surface. `push_branch` and `create_pull_request` already
- * refuse non-`chat_stream` runs of their own accord, so a fix run can diagnose and edit
- * but cannot silently push over the operator's branch; that last step stays a human's.
+ * refuse non-`chat_stream` runs of their own accord, so a fix run cannot silently push over
+ * the operator's branch; that last step stays a human's.
+ *
+ * It runs on the old loop, whose unattended tool list is `web_search` alone since `run_code`
+ * was retired (#69; `$lib/runtime/detached-tools`). So today a fix run can reason about the
+ * failure it is handed but cannot edit the checkout. Moving it onto the engine is the fix.
  */
 async function runFixLoop(input: {
 	userId: string
@@ -282,8 +286,7 @@ async function runFixLoop(input: {
 				{ role: 'system', content: definition.systemPrompt },
 				{ role: 'user', content: input.prompt },
 			],
-			initialTools: definition.tools,
-			computeTools: async () => definition.tools,
+			tools: definition.tools,
 			maxRounds: 12,
 			approvalRequiredTools: new Set<string>(),
 			isOrchestrator: false,
@@ -291,7 +294,6 @@ async function runFixLoop(input: {
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			projectId: conversation?.projectId ?? null,
-			spawnSubagent: undefined,
 		})
 
 		const { logLlmUsage } = await import('$lib/costs/usage')

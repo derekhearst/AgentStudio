@@ -2,10 +2,10 @@
  * Per-tool-call dispatch helpers extracted from `runtime/loop.server.ts`.
  *
  * The loop's per-round body executes each pending tool call serially. The original code had
- * three separate inline branches (`ask_user`, `run_subagent`, normal tool dispatch) plus an
- * approval check, totaling ~330 lines of repetitive emit/pushBlock/result-shaping. Each branch
- * is a coherent unit (build result → emit → push block → return record for state arrays); the
- * loop just chains them.
+ * inline branches (`ask_user`, `run_subagent`, normal tool dispatch) plus an approval check,
+ * all repetitive emit/pushBlock/result-shaping. Each branch is a coherent unit (build result →
+ * emit → push block → return record for state arrays); the loop just chains them. The
+ * `run_subagent` branch went with the in-house subagents (#5, #8).
  *
  * Each handler returns a `ToolHandlerOutcome` — the record to append to `toolResults` (LLM
  * messages) and `allToolCalls` (cost / activity rollups). The loop layer pushes those into the
@@ -26,9 +26,8 @@ import {
 	type ToolName,
 } from '$lib/tools/tools.server'
 import { emitHook } from '$lib/hooks'
-import { wrapSubagentResult } from '$lib/agents/subagent-result'
 import { logger } from '$lib/observability/logger'
-import type { Session, SpawnSubagent } from './types'
+import type { Session } from './types'
 
 export type PlannedToolCall = {
 	id: string
@@ -227,96 +226,6 @@ export async function handleAskUserCall(
 			result: questionResult,
 			executionMs: 0,
 		},
-	}
-}
-
-/**
- * Handle a `run_subagent` tool call. Returns null when the args don't include both `agentId`
- * and `task` (in that case the loop falls through to normal tool dispatch).
- */
-export async function handleRunSubagentCall(
-	session: Session,
-	tc: PlannedToolCall,
-	spawnSubagent: SpawnSubagent,
-): Promise<ToolHandlerOutcome | null> {
-	const subagentArgs = tc.parsedArgs as { task?: string; context?: string; agentId?: string }
-	if (!subagentArgs.agentId || !subagentArgs.task) return null
-
-	try {
-		const subResult = await spawnSubagent({
-			agentId: subagentArgs.agentId,
-			task: subagentArgs.task,
-			context: subagentArgs.context,
-		})
-		// #34 — what the model sees is wrapped as a child observation (the UI block below keeps
-		// the raw text). Any delimiter the child emitted is escaped inside the wrapper.
-		const resultStr = trimToolResult(
-			tc.name,
-			JSON.stringify({
-				success: true,
-				agentConversationId: subResult.conversationId,
-				result: wrapSubagentResult(subResult.result.slice(0, 4000), {
-					agentName: subagentArgs.agentId,
-					conversationId: subResult.conversationId,
-				}),
-			}),
-		)
-		await session.emit('tool_result', {
-			id: tc.id,
-			name: tc.name,
-			success: true,
-			executionMs: 0,
-			result: resultStr,
-		})
-		await session.pushBlock({
-			kind: 'tool',
-			name: tc.name,
-			arguments: tc.parsedArgs,
-			result: {
-				agentConversationId: subResult.conversationId,
-				result: subResult.result.slice(0, 4000),
-			},
-			success: true,
-			executionMs: 0,
-		})
-		return {
-			toolResult: { call_id: tc.id, name: tc.name, result: resultStr },
-			allToolCallsEntry: {
-				name: tc.name,
-				arguments: tc.parsedArgs,
-				result: {
-					agentConversationId: subResult.conversationId,
-					result: subResult.result.slice(0, 4000),
-				},
-				executionMs: 0,
-			},
-		}
-	} catch (error) {
-		const errorStr = error instanceof Error ? error.message : 'Sub-agent execution failed'
-		await session.emit('tool_result', {
-			id: tc.id,
-			name: tc.name,
-			success: false,
-			executionMs: 0,
-			result: errorStr,
-		})
-		await session.pushBlock({
-			kind: 'tool',
-			name: tc.name,
-			arguments: tc.parsedArgs,
-			result: { error: errorStr },
-			success: false,
-			executionMs: 0,
-		})
-		return {
-			toolResult: { call_id: tc.id, name: tc.name, result: `Error: ${errorStr}` },
-			allToolCallsEntry: {
-				name: tc.name,
-				arguments: tc.parsedArgs,
-				result: { error: errorStr },
-				executionMs: 0,
-			},
-		}
 	}
 }
 

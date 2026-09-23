@@ -5,9 +5,8 @@
  *   - ask_user: only the chat-stream loop fulfills this; the dispatcher reaches it as a
  *     defensive fallback (e.g. someone executes the tool directly without going through
  *     the loop) — return a 'not directly executable' error.
- *   - run_subagent: stateless one-shot LLM call — used as a fallback when the
- *     orchestrator-only path isn't available (the loop has its own special-case branch
- *     that uses spawnSubagent for full agent dispatch).
+ *   - run_subagent: stateless one-shot LLM call. The chat engine does not register it
+ *     (delegation is the SDK's Task tool); the MCP endpoint still lists it.
  */
 
 import { eq } from 'drizzle-orm'

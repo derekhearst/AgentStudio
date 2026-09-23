@@ -65,18 +65,8 @@ export type ChatPlugin =
 	| { id: string; [key: string]: unknown }
 
 /**
- * Audio output config for audio-capable models (e.g. openai/gpt-4o-audio-preview). When set,
- * the request also needs `modalities: ['text', 'audio']`. Audio bytes stream via `delta.audio`
- * SSE chunks; the runtime accumulates them alongside the text transcript.
- */
-export type AudioOutputConfig = {
-	voice: string
-	format: 'wav' | 'mp3' | 'pcm16' | 'flac' | 'opus'
-}
-
-/**
  * Optional per-call options bag. Lets us add new OpenRouter passthroughs (cache headers,
- * modalities, plugins) without growing the positional argument list.
+ * plugins) without growing the positional argument list.
  */
 export type ChatOptions = {
 	responseFormat?: ResponseFormat
@@ -84,10 +74,6 @@ export type ChatOptions = {
 	cache?: { enabled?: boolean; ttlSeconds?: number }
 	/** Plugin slots — file parser engine, etc. */
 	plugins?: ChatPlugin[]
-	/** Output modalities. Default `['text']`; pass `['text','audio']` for spoken replies. */
-	modalities?: Array<'text' | 'audio'>
-	/** Audio output configuration. Required when `modalities` includes `'audio'`. */
-	audio?: AudioOutputConfig
 }
 
 export type LlmMessage = {
@@ -238,12 +224,6 @@ export async function streamChat(
 	}
 	if (options.plugins && options.plugins.length > 0) {
 		;(chatRequest as Record<string, unknown>).plugins = options.plugins
-	}
-	if (options.modalities && options.modalities.length > 0) {
-		;(chatRequest as Record<string, unknown>).modalities = options.modalities
-	}
-	if (options.audio) {
-		;(chatRequest as Record<string, unknown>).audio = options.audio
 	}
 	return client.chat.send({ chatRequest })
 }
