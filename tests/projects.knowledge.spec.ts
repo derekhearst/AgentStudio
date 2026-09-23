@@ -160,6 +160,37 @@ test.describe('projects/knowledge — the directory', () => {
 		}
 	})
 
+	/*
+	 * Deleting a project only removed its directory when it had a repository. Knowledge is
+	 * written for every kind of project, so an "Empty" project's uploads — up to 50 files of
+	 * 20MB — stayed on the volume after its row was gone, with nothing left to find them.
+	 */
+	test('deleting a project with no repository removes its knowledge files too', async () => {
+		const prefix = uniquePrefix('knowledge-delete')
+		await cleanupPrefixedRecords(prefix)
+		const userId = await getActiveUserId()
+		const { deleteProject } = await import('../src/lib/projects/projects.server')
+		let projectId = ''
+
+		try {
+			const project = await seedProject(prefix)
+			projectId = project.id
+			const [{ repo_kind }] = await getSql()<{ repo_kind: string }[]>`
+				select repo_kind from projects where id = ${projectId}
+			`
+			expect(repo_kind, 'the case that used to leak').toBe('none')
+
+			await saveKnowledgeFile({ userId, projectId, filename: 'datasheet.pdf', bytes: bytes('%PDF') })
+			await stat(join(knowledgeRoot(userId, projectId), 'datasheet.pdf'))
+
+			expect(await deleteProject(projectId)).toEqual({ deleted: true })
+			await expect(stat(getProjectPath(userId, projectId))).rejects.toThrow()
+		} finally {
+			if (projectId) await rm(getProjectPath(userId, projectId), { recursive: true, force: true }).catch(() => {})
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
 	test("a git checkout gets the directory excluded, without touching a tracked .gitignore", async () => {
 		// In an imported project the working directory is somebody else's checkout. Writing
 		// `.gitignore` would be an uncommitted change to a tracked file in their repo.
