@@ -52,6 +52,9 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 				totalTokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
 				totalTokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
 				callCount: sql<number>`count(*)::int`,
+				// Calls the ledger could not price (see `logLlmUsage`): their zero is a gap in
+				// the total above, not a free call.
+				unpricedCallCount: sql<number>`count(*) filter (where ${llmUsage.metadata}->>'unpriced' is not null)::int`,
 			})
 			.from(llmUsage)
 			.where(gte(llmUsage.createdAt, since)),
@@ -183,6 +186,7 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		totalTokensIn: totalSpend[0]?.totalTokensIn ?? 0,
 		totalTokensOut: totalSpend[0]?.totalTokensOut ?? 0,
 		callCount: totalSpend[0]?.callCount ?? 0,
+		unpricedCallCount: totalSpend[0]?.unpricedCallCount ?? 0,
 		byModel,
 		bySource,
 		topConversations: byConversation,

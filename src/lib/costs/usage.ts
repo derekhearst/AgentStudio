@@ -1,7 +1,7 @@
 import { db } from '$lib/db.server'
 import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
-import { listModels, type ModelInfo } from '$lib/llm/models.server'
-import { toOpenRouterModelId } from '$lib/llm/model-ids'
+import { listModels } from '$lib/llm/models.server'
+import { createModelPriceTable, createUnpricedWarner } from '$lib/costs/model-pricing'
 
 export type LlmUsageSource =
 	| 'chat'
@@ -42,30 +42,8 @@ type LogInput = {
 	agentId?: string | null
 }
 
-let modelCache: ModelInfo[] | null = null
-let modelCacheTime = 0
-const MODEL_CACHE_TTL = 1000 * 60 * 60 // 1 hour
-
-async function getModelPricing(modelId: string): Promise<{ promptPrice: number; completionPrice: number } | null> {
-	if (!modelCache || Date.now() - modelCacheTime > MODEL_CACHE_TTL) {
-		try {
-			modelCache = await listModels()
-			modelCacheTime = Date.now()
-		} catch {
-			return null
-		}
-	}
-
-	// The catalogue is OpenRouter's, so a stored SDK-style id is looked up the way it was sent.
-	const catalogueId = toOpenRouterModelId(modelId)
-	const model = modelCache.find((m) => m.id === catalogueId)
-	if (!model) return null
-
-	return {
-		promptPrice: parseFloat(model.promptPrice),
-		completionPrice: parseFloat(model.completionPrice),
-	}
-}
+const priceTable = createModelPriceTable(listModels)
+const warnUnpriced = createUnpricedWarner()
 
 export function calculateCost(
 	tokensIn: number,
@@ -78,16 +56,29 @@ export function calculateCost(
 	return tokensIn * prompt + tokensOut * completion
 }
 
+/**
+ * Write one row to the LLM usage ledger and return its cost.
+ *
+ * The cost is `costOverride` when the caller has the real figure, otherwise tokens times the
+ * catalogue price. When there is no price to be had — the catalogue has never loaded, or it
+ * does not list the model — the row is written with a zero cost and
+ * `metadata.unpriced` set to the reason, and a warning is logged. The zero is then a known
+ * gap the cost view can count, not a silent claim that the call was free.
+ */
 export async function logLlmUsage(input: LogInput): Promise<string> {
 	let cost = '0'
+	let metadata = input.metadata ?? {}
 
 	if (input.costOverride !== undefined) {
 		cost = input.costOverride.toPrecision(15)
 	} else {
-		const pricing = await getModelPricing(input.model)
-		if (pricing) {
+		const pricing = await priceTable.lookup(input.model)
+		if (pricing.status === 'priced') {
 			const calculated = calculateCost(input.tokensIn, input.tokensOut, pricing)
 			cost = calculated.toPrecision(15)
+		} else {
+			metadata = { ...metadata, unpriced: pricing.reason }
+			warnUnpriced({ model: input.model, source: input.source, reason: pricing.reason })
 		}
 	}
 
@@ -104,7 +95,7 @@ export async function logLlmUsage(input: LogInput): Promise<string> {
 			userId: input.userId ?? null,
 			runId: input.runId ?? null,
 			agentId: input.agentId ?? null,
-			metadata: input.metadata ?? {},
+			metadata,
 		})
 		.returning({ id: llmUsage.id, cost: llmUsage.cost })
 
