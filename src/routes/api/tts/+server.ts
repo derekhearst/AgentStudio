@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { synthesizeSpeech, TtsError } from '$lib/llm/tts.server'
 import { logger } from '$lib/observability/logger'
 import { requireAuth } from '$lib/server/api-route'
+import { clientDisconnectSignal } from '$lib/server/client-disconnect'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { SPEECH_MODEL_ID_PATTERN, SPEECH_VOICE_PATTERN, TTS_MAX_CHARACTERS } from '$lib/speech/speech'
 
@@ -14,6 +15,10 @@ import { SPEECH_MODEL_ID_PATTERN, SPEECH_VOICE_PATTERN, TTS_MAX_CHARACTERS } fro
  * replies are split by the client (`splitForSpeech`) and sent one chunk at a time.
  *
  * Every refusal is JSON `{ message }` with a status, so the player can say what went wrong.
+ * A listener who presses Stop closes the connection. If that happens before the call to
+ * OpenRouter is made, the call is skipped; one already sent is finished and recorded, because
+ * OpenRouter bills it either way (see tts.server.ts). `clientDisconnectSignal` is what notices:
+ * the request's own signal never fires once the body has been read.
  */
 const ttsRequestSchema = z.object({
 	text: z
@@ -30,7 +35,7 @@ function refuse(status: number, message: string) {
 	return json({ message }, { status })
 }
 
-export const POST = requireAuth(async ({ request, user }) => {
+export const POST = requireAuth(async ({ request, platform, user }) => {
 	// JSON only. Cross-site form posts (text/plain, form encodings) never reach a paid call.
 	if (!request.headers.get('content-type')?.toLowerCase().includes('application/json')) {
 		return refuse(415, 'Send the text as JSON.')
@@ -47,6 +52,7 @@ export const POST = requireAuth(async ({ request, user }) => {
 	}
 	const payload = parsed.data
 
+	const disconnect = clientDisconnectSignal({ request, platform })
 	try {
 		const settings = await getOrCreateSettings(user.id)
 		const result = await synthesizeSpeech({
@@ -55,7 +61,7 @@ export const POST = requireAuth(async ({ request, user }) => {
 			voice: payload.voice ?? settings.ttsVoice,
 			purpose: payload.purpose,
 			userId: user.id,
-			signal: request.signal,
+			signal: disconnect.signal,
 		})
 		return new Response(result.audio, {
 			headers: {
@@ -70,5 +76,7 @@ export const POST = requireAuth(async ({ request, user }) => {
 		if (err instanceof TtsError) return refuse(err.status, err.message)
 		logger.error('[api/tts] synthesis failed', { err })
 		return refuse(502, 'Read-aloud failed.')
+	} finally {
+		disconnect.dispose()
 	}
 })

@@ -13,7 +13,11 @@ import { acquireGlobalStateLock, getActiveUserId, getSql, pollDb } from './helpe
  *   - a provider refusal comes back as a status and a message the user can act on — the
  *     provider's own "Unknown voice …" — instead of a bare "TTS failed";
  *   - empty or over-long text, a missing key, and a blocking budget limit are refused
- *     before any upstream call is made.
+ *     before any upstream call is made;
+ *   - a listener who stopped before the provider was called costs nothing, and one who
+ *     stops after it has the request does not lose the ledger row for it: OpenRouter bills
+ *     a sent request in full either way. The route ties the signal to the listener's
+ *     connection (server.client-disconnect.spec.ts).
  */
 
 const PRICE_PER_CHARACTER = 0.00001
@@ -24,7 +28,7 @@ const CATALOGUE = {
 type SpeechCall = { body: Record<string, unknown> }
 
 /** Replace `fetch`: the catalogue answers from CATALOGUE, speech from `speech()`. */
-function stubOpenRouter(speech: () => Response | Promise<Response>): { calls: SpeechCall[]; restore: () => void } {
+function stubOpenRouter(speech: (init?: RequestInit) => Response | Promise<Response>): { calls: SpeechCall[]; restore: () => void } {
 	const realFetch = globalThis.fetch
 	const calls: SpeechCall[] = []
 	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -33,7 +37,7 @@ function stubOpenRouter(speech: () => Response | Promise<Response>): { calls: Sp
 		if (url.includes('/models?output_modalities=speech')) return Response.json(CATALOGUE)
 		if (url.endsWith('/audio/speech')) {
 			calls.push({ body: JSON.parse(String(init?.body)) as Record<string, unknown> })
-			return speech()
+			return speech(init)
 		}
 		return realFetch(input, init)
 	}) as typeof fetch
@@ -167,15 +171,55 @@ test('provider refusals become a status and a message the user can act on', asyn
 	}
 })
 
-test('a listener who stops is a cancellation, not a provider failure', async () => {
+test('a listener who stopped before the provider was called costs nothing', async () => {
 	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
 	const stub = stubOpenRouter(() => audio('unused'))
 	try {
 		await expect(
 			synthesizeSpeech({ text: 'Hi.', model: 'e2e/speech', userId: null, signal: AbortSignal.abort() }),
 		).rejects.toMatchObject({ status: 499 })
+		expect(stub.calls).toEqual([])
 	} finally {
 		stub.restore()
+	}
+})
+
+test('a Stop after the provider has the request lets it finish, and it is recorded', async () => {
+	const { synthesizeSpeech } = await import('../src/lib/llm/tts.server')
+	const userId = await getActiveUserId()
+	const sql = getSql()
+	const generationId = `gen-e2e-${randomUUID()}`
+	const listener = new AbortController()
+	let providerSignalAborted: boolean | null = null
+	// The listener stops while the provider is still working on it.
+	const stub = stubOpenRouter(async (init) => {
+		listener.abort()
+		await new Promise((resolve) => setTimeout(resolve, 50))
+		providerSignalAborted = init?.signal?.aborted ?? false
+		return audio(generationId)
+	})
+	try {
+		// OpenRouter bills a sent request in full either way, so cancelling it would only lose
+		// the ledger row for money that is spent regardless.
+		const result = await synthesizeSpeech({
+			text: 'Hello there.',
+			model: 'e2e/speech',
+			voice: 'v1',
+			userId,
+			purpose: 'message',
+			signal: listener.signal,
+		})
+		expect(result.audio.byteLength).toBe(4)
+		expect(providerSignalAborted).toBe(false)
+		const [row] = await pollDb(
+			() => sql<{ cost: string }[]>`select cost from llm_usage where metadata->>'generationId' = ${generationId}`,
+			(rows) => rows.length === 1,
+			{ description: 'the ledger row of a synthesis the listener stopped' },
+		)
+		expect(Number(row.cost)).toBeCloseTo(12 * PRICE_PER_CHARACTER, 12)
+	} finally {
+		stub.restore()
+		await sql`delete from llm_usage where metadata->>'generationId' = ${generationId}`
 	}
 })
 

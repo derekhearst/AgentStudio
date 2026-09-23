@@ -109,7 +109,7 @@ Edge cases:
 
 ### What read-aloud records
 
-Each chunk of a reply read aloud writes one row with source `tts` (shown as "Read Aloud"). Speech is billed per character and OpenRouter sends no cost with the audio, so the cost is characters × the model's per-character price from OpenRouter's speech catalogue, and `tokensIn` holds the character count. A model the catalogue does not price is recorded at $0 with `metadata.priced = false`. Read-aloud is checked against budget limits before each chunk, like a chat turn. See [../speech/speech.md](../speech/speech.md).
+Each chunk of a reply read aloud writes one row with source `tts` (shown as "Read Aloud"). Speech is billed per character and OpenRouter sends no cost with the audio, so the cost is characters × the model's per-character price from OpenRouter's speech catalogue, and `tokensIn` holds the character count. A model the catalogue does not price is recorded at $0 with `metadata.priced = false`. Read-aloud is checked against budget limits before each chunk, like a chat turn. A chunk the listener stopped after OpenRouter already had it is still finished and recorded, because OpenRouter charges for it either way. See [../speech/speech.md](../speech/speech.md).
 
 ### Tool-call cost tracking
 

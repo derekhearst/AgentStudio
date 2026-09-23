@@ -10,6 +10,10 @@
  * Every failure is a `TtsError` whose message is safe to show the user: the route passes it
  * through, so a wrong voice in Settings reads as the provider's own "Unknown voice …" rather
  * than a bare "TTS failed".
+ *
+ * A request that has been sent is never cancelled. OpenRouter bills a non-streaming request
+ * in full even when the caller hangs up, so cancelling a synthesis would save nothing and
+ * would lose its ledger row. A listener who stops before the call is made costs nothing.
  */
 
 import { checkBudgetLimits } from '$lib/costs/budget.server'
@@ -46,7 +50,11 @@ export type SynthesizeSpeechInput = {
 	userId: string | null
 	runId?: string | null
 	purpose?: SpeechPurpose
-	/** The caller's request signal, so a listener who presses Stop cancels the upstream call. */
+	/**
+	 * The listener's connection (the route passes `clientDisconnectSignal`). Checked just before
+	 * the provider is called: once aborted, the synthesis is not requested. It is not passed to
+	 * the provider call itself — see the module comment.
+	 */
 	signal?: AbortSignal
 }
 
@@ -164,6 +172,9 @@ export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<Sy
 	const body: Record<string, unknown> = { model, input: text, response_format: 'mp3' }
 	if (voice) body.voice = voice
 
+	// The listener pressed Stop while the price and the budget were being looked up.
+	if (input.signal?.aborted) throw new TtsError(499, 'The request was cancelled.')
+
 	const timeout = AbortSignal.timeout(TTS_TIMEOUT_MS)
 	let response: Response
 	let audio: ArrayBuffer
@@ -172,13 +183,12 @@ export async function synthesizeSpeech(input: SynthesizeSpeechInput): Promise<Sy
 			method: 'POST',
 			headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
-			signal: input.signal ? AbortSignal.any([timeout, input.signal]) : timeout,
+			signal: timeout,
 		})
 		if (!response.ok) throw await upstreamFailure(response)
 		audio = await response.arrayBuffer()
 	} catch (err) {
 		if (err instanceof TtsError) throw err
-		if (input.signal?.aborted) throw new TtsError(499, 'The request was cancelled.', { cause: err })
 		if (timeout.aborted) throw new TtsError(504, 'The speech provider took too long to answer.', { cause: err })
 		logger.warn('[tts] speech request failed', { err })
 		throw new TtsError(502, 'Could not reach the speech provider.', { cause: err })
