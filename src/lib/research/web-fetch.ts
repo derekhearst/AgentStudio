@@ -1,54 +1,17 @@
 /**
  * Wave 4 #18 phase 1 — pure helpers for the web_fetch tool.
  *
- * URL validation + boilerplate stripping + paragraph-boundary truncation. Lives in its own
- * module (no $env / Playwright deps) so unit tests can pin the URL safety contract without
- * spinning up a browser.
+ * Boilerplate stripping + paragraph-boundary truncation. Lives in its own module (no $env /
+ * Playwright deps) so unit tests can pin the cleanup behaviour without spinning up a browser.
  *
- * SAFETY: web_fetch is NOT allowed to read private addresses (RFC 1918, link-local, loopback,
- * IPv6 ULA). The validator rejects them BEFORE the network call so SSRF can't leak data
- * from the orchestrator's network neighborhood.
+ * SAFETY: the URL rule — public internet only, no loopback, LAN, link-local, ULA, CGNAT or
+ * metadata addresses — lives in `$lib/tools/egress-policy`, and is enforced on every resolved
+ * address and redirect hop by `$lib/tools/egress.server`. `validateFetchUrl` is kept here as
+ * an alias so existing callers and specs keep working; it is only the shape check, never
+ * enough on its own to decide a request is safe to send.
  */
 
-const PRIVATE_HOST_PATTERNS = [
-	/^localhost$/i,
-	/^127\./, // 127.0.0.0/8 loopback
-	/^10\./, // 10.0.0.0/8 private
-	/^192\.168\./, // 192.168.0.0/16 private
-	/^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12 private
-	/^169\.254\./, // 169.254.0.0/16 link-local
-	/^0\./, // 0.0.0.0/8 reserved
-	/^\[?::1\]?$/, // IPv6 loopback (URL parser may keep brackets)
-	/^\[?fe80::/i, // IPv6 link-local
-	/^\[?fc[0-9a-f]{2}::/i, // IPv6 ULA fc00::/7
-	/^\[?fd[0-9a-f]{2}::/i,
-	/\.internal$/i,
-	/\.local$/i,
-]
-
-export type UrlValidationResult =
-	| { ok: true; url: URL }
-	| { ok: false; error: string }
-
-export function validateFetchUrl(input: string): UrlValidationResult {
-	let parsed: URL
-	try {
-		parsed = new URL(input.trim())
-	} catch {
-		return { ok: false, error: 'invalid URL' }
-	}
-	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-		return { ok: false, error: `unsupported protocol "${parsed.protocol}" (only http/https allowed)` }
-	}
-	const host = parsed.hostname
-	if (!host) return { ok: false, error: 'URL has no host' }
-	for (const pattern of PRIVATE_HOST_PATTERNS) {
-		if (pattern.test(host)) {
-			return { ok: false, error: `Blocked: private/loopback address "${host}"` }
-		}
-	}
-	return { ok: true, url: parsed }
-}
+export { validateEgressUrl as validateFetchUrl, type EgressCheck as UrlValidationResult } from '$lib/tools/egress-policy'
 
 const DEFAULT_MAX_CHARS = 50_000
 
@@ -69,9 +32,10 @@ export function truncateAtParagraph(text: string, maxChars: number = DEFAULT_MAX
 }
 
 /**
- * Strip common boilerplate elements from raw HTML text. The Playwright fetch returns
- * `page.textContent('body')` which already drops scripts/styles, but headers/footers/nav still
- * leak through; we collapse them via line-based heuristics here.
+ * Strip common boilerplate elements from raw HTML text. The Playwright fetch returns the
+ * start of the body's `textContent` (`readPageText`, cut to size inside the browser), which
+ * already drops markup, but headers/footers/nav still leak through; we collapse them via
+ * line-based heuristics here.
  *
  * Pure string transformation so tests can pin the cleanup behavior.
  */

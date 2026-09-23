@@ -128,6 +128,38 @@ Approval requests create a review inbox item and suspend the run durably (see ru
 
 All filesystem and shell tools operate against the run's isolated workspace directory (see workspace spec). They cannot access paths outside the workspace root. The shell tool runs in a subprocess with the workspace as the working directory and inherits only the environment variables declared in `environment.envVars`.
 
+### Web access safety (the egress guard)
+
+Four things read the web on the model's behalf: `web_fetch`, `pdf_read`, `browser_screenshot`, and the research loop's page reads. The address each one visits comes from the model, and the model may have picked it up from a page or search result written by anyone. So all four go through one shared guard with one rule: **they may reach the public internet and nothing else.**
+
+What counts as "not the public internet":
+
+| Kind | Examples |
+| --- | --- |
+| This machine | `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0`, `[::]` |
+| Private networks | `10.x`, `172.16–31.x`, `192.168.x`, IPv6 unique-local (`fc00::/7`) |
+| Cloud metadata and link-local | `169.254.169.254`, `fe80::/10` |
+| Carrier-grade NAT / Tailscale | `100.64.0.0/10` |
+| Reserved, documentation, multicast | `192.0.2.x`, `198.18.x`, `224.x`, `240.x`, `2001:db8::/32`, and the rest of the special-purpose registry |
+| Private-only names | `*.localhost`, `*.local`, `*.internal`, `*.home.arpa`, and single-word names like `router` or `postgres` |
+
+Disguised spellings are judged by where they really point: `http://2130706433/` and `http://[::ffff:127.0.0.1]/` are both loopback, and `localhost.` with a trailing dot is still `localhost`. Only `http` and `https` are allowed — never `file://`.
+
+How the rule is enforced:
+
+1. **The address is checked before anything is sent.** A blocked address fails immediately with a message naming the address and why it was refused.
+2. **The name is looked up, and every answer is checked.** A public-looking name whose DNS record points at a private address is refused. If a name has several addresses and any one of them is private, the whole name is refused. The check happens at the moment the connection is opened, so a DNS server cannot answer "public" to the check and "private" to the connection.
+3. **Every redirect is checked again.** A public page that redirects to a private address is stopped at that hop.
+4. **The browser cannot go around it.** The headless browser behind `web_fetch` and `browser_screenshot` is launched behind a small internal proxy that applies the same rule to every request it makes — the page itself, each redirect, images, scripts, and anything the page's own code tries to fetch.
+
+### Web tool limits and isolation
+
+- **Each browser call is separate.** Every `web_fetch` and `browser_screenshot` opens its own browser session (cookies, storage and tab), and closes it when the call ends. Two users — or two parallel research fetches — never see each other's pages, and nothing a site stores during one call is there for the next.
+- **`browser_screenshot` needs a URL.** Because nothing is left open between calls, there is no "current page" to capture without one. The screenshot is handed to the model as an image it can see, not as text. The chat keeps it with the tool call so the card can show it. Images returned by other tools (for example the built-in file reader opening a PNG, or a connected MCP server) are not stored in the chat as text; the card for those shows only their text output, as before.
+- **`web_fetch` reads a bounded amount of each page.** The page's text is cut down inside the browser, and only that part reaches the server: ten times the requested `maxChars` (at most one million characters). The page title is capped at 1,000 characters. A page that builds an enormous body, whether by accident or on purpose, cannot use up the server's memory, and the page's own scripts cannot get around the cut. When the read stops early, the result says `truncated: true`, and `fullCharCount` gives the page's raw text length.
+- **`pdf_read` downloads are capped at 50 MB.** A file that says it is larger is refused before downloading; one that turns out larger is cut off as soon as it passes the cap. The whole download has 45 seconds.
+- **PDF text extraction has limits too.** `pdftotext` gets 60 seconds per file, and stops once it has produced 16 MB of text — far more than any `maxChars` setting can return.
+
 ## Behavior Contracts
 
 - A tool that does not exist in the active tool set for this turn cannot be called. If the model attempts it, the runtime returns a `tool_not_available` error and suggests `enable_capability`.

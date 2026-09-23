@@ -18,6 +18,7 @@ import { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
 // without pulling in the server surface.
 export { ENGINE_EXCLUDED_TOOLS } from './builtin-tools'
 import { executeTool, type WorkspaceOptions } from '$lib/tools/tools.server'
+import { toolResultContent } from './tool-result-content'
 
 /** MCP namespaces tool names as `mcp__<server>__<tool>`. */
 export const ENGINE_MCP_SERVER = 'agentstudio'
@@ -98,16 +99,15 @@ export function buildToolServer(ctx: ToolServerContext) {
 
 					// Failures come back as tool output rather than thrown errors so the
 					// model can read them and recover, which is how the old loop behaved.
-					const text = outcome.success
-						? typeof outcome.result === 'string'
-							? outcome.result
-							: JSON.stringify(outcome.result ?? null)
-						: (outcome.error ?? 'Tool failed with no error message')
-
-					return {
-						content: [{ type: 'text' as const, text }],
-						...(outcome.success ? {} : { isError: true as const }),
+					if (!outcome.success) {
+						return {
+							content: [{ type: 'text' as const, text: outcome.error ?? 'Tool failed with no error message' }],
+							isError: true as const,
+						}
 					}
+					// JSON as text, except image results (browser_screenshot), which go to the
+					// model as an image block it can actually see.
+					return { content: toolResultContent(outcome.result) }
 				},
 			),
 		)
