@@ -92,6 +92,8 @@ Once trusted, the agent cannot quietly rewrite what was reviewed. Changing `.cla
 
 Delete from the `/projects` list. Deleting removes the database row and the project's directory with everything in it — the repository if there is one, knowledge files, and anything the agent wrote there. This applies to every kind of project; a project with no repository used to keep its directory, and its knowledge files stayed on disk for good. There is no soft delete for projects.
 
+The confirmation says what goes with the project, for every kind: a project with no repository warns that its files, knowledge files and anything agents wrote there will be removed, and a local or imported project adds its git repository to that list.
+
 ## Roles & permissions
 
 - **All authenticated users** — see and manage their own projects; nothing is shared cross-user.
