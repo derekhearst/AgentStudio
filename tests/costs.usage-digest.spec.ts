@@ -16,6 +16,7 @@ import {
 	detectAnomalies,
 	failureRate,
 	formatDigestTokens,
+	isUsageDigestAutomation,
 	parseUsageDigestPrompt,
 	renderDigestMarkdown,
 	resolveDigestWindow,
@@ -147,6 +148,17 @@ test.describe('costs/usage-digest — the digest prompt', () => {
 		expect(parseUsageDigestPrompt('{{usage_digest:abc}}')).toBeNull()
 		expect(parseUsageDigestPrompt('')).toBeNull()
 		expect(parseUsageDigestPrompt(null)).toBeNull()
+	})
+
+	test('only a maintenance automation with the placeholder is the digest (and skips the budget gate)', () => {
+		// The engine lets exactly these past a block limit, because they cannot spend.
+		expect(isUsageDigestAutomation({ mode: 'maintenance', prompt: USAGE_DIGEST_PROMPT })).toBe(true)
+		expect(isUsageDigestAutomation({ mode: 'maintenance', prompt: '{{usage_digest:30}}' })).toBe(true)
+		// Other modes send the prompt to a model, placeholder or not.
+		expect(isUsageDigestAutomation({ mode: 'chat_followup', prompt: USAGE_DIGEST_PROMPT })).toBe(false)
+		expect(isUsageDigestAutomation({ mode: 'research', prompt: USAGE_DIGEST_PROMPT })).toBe(false)
+		expect(isUsageDigestAutomation({ mode: 'maintenance', prompt: 'Summarise {{usage_digest}}' })).toBe(false)
+		expect(isUsageDigestAutomation({ mode: 'maintenance', prompt: null })).toBe(false)
 	})
 })
 

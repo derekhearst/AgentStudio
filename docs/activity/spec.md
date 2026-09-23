@@ -101,6 +101,7 @@ The same numbers and warnings can be sent every Monday at 9:00, as markdown, to 
 What it costs and what it does not do:
 
 - **No model is called.** The digest is written by code from the ledgers, so each run costs $0 and works with no model credentials at all. It restates numbers; it does not interpret them.
+- **Budget limits do not stop it.** A budget limit that blocks automations still lets the digest through, because it cannot spend anything. That is the week its "Budget near limit" warning matters most.
 - **Nothing is turned on by deploying.** No digest exists until the owner presses the button. (Seeding one at startup would also bring it back after the owner deleted it.)
 - In the review inbox, the digest is an "Automation summary" item; expanding it shows the markdown rendered. In chat, it is an assistant message in a thread that collects every week's digest.
 

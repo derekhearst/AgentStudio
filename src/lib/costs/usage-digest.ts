@@ -118,6 +118,14 @@ export function parseUsageDigestPrompt(prompt: string | null | undefined): numbe
 }
 
 /**
+ * Whether an automation is the usage digest: a maintenance automation whose prompt is the
+ * placeholder. Its runs are rendered by code and cannot spend anything.
+ */
+export function isUsageDigestAutomation(automation: { mode: string; prompt: string | null }): boolean {
+	return automation.mode === 'maintenance' && parseUsageDigestPrompt(automation.prompt) !== null
+}
+
+/**
  * Whether the automation ledger still holds the whole previous window, which is what
  * "newly failing" compares against.
  *

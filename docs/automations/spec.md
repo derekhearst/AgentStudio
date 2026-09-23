@@ -151,6 +151,7 @@ A maintenance automation whose prompt is exactly `{{usage_digest}}` is the **wee
 - **No model call.** The digest is rendered by code, so the run costs $0 and cannot fail for lack of model credentials. Any other maintenance prompt still goes to the model as before; a prompt with text around the placeholder is treated as an ordinary prompt.
 - **Opt-in only.** Nothing creates the digest on deploy. The owner turns it on from `/activity`, which creates "Weekly usage digest" for Monday 09:00 in their browser's time zone (or switches an existing, disabled one back on). After that it is managed here like any automation.
 - **Nothing new underneath.** It uses the existing dispatch tick, run history, retries and failure reporting.
+- **Budget limits do not stop it.** A limit that blocks automations still lets the digest run, because the digest cannot spend anything. The week a limit is exceeded is the week the digest reports it.
 - **A digest that is not delivered is a failed run.** If the review item or the chat message cannot be written, the run is marked failed, so it is retried and reported like any other failure. (For model-written maintenance output, a delivery failure is only logged, because running it again would pay for the model call again.)
 
 The card on `/automations` notes when a prompt is the digest. See [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what the digest contains.
@@ -164,7 +165,7 @@ Automations can attach project or repository context so recurring runs are not c
 
 ### Budget controls
 
-Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was.
+Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was. The weekly usage digest is the one exception: it cannot spend anything, so limits never block it.
 
 ### Review policies
 
@@ -302,7 +303,7 @@ A first-class automation recipe exists for your stated goal:
 - Every automation execution produces an `automationRuns` row, even if it fails immediately.
 - Automations execute through jobs, not inline HTTP handlers.
 - Disabled automations do not enqueue new runs.
-- Budget overage blocks execution and creates a review item.
+- Budget overage blocks execution and creates a review item (except for the usage digest, which spends nothing).
 - Automations are resumable only through underlying jobs, tasks, and runs primitives, not ad hoc engine state.
 - An automation may write to multiple surfaces, but each delivery is recorded explicitly in `automationDeliveries`.
 

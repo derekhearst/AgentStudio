@@ -119,10 +119,11 @@ Not yet counted: tool calls made through the older agent loop, which agent-attac
 
 ### Usage strip and weekly digest (#38)
 
-The usage strip on `/activity` and the optional weekly usage digest are built from these ledgers; see [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what they show. Three things about them belong to this domain:
+The usage strip on `/activity` and the optional weekly usage digest are built from these ledgers; see [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what they show. Four things about them belong to this domain:
 
 - **Tokens lead, dollars are "metered".** Claude runs record $0 (above), so the digest reports tokens first and labels dollars as metered spend — what gateway models, OpenRouter calls and paid tools charged.
 - **Budget headroom reads spend the way enforcement does.** The strip's Budget tile uses the same per-limit spend calculation as the check that blocks runs, over the same period, so the two cannot disagree. Per-run limits are left out.
+- **Budget limits do not block the digest.** It spends nothing, so the automation budget check is skipped for it; that way it can still report a limit that is blocking everything else.
 - **The digest itself costs nothing.** It is rendered by code with no model call and records a run cost of $0.
 
 ### Cost summary

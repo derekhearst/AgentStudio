@@ -368,6 +368,65 @@ test.describe('costs/usage-digest live — the weekly digest automation', () => 
 		}
 	})
 
+	test('a budget limit that blocks automations does not block the digest, which reports it', async () => {
+		const prefix = uniquePrefix('usage-digest-blocked')
+		const sql = getSql()
+		const userId = await getActiveUserId()
+		let limitId: string | null = null
+
+		try {
+			// $0.01 a day, blocking, and $5 spent today: every automation that can spend is over.
+			const [limit] = await sql<{ id: string }[]>`
+				insert into budget_limits (user_id, scope, period, limit_usd, action, enabled)
+				values (${userId}, 'global', 'day', '0.01', 'block', true)
+				returning id
+			`
+			limitId = limit.id
+			await sql`
+				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id)
+				values ('chat', ${`${prefix}-model`}, 1, 1, '5.00', ${userId})
+			`
+			const { checkBudgetLimits } = await import('../src/lib/costs/budget.server')
+			const gate = await checkBudgetLimits({ userId })
+			expect(gate.allowed, 'the fixture limit blocks ordinary runs').toBe(false)
+
+			const [automation] = await sql<{ id: string }[]>`
+				insert into automations (user_id, description, cron_expression, prompt, mode, output_target)
+				values (${userId}, ${`${prefix} digest`}, '0 9 * * 1', '{{usage_digest}}', 'maintenance', 'review_inbox')
+				returning id
+			`
+			const { runAutomationById } = await import('../src/lib/automations/engine')
+			const result = (await runAutomationById(automation.id)) as {
+				blocked?: boolean
+				routedTo?: string
+				reviewItemId?: string | null
+			}
+			expect(result.blocked).toBeUndefined()
+			expect(result.routedTo).toBe('review_inbox')
+
+			// The week a limit is blown is the week the digest has to say so.
+			const [item] = await sql<{ payload: { summary?: string } }[]>`
+				select payload from review_items where id = ${result.reviewItemId!}
+			`
+			expect(item.payload.summary).toMatch(/- \*\*Critical:\*\* Global daily limit is \d+% spent \(\$[\d.]+ of \$0\.01\)\./)
+
+			const runs = await sql<{ status: string }[]>`
+				select status from automation_runs where automation_id = ${automation.id}
+			`
+			expect(runs.map((run) => run.status)).toEqual(['completed'])
+			const [{ alerts }] = await sql<{ alerts: number }[]>`
+				select count(*)::int as alerts from budget_alerts where budget_limit_id = ${limit.id}
+			`
+			expect(alerts, 'the digest never consulted the gate, so no block was recorded').toBe(0)
+		} finally {
+			if (limitId) {
+				await sql`delete from budget_alerts where budget_limit_id = ${limitId}`
+				await sql`delete from budget_limits where id = ${limitId}`
+			}
+			await cleanupLedger(prefix)
+		}
+	})
+
 	test('opting in creates one digest automation, and opting in again re-targets it', async () => {
 		const sql = getSql()
 		const userId = await getActiveUserId()
