@@ -34,11 +34,22 @@
  *     answers are to gate it on human approval or refuse it. `bashPolicy: 'ask'` and
  *     'deny' express those. What this module will not do is pretend.
  *
- * Pure: no DB, no SvelteKit, no `node:fs`. `node:path` only, so it unit-tests without a
- * filesystem and cannot be defeated by a race between the check and the read.
+ * ## Symlinks
+ *
+ * A lexical check alone is not containment. Sandboxed Bash can `ln -s / root` inside the
+ * workspace (it may write there), and an imported repo can commit such a link, after which
+ * `Read root/etc/passwd` is lexically inside the workspace while the SDK opens the host's
+ * file. So a path must also stay inside once symlinks are resolved on both sides — see
+ * `resolveRealPath`. That is the only filesystem access here, and it is injectable so the
+ * decision still unit-tests without a disk. A link swapped between this check and the
+ * SDK's open can still win that race; nothing short of `openat2(RESOLVE_BENEATH)` in the
+ * SDK itself would close it.
+ *
+ * No DB, no SvelteKit.
  */
 
 import { isAbsolute, resolve, sep } from 'node:path'
+import { resolveRealPath as resolveRealPathOnDisk } from '$lib/workspace/containment.server'
 
 /** Built-in tools whose arguments name a path we can resolve and contain. */
 const PATH_ARGS: Record<string, readonly string[]> = {
@@ -69,6 +80,12 @@ export type GuardInput = {
 	bashPolicy: BashPolicy
 	/** Extra roots the run may touch, e.g. a read-only skills directory. Absolute. */
 	additionalRoots?: readonly string[]
+	/**
+	 * Resolves every symlink in a path (nearest existing ancestor for one that does not
+	 * exist yet). Defaults to the real filesystem; specs inject a fake. May throw, which
+	 * counts as "cannot prove it stays inside".
+	 */
+	resolveRealPath?: (path: string) => string
 }
 
 export type GuardDecision =
@@ -133,15 +150,27 @@ export function guardWorkspaceAccess(input: GuardInput): GuardDecision {
 	if (paths.length === 0) return { verdict: 'allow' }
 
 	const roots = [workspaceRoot, ...(input.additionalRoots ?? [])]
+	const realPath = input.resolveRealPath ?? resolveRealPathOnDisk
+	let realRoots: string[] | null = null
 	for (const candidate of paths) {
 		// A relative path resolves against the workspace, which is also the SDK's cwd.
 		const absolute = isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate)
-		if (!roots.some((root) => isInside(root, absolute))) {
-			return {
-				verdict: 'deny',
-				reason: `Path is outside this run's workspace: ${candidate}`,
-			}
+		const outside = {
+			verdict: 'deny',
+			reason: `Path is outside this run's workspace: ${candidate}`,
+		} as const
+		if (!roots.some((root) => isInside(root, absolute))) return outside
+
+		// Lexically fine; now the path the SDK will really open. Resolved lazily so a
+		// call with no path argument never touches the disk.
+		let realCandidate: string
+		try {
+			realRoots ??= roots.map((root) => realPath(root))
+			realCandidate = realPath(absolute)
+		} catch {
+			return outside
 		}
+		if (!realRoots.some((root) => isInside(root, realCandidate))) return outside
 	}
 
 	return { verdict: 'allow' }

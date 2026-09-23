@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
-import { resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
+import { isPathWithin, isRealPathWithin } from './containment.server'
 import { ensureWorktree, type GitRunner } from './worktree.server'
 
 const ID_PATTERN = /^[a-zA-Z0-9_-]+$/
@@ -101,10 +102,23 @@ export function resolveWorkspaceRoot(ctx: WorkspaceContext): string {
 	return resolve(root, userId)
 }
 
+/**
+ * Resolve `userPath` inside `workspaceRoot`, or throw if it escapes.
+ *
+ * Two checks, and both must pass. The lexical one catches `../` and absolute paths
+ * elsewhere. The real-path one catches a symlink that sits inside the workspace but
+ * points out of it — the agent's Bash can create one, and an imported repo can commit
+ * one — which the lexical check cannot see because the OS only follows the link when
+ * the path is opened. Paths that do not exist yet are judged by their nearest existing
+ * ancestor, which is where a create would land (see `containment.server.ts`).
+ *
+ * Returns the lexical path, not the resolved one, so display paths and the paths handed
+ * back to the model stay the ones the caller asked about.
+ */
 export function safePathWithin(workspaceRoot: string, userPath: string): string {
-	const resolved = resolve(workspaceRoot, userPath)
-	const rootWithSep = workspaceRoot.endsWith(sep) ? workspaceRoot : `${workspaceRoot}${sep}`
-	if (!(resolved === workspaceRoot || resolved.startsWith(rootWithSep))) {
+	const root = resolve(workspaceRoot)
+	const resolved = resolve(root, userPath)
+	if (!isPathWithin(root, resolved) || !isRealPathWithin(root, resolved)) {
 		throw new Error(`Path escapes sandbox workspace: ${userPath}`)
 	}
 	return resolved

@@ -47,6 +47,16 @@ ${SANDBOX_WORKSPACE}/<userId>/worktrees/<runId>/     # worktree
 
 Tools cannot traverse above the workspace root. Any path that resolves outside the root returns a `WORKSPACE_ESCAPE` error.
 
+"Resolves" means where the file really is, not just how the path is spelled. A workspace can contain symbolic links (shortcuts to another location): the agent's shell can create one, and an imported repository can include one. Before any server-side feature opens a workspace path, it follows every link in that path and checks that the real destination is still inside the workspace. So a link called `root` that points at `/` does not make `root/etc/passwd` readable, and a link into another user's folder does not let a tool delete or move their files.
+
+- A path that does not exist yet (a file about to be written) is judged by the nearest folder that does exist, since that is where it would be created.
+- A broken link is judged by where it points, because writing through it would create the file there.
+- Links that stay inside the workspace keep working normally.
+- The same rule covers the agent's own file tools, the SDK's built-in `Read` / `Write` / `Edit` / `Glob` / `Grep` calls, the chat's file preview, attachment staging and project knowledge files.
+- Directory listings show a link as an entry but never walk into it.
+
+One limit remains: a process that swaps a link in the instant between the check and the file being opened can still win that race. Closing it fully needs operating-system support that Node.js does not offer today.
+
 ### Workspace creation
 
 Created at run start by `buildEnvironment`. The runtime calls `createWorkspace(runId, userId, mode)` which:
@@ -91,7 +101,7 @@ The `Environment.networkPolicy` field controls what the `shell` tool can reach:
 
 - Workspace creation is idempotent for persistent workspaces: calling `createWorkspace` with the same key twice returns the same path.
 - Workspace paths are never user-controlled strings. They are constructed solely from `userId`, `runId`, and `key` values from the DB.
-- A file path that escapes the workspace root is rejected before the tool executes.
+- A file path that escapes the workspace root is rejected before the tool executes, including a path that only escapes through a symbolic link.
 - GC never deletes a pinned workspace, regardless of TTL.
 - Worktree branches follow the naming convention `agent/<runId>`. Branch names are not configurable by the agent.
 - `envVars` are applied only to the shell subprocess, not to the app process or other tools.

@@ -96,6 +96,7 @@ Everything else the agent does inside a project goes through the ordinary filesy
 - **Legacy `none` projects** — projects created before repos existed have no directory. They still list and bind fine; the agent simply has no project-local place to write.
 - **Clone timeouts** — a large import can take tens of seconds. The row is inserted first and rolled back on failure, so a timeout shows as "project disappeared" rather than a half-cloned directory.
 - **Deleting a user** — cascades through their projects. Sandbox directories are removed by the project delete path, not by the database.
+- **A repo that links out of itself** — an imported repo can contain symbolic links, and so can anything the agent's shell creates. If the project's `.agentstudio` knowledge folder turns out to be a link to somewhere outside the project, knowledge uploads and deletes are refused and the knowledge list shows as empty. The same check stops the "keep knowledge out of git" note from being written through a linked `.git/info` folder.
 
 ## Data model summary
 
