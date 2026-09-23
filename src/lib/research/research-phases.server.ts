@@ -17,6 +17,7 @@ import { logger } from '$lib/observability/logger'
 import {
 	addResearchSource,
 	addResearchStep,
+	listSourceUrlsForResearch,
 } from './research.server'
 import type { ResearchRow, ResearchSourceRow } from './research.schema'
 import {
@@ -36,6 +37,12 @@ const PARALLEL_FETCH_CONCURRENCY = 4
  * Run a single search+fetch pass over a list of queries. Used for both the initial planner-
  * generated sub-questions and the reflection-generated gap queries. Fans out per-query work
  * with bounded concurrency so wall-clock stays sane even at the 12-sub-question hardcap.
+ *
+ * A URL is fetched once per run. Sub-questions and gap queries overlap, so their searches
+ * return many of the same pages; each copy used to be fetched and stored again, and the
+ * synthesizer and the reflection step then read the same source several times over. The
+ * set starts from what the run already has, so a run resumed after a worker restart does
+ * not fetch its sources a second time either.
  */
 export async function runSearchAndFetchPass(
 	researchId: string,
@@ -43,19 +50,22 @@ export async function runSearchAndFetchPass(
 	config: ResolvedResearchConfig,
 	checkCanceled: () => Promise<void>,
 ): Promise<void> {
+	const fetched = new Set(await listSourceUrlsForResearch(researchId))
 	await mapWithConcurrency(queries, PARALLEL_FETCH_CONCURRENCY, async (subQuestion) => {
 		await checkCanceled()
 		const hits = await runSearch(researchId, subQuestion).catch((err) => {
 			logger.warn('[research] search failed', { researchId, subQuestion, err })
 			return [] as SearchHit[]
 		})
-		const picked = pickUrlsToFetch(hits, config.urlsPerQuestion)
+		const picked = pickUrlsToFetch(hits, config.urlsPerQuestion, fetched)
+		// Claimed before the first await, so a parallel sub-question cannot pick the same URL.
+		for (const hit of picked) fetched.add(hit.url)
 		// Within a sub-question, fetch URLs in parallel too — they're independent. Keeps total
 		// in-flight bounded by PARALLEL_FETCH_CONCURRENCY × urlsPerQuestion (default 4×4 = 16),
 		// well within Playwright's capacity.
 		await Promise.all(
 			picked.map((hit) =>
-				runFetch(researchId, subQuestion, hit, config).catch((err) => {
+				runFetch(researchId, subQuestion, hit, config, fetched).catch((err) => {
 					logger.warn('[research] fetch failed', { researchId, url: hit.url, err })
 				}),
 			),
@@ -109,8 +119,14 @@ async function runFetch(
 	subQuestion: string,
 	hit: SearchHit,
 	config: ResolvedResearchConfig,
+	fetched: Set<string>,
 ): Promise<ResearchSourceRow | null> {
 	const result = await webFetch(hit.url, config.maxFetchChars)
+	// Two different links can land on the same page after redirects; keep the first copy.
+	if (result.url !== hit.url) {
+		if (fetched.has(result.url)) return null
+		fetched.add(result.url)
+	}
 	const source = await addResearchSource({
 		researchId,
 		url: result.url,

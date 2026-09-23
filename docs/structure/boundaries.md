@@ -12,26 +12,28 @@ A chat message goes through three distinct layers. Each owns one thing and stays
 
 ### `src/lib/llm/`
 The narrow LLM-provider surface. Only this module knows OpenRouter exists.
-- `chat.server.ts` — `streamChat()`, `chat()`, `compactMessages()`, `shouldCompact()`. Speaks the OpenRouter SDK; everything else takes back provider-agnostic results.
+- `chat.server.ts` — `streamChat()`, `chat()`. Speaks the OpenRouter SDK; everything else takes back provider-agnostic results.
 - `models.server.ts`, `model-capabilities.ts` — model registry + per-model capability metadata (audio modalities, reasoning support, etc).
 - `video-generation.server.ts` — async video-job submission.
 
 **Rule of thumb:** if you're touching `OpenAI`, `openrouter`, `claude-sonnet-4`, model strings, or token-streaming primitives — it lives here.
 
 ### `src/lib/runtime/`
-The provider-agnostic agent loop.
-- `loop.server.ts` — `runChatLoop()`. Drives streaming, multi-round tool execution, approval gates, sub-agent dispatch. Calls `streamChat()` from `llm/`.
-- `tool-handlers.server.ts` — per-tool-call dispatch (ask_user, run_subagent, normal tool). Owns the emit / pushBlock / approval-await flow.
-- `types.ts` — `Session`, `RunChatLoopInput`, `LoopMessage`. The contract every caller (chat stream, automation, sub-agent) implements.
+The pre-engine agent loop. Interactive chat runs on the Claude Agent SDK (`src/lib/engine/`); what still runs here is unattended — automations with an agent attached, a monitor's start_conversation, and CI fix runs (#8).
+- `loop.server.ts` — `runChatLoop()`. Drives streaming, multi-round tool execution and approval gates. Calls `streamChat()` from `llm/`.
+- `tool-handlers.server.ts` — per-tool-call dispatch (ask_user, normal tool). Owns the emit / pushBlock / approval-await flow.
+- `types.ts` — `Session`, `RunChatLoopInput`, `LoopMessage`. The contract the three callers implement.
 - `agent-definition.server.ts` — slot assembly + workspace context resolution.
-- `session/` — SSE-backed and detached `Session` implementations.
+- `detached-tools.ts` — the short tool list an unattended run is offered (`web_search`).
+- `session/` — the detached `Session`.
+- `sse-codec.ts`, `constants.ts`, `monitor-factory.server.ts` — shared with the engine's stream route, run replay and the monitor endpoints.
 
-**Rule of thumb:** if you're orchestrating "send a message, run tools, get the response back" without caring whether it goes over SSE or runs in the background — it lives here. The runtime never imports `chat/` or anything UI-shaped.
+**Rule of thumb:** new agent-loop work belongs in `engine/`, not here. The runtime never imports `chat/` or anything UI-shaped.
 
 ### `src/lib/chat/`
 The persistence + UI-side layer. Everything that's *about* a conversation but not *driving* it.
 - `chat.ts` — pure transforms (renderMarkdown, trimToolResult).
-- `chat.server.ts` — re-exports of the LLM helpers used by the chat domain.
+- `chat.server.ts` — conversation title generation (`generateTitle`, `generateTitleAndCategory`).
 - `chat.remote.ts` — SvelteKit remote functions for the chat page (createConversation, getConversation, deleteMessagesAfter, etc).
 - `streaming-blocks.ts` — pure transforms over `StreamingBlock[]` (the chat page's per-message state machine).
 - `streaming-interpolation.ts` — typewriter-animation step functions.
@@ -89,13 +91,13 @@ Memory has four distinct phases that easily get tangled. They run in this order:
 
 The tool surface is a registry + a dispatch table.
 
-- `tool-schemas.ts` — the source of truth: every tool's name, Zod schema, description, examples, disclosure tier ('always' loaded vs 'searchable'). Adding a new tool starts here.
+- `tool-schemas.ts` — the source of truth: every tool's name, Zod schema, description, examples. Adding a new tool starts here.
 - `tools.server.ts` — the barrel + `executeTool()` dispatcher. Reads the dispatch table and runs the matched handler.
 - `handlers/<domain>.server.ts` — one file per logical group (filesystem, web, projects, media, source-control, agents-automations, skills, meta). Each file exports a `Record<string, ToolHandler>` that gets merged into the table.
 - `sandbox.server.ts` + `sandbox-fs.server.ts` + `sandbox-browser.server.ts` — the per-tool primitives (workspace, shell, fs ops, headless Chrome). Handlers compose these.
 
 **Rule of thumb:** when adding a tool:
-1. Define it in `tool-schemas.ts` (schema + description + tier).
+1. Define it in `tool-schemas.ts` (schema + description).
 2. Implement the handler in the appropriate `handlers/<domain>.server.ts` file (or create a new domain file if it's truly new territory).
 3. The dispatcher picks it up automatically via the `TOOL_HANDLERS` map.
 
@@ -103,17 +105,17 @@ You should never need to touch `executeTool()` itself.
 
 ---
 
-## `runtime/` vs `chat/[id]/stream/+server.ts`
+## `engine/` vs `chat/[id]/stream/+server.ts`
 
 The chat-stream POST handler is *not* the runtime. It's an adapter.
 
 - The route handler does pre-flight work that's specific to the interactive chat surface: resolve the model + reasoning config from the user's settings, build the system prompt slots, gate on budget caps, write the initial chat_run row, etc. Most of that is in `chat/stream-prep.server.ts` + `chat/stream-slots.server.ts` + `chat/stream-persistence.server.ts`.
-- It then hands off to `runChatLoop()`. The runtime does the actual generation + tool execution.
+- It then hands off to `runEngineStream()` in `engine/stream.server.ts`. The Claude Agent SDK does the actual generation + tool execution.
 - After the loop returns, the handler does post-flight: persist the assistant message, log cost, kick off memory mining + evaluator jobs.
 
-**Rule of thumb:** if it's "what does the chat-stream endpoint specifically need", it's in `chat/`. If it's "how does the agent loop work", it's in `runtime/`. New code should rarely live in the route handler itself; that file should read like a list of helper calls.
+**Rule of thumb:** if it's "what does the chat-stream endpoint specifically need", it's in `chat/`. If it's "how does the agent loop work", it's in `engine/`. New code should rarely live in the route handler itself; that file should read like a list of helper calls.
 
-Automation runs and inline sub-agents go through `runChatLoop()` too — they import `runtime/` directly without going through the chat route.
+Automations with an agent attached, monitor-started conversations and CI fix runs still go through `runChatLoop()` — they import `runtime/` directly without going through the chat route.
 
 ---
 

@@ -25,15 +25,33 @@ test.describe('llm/openrouter model ids', () => {
 		['claude-sonnet-4-5[1m]', 'anthropic/claude-sonnet-4.5'],
 		['claude-sonnet-5', 'anthropic/claude-sonnet-5'],
 		['claude-sonnet-4', 'anthropic/claude-sonnet-4'],
+		['claude-opus-5-5', 'anthropic/claude-opus-5.5'],
+		['claude-3-haiku', 'anthropic/claude-3-haiku'],
+		['  claude-sonnet-5  ', 'anthropic/claude-sonnet-5'],
 		['anthropic/claude-haiku-4.5', 'anthropic/claude-haiku-4.5'],
+		// Written the SDK's way under the vendor prefix: still needs the dot.
+		['anthropic/claude-sonnet-4-6', 'anthropic/claude-sonnet-4.6'],
+		// OpenRouter's own variant suffix is kept.
+		['anthropic/claude-sonnet-5:batch', 'anthropic/claude-sonnet-5:batch'],
 		['openai/gpt-4o-mini', 'openai/gpt-4o-mini'],
-		['moonshotai/kimi-k2', 'moonshotai/kimi-k2'],
+		['moonshotai/kimi-k2-0905', 'moonshotai/kimi-k2-0905'],
+		['google/gemini-2.5-flash', 'google/gemini-2.5-flash'],
+		// An alias names no specific model, so it is not guessed at.
+		['sonnet', 'sonnet'],
+		['', ''],
 	]
 	for (const [input, expected] of cases) {
-		test(`${input} → ${expected}`, () => {
+		test(`${JSON.stringify(input)} → ${JSON.stringify(expected)}`, () => {
 			expect(toOpenRouterModelId(input)).toBe(expected)
 		})
 	}
+
+	test('the defaults research falls back to map to catalogue ids', async () => {
+		// Every research planner call was a 400 while these went out bare.
+		const { DEFAULT_RESEARCH_CONFIG } = await import('../src/lib/research/research-config')
+		expect(toOpenRouterModelId(DEFAULT_RESEARCH_CONFIG.plannerModel)).toBe('anthropic/claude-sonnet-5')
+		expect(toOpenRouterModelId(DEFAULT_RESEARCH_CONFIG.synthesizerModel)).toBe('anthropic/claude-sonnet-5')
+	})
 })
 
 test.describe('llm/chat — what reaches OpenRouter', () => {

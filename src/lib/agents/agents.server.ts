@@ -174,11 +174,10 @@ export async function updateAgentRecord(
 		role?: string
 		systemPrompt?: string
 		model?: string
-		// Optional fine-grained override: a fixed allow-list of tool names. When set, the
-		// agent's tool surface is exactly this list (no Tool Search Tool deferred loading).
-		// Empty/undefined means the agent uses the default tier-based surface like the
-		// orchestrator: `disclosure: 'always'` tools loaded by default, others loaded on
-		// `search_tools` invocation.
+		// Optional fine-grained override: a fixed allow-list of tool names. When set, a chat
+		// run offers the agent exactly this list; empty/undefined offers every tool. An
+		// unattended old-loop run can only narrow its own short list with it
+		// (`$lib/runtime/detached-tools`).
 		allowedTools?: string[]
 		// Wave 3 #13 phase 4 — per-agent hook bindings. Map of `event → hookRef[]`. Refs are either
 		// registered built-in hook names OR future skill slugs (Phase 3). Empty array clears the
@@ -209,7 +208,7 @@ export async function updateAgentRecord(
 		const existing = (current?.config ?? {}) as Record<string, unknown>
 		const nextConfig: Record<string, unknown> = { ...existing }
 		// Drop the legacy `capabilityGroups` field if a previous version of the agent had it.
-		// Tool Search Tool replaces capability groups; leaving them would be silently ignored.
+		// Capability groups were retired and nothing reads them; leaving them would be silently ignored.
 		delete nextConfig.capabilityGroups
 		if (patch.allowedTools !== undefined) {
 			if (patch.allowedTools.length === 0) {

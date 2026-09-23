@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test'
 import type { HookCallbackMatcher, Options, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { runEngineStream, type EngineRunInput, type EngineQuerySource } from '../src/lib/engine/stream.server'
 import { resolveToolScope } from '../src/lib/engine/tool-scope'
+import { HOST_OWNED_TOOLS } from '../src/lib/engine/builtin-tools'
+import { allToolNames } from '../src/lib/tools/tool-schemas'
 
 /**
  * How the engine gates a call, driven the way the SDK drives it.
@@ -24,6 +26,10 @@ import { resolveToolScope } from '../src/lib/engine/tool-scope'
  *   - a call that containment will ask about (Bash with no bubblewrap) is shown as pending,
  *     not as executing
  *   - a subagent's call that needs approval gets a card the operator can answer
+ *
+ * And one that has not shipped: the tools the engine hands to the host ungated are exactly
+ * the ones the settings approval list and /api/mcp leave out, so the list never offers a
+ * setting for a call the engine hands over, nor hides one it gates.
  *
  * Needs a database only because `stream.server.ts` transitively imports the tool registry.
  */
@@ -167,6 +173,28 @@ test.describe('every call meets the gate', () => {
 		expect(outcomes[0].hook).toBe('ask')
 		expect(outcomes[0].permission?.behavior).toBe('deny')
 		expect(events(frames, 't1')).toContain('tool_denied')
+	})
+})
+
+test.describe('the tools the host owns', () => {
+	test('skip both gates, and are exactly the set the settings list and MCP leave out', async () => {
+		// `builtin-tools`' HOST_OWNED_TOOLS is what the settings approval list and /api/mcp
+		// filter by, on the promise that the engine hands those calls to the host before any
+		// gate runs. The engine keeps its own copy of the set, so drive it: with every tool set
+		// to ask, a host-owned call gets no 'ask', no card and no tool_call frame (the host
+		// renders its own), and every other registry tool is asked about.
+		const calls = allToolNames.map((name, i) => ({ id: `t${i}`, name: `mcp__agentstudio__${name}`, input: {} }))
+		const { outcomes, frames } = await drive({ requiresApproval: () => true }, calls)
+
+		const handedOver = allToolNames.filter(
+			(_, i) => outcomes[i].hook === 'none' && outcomes[i].permission?.behavior === 'allow',
+		)
+		expect([...handedOver].sort()).toEqual([...HOST_OWNED_TOOLS].sort())
+		for (const [i, name] of allToolNames.entries()) {
+			if (!HOST_OWNED_TOOLS.has(name)) continue
+			const seen = events(frames, `t${i}`)
+			for (const frame of ['tool_call', 'tool_pending', 'tool_denied']) expect(seen, name).not.toContain(frame)
+		}
 	})
 })
 

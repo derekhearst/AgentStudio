@@ -52,6 +52,9 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 				totalTokensIn: sql<number>`coalesce(sum(${llmUsage.tokensIn}), 0)::int`,
 				totalTokensOut: sql<number>`coalesce(sum(${llmUsage.tokensOut}), 0)::int`,
 				callCount: sql<number>`count(*)::int`,
+				// Calls the ledger could not price (see `logLlmUsage`): their zero is a gap in
+				// the total above, not a free call.
+				unpricedCallCount: sql<number>`count(*) filter (where ${llmUsage.metadata}->>'unpriced' is not null)::int`,
 			})
 			.from(llmUsage)
 			.where(gte(llmUsage.createdAt, since)),
@@ -183,6 +186,7 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 		totalTokensIn: totalSpend[0]?.totalTokensIn ?? 0,
 		totalTokensOut: totalSpend[0]?.totalTokensOut ?? 0,
 		callCount: totalSpend[0]?.callCount ?? 0,
+		unpricedCallCount: totalSpend[0]?.unpricedCallCount ?? 0,
 		byModel,
 		bySource,
 		topConversations: byConversation,
@@ -198,27 +202,31 @@ export const getCostSummary = query(costPeriodSchema, async ({ period }) => {
 	}
 })
 
+// Model and tool spend together, because that is what the budget gate adds up: the bars on
+// /review sit next to the Settings limits the gate enforces, and should reach 100% when it
+// starts blocking.
 export const getBudgetStatus = query(async () => {
 	requireAuthenticatedRequestUser()
 	const today = new Date()
 	const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
 	const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
 
-	const [dailySpend, monthlySpend] = await Promise.all([
-		db
-			.select({ total: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text` })
-			.from(llmUsage)
-			.where(gte(llmUsage.createdAt, dayStart)),
-		db
-			.select({ total: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text` })
-			.from(llmUsage)
-			.where(gte(llmUsage.createdAt, monthStart)),
-	])
-
-	return {
-		dailySpend: dailySpend[0]?.total ?? '0',
-		monthlySpend: monthlySpend[0]?.total ?? '0',
+	const spendSince = async (since: Date) => {
+		const [[llm], [tool]] = await Promise.all([
+			db
+				.select({ total: sql<string>`coalesce(sum(${llmUsage.cost}::numeric), 0)::text` })
+				.from(llmUsage)
+				.where(gte(llmUsage.createdAt, since)),
+			db
+				.select({ total: sql<string>`coalesce(sum(${toolUsage.cost}::numeric), 0)::text` })
+				.from(toolUsage)
+				.where(gte(toolUsage.createdAt, since)),
+		])
+		return (parseFloat(llm?.total ?? '0') + parseFloat(tool?.total ?? '0')).toPrecision(15)
 	}
+
+	const [dailySpend, monthlySpend] = await Promise.all([spendSince(dayStart), spendSince(monthStart)])
+	return { dailySpend, monthlySpend }
 })
 
 const budgetScopeSchema = z.enum(['global', 'project', 'agent', 'run'])

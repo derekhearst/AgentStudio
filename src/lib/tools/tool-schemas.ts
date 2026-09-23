@@ -249,14 +249,6 @@ export const toolSchemas = {
 		paths: z.array(z.string().min(1)).optional(),
 		staged: z.boolean().default(false),
 	}),
-	search_tools: z.object({
-		query: z.string().trim().min(1).max(200),
-		limit: z.number().int().min(1).max(20).optional(),
-	}),
-	run_code: z.object({
-		code: z.string().min(1).max(64_000),
-		timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
-	}),
 }
 
 export type ToolName = keyof typeof toolSchemas
@@ -265,9 +257,8 @@ export const allToolNames = Object.keys(toolSchemas) as ToolName[]
 
 /**
  * Normalize a tool name from the model: trim, then case-insensitive snake_case match against the
- * registry. Returns null when no canonical match exists. Shared by `executeTool` and the
- * `run_code` HTTP RPC handler so a script saying `await tools.Web_Search({...})` resolves to the
- * canonical `web_search`.
+ * registry. Returns null when no canonical match exists. Used by `executeTool`, so a call
+ * spelled `Web_Search` or `web-search` resolves to the canonical `web_search`.
  */
 export function normalizeToolName(name: string): ToolName | null {
 	const trimmed = name.trim()
@@ -343,10 +334,6 @@ export const toolDescriptions: Record<ToolName, string> = {
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
 	request_plan_approval:
 		'Ask the user to approve a plan file and hand the conversation to an implementer agent. Write the plan into the workspace first (Write, e.g. PLAN.md), then pass its path. Mandatory approval: the user must approve in the inline card before this runs. On approve the bound agent flips to implementerAgentId and the next round runs under that agent, which can read the file with Read. On deny the planner stays bound. implementerAgentId is the full agent id — call list_agents to get it; the built-in Chat and Autonomous agents are the usual implementers.',
-	search_tools:
-		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
-	run_code:
-		'Run a JavaScript program in the sandboxed Bun runtime. Inside the script every tool currently available to you is callable as `await tools.<name>(args)` — same arguments, return shape, approvals, capabilities, and policies as a direct tool call. Use this when you need to fan out many tool calls in parallel, post-process their results, or branch on intermediate values without spending a round-trip per call. PREFER `return` OVER `console.log` for output the model should see: when the script returns a value, that becomes `returnValue` and stdout is omitted from the result to keep your context tight. console.log is for debugging only and is truncated to 8KB in the model-facing result. Run tool calls in parallel with `Promise.all` whenever they are independent — that\'s the main reason to use run_code over individual tool calls. The script\'s working directory is the same persistent sandbox as `shell`, so files persist. Throw to surface an error. The returned value must be JSON-serializable. Default timeout 60s, max 300s. Cannot recursively call `run_code`. Example pattern: `const [a, b, c] = await Promise.all([tools.web_search({query: "x"}), tools.web_search({query: "y"}), tools.web_search({query: "z"})]); return {a: a.length, b: b.length, c: c.length}` — three searches batched into one round-trip, model sees only the summary.',
 }
 
 /**
@@ -366,19 +353,6 @@ export const toolExamples: Partial<Record<ToolName, unknown[]>> = {
 	web_search: [
 		{ query: 'sveltekit remote functions 2026' },
 		{ query: 'pgvector hnsw vs ivfflat benchmark' },
-	],
-	run_code: [
-		// Parallel batching pattern — the canonical reason to use run_code instead of individual
-		// tool calls. Tool results stay inside the sandbox; only the structured returnValue
-		// reaches the model's context.
-		{
-			code: `const [a, b, c] = await Promise.all([
-  tools.web_search({ query: 'pgvector benchmarks' }),
-  tools.web_search({ query: 'hnsw recall accuracy' }),
-  tools.web_search({ query: 'ivfflat performance' }),
-])
-return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.title } }`,
-		},
 	],
 	create_monitor: [
 		// Deterministic path — narrow `extract` so the comparison is on the thing that matters.
@@ -417,90 +391,4 @@ return { topByQuery: { pgvector: a[0]?.title, hnsw: b[0]?.title, ivfflat: c[0]?.
 			rationale: 'Hand off to the coding agent to implement the approved plan.',
 		},
 	],
-}
-
-/**
- * Disclosure tier per tool — drives Tool Search Tool deferred loading.
- *
- *   `always`: shipped in the tools array on every request. Reserved for high-cardinality,
- *     orchestration-class tools the model reaches for constantly.
- *   `searchable`: discoverable via `search_tools(query)`. Once a tool name is returned by
- *     a search, the runtime adds it to the per-run loaded set and it appears in subsequent
- *     rounds' tools arrays. ~85% of the registry lives here.
- *
- * Approval gating is orthogonal to this tier — sensitive tools (push_branch,
- * create_pull_request, request_plan_approval) live in `searchable` and rely on the
- * existing `MANDATORY_APPROVAL_TOOLS` enforcement at execution time. Loading a tool ≠
- * permission to use it without approval.
- */
-export type ToolDisclosure = 'always' | 'searchable'
-
-const ALWAYS_LOADED: ToolName[] = [
-	'web_search',
-	'ask_user',
-	'run_code',
-	'search_tools',
-]
-
-export const toolDisclosure: Record<ToolName, ToolDisclosure> = (() => {
-	const m: Partial<Record<ToolName, ToolDisclosure>> = {}
-	for (const name of allToolNames) {
-		m[name] = ALWAYS_LOADED.includes(name) ? 'always' : 'searchable'
-	}
-	return m as Record<ToolName, ToolDisclosure>
-})()
-
-/**
- * Find tools matching a query, ranked by name + description relevance. Pure helper — the
- * runtime side-effect (registering matched names into the per-run loaded set) is wired in
- * the `search_tools` execution handler.
- */
-export type ToolSearchHit = { name: ToolName; description: string; score: number }
-
-export function searchToolsRegistry(query: string, limit = 10): ToolSearchHit[] {
-	const q = query.trim().toLowerCase()
-	if (q.length === 0) return []
-	const queryWords = q.split(/[^a-z0-9]+/).filter((w) => w.length > 0)
-
-	const hits: ToolSearchHit[] = []
-	for (const name of allToolNames) {
-		// Always-loaded tools are already in the model's surface; surfacing them here would
-		// be wasted output. Only suggest searchable tools.
-		if (toolDisclosure[name] !== 'searchable') continue
-		const desc = toolDescriptions[name] ?? ''
-		const score = scoreToolMatch(name, desc, q, queryWords)
-		if (score > 0) hits.push({ name, description: desc, score })
-	}
-	hits.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-	return hits.slice(0, limit)
-}
-
-function scoreToolMatch(name: string, description: string, q: string, queryWords: string[]): number {
-	const nameLower = name.toLowerCase()
-	const descLower = description.toLowerCase()
-	const nameParts = nameLower.split(/[^a-z0-9]+/).filter((w) => w.length > 0)
-
-	let score = 0
-
-	// Exact name match — strongest signal.
-	if (nameLower === q) score += 100
-
-	// Whole-name substring (e.g. query "git" → "git_status").
-	else if (nameLower.includes(q)) score += 30
-
-	// Per-query-word matching.
-	for (const word of queryWords) {
-		if (word.length < 2) continue
-		// Word matches a name part exactly.
-		if (nameParts.includes(word)) score += 15
-		// Word is a prefix of a name part.
-		else if (nameParts.some((p) => p.startsWith(word))) score += 8
-		// Word appears as a whole word in description.
-		const descWordRe = new RegExp(`(?:^|[^a-z0-9_])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^a-z0-9_])`, 'i')
-		if (descWordRe.test(descLower)) score += 4
-		// Word substring in description (weakest signal, capped contribution).
-		else if (descLower.includes(word)) score += 1
-	}
-
-	return score
 }

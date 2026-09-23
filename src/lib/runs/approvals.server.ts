@@ -3,6 +3,8 @@ import { db } from '$lib/db.server'
 import { chatRuns, type PendingApprovalEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
+import { scheduleNeedsInputNotification } from './needs-input.server'
+import { closePromptReviewItem, promptDedupeKey } from './prompt-review-items.server'
 
 export const APPROVAL_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -42,7 +44,8 @@ export async function enqueuePendingApproval(
 		await tx.update(chatRuns).set(patch).where(eq(chatRuns.id, runId))
 	})
 	// Wave 5 #20 — open a review item so approval requests show up in /review even when the
-	// SSE client is disconnected. Best-effort + deduped by token so retries collapse.
+	// SSE client is disconnected. Best-effort + deduped by token so retries collapse. It is
+	// closed again when the approval is settled; see prompt-review-items.server.
 	void (async () => {
 		try {
 			const { openReviewItem } = await import('$lib/observability/review.server')
@@ -52,12 +55,18 @@ export async function enqueuePendingApproval(
 				summary: `Tool approval requested: ${entry.toolName}`,
 				payload: { toolName: entry.toolName, args: entry.args, token: entry.token },
 				runId,
-				dedupeKey: `approval:${entry.token}`,
+				dedupeKey: promptDedupeKey('approval', entry.token),
 			})
 		} catch (err) {
 			logger.warn('[approvals] review item open failed (non-fatal)', { err })
 		}
 	})()
+	scheduleNeedsInputNotification({
+		runId,
+		token: entry.token,
+		kind: 'approval',
+		summary: `Waiting for approval to run ${entry.toolName}`,
+	})
 }
 
 /** Run states an approval answer can still land in. */
@@ -106,12 +115,23 @@ export async function findRunAwaitingApproval(input: {
 	}
 }
 
+export type DecisionContext = {
+	/** Who answered, for the review item's audit trail. */
+	decidedBy?: string | null
+	note?: string
+}
+
+/**
+ * Record the operator's answer to a pending approval, from the chat's Allow/Deny card or from
+ * /review. The approval's review item closes with it — it used to stay open forever.
+ */
 export async function recordApprovalDecision(
 	runId: string,
 	token: string,
 	approved: boolean,
+	context: DecisionContext = {},
 ): Promise<{ resolved: boolean }> {
-	return db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		const [row] = await tx
 			.select({ pendingApprovals: chatRuns.pendingApprovals })
 			.from(chatRuns)
@@ -136,6 +156,14 @@ export async function recordApprovalDecision(
 		await tx.update(chatRuns).set({ pendingApprovals: next }).where(eq(chatRuns.id, runId))
 		return { resolved: true }
 	})
+	if (result.resolved) {
+		await closePromptReviewItem('approval', token, {
+			action: approved ? 'approved' : 'denied',
+			decidedBy: context.decidedBy,
+			note: context.note,
+		})
+	}
+	return result
 }
 
 async function removePendingApproval(runId: string, token: string): Promise<void> {
@@ -186,6 +214,7 @@ export async function awaitApprovalDecision(
 
 		if (Date.now() >= deadline) {
 			await removePendingApproval(runId, token)
+			await closePromptReviewItem('approval', token, { action: 'timed_out' })
 			return false
 		}
 

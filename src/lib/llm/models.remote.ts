@@ -10,12 +10,12 @@ import { listGatewayModelIds } from '$lib/llm/gateway-models.server'
 /**
  * The model list for the picker.
  *
- * Failure here must never take a page down. `RecentChats.svelte` awaits this inside a
- * `$derived`, and it renders in the sidebar of *every* page — so before this catch, any
- * failure reaching OpenRouter (an outage, a DNS blip, a network policy that does not allow
- * the host) turned into `500 Internal Error` on `/` and on every `/chat/[id]`. A
- * self-hosted app whose own chat page is unreachable because a third-party catalogue is
- * unreachable is worse than one with an empty model dropdown.
+ * Failure here must never take a page down. The chat page awaits this inside a `$derived`,
+ * and the sidebar of *every* page used to (`RecentChats.svelte`, since deleted) — so before
+ * this catch, any failure reaching OpenRouter (an outage, a DNS blip, a network policy that
+ * does not allow the host) turned into `500 Internal Error` on `/` and on every
+ * `/chat/[id]`. A self-hosted app whose own chat page is unreachable because a third-party
+ * catalogue is unreachable is worse than one with an empty model dropdown.
  *
  * CI cannot catch this: OpenRouter's model catalogue answers unauthenticated, so a runner
  * with a placeholder key still gets a 200 and the failure path never runs. It reproduces

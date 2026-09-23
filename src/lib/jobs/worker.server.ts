@@ -6,6 +6,7 @@ import {
 	claimNextJob,
 	completeJob,
 	failJob,
+	getJobById,
 	heartbeatJob,
 	type ClaimJobOptions,
 } from './jobs.server'
@@ -25,6 +26,7 @@ import { logger } from '$lib/observability/logger'
  *   - Async function `(job: JobRow, ctx: HandlerContext) => Promise<JobResult>`
  *   - Throws → failJob (which retries up to maxAttempts then transitions to failed)
  *   - Returns a result → completeJob with the result as metadata
+ *   - Either way, a job that was canceled while it ran stays canceled (see jobs.server)
  *   - Calls `ctx.checkCancellation()` at safe boundaries to honor cancellation
  *
  * The worker is opt-in: callers wire `startJobWorker()` once on boot behind an env flag so
@@ -37,8 +39,46 @@ import { logger } from '$lib/observability/logger'
 export type JobHandlerContext = {
 	job: JobRow
 	workerId: string
-	/** Throws when the job has been canceled — handlers should call at safe boundaries. */
+	/**
+	 * Throws `JobCanceledError` when the job has been canceled — handlers should call at safe
+	 * boundaries. Any other error it throws is not a cancellation: a database hiccup, or the
+	 * queue having taken the job back after this worker's lease lapsed (`errorForLostJob`).
+	 */
 	checkCancellation: () => Promise<void>
+}
+
+/**
+ * What `checkCancellation` throws when the job was canceled or removed.
+ *
+ * Its own type so a handler can tell "stop, the user canceled" from "the heartbeat write
+ * failed". The research runner used to see a plain Error here, record the run as failed
+ * over the user's cancel, and hand the worker a failure to retry — so a canceled run came
+ * back and finished.
+ */
+export class JobCanceledError extends Error {
+	constructor(jobId: string) {
+		super(`Job ${jobId} canceled or removed`)
+		this.name = 'JobCanceledError'
+	}
+}
+
+export function isJobCanceledError(err: unknown): err is JobCanceledError {
+	return err instanceof JobCanceledError || (err instanceof Error && err.name === 'JobCanceledError')
+}
+
+/**
+ * What `checkCancellation` throws once the heartbeat finds the job no longer in flight.
+ *
+ * `heartbeatJob` returns null for a job that was canceled, and also for one the claim path
+ * retired as failed after this worker's lease lapsed — a database outage longer than the
+ * lease. Only the first is a cancel. Reporting the second as one would record a research run
+ * as canceled by a user who never pressed Cancel, so it gets a plain Error, which a handler
+ * treats as the failure it is. A job that is gone counts as canceled, as it always has.
+ */
+export async function errorForLostJob(jobId: string): Promise<Error> {
+	const current = await getJobById(jobId)
+	if (!current || current.status === 'canceled') return new JobCanceledError(jobId)
+	return new Error(`Job ${jobId} was taken back by the queue (now ${current.status}) after this worker's lease lapsed`)
 }
 
 export type JobResult = Record<string, unknown> | undefined | void
@@ -147,7 +187,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 				workerId,
 				checkCancellation: async () => {
 					const fresh = await heartbeatJob(job.id, leaseTtlMs)
-					if (!fresh) throw new Error(`Job ${job.id} canceled or removed`)
+					if (!fresh) throw await errorForLostJob(job.id)
 				},
 			})
 			const finished = await completeJob(job.id, normalizeResult(result))

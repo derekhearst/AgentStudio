@@ -18,7 +18,16 @@ Which models a *chat* can run on — Claude on the subscription, or other models
 
 ## Model ids
 
-The app keeps two spellings of a Claude model. The Agent SDK engine uses Anthropic's bare id (`claude-haiku-4-5`), and since the engine migration that is what the app's defaults and stored settings hold. OpenRouter only accepts its own catalogue names (`anthropic/claude-haiku-4.5`) and refuses anything else. So `chat()` and `streamChat()` convert before sending (`toOpenRouterModelId` in `src/lib/llm/openrouter-model.ts`): a bare Claude id gains the `anthropic/` prefix, loses any snapshot date or `[1m]` suffix, and has its version written with a dot. An id that already names a vendor (`openai/gpt-4o-mini`) is sent as it is. Callers that log usage log the converted id, since that is the one the model catalogue prices.
+The app keeps two spellings of a Claude model. The Agent SDK engine uses Anthropic's bare id (`claude-haiku-4-5`), and since the engine migration that is what the app's defaults and stored settings hold. OpenRouter, which the rest of the app still calls directly (research, memory mining and reranking, monitors, titles, automations, the legacy runtime loop), only accepts its own catalogue names (`anthropic/claude-haiku-4.5`) and refuses anything else. So `chat()` and `streamChat()` convert before sending (`toOpenRouterModelId` in `src/lib/llm/openrouter-model.ts`), and the usage ledger looks prices up with the same conversion:
+
+| Stored id | Sent to OpenRouter |
+| --- | --- |
+| `claude-sonnet-5` | `anthropic/claude-sonnet-5` |
+| `claude-haiku-4-5`, `claude-haiku-4-5-20251001`, `claude-sonnet-4-5[1m]` | `anthropic/claude-haiku-4.5`, `anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.5` |
+| `anthropic/claude-sonnet-4-6` | `anthropic/claude-sonnet-4.6` |
+| `openai/gpt-4o-mini`, or an alias such as `sonnet` | unchanged |
+
+A bare Claude id gains the `anthropic/` prefix, loses any snapshot date or `[1m]` suffix, and has its version written with a dot. Only ids it can map with certainty are changed; anything else goes to OpenRouter as written, so OpenRouter's own error names it. Callers that log usage log the converted id, since that is the one the model catalogue prices. Before 2026-09-23 the bare id was sent as-is, so every research run failed at its first planner call, every memory extraction and rerank quietly degraded, and the few calls that did succeed were priced at nothing.
 
 The other direction is `normalizeModelId` in `src/lib/engine/model-backend.ts`: an OpenRouter Claude slug becomes the engine's id (`anthropic/claude-haiku-4.5` → `claude-haiku-4-5`: prefix stripped, dotted version dashed). Non-Anthropic ids are left alone — they are the gateway's ids.
 
@@ -93,6 +102,7 @@ Options accepted by `streamChat()`:
 | `listModels()`                              | Returns full model catalog from OpenRouter (1h cache)                    |
 | `getModel(id)`                              | Returns a single `ModelInfo` by ID                                       |
 | `calculateCost(model, tokensIn, tokensOut)` | Returns USD cost as a number using live pricing                          |
+| `toOpenRouterModelId(id)`                   | Translates a stored model id into the one OpenRouter knows (see Model ids) |
 | `synthesizeSpeech(input)`                   | One chunk of text → MP3 via OpenRouter; budget-checked, ledgered as `tts` |
 | `listSpeechModels()`                        | OpenRouter's speech models with per-character price and voices (1h cache; a failed fetch is retried after a minute) |
 
@@ -126,7 +136,7 @@ OpenRouter availability is not treated as a special case. If the service is down
 
 ## Behavior Contracts
 
-- `calculateCost()` returns 0 if the model is not found in the catalog — never throws.
+- A call whose model has no catalogue price is never recorded as free without a word: the usage ledger marks the row unpriced and logs a warning (see [../cost/spec.md](../cost/spec.md)). A failed catalogue refresh keeps pricing from the previous copy.
 - `streamChat()` always calls `onUsage` before resolving, even if the response was empty.
 - Tool call arguments are accumulated across streaming chunks before `onToolCall` is fired.
 - Retry attempts are transparent to callers — `onToken`, `onToolCall`, and `onUsage` are only called for the successful attempt.

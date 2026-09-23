@@ -1,8 +1,8 @@
 import { z } from 'zod'
-import { registerJobHandler } from '$lib/jobs/worker.server'
+import { registerJobHandler, type JobHandlerContext } from '$lib/jobs/worker.server'
 import { runResearchLoop } from './research-runner.server'
 import { getResearchById } from './research.server'
-import { createNotificationRecord, sendPushToAll } from '$lib/notifications/notifications.server'
+import { notifyUser } from '$lib/notifications/notify.server'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -19,6 +19,14 @@ import { logger } from '$lib/observability/logger'
  * The handler returns the orchestrator's outcome so the job's `result` jsonb captures the
  * final source/cited counts and total cost — admins can see this directly in the
  * `/settings/jobs` viewer alongside the trace in the research detail UI.
+ *
+ * How each outcome ends the job:
+ *   - complete → the job completes, and the user is notified
+ *   - canceled → the handler returns; the job was canceled with the research and stays so
+ *   - failed   → the handler throws, so the job is recorded as failed. The job's second
+ *                attempt (kept for a worker that dies mid-run, see `enqueueResearchRun`) finds
+ *                the row already failed and throws the same error, so a failed run is never
+ *                run again
  */
 
 const RESEARCH_RUN_PAYLOAD = z.object({
@@ -27,43 +35,47 @@ const RESEARCH_RUN_PAYLOAD = z.object({
 
 let registered = false
 
+export async function runResearchJob({ job, checkCancellation }: JobHandlerContext) {
+	const parsed = RESEARCH_RUN_PAYLOAD.safeParse(job.payload)
+	if (!parsed.success) {
+		throw new Error(`research_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
+	}
+	// Wave 4 #17 phase 3 — pass the worker's checkCancellation through so the runner can
+	// bail at safe boundaries when the user clicks Cancel. The runner ALSO checks the
+	// research row directly so a cancel via cancelResearchCommand is honored even if the
+	// underlying job-cancel is racing.
+	const outcome = await runResearchLoop(parsed.data.researchId, { checkCancellation })
+	if (outcome.status === 'failed') {
+		throw new Error(outcome.error ?? 'research run failed')
+	}
+
+	// Notify on success — once, for the attempt that actually finished the report. Best-effort:
+	// failures here never roll back the orchestrator.
+	if (outcome.status === 'complete' && !outcome.alreadyFinished) {
+		await fireCompletionNotification(outcome.researchId).catch((err) => {
+			logger.warn('[research_run] notification dispatch failed (non-fatal)', { err })
+		})
+	}
+
+	return {
+		researchId: outcome.researchId,
+		status: outcome.status,
+		sourceCount: outcome.sourceCount,
+		citedCount: outcome.citedCount,
+		costUsd: outcome.costUsd,
+	}
+}
+
 export function registerResearchJobHandlers(): void {
 	if (registered) return
-	registerJobHandler('research_run', async ({ job, checkCancellation }) => {
-		const parsed = RESEARCH_RUN_PAYLOAD.safeParse(job.payload)
-		if (!parsed.success) {
-			throw new Error(`research_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
-		}
-		// Wave 4 #17 phase 3 — pass the worker's checkCancellation through so the runner can
-		// bail at safe boundaries when the user clicks Cancel. The runner ALSO checks the
-		// research row directly so a cancel via cancelResearchCommand is honored even if the
-		// underlying job-cancel is racing.
-		const outcome = await runResearchLoop(parsed.data.researchId, { checkCancellation })
-		if (outcome.status === 'failed') {
-			throw new Error(outcome.error ?? 'research run failed')
-		}
-
-		// Notify on success. Best-effort: failures here never roll back the orchestrator.
-		if (outcome.status === 'complete') {
-			await fireCompletionNotification(outcome.researchId).catch((err) => {
-				logger.warn('[research_run] notification dispatch failed (non-fatal)', { err })
-			})
-		}
-
-		return {
-			researchId: outcome.researchId,
-			status: outcome.status,
-			sourceCount: outcome.sourceCount,
-			citedCount: outcome.citedCount,
-			costUsd: outcome.costUsd,
-		}
-	})
+	registerJobHandler('research_run', runResearchJob)
 	registered = true
 }
 
 async function fireCompletionNotification(researchId: string): Promise<void> {
 	const r = await getResearchById(researchId)
-	if (!r) return
+	// Read back, so a run the user canceled at the last moment is never announced as complete.
+	if (!r || r.status !== 'complete') return
 	const queryShort = r.query.length > 120 ? `${r.query.slice(0, 117)}…` : r.query
 	const payload = {
 		title: 'Research complete',
@@ -71,18 +83,7 @@ async function fireCompletionNotification(researchId: string): Promise<void> {
 		url: `/research/${r.id}`,
 		tag: `research:${r.id}`,
 	}
-	// In-app record so the notifications UI can show it; user-scoped so other users
-	// don't see someone else's research.
-	await createNotificationRecord(payload, r.userId).catch((err) => {
-		logger.warn('[research_run] in-app notification record failed', { err })
-	})
-	// Web push to any subscribed devices. Silently no-ops when VAPID keys aren't configured
-	// (e.g. local dev) — the in-app row is still written.
-	if (r.userId) {
-		try {
-			await sendPushToAll(payload, r.userId)
-		} catch (err) {
-			logger.warn('[research_run] web push failed (non-fatal, possibly missing VAPID keys)', { err })
-		}
-	}
+	// In-app row plus web push, user-scoped so other users don't see someone else's research.
+	// "Task completed" in Settings → Notifications switches both off.
+	await notifyUser({ userId: r.userId, category: 'taskCompleted', payload })
 }

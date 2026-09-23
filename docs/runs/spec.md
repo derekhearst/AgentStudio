@@ -117,6 +117,12 @@ The chat's Allow / Deny card can appear a moment before step 1 has happened. An 
 
 `ask_user` follows the same pattern as approvals, written to `runs.pendingQuestions`, resolved via the answer endpoint.
 
+### Approvals and questions in the review inbox
+
+Each pending approval and each `ask_user` question also opens an item in the /review inbox, so a user who is not watching the chat can find it (and, after a minute, gets a "Needs input" notification). The item can be answered from /review — Approve, Deny, or the answer card — with the same effect as answering in the chat.
+
+The item closes by itself when the prompt is settled: answered in either place (resolved, with who answered), timed out after five minutes (dismissed), or left behind by a run that ended or was reaped (dismissed by the check that runs with the reaper every five minutes). Before 2026-09-23 these items were never closed, and answering one in /review did not reach the run.
+
 ### Incremental block persistence
 
 As the loop runs, content blocks (`thinking`, `text`, `tool_call`, `tool_result`) are appended to `runs.streamBlocks` after each block is finalized. This allows the state of a live run to be inspected from outside the stream.
