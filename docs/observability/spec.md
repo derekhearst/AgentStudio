@@ -140,7 +140,7 @@ The logger writes to two sinks:
 
 Operators browse logs at `/observability/logs` (admin-only, mobile-friendly). Filters: min level, source, free-text search across message + JSON context, time-since, row limit. The sidebar shows row counts per source for the last 15min/1h/6h/24h so you can spot a noisy domain without scanning.
 
-A daily `app_logs_purge` job deletes rows older than `APP_LOGS_RETENTION_DAYS` (default `14`). The job is registered alongside the metrics handler at bootstrap.
+A daily `app_logs_purge` job deletes rows older than `APP_LOGS_RETENTION_DAYS` (default `14`). The same job, with the same window, deletes old `hook_invocations` rows (the hook log behind `/settings/hooks`), which grow by one row per hook per chat tool call. The job is registered alongside the metrics handler at bootstrap.
 
 Intentional exceptions where `console.*` is preferred over `logger`:
 

@@ -72,7 +72,8 @@ AgentStudio has a single owner. The owner binds hooks on any agent and sees ever
 ## Business rules
 
 - A hook never blocks, changes or fails the run it watches. It runs in the background with a time limit (5 seconds for built-ins, 8 for skill hooks).
-- Every hook run is recorded, successful or not.
+- Every hook run is recorded, successful or not — including a built-in that looked at the event and had nothing to do, such as `activity-impactful-tools` after a `Read`.
+- Records are kept for 14 days and then deleted by the daily log clean-up, the same one that trims the server log (`APP_LOGS_RETENTION_DAYS` changes both). Since chats raise hook events, every chat tool call adds records, and before this nothing ever removed them.
 - An opt-in built-in runs only for agents that bind it. (Opt-in hooks used to run on every event, and twice for an agent that bound one.)
 - A binding that names neither a built-in nor an existing, enabled skill is recorded as a failure with the reason, "skill not found" or "skill is disabled".
 - A skill hook sees at most the first 4,000 characters of the event's details.
