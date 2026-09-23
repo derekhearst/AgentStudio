@@ -48,11 +48,11 @@ The groups of AgentStudio tools:
 ### Choosing which tools ask first
 
 1. Open **Settings → Tool Approval**.
-2. Tick a tool to make it ask before it runs, or untick it. Every tool in the list can be ticked, including `web_search` and `ask_user`. **All** and **None** tick or untick the whole list.
+2. Tick a tool to make it ask before it runs, or untick it. Every tool in the list can be ticked, including `web_search`. **All** and **None** tick or untick the whole list.
 3. Or turn on **Require approval for all tools**, which covers every tool, Claude's own included, and overrides the ticks.
 4. Press **Save**.
 
-The list shows exactly the AgentStudio tools a chat can call. It used to be split into an "Always loaded" group, whose ticks could not be changed, and a "Searchable" group. Both described a way of loading tools that the chat engine never had, so the split is gone.
+The list shows exactly the AgentStudio tools a chat can call and an approval can pause. `ask_user` is not on it: it is the agent asking you a question, answered in its own card, so there is nothing to approve. The list used to be split into an "Always loaded" group, whose ticks could not be changed, and a "Searchable" group. Both described a way of loading tools that the chat engine never had, so the split is gone.
 
 ### Running code
 

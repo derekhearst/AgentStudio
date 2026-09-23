@@ -65,7 +65,7 @@ One row per user. Created with defaults when the user first accesses settings.
 }
 ```
 
-The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own. Its old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
+The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own. `ask_user` is left off, because it is a question to you rather than an action, and no approval setting ever reaches it. The panel's old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
 
 **`memoryConfig`**
 

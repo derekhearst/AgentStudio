@@ -17,25 +17,28 @@ import { BUILTIN_TOOLS } from '../src/lib/tools/tools'
  *   - and the "Always loaded" chips were rendered disabled, so `web_search`, which the engine
  *     registers and gates by name, could only be made to ask through the all-tools wildcard.
  *
+ * Unlocking the chips must not swap one false promise for another: `ask_user` is handed to
+ * the host before any approval gate runs, so a tick on it could never take effect.
+ *
  * The first test is pure. The second opens the page but saves nothing: settings are a single
  * shared row.
  */
 
 test.describe('settings/tool-approval — the list is the engine surface', () => {
-	test('it lists exactly the registry tools the engine registers', () => {
+	test('it lists exactly the registry tools the engine registers and gates', () => {
 		// `buildToolServer` registers every registry tool outside ENGINE_EXCLUDED_TOOLS for an
-		// unscoped run. A setting for anything else could never take effect.
-		const engineRegistered = allToolNames.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name)).sort()
-		expect(BUILTIN_TOOLS.map((t) => t.name)).toEqual(engineRegistered)
+		// unscoped run, and the engine's gate sees all of them but ask_user. A setting for
+		// anything else could never take effect.
+		const gated = allToolNames.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && name !== 'ask_user').sort()
+		expect(BUILTIN_TOOLS.map((t) => t.name)).toEqual(gated)
 	})
 
-	test('no entry promises a tool that is gone or hidden', () => {
+	test('no entry promises a tool that is gone, hidden or never gated', () => {
 		const names = new Set(BUILTIN_TOOLS.map((t) => t.name))
-		for (const gone of ['run_code', 'search_tools', 'run_subagent']) {
+		for (const gone of ['run_code', 'search_tools', 'run_subagent', 'ask_user']) {
 			expect(names.has(gone), gone).toBe(false)
 		}
 		expect(names.has('web_search')).toBe(true)
-		expect(names.has('ask_user')).toBe(true)
 	})
 
 	test('entries carry no tier, so none can be rendered locked', () => {
@@ -59,5 +62,6 @@ test.describe('settings/tool-approval — the panel', () => {
 		await expect(page.getByText('Always loaded')).toHaveCount(0)
 		await expect(page.getByRole('checkbox', { name: 'run_code', exact: true })).toHaveCount(0)
 		await expect(page.getByRole('checkbox', { name: 'search_tools', exact: true })).toHaveCount(0)
+		await expect(page.getByRole('checkbox', { name: 'ask_user', exact: true })).toHaveCount(0)
 	})
 })
