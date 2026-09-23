@@ -416,7 +416,8 @@
 		{/each}
 		{#if conversations.length === 0 && messageHits.length === 0}
 			<div class="console-chatempty">{showingArchive ? 'Nothing archived.' : 'No conversations yet'}</div>
-		{:else if sorted.length === 0 && messageHits.length === 0 && searchStatus !== 'loading'}
+		{:else if sorted.length === 0 && searchStatus === 'idle'}
+			<!-- Once the server search runs, its own section says whether anything matched. -->
 			<div class="console-chatempty">No chats match.</div>
 		{/if}
 
