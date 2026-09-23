@@ -4,6 +4,7 @@
 		resolveReviewItemCommand,
 	} from '$lib/observability/review.remote';
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
+	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
@@ -86,9 +87,9 @@
 				checkName: target.checkName ?? null,
 				reviewItemId: itemId,
 			});
-			alert(
-				`Fix run queued (job ${result.jobId.slice(0, 8)}). The agent replies in the conversation that opened the pull request.`
-			);
+			// A second press returns the item's first job, which may already be finished or
+			// failed — say which, rather than claiming a fresh run was queued.
+			alert(describeFixRunJob(result));
 			onChange();
 		} catch (e) {
 			alert(e instanceof Error ? e.message : 'Failed to queue the fix run');
