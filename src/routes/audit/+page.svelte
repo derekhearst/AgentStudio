@@ -129,11 +129,11 @@
 					<li class="card card-body bg-base-100 border-base-300/60 rounded-xl border">
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+							class="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 							onclick={() => toggleExpand(evt.id)}
 						>
 							<span class="badge badge-xs {actionTone(evt.action)}">{evt.action}</span>
-							<span class="line-clamp-1 flex-1 font-medium leading-tight">{evt.summary ?? '(no summary)'}</span>
+							<span class="order-last line-clamp-1 w-full font-medium leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{evt.summary ?? '(no summary)'}</span>
 							{#if evt.actorUsername}
 								<span class="font-mono text-xs text-base-content/55">{evt.actorUsername}</span>
 							{/if}

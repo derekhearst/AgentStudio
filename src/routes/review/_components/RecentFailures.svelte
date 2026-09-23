@@ -28,10 +28,10 @@
 			<li>
 				<a
 					href="/review/trace/{failure.runId}"
-					class="flex items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 text-sm hover:bg-base-200/40"
+					class="flex flex-wrap items-center gap-2 rounded-xl border border-base-300/60 bg-base-100 px-3 py-2 text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 				>
 					<span class="badge badge-xs {kindBadge(failure.kind)}">{kindLabel(failure.kind)}</span>
-					<span class="line-clamp-1 flex-1 text-xs leading-tight">{failure.label}</span>
+					<span class="order-last line-clamp-1 w-full text-xs leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{failure.label}</span>
 					<span class="font-mono text-[10px] text-base-content/40">{failure.runId.slice(0, 8)}</span>
 					<span class="font-mono text-[10px] text-base-content/55">{fmtAge(failure.occurredAt)}</span>
 					<span class="text-xs text-base-content/40">→</span>
