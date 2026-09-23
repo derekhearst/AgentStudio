@@ -119,6 +119,21 @@ export function validateExclusionPattern(kind: ExclusionKind, pattern: string): 
 }
 
 /**
+ * What the rules list says about a rule already saved, or null when the editor would accept it
+ * today: the editor's complaint, plus what the rule does in the meantime. A rule saved before a
+ * validation change keeps running — one that no longer compiles never matches, and any other
+ * runs under the scanner's time limit.
+ */
+export function describeSavedRuleProblem(kind: ExclusionKind, pattern: string): string | null {
+	const problem = validateExclusionPattern(kind, pattern)
+	if (!problem) return null
+	if (compileExclusionRule({ name: '', kind, pattern }).invalid) {
+		return `${problem} Until it is fixed, this rule never matches.`
+	}
+	return `${problem} It still runs, but a turn it cannot finish checking in time is dropped.`
+}
+
+/**
  * The first repeated group that can split a run of text more than one way, or null when there
  * is none: a group repeated by `*`, `+` or `{n,…}` whose inside also repeats, where some
  * alternative has nothing that must appear between one repetition and the next — `(a+)+`,

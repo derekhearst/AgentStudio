@@ -23,6 +23,7 @@ export {
 	MAX_PATTERN_LENGTH,
 	compileExclusionRule,
 	compileExclusionRules,
+	describeSavedRuleProblem,
 	redactSample,
 	validateExclusionPattern,
 } from '$lib/memory/exclusions'

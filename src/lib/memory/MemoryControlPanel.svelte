@@ -246,7 +246,7 @@
 							{/if}
 							<code class="rule__pattern">{rule.pattern}</code>
 							{#if rule.problem}
-								<p class="rule__problem">{rule.problem} It still runs, but a turn it cannot finish checking in time is dropped.</p>
+								<p class="rule__problem">{rule.problem}</p>
 							{/if}
 						</li>
 					{:else}

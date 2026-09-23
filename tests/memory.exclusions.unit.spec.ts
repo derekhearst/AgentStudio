@@ -4,6 +4,7 @@ import {
 	compileBuiltinExclusionRules,
 	compileExclusionRule,
 	compileExclusionRules,
+	describeSavedRuleProblem,
 	findExclusionMatch,
 	findNestedQuantifier,
 	MAX_PATTERN_LENGTH,
@@ -170,6 +171,21 @@ test.describe('memory/exclusions — validation and redaction', () => {
 	test('every built-in pattern passes the nested-repetition check', () => {
 		for (const rule of BUILTIN_EXCLUSION_RULES) {
 			expect(findNestedQuantifier(rule.pattern), rule.name).toBeNull()
+		}
+	})
+
+	test('the rules list says what a rule the editor would now refuse does meanwhile', () => {
+		// Saved before the check existed: still runs, under the scanner's time limit.
+		const slow = describeSavedRuleProblem('regex', '(a+)+$')
+		expect(slow).toContain('repeats a group')
+		expect(slow).toContain('It still runs')
+		// No longer compiles: never matches, so "still runs" would be wrong.
+		const broken = describeSavedRuleProblem('regex', '([unclosed')
+		expect(broken).toContain('Invalid regular expression')
+		expect(broken).toContain('never matches')
+		expect(describeSavedRuleProblem('regex', String.raw`\b\d{3}-\d{2}-\d{4}\b`)).toBeNull()
+		for (const rule of BUILTIN_EXCLUSION_RULES) {
+			expect(describeSavedRuleProblem(rule.kind, rule.pattern), rule.name).toBeNull()
 		}
 	})
 

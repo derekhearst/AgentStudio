@@ -27,6 +27,7 @@ import {
 } from '$lib/memory/curation.server'
 import {
 	compileExclusionRules,
+	describeSavedRuleProblem,
 	ensureBuiltinExclusionRules,
 	MAX_PATTERN_LENGTH,
 	scanForExclusion,
@@ -262,9 +263,9 @@ export const listMemoryExclusionRulesQuery = query(async () => {
 		.from(memoryExclusionRules)
 		.where(eq(memoryExclusionRules.userId, user.id))
 		.orderBy(desc(memoryExclusionRules.builtin), memoryExclusionRules.name)
-	// What the editor would refuse today — a rule saved before a validation change still runs,
-	// under the scanner's time limit, and the list says why it should be rewritten.
-	return rows.map((row) => ({ ...row, problem: validateExclusionPattern(row.kind, row.pattern) }))
+	// What the editor would refuse today: a rule saved before a validation change still runs,
+	// and the list says why it should be rewritten and what it does meanwhile.
+	return rows.map((row) => ({ ...row, problem: describeSavedRuleProblem(row.kind, row.pattern) }))
 })
 
 const saveExclusionRuleSchema = z.object({
