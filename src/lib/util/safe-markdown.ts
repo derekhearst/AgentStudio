@@ -21,7 +21,10 @@ import type { Token, Tokens } from 'marked'
  *   the following text unescaped, so `<kbd>x <img src=x onerror=…>` gets a live `<img>`
  *   through even when the `html` renderer escapes every tag. `sanitizedText` closes that.
  * - Links must be http, https, mailto, or relative to our own origin.
- * - Images from anywhere but our own origin are not loaded automatically.
+ * - Images load automatically only from where the app serves uploaded images
+ *   (`inlineImageSrc`). "Our own origin" is not enough: an `<img>` is a GET the browser
+ *   sends with the user's cookies and without a click, so a same-origin URL that
+ *   redirects, or that changes state on GET, becomes an exfiltration or CSRF primitive.
  */
 
 export function escapeHtml(value: string): string {
@@ -37,6 +40,10 @@ export function escapeHtml(value: string): string {
  * Escape text content the way `marked` does: every `<`, `>` and quote, and every `&`
  * that does not already start an entity. Leaving entities alone keeps `&rarr;` an arrow,
  * and is safe in text content, where an entity can only ever decode to text.
+ *
+ * Also right for a quoted `title` or `alt` attribute, whose value is only ever shown:
+ * an entity there decodes to a character of the value and cannot end the attribute.
+ * Never for `href` or `src`, where a decoded entity would change the URL.
  */
 export function escapeText(value: string): string {
 	return value
@@ -148,11 +155,35 @@ export function safeUrl(raw: string | null | undefined): SafeUrl | null {
 	return { href, external: url.protocol !== 'mailto:' && url.origin !== SENTINEL_ORIGIN }
 }
 
-/** An image source we will load without asking: our own origin only. */
-export function sameOriginImageSrc(raw: string | null | undefined): string | null {
+/**
+ * An uploaded file: `/api/upload/<uuid>.<ext>`. That route only ever reads one file from
+ * the upload directory, never redirects and changes nothing, so loading it is harmless.
+ */
+const UPLOADED_IMAGE_PATH = /^\/api\/upload\/[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+/**
+ * An image source we will load without asking, or null for "make it a link instead".
+ *
+ * Only the upload route qualifies. Any other path on our origin is a request the reader
+ * never chose to make: a route that redirects forwards it (and whatever the model put in
+ * the URL) to another site, and a route that acts on GET acts. The path is judged after
+ * the URL parser has normalised it (`/api/upload/../x` is `/x`), and that normalised path
+ * is what gets emitted, so the browser fetches exactly what was checked. Query and
+ * fragment are dropped; the route reads neither. The chat's own attachments use exactly
+ * this form (`/api/upload/<name>`, see `routes/api/upload/+server.ts`).
+ */
+export function inlineImageSrc(raw: string | null | undefined): string | null {
 	const url = safeUrl(raw)
-	if (!url || url.external || /^mailto:/i.test(url.href)) return null
-	return url.href
+	// A path without a leading `/` is relative to whichever page shows the message.
+	if (!url || url.external || !url.href.startsWith('/')) return null
+	let parsed: URL
+	try {
+		parsed = new URL(url.href, `${SENTINEL_ORIGIN}/`)
+	} catch {
+		return null
+	}
+	if (parsed.origin !== SENTINEL_ORIGIN || !UPLOADED_IMAGE_PATH.test(parsed.pathname)) return null
+	return parsed.pathname
 }
 
 /**

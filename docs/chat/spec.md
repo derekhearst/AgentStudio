@@ -231,8 +231,10 @@ Assistant replies, thinking, subagent results and `ask_user` questions are writt
 | Any other HTML (`<script>`, `<img>`, `<style>`, `<div>`, tags with attributes) | Shown as text, never run |
 | A link to an `http`, `https` or `mailto` address, or a page inside the app | A normal link; outside links open in a new tab without telling the site where you came from |
 | A link using any other scheme (`javascript:`, `data:` and so on) | Just the link text, with no link |
-| An image stored in the app (for example an uploaded attachment) | Shown inline |
-| An image from anywhere else | A link labelled "Image: …" that opens only if the reader clicks it |
+| An uploaded image (an attachment stored by the app) | Shown inline |
+| Any other image, including other addresses inside the app | A link labelled "Image: …" that opens only if the reader clicks it |
+
+Images are the one place where "inside the app" is not good enough. The browser fetches an image as soon as the reply is shown, with the reader's login, and without asking. An address inside the app that redirects somewhere else (or that changes something when it is visited) would turn that fetch into a leak or an unwanted action. So only the upload store, which just returns the stored file, is loaded automatically.
 
 The renderer checks itself when the app starts by running a set of known attack samples through it. If any of them gets through (for example after a library upgrade changed how it works), replies are shown as plain text instead.
 
@@ -249,7 +251,7 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Run tree nodes are derived from durable `runs` lineage (`id`, `parentRunId`, `sessionId`) and are never inferred from transient UI state.
 - An attachment on a message is either delivered to the model or warned about on that message. There is no path that accepts a file and silently ignores it.
 - A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
-- Nothing the model writes can run script in the app, and displaying a reply never loads an image from outside the app.
+- Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
 
 ## Roles & Permissions
 

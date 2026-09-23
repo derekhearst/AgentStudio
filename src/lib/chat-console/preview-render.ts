@@ -1,6 +1,6 @@
 import { Marked, type Token, type Tokens } from 'marked'
 import hljs from 'highlight.js/lib/core'
-import { escapeHtml, sanitizedText, sanitizerHolds } from '$lib/util/safe-markdown'
+import { escapeHtml, escapeText, sanitizedText, sanitizerHolds } from '$lib/util/safe-markdown'
 import { dirName, normalizePreviewUrl } from './preview-kinds'
 
 /**
@@ -192,15 +192,15 @@ previewMarked.use({
 			const inner = this.parser.parseInline(tokens)
 			const safe = normalizePreviewUrl(href)
 			if (!safe) return inner
-			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+			const titleAttr = title ? ` title="${escapeText(title)}"` : ''
 			return `<a href="${escapeHtml(safe)}" target="_blank" rel="noopener noreferrer nofollow"${titleAttr}>${inner}</a>`
 		},
 
 		image({ href, title, text }: Tokens.Image): string {
 			const src = resolveImageSrc(href)
-			if (!src) return escapeHtml(text || href)
-			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
-			return `<img src="${escapeHtml(src)}" alt="${escapeHtml(text ?? '')}"${titleAttr} loading="lazy" />`
+			if (!src) return text ? escapeText(text) : escapeHtml(href)
+			const titleAttr = title ? ` title="${escapeText(title)}"` : ''
+			return `<img src="${escapeHtml(src)}" alt="${escapeText(text ?? '')}"${titleAttr} loading="lazy" />`
 		},
 
 		code({ text, lang }: Tokens.Code): string {
