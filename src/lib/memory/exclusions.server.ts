@@ -15,6 +15,7 @@ import {
 	compileExclusionRule,
 	type CompiledExclusionRule,
 } from '$lib/memory/exclusions'
+import { scanForExclusion, type ExclusionScanMatch } from '$lib/memory/exclusion-scan.server'
 import { logger } from '$lib/observability/logger'
 
 export {
@@ -78,6 +79,24 @@ export async function loadCompiledExclusionRules(userId: string): Promise<Compil
 		}
 	}
 	return compiled
+}
+
+/**
+ * The rule `content` matches, if any, among the user's enabled rules — for text that is about
+ * to leave the process somewhere other than the miner, which checks its turns itself. Recall
+ * uses it on the user's message before that message is embedded or written to the recall log.
+ *
+ * A user who has never mined has never had the built-ins seeded, and would otherwise be
+ * checked against nothing; they are seeded when no enabled rule is found. Throws when the
+ * rules cannot be loaded, so a caller fails closed rather than sending the text unchecked.
+ */
+export async function matchExclusionRules(userId: string, content: string): Promise<ExclusionScanMatch | null> {
+	let rules = await loadCompiledExclusionRules(userId)
+	if (rules.length === 0) {
+		await ensureBuiltinExclusionRules(userId)
+		rules = await loadCompiledExclusionRules(userId)
+	}
+	return scanForExclusion(content, rules)
 }
 
 /**

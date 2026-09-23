@@ -212,8 +212,9 @@
 			{:else if tab === 'rules'}
 				<p class="control-panel__intro">
 					The miner checks every turn against these patterns <strong>before</strong> it embeds or stores anything. A
-					match drops the turn entirely — it never reaches the embedding provider and never becomes a drawer. The
-					credential rules are built in; you can disable or reword them, but not delete them.
+					match drops the turn entirely — it never reaches the embedding provider and never becomes a drawer. A
+					message that matches is not used to search memory either. The credential rules are built in; you can
+					disable or reword them, but not delete them.
 				</p>
 
 				<ul class="rule-list">
@@ -325,8 +326,8 @@
 			{:else}
 				<p class="control-panel__intro">
 					Each row is one conversation's footprint in the palace. Forgetting deletes its rooms, closets, and drawers
-					— and any wing left empty as a result. The chat transcript itself is untouched, so a later
-					<strong>Mine pending</strong> would memorize it again unless you add an exclusion rule first.
+					— and any wing left empty as a result. The chat transcript itself is untouched, and what it held so far
+					stays forgotten; anything said in it afterwards is remembered as usual, unless an exclusion rule blocks it.
 				</p>
 				<ul class="convo-list">
 					{#each conversations as row (row.conversationId)}

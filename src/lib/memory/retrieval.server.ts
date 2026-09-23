@@ -92,7 +92,9 @@ function buildTsQuery(query: string): string {
 
 export async function recall(userId: string, query: string, options: RecallOptions = {}): Promise<RetrievedDrawer[]> {
 	const opts = { ...DEFAULTS, ...options }
-	const queryEmbedding = await embedOne(query)
+	// The query is the user's message as typed: embedded once, so there is nothing to gain from
+	// asking OpenRouter to keep it for a day.
+	const queryEmbedding = await embedOne(query, { cache: false })
 	const vec = toPgVector(queryEmbedding)
 	const tsQuery = buildTsQuery(query)
 

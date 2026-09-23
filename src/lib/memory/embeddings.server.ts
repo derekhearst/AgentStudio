@@ -22,6 +22,12 @@ type EmbedOptions = {
 	model?: string
 	logSource?: 'memory_embed'
 	metadata?: Record<string, unknown>
+	/**
+	 * Ask OpenRouter to cache the response (default true). Worth it for drawer content, which
+	 * rebuilds and backfills embed again; not for a recall query, which is the user's raw
+	 * message and is embedded once.
+	 */
+	cache?: boolean
 }
 
 type EmbeddingResponse = {
@@ -30,7 +36,7 @@ type EmbeddingResponse = {
 	model?: string
 }
 
-async function callEmbeddings(model: string, input: string[]): Promise<EmbeddingResponse> {
+async function callEmbeddings(model: string, input: string[], cache: boolean): Promise<EmbeddingResponse> {
 	const apiKey = requireOpenRouterApiKey()
 
 	let attempt = 0
@@ -43,8 +49,7 @@ async function callEmbeddings(model: string, input: string[]): Promise<Embedding
 				'content-type': 'application/json',
 				// Embeddings are deterministic per-(model,input) — re-embedding identical drawer
 				// content during rebuild/reindex is exactly the cache-hit case OpenRouter optimizes.
-				'x-openrouter-cache': 'true',
-				'x-openrouter-cache-ttl': '86400',
+				...(cache ? { 'x-openrouter-cache': 'true', 'x-openrouter-cache-ttl': '86400' } : {}),
 			},
 			body: JSON.stringify({ model, input }),
 		})
@@ -88,7 +93,7 @@ export async function embed(texts: string[], options: EmbedOptions = {}): Promis
 
 	for (let start = 0; start < safeTexts.length; start += MAX_BATCH) {
 		const slice = safeTexts.slice(start, start + MAX_BATCH)
-		const result = await callEmbeddings(model, slice)
+		const result = await callEmbeddings(model, slice, options.cache ?? true)
 		for (const item of result.data) {
 			out[start + item.index] = item.embedding
 		}
