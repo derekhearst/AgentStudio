@@ -131,6 +131,52 @@ export async function checkBudgetLimits(ctx: BudgetCheckContext, now = new Date(
 	}
 }
 
+export type BudgetHeadroom = {
+	id: string
+	scope: BudgetScope
+	scopeId: string | null
+	period: BudgetPeriod
+	limitUsd: number
+	spendUsd: number
+	/** spend / limit. Over 1 means the limit is exceeded. */
+	pct: number
+	action: BudgetAction
+}
+
+/**
+ * #38 — how much of each enabled limit is spent right now, tightest first.
+ *
+ * Reads spend exactly the way enforcement does (`spendForLimit`), so the `/activity` strip
+ * can never say "40% used" about a limit that is already blocking runs. Run-scoped and
+ * per-run limits are left out: they have no standing period to report against. An empty
+ * list means no limits are set.
+ */
+export async function listBudgetHeadroom(userId: string, now = new Date()): Promise<BudgetHeadroom[]> {
+	const rows = (await db
+		.select()
+		.from(budgetLimits)
+		.where(and(eq(budgetLimits.userId, userId), eq(budgetLimits.enabled, true)))) as BudgetLimitRow[]
+
+	const standing = rows.filter((limit) => limit.scope !== 'run' && limit.period !== 'run')
+	const headroom = await Promise.all(
+		standing.map(async (limit) => {
+			const spendUsd = await spendForLimit(limit, now)
+			const limitUsd = parseFloat(limit.limitUsd)
+			return {
+				id: limit.id,
+				scope: limit.scope,
+				scopeId: limit.scopeId,
+				period: limit.period,
+				limitUsd,
+				spendUsd,
+				pct: limitUsd > 0 ? spendUsd / limitUsd : 0,
+				action: limit.action,
+			}
+		}),
+	)
+	return headroom.sort((a, b) => b.pct - a.pct)
+}
+
 /**
  * Record a budget threshold event into the immutable alerts log. Idempotent at the (limit,
  * trigger, period-start) level: if an alert already exists for this period/trigger, this is
