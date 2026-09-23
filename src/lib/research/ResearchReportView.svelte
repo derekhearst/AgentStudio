@@ -294,7 +294,7 @@
 									{step.kind}
 								</span>
 								{#if step.subQuestion}
-									<span class="line-clamp-1 flex-1 leading-snug">{step.subQuestion}</span>
+									<span class="line-clamp-1 min-w-[6rem] flex-1 leading-snug">{step.subQuestion}</span>
 								{:else}
 									<span class="flex-1"></span>
 								{/if}

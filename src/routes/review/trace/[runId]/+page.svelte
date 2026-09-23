@@ -202,12 +202,12 @@
 						<li class="card card-body bg-base-100 border-base-300/60 rounded-xl border">
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+								class="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 								onclick={() => toggle(seq)}
 							>
 								<span class="w-8 text-right font-mono text-[10px] text-base-content/40">#{seq}</span>
 								<span class="badge badge-xs {kindTone(String(span.kind ?? ''))}">{String(span.kind ?? '')}</span>
-								<span class="line-clamp-1 flex-1 text-xs leading-tight">{spanLabel(span)}</span>
+								<span class="order-last line-clamp-1 w-full text-xs leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{spanLabel(span)}</span>
 								<span class="font-mono text-[10px] text-base-content/40">
 									{elapsedSinceStart(span, tr.startedAt)}
 								</span>

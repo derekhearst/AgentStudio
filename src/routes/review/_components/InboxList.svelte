@@ -202,13 +202,15 @@
 					<li class="rounded-xl border border-base-300/60 bg-base-100">
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40"
+							class="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-base-200/40 tablet:flex-nowrap"
 							onclick={() => toggleExpand(item.id)}
 						>
 							<span class="badge badge-xs {severityTone(item.severity)}">{item.severity}</span>
 							<span class="badge badge-xs badge-outline">{typeLabel(item.type)}</span>
 							<span class="badge badge-xs {statusTone(item.status)}">{item.status}</span>
-							<span class="line-clamp-1 flex-1 text-xs leading-tight">{item.summary ?? '(no summary)'}</span>
+							<!-- On a phone the badges and date fill the row, and a flex-1 summary shrank to
+							     nothing — every item's text was invisible. It takes its own line there. -->
+							<span class="order-last line-clamp-1 w-full text-xs leading-tight tablet:order-none tablet:w-auto tablet:min-w-0 tablet:flex-1">{item.summary ?? '(no summary)'}</span>
 							<span class="font-mono text-xs text-base-content/40">{fmtDate(item.createdAt)}</span>
 							<svg class="size-3 transition-transform {isOpen ? 'rotate-180' : ''}" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
 								<polyline points="3 5 6 8 9 5" />
