@@ -321,7 +321,12 @@ async function runResearchModeAutomation(automation: typeof automations.$inferSe
 		priority: 100,
 		payload: { researchId: research.id },
 		userId: automation.userId,
-		dedupeKey: `automation_research:${automation.id}:${(automation.nextRunAt ?? new Date()).toISOString().slice(0, 16)}`,
+		// One job per research row, which this call has just created. Not the schedule slot:
+		// "Run now" leaves `nextRunAt` alone, so a slot-derived key made the manual run and the
+		// next scheduled tick compute the same key, and the tick's research row was linked to
+		// the manual run's finished job and never executed. Which slot a run belongs to is
+		// settled upstream, by the automation_run job's own key.
+		dedupeKey: `automation_research:${research.id}`,
 	})
 	await updateResearch(research.id, { jobId: job.id })
 

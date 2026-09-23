@@ -173,15 +173,19 @@ produced. A failed run shows its error; a successful one shows an excerpt of its
 
 Every card has a **Run now** button. It queues a manual `automation_run` job (priority above
 the scheduled tier) rather than executing inline, because a tick can take minutes and a web
-request must not be held open that long. Two guarantees:
+request must not be held open that long. Three guarantees:
 
 1. **The schedule is not disturbed.** A manual run updates `lastRunAt` and the run history,
    and leaves `nextRunAt` exactly where it was. Pressing the button at 09:58 does not push a
    10:00 tick to tomorrow.
-2. **A disabled automation can still be run.** That is the point: fix the cause, run once to
+2. **A manual run never stands in for a scheduled one.** Both happen, separately. In
+   research mode each run — manual or scheduled — starts its own research report; pressing
+   the button today does not use up tomorrow's scheduled report.
+3. **A disabled automation can still be run.** That is the point: fix the cause, run once to
    verify, then switch it back on.
 
-Double-clicking is harmless — manual runs within the same minute collapse into one job.
+Double-clicking is harmless — a second press in the same minute, while the first manual run
+is still queued or running, collapses into it.
 
 ### Retries, backoff, and giving up
 
