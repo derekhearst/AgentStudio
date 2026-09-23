@@ -46,19 +46,37 @@ class GithubApiError extends Error {
 }
 
 /**
- * True when a response is GitHub throttling us. Both the primary limit (403/429 with
- * `x-ratelimit-remaining: 0`) and the secondary limit (403/429 with `retry-after`) say so
- * in headers; a 429 is a rate limit by definition.
+ * True when a response is GitHub throttling us. A 429 is a rate limit by definition. A 403
+ * is one when the headers say so — the primary limit sends `x-ratelimit-remaining: 0`, the
+ * secondary limit usually `retry-after` — or, since GitHub documents secondary-limit 403s
+ * that carry neither header, when the body's message says so ("You have exceeded a
+ * secondary rate limit", "API rate limit exceeded", the older "abuse detection mechanism").
  */
-export function isRateLimitResponse(res: Pick<Response, 'status' | 'headers'>): boolean {
+export function isRateLimitResponse(res: Pick<Response, 'status' | 'headers'>, body = ''): boolean {
 	if (res.status === 429) return true
 	if (res.status !== 403) return false
-	return res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after')
+	if (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.has('retry-after')) return true
+	return /rate limit|abuse detection/i.test(githubErrorMessage(body))
 }
 
-/** A `GithubApiError` for a non-OK response, with the rate-limit fact carried along. */
-function errorFromResponse(res: Response, message: string): GithubApiError {
-	const rateLimited = isRateLimitResponse(res)
+/** The `message` of a GitHub error body, or the raw text when it is not JSON. */
+function githubErrorMessage(body: string): string {
+	try {
+		const parsed = JSON.parse(body) as { message?: unknown }
+		if (typeof parsed?.message === 'string') return parsed.message
+	} catch {
+		// Not JSON — fall through to the raw text.
+	}
+	return body
+}
+
+/**
+ * A `GithubApiError` for a non-OK response, with the rate-limit fact carried along. Reads
+ * the body unless the caller already did (a body can only be read once).
+ */
+async function errorFromResponse(res: Response, message: string, body?: string): Promise<GithubApiError> {
+	const text = body ?? (await res.text().catch(() => ''))
+	const rateLimited = isRateLimitResponse(res, text)
 	return new GithubApiError(`${message}${rateLimited ? ' — rate limit exhausted, retry later' : ''}`, res.status, rateLimited)
 }
 
@@ -135,8 +153,8 @@ export async function listAuthenticatedUserRepos(
 		})
 		const res = await ghFetch(token, `/user/repos?${params.toString()}`)
 		if (res.status === 401) throw new GithubApiError('GitHub token rejected (401). Reconnect to refresh.', 401)
-		if (res.status === 403) throw errorFromResponse(res, 'GitHub forbade the request (403)')
-		if (!res.ok) throw errorFromResponse(res, `GitHub list-repos failed: HTTP ${res.status}`)
+		if (res.status === 403) throw await errorFromResponse(res, 'GitHub forbade the request (403)')
+		if (!res.ok) throw await errorFromResponse(res, `GitHub list-repos failed: HTTP ${res.status}`)
 		const arr = (await res.json()) as Record<string, unknown>[]
 		if (!Array.isArray(arr)) break
 		for (const r of arr) out.push(mapRepoSummary(r))
@@ -148,7 +166,7 @@ export async function listAuthenticatedUserRepos(
 export async function getRepository(token: string, owner: string, repo: string): Promise<GithubRepoSummary> {
 	const res = await ghFetch(token, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`)
 	if (res.status === 404) throw new GithubApiError(`Repo ${owner}/${repo} not found or no access`, 404)
-	if (!res.ok) throw errorFromResponse(res, `GitHub get-repo failed: HTTP ${res.status}`)
+	if (!res.ok) throw await errorFromResponse(res, `GitHub get-repo failed: HTTP ${res.status}`)
 	const raw = (await res.json()) as Record<string, unknown>
 	return mapRepoSummary(raw)
 }
@@ -182,7 +200,7 @@ export async function createPullRequest(token: string, input: CreatePullRequestI
 	})
 	if (!res.ok) {
 		const text = await res.text().catch(() => '')
-		throw errorFromResponse(res, `GitHub create-PR failed (${res.status}): ${text.slice(0, 400)}`)
+		throw await errorFromResponse(res, `GitHub create-PR failed (${res.status}): ${text.slice(0, 400)}`, text)
 	}
 	const raw = (await res.json()) as Record<string, unknown>
 	return {
@@ -227,7 +245,7 @@ export async function getPullRequestFromProvider(
 		`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}`,
 	)
 	if (res.status === 404) throw new GithubApiError(`PR ${owner}/${repo}#${prNumber} not found or no access`, 404)
-	if (!res.ok) throw errorFromResponse(res, `GitHub get-PR failed: HTTP ${res.status}`)
+	if (!res.ok) throw await errorFromResponse(res, `GitHub get-PR failed: HTTP ${res.status}`)
 	const raw = (await res.json()) as Record<string, unknown>
 	const head = (raw.head as Record<string, unknown> | undefined) ?? {}
 	const base = (raw.base as Record<string, unknown> | undefined) ?? {}
@@ -267,7 +285,7 @@ export async function listCheckRunsForRef(
 		`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
 	)
 	if (res.status === 404) return []
-	if (!res.ok) throw errorFromResponse(res, `GitHub list-check-runs failed: HTTP ${res.status}`)
+	if (!res.ok) throw await errorFromResponse(res, `GitHub list-check-runs failed: HTTP ${res.status}`)
 	const raw = (await res.json()) as { check_runs?: unknown }
 	return Array.isArray(raw.check_runs) ? (raw.check_runs as Record<string, unknown>[]) : []
 }
@@ -288,7 +306,7 @@ export async function listCommitStatusesForRef(
 		`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}/status?per_page=100`,
 	)
 	if (res.status === 404) return []
-	if (!res.ok) throw errorFromResponse(res, `GitHub combined-status failed: HTTP ${res.status}`)
+	if (!res.ok) throw await errorFromResponse(res, `GitHub combined-status failed: HTTP ${res.status}`)
 	const raw = (await res.json()) as { statuses?: unknown }
 	return Array.isArray(raw.statuses) ? (raw.statuses as Record<string, unknown>[]) : []
 }

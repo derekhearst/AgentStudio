@@ -16,6 +16,13 @@ function response(status: number, headers: Record<string, string> = {}): Respons
 	return new Response(status === 200 ? '[]' : '{"message":"x"}', { status, headers })
 }
 
+/** GitHub's documented secondary-limit 403: no rate-limit headers, only the message. */
+function secondaryLimit(): Response {
+	return new Response(JSON.stringify({ message: 'You have exceeded a secondary rate limit. Please wait a few minutes.' }), {
+		status: 403,
+	})
+}
+
 test.describe('source-control/github-api — classifying failures', () => {
 	test('rate limits are recognised from GitHub’s headers', async () => {
 		const { isRateLimitResponse } = await import('../src/lib/source-control/github-api.server')
@@ -24,6 +31,19 @@ test.describe('source-control/github-api — classifying failures', () => {
 		expect(isRateLimitResponse(response(403, { 'retry-after': '60' }))).toBe(true)
 		expect(isRateLimitResponse(response(403, { 'x-ratelimit-remaining': '4999' }))).toBe(false)
 		expect(isRateLimitResponse(response(502))).toBe(false)
+	})
+
+	test('a secondary-limit 403 with neither header is recognised from its message', async () => {
+		const { isRateLimitResponse } = await import('../src/lib/source-control/github-api.server')
+		const bare = { status: 403, headers: new Headers() }
+		expect(
+			isRateLimitResponse(bare, JSON.stringify({ message: 'You have exceeded a secondary rate limit. Please wait a few minutes.' })),
+		).toBe(true)
+		expect(isRateLimitResponse(bare, JSON.stringify({ message: 'You have triggered an abuse detection mechanism.' }))).toBe(true)
+		expect(isRateLimitResponse(bare, JSON.stringify({ message: 'Resource protected by organization SAML enforcement.' }))).toBe(
+			false,
+		)
+		expect(isRateLimitResponse(bare, '')).toBe(false)
 	})
 
 	test('only a dead token counts as a credential failure', async () => {
@@ -43,6 +63,9 @@ test.describe('source-control/github-api — classifying failures', () => {
 		const realFetch = globalThis.fetch
 		globalThis.fetch = (async () => response(403, { 'x-ratelimit-remaining': '0' })) as typeof fetch
 		try {
+			await expect(listAuthenticatedUserRepos('tok')).rejects.toMatchObject({ status: 403, rateLimited: true })
+			// The body is read too: a secondary limit can say so only in its message.
+			globalThis.fetch = (async () => secondaryLimit()) as typeof fetch
 			await expect(listAuthenticatedUserRepos('tok')).rejects.toMatchObject({ status: 403, rateLimited: true })
 		} finally {
 			globalThis.fetch = realFetch
@@ -76,6 +99,7 @@ test.describe('source-control/github-provider — a failed sync and the connecti
 			for (const transient of [
 				async () => response(502),
 				async () => response(403, { 'x-ratelimit-remaining': '0' }),
+				async () => secondaryLimit(),
 				async () => {
 					throw new DOMException('The operation was aborted.', 'AbortError')
 				},
