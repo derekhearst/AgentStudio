@@ -67,6 +67,7 @@ import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
 import { prepareRunWorkspace, type RunWorkspace } from '$lib/workspace/workspace.server'
+import { resolveToolScope } from '$lib/engine/tool-scope'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -262,6 +263,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// push a frame, so the emitter is assigned once the stream starts.
 	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
 	let askUserSeq = 0
+	/** What an approval answer carries: on the call's `tool_pending` frame and in `pendingApprovals`. */
+	const approvalTokenFor = (toolUseId: string) => `${run.id}:${toolUseId}`
 
 	async function fulfilAskUser(questions: unknown[]): Promise<string> {
 		askUserSeq += 1
@@ -372,6 +375,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		parentIsOrchestrator: isOrchestrator,
 		parentIsClaude: isClaudeModel(routedModel),
 	})
+	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
 
 	let engineOptions
 	try {
@@ -381,7 +385,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			model: routedModel,
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
-			allowedTools: scopedTools,
+			toolScope,
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
@@ -571,6 +575,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						requiresApproval: (name) =>
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
+						toolScope,
+						approvalToken: approvalTokenFor,
 						// Confines every built-in filesystem call to this run's workspace (#15) —
 						// the same root the SDK was given as its cwd, so a relative path means the
 						// same file to the guard and to the tool.
@@ -582,7 +588,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {
-										const token = `${run.id}:${id}`
+										const token = approvalTokenFor(id)
 										await enqueuePendingApproval(
 											run.id,
 											{ token, toolName: name, args: input, requestedAt: new Date().toISOString() },

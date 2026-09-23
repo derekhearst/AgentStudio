@@ -6,7 +6,7 @@
  *
  *   delta         { content }
  *   reasoning     { content }
- *   tool_pending  { id, name, arguments, token? }
+ *   tool_pending  { id, name, arguments, token?, subagentId? }
  *   tool_call     { id, name, arguments }
  *   tool_result   { id, name, success, executionMs, result, details? }
  *   tool_denied   { id }
@@ -29,10 +29,18 @@
  * existed, still has the `result` string it always had.
  */
 
-import { query, type PermissionResult, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import {
+	query,
+	type HookCallback,
+	type PermissionResult,
+	type SDKMessage,
+	type SDKUserMessage,
+} from '@anthropic-ai/claude-agent-sdk'
 import { bareToolName } from './tools.server'
-import { guardWorkspaceAccess, resolveBashPolicy, type BashPolicy } from './workspace-guard'
-import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
+import { resolveBashPolicy, type BashPolicy } from './workspace-guard'
+import type { ConversationPermissionMode } from './permission-mode'
+import { decideToolCall, type ToolDecisionContext } from './tool-decision'
+import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { interpretSdkMessage } from './sdk-notices'
 import type { EngineQueryHandle } from './run-registry.server'
@@ -85,9 +93,23 @@ export type EngineRunInput = {
 	 * answers — the SDK holds the turn open while it's pending, which is what
 	 * replaces the old pendingApprovals jsonb round-trip.
 	 *
-	 * Omit to auto-approve everything (the old "auto-approve mode").
+	 * Omit when nobody can answer: a call that needs approval is then refused rather than
+	 * left waiting, and its pending card carries no token.
 	 */
 	requestApproval?: (call: { id: string; name: string; input: Record<string, unknown> }) => Promise<ApprovalDecision>
+	/**
+	 * The token an operator's Allow/Deny answer for a call must carry — the same one
+	 * `requestApproval` waits on. It goes out on the call's `tool_pending` frame, which is
+	 * the only way the chat's approval card learns it: the card renders its buttons only
+	 * when the frame has one, so without this every approval waited out its timeout and was
+	 * recorded as the user's denial.
+	 */
+	approvalToken?: (toolUseId: string) => string
+	/**
+	 * The agent's fixed tool surface (`./tool-scope`). A call outside it is refused before
+	 * anything else is considered. Omit for every tool.
+	 */
+	toolScope?: ToolScope | null
 	/**
 	 * Whether the per-tool *settings* alone require human approval — i.e. the tool is in
 	 * `settings.toolConfig.approvalRequiredTools` (or the `'*'` wildcard), unioned with
@@ -228,11 +250,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const toolInputs = new Map<string, unknown>()
 
 	/*
-	 * canUseTool is called with (name, input) but NOT the tool_use id, while the
-	 * UI keys its blocks on that id. The assistant message carrying the tool_use
-	 * block always arrives first, so record id by name+input there and look it up
-	 * here. Without this the pending block and the call block get different ids
-	 * and the UI renders the same tool twice.
+	 * The UI keys its blocks on the tool_use id, and the permission callbacks have to emit
+	 * frames against the same id or the pending block and the call block render as two
+	 * tools. The hook and current `canUseTool` both receive it; for an SDK whose
+	 * `canUseTool` does not, the assistant branch records the id by name+input and the
+	 * callback looks it up (`claimToolUseId`).
 	 */
 	/*
 	 * ── Subagent routing (#5) ───────────────────────────────────────────────────────────
@@ -248,24 +270,26 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	 *
 	 * Child activity now accumulates on its own `subagent` block and goes out on the
 	 * `subagent_*` frames the chat page has always known how to render and has never been
-	 * sent. Note what deliberately does NOT change: `canUseTool` still sees every child call,
-	 * so containment and the approval gate apply to a subagent exactly as to the parent. A
-	 * mode says how much the operator trusts the agent; delegation is not a way around it.
+	 * sent. Note what deliberately does NOT change: the PreToolUse hook and `canUseTool` still
+	 * see every child call, so containment and the approval gate apply to a subagent exactly
+	 * as to the parent. A mode says how much the operator trusts the agent; delegation is not
+	 * a way around it.
 	 *
-	 * Known gap, stated rather than left to be found: a child call that needs approval gets
-	 * no inline Allow/Deny card, because that card is driven by the `tool_pending` frame and
-	 * emitting one here would leave a block in the parent's transcript that never resolves —
-	 * the child's result goes to the child. The approval itself is not lost: it is written to
-	 * `chat_runs.pendingApprovals` and flips the run to `waiting_tool_approval`, which is the
-	 * surface the dock and the HUD read. Giving it a card of its own belongs with #32's
-	 * per-child rendering.
+	 * A child call that needs approval gets the same inline Allow/Deny card a parent call
+	 * does: a `tool_pending` frame with its token, marked with `subagentId`. Nothing else
+	 * could answer it — the dock and HUD that once read `chat_runs.pendingApprovals` are
+	 * gone — so without the card the run sat in `waiting_tool_approval` for five minutes and
+	 * the call was recorded as the user's denial. The card is resolved like any other (a
+	 * `tool_call`, then a `tool_result` or `tool_denied`), so it never dangles; the child's
+	 * result still goes to the child's block, and the persisted transcript keeps the call in
+	 * the subagent card only.
 	 */
 	/** `Task` tool_use id → the agent key the parent asked for, read off the call's input. */
 	const subagentNames = new Map<string, string>()
 	/** `Task` tool_use id → the task the parent handed it, for the child card's header. */
 	const subagentTasks = new Map<string, string>()
-	/** tool_use ids belonging to a subagent, so `canUseTool` emits the child frame for them. */
-	const childCallIds = new Set<string>()
+	/** tool_use id of a subagent's call → the `Task` call it belongs to. */
+	const childParents = new Map<string, string>()
 	/** `Task` tool_use id → its block, so repeated child messages append to one place. */
 	const subagentBlocks = new Map<string, Extract<StreamBlock, { kind: 'subagent' }>>()
 
@@ -298,35 +322,27 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 	const idByCall = new Map<string, string[]>()
 	const callKey = (name: string, args: unknown) => `${name}:${JSON.stringify(args ?? {})}`
-	const takeToolUseId = (name: string, args: unknown): string | null => {
+	/**
+	 * The id the UI keys this call's block on. Current SDKs hand `canUseTool` the tool_use id
+	 * directly; the name+input lookup is the fallback for one that does not, and a known id is
+	 * taken out of the queue so the fallback cannot hand it to a different call later.
+	 */
+	const claimToolUseId = (name: string, args: unknown, known?: string): string => {
 		const queue = idByCall.get(callKey(name, args))
-		return queue && queue.length > 0 ? (queue.shift() ?? null) : null
+		if (known) {
+			const at = queue?.indexOf(known) ?? -1
+			if (queue && at >= 0) queue.splice(at, 1)
+			return known
+		}
+		return queue?.shift() ?? `pending-${name}-${Date.now()}`
 	}
 
 	const permissionMode: ConversationPermissionMode = input.permissionMode ?? 'default'
-	const approvalsEnabled = Boolean(input.requestApproval)
-
-	/**
-	 * One decision point, shared by the pending-block predicate below and by `canUseTool`,
-	 * so the block the user sees and the answer the SDK gets can never disagree.
-	 */
-	const gateFor = (name: string): ToolGateDecision =>
-		resolveToolGate({
-			mode: permissionMode,
-			toolName: name,
-			settingsRequiresApproval: input.requiresApproval?.(name) ?? true,
-		})
-
-	/** True when the call will reach `canUseTool` with something other than a straight allow. */
-	const needsApproval = (name: string) => gateFor(name).gate !== 'allow'
-	// Tools whose `tool_call` frame has already gone out, so the approval path
-	// doesn't emit a second one.
-	const callEmitted = new Set<string>()
 
 	/**
 	 * Workspace containment (#15). The SDK's built-in Read/Write/Edit/Bash call the
-	 * filesystem directly, so `canUseTool` is the only place left that can keep them
-	 * inside the run's workspace — `cwd` is a working directory, not a jail.
+	 * filesystem directly, so the gate below is the only thing that can keep them inside the
+	 * run's workspace — `cwd` is a working directory, not a jail.
 	 *
 	 * `workspaceRoot` being absent means the run has no workspace to be confined to
 	 * (a synthesis path with no filesystem work), and the guard stands down.
@@ -334,83 +350,184 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const workspaceRoot = input.workspaceRoot ?? null
 	const bashPolicy: BashPolicy = input.bashPolicy ?? resolveBashPolicy({})
 
-	// `canUseTool` is installed whenever anything could be gated. A non-default mode gates
-	// on its own — plan mode refuses writes even in a run with no approval surface at all.
-	// Containment forces it on regardless: without it, a default-mode run with approvals
-	// disabled would install no hook at all, and the built-ins would reach the host
-	// filesystem unchecked. That is the one case that must never be optimised away.
-	const gatingEnabled = approvalsEnabled || permissionMode !== 'default' || workspaceRoot !== null
+	/**
+	 * One decision, shared by the PreToolUse hook, `canUseTool` and the frame the assistant
+	 * branch sends, so the block the user sees and the answer the SDK gets cannot disagree.
+	 * See `./tool-decision` for how scope, containment and the permission gate compose.
+	 */
+	const decisionContext: ToolDecisionContext = {
+		mode: permissionMode,
+		settingsRequiresApproval: (name) => input.requiresApproval?.(name) ?? true,
+		workspaceRoot,
+		bashPolicy,
+		scope: input.toolScope ?? null,
+		// Read off what the SDK is actually told, so it cannot drift from `settingSources`.
+		projectConfigLoaded: (input.options.settingSources ?? []).includes('project'),
+	}
+	const decide = (name: string, args: unknown) => decideToolCall(decisionContext, name, args)
+
+	// Tools whose `tool_call` frame has already gone out, so the approval path
+	// doesn't emit a second one.
+	const callEmitted = new Set<string>()
+	/** Calls with a `tool_pending` card in the parent's transcript, child calls included. */
+	const pendingShown = new Set<string>()
+
+	/**
+	 * The SDK reads the CLI's output on its own schedule: the permission callbacks for a call
+	 * can start while this loop is still awaiting the frame write for the assistant message
+	 * that announced it. A `tool_denied` that overtook its `tool_pending` would leave a card
+	 * waiting forever, so the callbacks wait here for the announcement — briefly, since it is
+	 * normally already done, and never indefinitely.
+	 */
+	const ANNOUNCE_WAIT_MS = 2_000
+	const announcements = new Map<string, { settled: Promise<void>; resolve: () => void }>()
+	const announcementFor = (id: string) => {
+		let entry = announcements.get(id)
+		if (!entry) {
+			let resolve: () => void = () => {}
+			const settled = new Promise<void>((r) => (resolve = r))
+			entry = { settled, resolve }
+			announcements.set(id, entry)
+		}
+		return entry
+	}
+	const awaitAnnouncement = async (id: string) => {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		await Promise.race([
+			announcementFor(id).settled,
+			new Promise<void>((r) => (timer = setTimeout(r, ANNOUNCE_WAIT_MS))),
+		])
+		clearTimeout(timer)
+	}
+
+	/** A pending card. Carries the approval token only when someone can actually answer it. */
+	const emitPending = async (id: string, name: string, args: unknown, askable: boolean) => {
+		pendingShown.add(id)
+		const token = askable && input.requestApproval ? input.approvalToken?.(id) : undefined
+		const subagentId = childParents.get(id)
+		await emit('tool_pending', {
+			id,
+			name,
+			arguments: JSON.stringify(args ?? {}),
+			...(token ? { token } : {}),
+			...(subagentId ? { subagentId } : {}),
+		})
+	}
+
+	/** Whether the parent's transcript has a block for this call that a frame has to resolve. */
+	const hasParentBlock = (id: string) => !childParents.has(id) || pendingShown.has(id)
+
+	const emitDenied = async (id: string) => {
+		if (hasParentBlock(id)) await emit('tool_denied', { id })
+	}
+
+	/*
+	 * Every call meets the decision before the SDK's own permission pipeline does.
+	 *
+	 * `canUseTool` alone is not enough: the SDK consults it last, after allow rules
+	 * (`allowedTools`, a trusted project's `permissions.allow`) and after its own modes
+	 * (`acceptEdits` auto-approves edits inside the working directory). Any of those
+	 * approved a call without our gate ever hearing of it. A PreToolUse hook runs first, and
+	 * the SDK treats its answer as binding: 'deny' refuses, and 'ask' goes to `canUseTool`
+	 * whatever the rules and modes would have said. 'allow' is never returned — a call the
+	 * gate allows is left to the normal pipeline, which may still refuse it on its own terms.
+	 * The hook fires for a subagent's calls too, so delegation is no way around it.
+	 */
+	const preToolUse: HookCallback = async (hookInput, toolUseId) => {
+		if (hookInput.hook_event_name !== 'PreToolUse') return {}
+		const name = bareToolName(hookInput.tool_name)
+		// The host owns ask_user end to end (see the assistant branch below).
+		if (HOST_OWNED_TOOLS.has(name)) return {}
+
+		const decision = decide(name, hookInput.tool_input)
+		if (decision.gate === 'allow') return {}
+
+		if (decision.gate === 'deny') {
+			const id = hookInput.tool_use_id || toolUseId
+			if (id) {
+				await awaitAnnouncement(id)
+				await emitDenied(id)
+			}
+			return {
+				hookSpecificOutput: {
+					hookEventName: 'PreToolUse',
+					permissionDecision: 'deny',
+					permissionDecisionReason: decision.reason ?? 'Refused by the conversation permission mode.',
+				},
+			}
+		}
+		return {
+			hookSpecificOutput: {
+				hookEventName: 'PreToolUse',
+				permissionDecision: 'ask',
+				...(decision.reason ? { permissionDecisionReason: decision.reason } : {}),
+			},
+		}
+	}
 
 	const options: Options = {
 		...input.options,
-		...(gatingEnabled
-			? {
-					canUseTool: async (toolName, toolInput, { signal }): Promise<PermissionResult> => {
-						const name = bareToolName(toolName)
-						// The host owns ask_user end to end (see the assistant branch below): it
-						// renders its own card, so no tool_call / tool_pending frame may go out.
-						if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
+		hooks: {
+			...input.options.hooks,
+			PreToolUse: [{ hooks: [preToolUse] }, ...(input.options.hooks?.PreToolUse ?? [])],
+		},
+		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
+		// answer still needs this to refuse rather than hang.
+		canUseTool: async (toolName, toolInput, { signal, toolUseID }): Promise<PermissionResult> => {
+			const name = bareToolName(toolName)
+			// The host owns ask_user end to end (see the assistant branch below): it
+			// renders its own card, so no tool_call / tool_pending frame may go out.
+			if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
 
-						const id = takeToolUseId(name, toolInput) ?? `pending-${name}-${Date.now()}`
+			const id = claimToolUseId(name, toolInput, toolUseID)
+			if (toolUseID) await awaitAnnouncement(id)
 
-						// ── Containment first. No permission mode may waive it, including
-						// bypassPermissions: a mode says how much the operator trusts the
-						// agent, never whether it may leave its workspace.
-						const containment = workspaceRoot
-							? guardWorkspaceAccess({ toolName: name, toolInput, workspaceRoot, bashPolicy })
-							: ({ verdict: 'allow' } as const)
+			const gate = decide(name, toolInput)
 
-						const gate =
-							containment.verdict === 'deny'
-								? ({ gate: 'deny', reason: containment.reason } as const)
-								: containment.verdict === 'ask'
-									? ({ gate: 'ask', reason: containment.reason } as const)
-									: gateFor(name)
-
-						/** Moves the UI's pending block to "executing" using the same id. */
-						const allow = async (): Promise<PermissionResult> => {
-							if (!callEmitted.has(id)) {
-								callEmitted.add(id)
-								// A child's call was already announced as `subagent_tool_call` when its
-								// tool_use block arrived; a `tool_call` here would put it in the parent's
-								// transcript as well.
-								if (!childCallIds.has(id)) {
-									await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
-								}
-							}
-							return { behavior: 'allow' }
-						}
-						const deny = async (message: string): Promise<PermissionResult> => {
-							await emit('tool_denied', { id })
-							return { behavior: 'deny', message }
-						}
-
-						if (gate.gate === 'allow') return allow()
-						if (gate.gate === 'deny') return deny(gate.reason ?? 'Refused by the conversation permission mode.')
-
-						// gate === 'ask'. Without an approval surface there is nobody to ask, so the
-						// call fails closed — the same posture `push_branch` takes in a detached run.
-						if (!input.requestApproval) {
-							return deny(
-								gate.reason ??
-									`${name} requires operator approval and this run has no approval surface.`,
-							)
-						}
-
-						const decision = await Promise.race([
-							input.requestApproval({ id, name, input: toolInput }),
-							new Promise<ApprovalDecision>((resolve) => {
-								signal.addEventListener('abort', () => resolve({ allow: false, reason: 'Run aborted' }), {
-									once: true,
-								})
-							}),
-						])
-
-						if (!decision.allow) return deny(decision.reason)
-						return allow()
-					},
+			/** Moves the UI's pending block to "executing" using the same id. */
+			const allow = async (): Promise<PermissionResult> => {
+				if (!callEmitted.has(id)) {
+					callEmitted.add(id)
+					// A child's call was already announced as `subagent_tool_call` when its
+					// tool_use block arrived; a `tool_call` here would put it in the parent's
+					// transcript as well — unless it has an approval card there to resolve.
+					if (hasParentBlock(id)) {
+						await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
+					}
 				}
-			: {}),
+				return { behavior: 'allow' }
+			}
+			const deny = async (message: string): Promise<PermissionResult> => {
+				await emitDenied(id)
+				return { behavior: 'deny', message }
+			}
+
+			if (gate.gate === 'allow') return allow()
+			if (gate.gate === 'deny') return deny(gate.reason ?? 'Refused by the conversation permission mode.')
+
+			// gate === 'ask'. Without an approval surface there is nobody to ask, so the
+			// call fails closed — the same posture `push_branch` takes in a detached run.
+			if (!input.requestApproval) {
+				return deny(gate.reason ?? `${name} requires operator approval and this run has no approval surface.`)
+			}
+
+			// Normally the assistant branch already showed the card. If it decided differently
+			// (the SDK normalised the input in between), show one now: an approval nobody can
+			// see is the failure this exists to prevent.
+			if (!pendingShown.has(id)) await emitPending(id, name, toolInput, true)
+
+			const decision = await Promise.race([
+				input.requestApproval({ id, name, input: toolInput }),
+				new Promise<ApprovalDecision>((resolve) => {
+					signal.addEventListener('abort', () => resolve({ allow: false, reason: 'Run aborted' }), {
+						once: true,
+					})
+				}),
+			])
+
+			if (!decision.allow) return deny(decision.reason)
+			return allow()
+		},
 	}
 
 	/*
@@ -557,7 +674,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						// A child's call. Still parked for `canUseTool`, so containment and the
 						// approval gate run on it exactly as they would on the parent's — only the
 						// frame it produces differs.
-						childCallIds.add(id)
+						childParents.set(id, parentToolUseId)
 						toolInputs.set(id, block.input ?? null)
 						idByCall.set(callKey(name, block.input), [
 							...(idByCall.get(callKey(name, block.input)) ?? []),
@@ -569,6 +686,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							conversationId: null,
 							name,
 						})
+						// One that needs an answer gets a card the operator can answer — see the
+						// subagent note above. One that is refused or allowed outright needs none.
+						if (decide(name, block.input).gate === 'ask' && input.requestApproval) {
+							await emitPending(id, name, block.input, true)
+						}
+						announcementFor(id).resolve()
 						continue
 					}
 					toolInputs.set(id, block.input ?? null)
@@ -588,14 +711,17 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					const key = callKey(name, block.input)
 					idByCall.set(key, [...(idByCall.get(key) ?? []), id])
 
-					if (needsApproval(name)) {
-						// Show the block as awaiting approval; the tool_call frame is emitted from
-						// canUseTool once approved (or a tool_denied if it is refused).
-						await emit('tool_pending', { id, name, arguments: JSON.stringify(block.input ?? {}) })
-					} else {
+					const decision = decide(name, block.input)
+					if (decision.gate === 'allow') {
 						callEmitted.add(id)
 						await emit('tool_call', { id, name, arguments: JSON.stringify(block.input ?? {}) })
+					} else {
+						// Show the block as awaiting approval — with the token that lets the card
+						// answer it — or, for a refusal, as the block the `tool_denied` resolves.
+						// The tool_call frame is emitted once approved.
+						await emitPending(id, name, block.input, decision.gate === 'ask')
 					}
+					announcementFor(id).resolve()
 				}
 				continue
 			}
@@ -640,6 +766,18 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							name: toolName,
 							success: block.is_error !== true,
 						})
+						// Close the approval card this call had in the parent's transcript, if any.
+						// Not a block: the persisted transcript keeps the call in the child's card.
+						if (pendingShown.has(id)) {
+							await emit('tool_result', {
+								id,
+								name: toolName,
+								success: block.is_error !== true,
+								executionMs: null,
+								result: text,
+								...(details ? { details } : {}),
+							})
+						}
 						input.onToolResult?.({
 							name: toolName,
 							success: block.is_error !== true,

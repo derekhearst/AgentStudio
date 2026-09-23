@@ -17,11 +17,12 @@
  */
 
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
-import { BUILTIN_TOOL_SET, DISALLOWED_BUILTIN_TOOLS, SUBAGENT_TOOL } from './builtin-tools'
+import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
+import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
 import { env } from '$env/dynamic/private'
-import { buildToolServer, ENGINE_MCP_SERVER, qualifiedToolName, type ToolServerContext } from './tools.server'
+import { buildToolServer, ENGINE_MCP_SERVER, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
 import {
 	resolveEffectivePermissionMode,
@@ -86,8 +87,11 @@ export type EngineOptionsInput = {
 	model: string
 	reasoningEffort?: ReasoningEffort
 	tools: ToolServerContext
-	/** Tool names (bare) the run is allowed to call. Omit for all of them. */
-	allowedTools?: string[]
+	/**
+	 * The agent's fixed tool surface, from `./tool-scope`. Omit for every tool. This
+	 * restricts; it is never handed to the SDK as `allowedTools`, which auto-approves.
+	 */
+	toolScope?: ToolScope | null
 	systemPrompt?: string
 	/**
 	 * The conversation's own mode (`conversations.permission_mode`). Not the SDK's union —
@@ -162,8 +166,7 @@ export function resolveRunPermissionMode(input: {
 }
 
 // Built-in tool names live in `./builtin-tools` so they can be imported without `$env`.
-// Imported *and* re-exported: this module uses BUILTIN_TOOL_SET itself, and has always
-// been where callers look for the others.
+// Re-exported because this module has always been where callers look for them.
 export {
 	BUILTIN_FILE_TOOLS,
 	BUILTIN_SHELL_TOOLS,
@@ -195,6 +198,7 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const proxyEnv = claude ? undefined : gatewayEnv(input.model)
 
 	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
+	const scopedBuiltins = scopeBuiltinTools(input.toolScope)
 
 	const { thinking, effort } = resolveThinking(input.reasoningEffort)
 
@@ -211,25 +215,14 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		model: sdkModel,
 		thinking,
 		...(effort ? { effort } : {}),
-		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools) },
-		// A scoped run names its in-house tools (MCP-qualified) plus the built-ins it may
-		// use. An unscoped run omits allowedTools entirely, which is how the SDK expresses
-		// "everything" — the built-ins are the filesystem surface now, so they must not be
-		// filtered out by an allowlist that only knows MCP names.
-		...(input.allowedTools
-			? {
-					allowedTools: [
-						...input.allowedTools
-							.filter((name) => !BUILTIN_TOOL_SET.has(name))
-							.map(qualifiedToolName),
-						...input.allowedTools.filter((name) => BUILTIN_TOOL_SET.has(name)),
-						// Delegation is only reachable through `Task`, so a scoped run that was
-						// given agents has to be allowed to call it — otherwise the definitions
-						// are described in the prompt and the tool that uses them is filtered out.
-						...(agents ? [SUBAGENT_TOOL] : []),
-					],
-				}
-			: {}),
+		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools, input.toolScope?.inHouse) },
+		/*
+		 * A scoped run restricts: `tools` is the SDK's availability list for its built-ins, and
+		 * the MCP server above registers only the scoped in-house tools. `allowedTools` is
+		 * never set — the SDK treats it as "auto-approve without asking", which skipped every
+		 * gate for the very tools a read-only agent was scoped to. See `./tool-scope`.
+		 */
+		...(scopedBuiltins ? { tools: scopedBuiltins } : {}),
 		disallowedTools: [...DISALLOWED_BUILTIN_TOOLS],
 		/*
 		 * Always set, never omitted. The SDK reads an omitted `settingSources` as "load

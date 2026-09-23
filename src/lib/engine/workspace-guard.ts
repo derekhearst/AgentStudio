@@ -14,8 +14,9 @@
  * the model unrestricted filesystem access on the host, which is a bigger regression than
  * the duplication #15 set out to fix.
  *
- * So containment moves into `canUseTool`, which the SDK consults before every built-in
- * call, and this module is the decision.
+ * So containment moves into the engine's `PreToolUse` hook, which the SDK runs before every
+ * call — ahead of allow rules and permission modes, which `canUseTool` is not — and this
+ * module is the decision. See `./tool-decision`.
  *
  * ## What this can and cannot do
  *
@@ -38,7 +39,7 @@
  * filesystem and cannot be defeated by a race between the check and the read.
  */
 
-import { isAbsolute, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 
 /** Built-in tools whose arguments name a path we can resolve and contain. */
 const PATH_ARGS: Record<string, readonly string[]> = {
@@ -55,6 +56,35 @@ const PATH_ARGS: Record<string, readonly string[]> = {
 /** Tools that run a command rather than touch a named path. Not decidable from arguments. */
 const COMMAND_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
 
+/**
+ * Tools that can create, change or remove a file, and the arguments that name it.
+ *
+ * Wider than the built-ins on purpose: our own `move_file` / `delete_file` resolve inside the
+ * same workspace, and moving a file onto `.claude/settings.json` rewrites it just as
+ * surely as `Write` does. Deleting one counts too — removing a trusted `permissions.deny`
+ * is an escalation of its own.
+ */
+const CONFIG_WRITE_ARGS: Record<string, readonly string[]> = {
+	Write: ['file_path', 'path'],
+	Edit: ['file_path', 'path'],
+	MultiEdit: ['file_path', 'path'],
+	NotebookEdit: ['notebook_path', 'file_path', 'path'],
+	move_file: ['fromPath', 'toPath'],
+	delete_file: ['path'],
+}
+
+/**
+ * What under `.claude/` configures the agent rather than being work it produced.
+ *
+ * The same set the SDK's own sandbox refuses to let a sandboxed `Bash` write (its settings
+ * files, `commands`, `agents`, `skills`), plus `hooks` — a trusted project's hook commands
+ * run as the app user, outside the sandbox.
+ */
+const CLAUDE_CONFIG_ENTRIES = new Set(['settings.json', 'settings.local.json', 'commands', 'agents', 'skills', 'hooks'])
+
+/** Instruction files the project tier loads into every run's prompt once a project is trusted. */
+const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md'])
+
 export type BashPolicy = 'sandboxed' | 'ask' | 'deny'
 
 export type GuardInput = {
@@ -69,6 +99,12 @@ export type GuardInput = {
 	bashPolicy: BashPolicy
 	/** Extra roots the run may touch, e.g. a read-only skills directory. Absolute. */
 	additionalRoots?: readonly string[]
+	/**
+	 * Whether this run loads the project's own committed configuration (the SDK's `project`
+	 * setting source — see `./setting-sources`). When it does, the `CLAUDE.md` files are part
+	 * of what the agent is told on every turn, so changing them needs approval too.
+	 */
+	projectConfigLoaded?: boolean
 }
 
 export type GuardDecision =
@@ -90,8 +126,8 @@ export function isInside(root: string, candidate: string): boolean {
 }
 
 /** Pull every string argument that names a path, by the conventions each built-in uses. */
-function pathArgumentsFor(toolName: string, toolInput: unknown): string[] {
-	const keys = PATH_ARGS[toolName]
+function pathArgumentsFor(toolName: string, toolInput: unknown, table = PATH_ARGS): string[] {
+	const keys = table[toolName]
 	if (!keys || typeof toolInput !== 'object' || toolInput === null) return []
 	const record = toolInput as Record<string, unknown>
 	const found: string[] = []
@@ -114,6 +150,24 @@ export function guardWorkspaceAccess(input: GuardInput): GuardDecision {
 	const { toolName, toolInput, workspaceRoot, bashPolicy } = input
 
 	if (COMMAND_TOOLS.has(toolName)) {
+		/*
+		 * `Bash` takes a `dangerouslyDisableSandbox` flag that runs the command outside the
+		 * OS sandbox, and the SDK honours it unless `allowUnsandboxedCommands` is false. That
+		 * option is set too (`./options.server`), but a 'sandboxed' policy that waved the
+		 * flag through would be claiming a confinement it had just been told to drop. Refused
+		 * in every policy: where there is no sandbox the flag means nothing, and the model
+		 * can simply ask again without it.
+		 */
+		if (
+			typeof toolInput === 'object' &&
+			toolInput !== null &&
+			(toolInput as Record<string, unknown>).dangerouslyDisableSandbox === true
+		) {
+			return {
+				verdict: 'deny',
+				reason: 'Shell commands always run inside the sandbox here; dangerouslyDisableSandbox is not honoured.',
+			}
+		}
 		if (bashPolicy === 'sandboxed') return { verdict: 'allow' }
 		if (bashPolicy === 'ask') {
 			return {
@@ -129,14 +183,14 @@ export function guardWorkspaceAccess(input: GuardInput): GuardDecision {
 		}
 	}
 
-	const paths = pathArgumentsFor(toolName, toolInput)
-	if (paths.length === 0) return { verdict: 'allow' }
+	// A relative path resolves against the workspace, which is also the SDK's cwd — the
+	// chat route passes the same root as both, so the two cannot resolve it differently.
+	const absoluteFor = (candidate: string) => (isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate))
 
+	const paths = pathArgumentsFor(toolName, toolInput)
 	const roots = [workspaceRoot, ...(input.additionalRoots ?? [])]
 	for (const candidate of paths) {
-		// A relative path resolves against the workspace, which is also the SDK's cwd.
-		const absolute = isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate)
-		if (!roots.some((root) => isInside(root, absolute))) {
+		if (!roots.some((root) => isInside(root, absoluteFor(candidate)))) {
 			return {
 				verdict: 'deny',
 				reason: `Path is outside this run's workspace: ${candidate}`,
@@ -144,7 +198,53 @@ export function guardWorkspaceAccess(input: GuardInput): GuardDecision {
 		}
 	}
 
+	/*
+	 * Inside the workspace, but is it the agent's own configuration?
+	 *
+	 * A trusted project's `.claude/settings.json` is loaded by the next run, and its hooks run
+	 * as the app user outside the sandbox — so an agent that could rewrite it could grant
+	 * itself anything between turns, which is exactly why `./setting-sources` never loads
+	 * the `local` tier. Trust is a decision about content the operator looked at, and that
+	 * content sits in the agent's own writable directory. Asking rather than refusing keeps
+	 * the legitimate case ("add a slash command for this repo") possible, with a human in it.
+	 */
+	for (const candidate of pathArgumentsFor(toolName, toolInput, CONFIG_WRITE_ARGS)) {
+		if (isAgentConfigPath(workspaceRoot, absoluteFor(candidate), input.projectConfigLoaded === true)) {
+			return {
+				verdict: 'ask',
+				reason: `${candidate} configures the agent itself (its permissions, hooks, commands or instructions), so changing it always needs your approval.`,
+			}
+		}
+	}
+
 	return { verdict: 'allow' }
+}
+
+/**
+ * True when `absolute` is part of the configuration the SDK loads from a project rather
+ * than something the agent produced. Matched per path segment and case-insensitively, so
+ * `.Claude/Settings.json` on a case-insensitive filesystem cannot slip past.
+ */
+export function isAgentConfigPath(workspaceRoot: string, absolute: string, includeInstructions: boolean): boolean {
+	// Relative to the workspace when inside it, so a workspace that itself lives under some
+	// `.claude/` directory on the host is not mistaken for configuration.
+	const rel = relative(workspaceRoot, absolute)
+	const within = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+	const segments = (within ? rel : absolute)
+		.split(/[\\/]+/)
+		.filter((s) => s.length > 0 && s !== '.')
+		.map((s) => s.toLowerCase())
+	if (segments.length === 0) return false
+
+	for (let i = 0; i < segments.length; i++) {
+		if (segments[i] !== '.claude') continue
+		// The directory itself (a move or recursive delete of `.claude`), or a config entry in it.
+		if (i === segments.length - 1 || CLAUDE_CONFIG_ENTRIES.has(segments[i + 1])) return true
+	}
+
+	const base = segments[segments.length - 1]
+	if (base === '.mcp.json') return true
+	return includeInstructions && INSTRUCTION_FILES.has(base)
 }
 
 /**
