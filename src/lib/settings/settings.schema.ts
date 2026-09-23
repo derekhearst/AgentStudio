@@ -18,6 +18,12 @@ export const appSettings = pgTable('app_settings', {
 		.$type<{
 			dailyLimit: number | null
 			monthlyLimit: number | null
+			/**
+			 * The `budget_limits` rows these two limits are enforced through, written by
+			 * `syncSettingsBudgetLimits`. Kept here so the rows Settings owns are never
+			 * confused with limits created any other way.
+			 */
+			limitIds?: { day?: string | null; month?: string | null }
 		}>()
 		.notNull()
 		.default({ dailyLimit: null, monthlyLimit: null }),

@@ -1,6 +1,8 @@
 import { asc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
+import { syncSettingsBudgetLimits } from '$lib/costs/budget.server'
+import { logger } from '$lib/observability/logger'
 
 /**
  * Note on `dreamConfig` + `notificationPrefs.dreamSummary`:
@@ -152,7 +154,24 @@ export async function updateSettings(input: {
 		.where(eq(appSettings.id, current.id))
 		.returning()
 
-	return updated
+	return withBudgetLimitsSynced(input.userId, updated)
+}
+
+/**
+ * The daily and monthly limits are enforced through `budget_limits` rows, which follow the
+ * settings here and again at every budget check. Returns the settings as they stand after
+ * the sync, which records the ids of any rows it created.
+ */
+async function withBudgetLimitsSynced<T extends { id: string }>(userId: string, settings: T): Promise<T> {
+	try {
+		await syncSettingsBudgetLimits(userId)
+		const [fresh] = await db.select().from(appSettings).where(eq(appSettings.id, settings.id)).limit(1)
+		return (fresh as T | undefined) ?? settings
+	} catch (err) {
+		// The next budget check retries; the settings themselves are saved either way.
+		logger.warn('[settings] syncing the budget limits failed', { err })
+		return settings
+	}
 }
 
 export async function resetSettings(userId: string) {
@@ -172,7 +191,8 @@ export async function resetSettings(userId: string) {
 			defaultModel: DEFAULT_SETTINGS.defaultModel,
 			theme: DEFAULT_SETTINGS.theme,
 			notificationPrefs: DEFAULT_SETTINGS.notificationPrefs,
-			budgetConfig: DEFAULT_SETTINGS.budgetConfig,
+			// The row ids stay: the sync below needs them to switch the old limits off.
+			budgetConfig: { ...DEFAULT_SETTINGS.budgetConfig, limitIds: existing.budgetConfig?.limitIds },
 			contextConfig: DEFAULT_SETTINGS.contextConfig,
 			toolConfig: DEFAULT_SETTINGS.toolConfig,
 			memoryConfig: DEFAULT_SETTINGS.memoryConfig,
@@ -180,5 +200,5 @@ export async function resetSettings(userId: string) {
 		})
 		.where(eq(appSettings.id, existing.id))
 		.returning()
-	return updated
+	return withBudgetLimitsSynced(userId, updated)
 }

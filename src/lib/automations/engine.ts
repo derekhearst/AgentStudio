@@ -1,7 +1,7 @@
 import { and, asc, eq, lte } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
-import { checkBudgetLimits, recordBudgetAlert, type BudgetLimitRow } from '$lib/costs/budget.server'
+import { checkBudgetLimits, recordBudgetAlert, recordBudgetWarnings, type BudgetLimitRow } from '$lib/costs/budget.server'
 import { logger } from '$lib/observability/logger'
 import { computeNextRunAt } from './cron'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
@@ -96,12 +96,15 @@ export async function runAutomationById(
 		userId: automation.userId,
 		agentId: automation.agentId ?? undefined,
 	})
+	// Unattended spend crossing a warning line is the case a warning is most for.
+	await recordBudgetWarnings(budgetCheck)
 	if (!budgetCheck.allowed && budgetCheck.blockedBy) {
 		return await handleAutomationBudgetBlocked(automation, budgetCheck.blockedBy, now, {
 			trigger,
 			attempt,
 			jobId: options.jobId ?? null,
 			preserveSchedule,
+			spendUsd: budgetCheck.blockedSpendUsd ?? parseFloat(budgetCheck.blockedBy.limitUsd),
 		})
 	}
 
@@ -202,7 +205,14 @@ async function handleAutomationBudgetBlocked(
 	automation: typeof automations.$inferSelect,
 	blockedBy: BudgetLimitRow,
 	now: Date,
-	context: { trigger: AutomationRunTrigger; attempt: number; jobId: string | null; preserveSchedule: boolean },
+	context: {
+		trigger: AutomationRunTrigger
+		attempt: number
+		jobId: string | null
+		preserveSchedule: boolean
+		/** What had been spent when the limit tripped — recorded on the alert, not the limit itself. */
+		spendUsd: number
+	},
 ) {
 	// #31 — a blocked tick is part of the run history too, with its own status so it is not
 	// confused with a failure (nothing is broken; a cap was hit).
@@ -225,7 +235,7 @@ async function handleAutomationBudgetBlocked(
 		await recordBudgetAlert({
 			limit: blockedBy,
 			triggerType: 'block',
-			spendUsd: parseFloat(blockedBy.limitUsd),
+			spendUsd: context.spendUsd,
 		})
 	} catch (err) {
 		logger.warn('[automations] budget block alert insert failed', { err })

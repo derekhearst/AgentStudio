@@ -134,12 +134,15 @@ test.describe('automations/budget-gate — pre-check skip', () => {
 			expect(updated.next_run_at).not.toBeNull()
 			expect(new Date(updated.next_run_at!).getTime()).toBeGreaterThan(past.getTime())
 
-			// Block alert recorded.
-			const alerts = await sql<{ trigger_type: string }[]>`
-				select trigger_type::text as trigger_type
+			// Block alert recorded, with what had actually been spent ($5.00) rather than the
+			// $0.01 limit it crossed — the overshoot is what the alert history is for.
+			const alerts = await sql<{ trigger_type: string; spend_at_trigger: string }[]>`
+				select trigger_type::text as trigger_type, spend_at_trigger::text as spend_at_trigger
 				from budget_alerts where user_id = ${userId}
 			`
-			expect(alerts.some((a) => a.trigger_type === 'block')).toBe(true)
+			const block = alerts.find((a) => a.trigger_type === 'block')
+			expect(block).toBeTruthy()
+			expect(parseFloat(block!.spend_at_trigger)).toBe(5)
 
 			// Lifecycle metric emitted.
 			const metrics = await sql<{ metric: string; dimension: { mode?: string; outputTarget?: string }; value: string }[]>`
