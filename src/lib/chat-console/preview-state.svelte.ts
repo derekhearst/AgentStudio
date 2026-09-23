@@ -13,8 +13,9 @@ import { openRight } from './mobile-drawer-state.svelte';
  *
  * #14 added `open`: the rail is folded to a thin strip until something opens a
  * preview or the viewer expands it. That one is remembered per viewer, not per
- * chat (`getRailOpen` / `setRailOpen`), and only on the desktop column — the
- * phone drawer is opened and closed by hand and ignores it.
+ * chat (`getRailOpen` / `setRailOpen`), and belongs to the column beside the
+ * thread. The phone drawer is opened and closed by hand and always shows the
+ * whole rail, so nothing done on a phone-width screen changes it (see `setOpen`).
  *
  * The `proposed` field is the security-relevant part. A URL that arrives from a
  * tool result is attacker-influenced data — a page the agent fetched can put
@@ -142,7 +143,17 @@ export async function hydrateRailOpen() {
 	}
 }
 
+/**
+ * Expand or fold the column, and remember it for this viewer.
+ *
+ * Every rail action funnels through here — tab buttons, "Open file" on an edit card, a
+ * Files row, "Close preview" — whichever copy of the rail they come from. On a phone-width
+ * screen they all come from the drawer or the thread beside it, where the column is not
+ * shown, so the fold is left alone rather than persisted: otherwise tapping Files in the
+ * drawer would rewrite the preference the viewer's desktop uses.
+ */
 function setOpen(open: boolean) {
+	if (isDrawerViewport()) return;
 	openTouched = true;
 	if (previewState.open === open) return;
 	previewState.open = open;

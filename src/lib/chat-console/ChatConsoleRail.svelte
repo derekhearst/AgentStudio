@@ -25,7 +25,8 @@
 	 * strip button is clicked, or when the viewer left it expanded last time.
 	 *
 	 * `variant="drawer"` is the phone's slide-in copy. The drawer is opened and closed by
-	 * hand, so it always shows the full rail and has no collapse control.
+	 * hand, so it always shows the full rail and has no collapse control; tapping a tab or a
+	 * file in it leaves the column's remembered fold alone (see `setOpen` in preview-state).
 	 */
 	let { variant = 'column' }: { variant?: 'column' | 'drawer' } = $props();
 

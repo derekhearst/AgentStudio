@@ -17,12 +17,15 @@ import {
  * the Files tab has something real to list without a model round-trip.
  *
  * Whether the rail is expanded is a per-user preference (`chat_workbench_preferences.
- * panel_layout.railOpen`), so the desktop tests that read or write it hold a lock and put
- * the user's own value back afterwards. The phone tests only open the drawer, which neither
- * reads nor writes it.
+ * panel_layout.railOpen`), shared by every test that signs in as the test user. So every
+ * test here that can change it or asserts on it — the phone drawer's included, which checks
+ * the drawer leaves it alone — holds a lock and puts the user's own value back afterwards.
  */
 
 const RAIL_LOCK = 'chat-rail-open-preference'
+
+/** The fold's save, as the page requests it: `/_app/remote/<hash>/setRailOpen`. */
+const RAIL_OPEN_COMMAND = /\/remote\/[^/?]+\/setRailOpen(?:[?#]|$)/
 
 async function seedChatWithEdits(prefix: string, extra?: { runId?: string }) {
 	const sql = getSql()
@@ -91,6 +94,34 @@ async function setRailOpenPref(open: boolean) {
 	`
 }
 
+/**
+ * Hold the preference for one test: take the lock, remember the user's own value and start
+ * from folded. The returned restore puts that value back and releases the lock — close the
+ * page first, so nothing left on it can still save over the restored value.
+ */
+async function holdRailOpenPref(): Promise<() => Promise<void>> {
+	const release = await acquireGlobalStateLock(RAIL_LOCK)
+	try {
+		const original = await readRailOpenPref()
+		await setRailOpenPref(false)
+		return async () => {
+			try {
+				const userId = await getActiveUserId()
+				await getSql()`
+					update chat_workbench_preferences
+					set panel_layout = ${original.panelLayout === null ? null : getSql().json(original.panelLayout as never)}
+					where user_id = ${userId}
+				`
+			} finally {
+				await release()
+			}
+		}
+	} catch (error) {
+		await release()
+		throw error
+	}
+}
+
 async function waitForRailOpenPref(open: boolean) {
 	await pollDb(
 		readRailOpenPref,
@@ -113,15 +144,12 @@ async function openChat(page: Page, id: string, prefix: string) {
 test.describe('chat rail — desktop column', () => {
 	let prefix = ''
 	let conversationId = ''
-	let release: (() => Promise<void>) | null = null
-	let original: { exists: boolean; panelLayout: unknown } | null = null
+	let restorePref: (() => Promise<void>) | null = null
 
 	test.beforeEach(async ({ page }, testInfo) => {
 		test.skip(testInfo.project.name !== 'desktop', 'the rail is a column on desktop; the phone drawer is covered below')
 		test.setTimeout(90_000)
-		release = await acquireGlobalStateLock(RAIL_LOCK)
-		original = await readRailOpenPref()
-		await setRailOpenPref(false)
+		restorePref = await holdRailOpenPref()
 		prefix = uniquePrefix('rail-col')
 		await cleanupPrefixedRecords(prefix)
 		conversationId = (await seedChatWithEdits(prefix, { runId: '6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b' })).id
@@ -133,18 +161,9 @@ test.describe('chat rail — desktop column', () => {
 			// Nothing left on the page may still save the preference after it is restored.
 			await page.close()
 			if (prefix) await cleanupPrefixedRecords(prefix)
-			if (original) {
-				const userId = await getActiveUserId()
-				await getSql()`
-					update chat_workbench_preferences
-					set panel_layout = ${original.panelLayout === null ? null : getSql().json(original.panelLayout as never)}
-					where user_id = ${userId}
-				`
-			}
 		} finally {
-			original = null
-			await release?.()
-			release = null
+			await restorePref?.()
+			restorePref = null
 		}
 	})
 
@@ -284,7 +303,12 @@ test.describe('chat rail — phone drawer', () => {
 		test.setTimeout(90_000)
 		const prefix = uniquePrefix('rail-drawer')
 		await cleanupPrefixedRecords(prefix)
+		const restorePref = await holdRailOpenPref()
 		await authenticateContext(page.context())
+		const railOpenWrites: string[] = []
+		page.on('request', (request) => {
+			if (RAIL_OPEN_COMMAND.test(request.url())) railOpenWrites.push(request.url())
+		})
 		try {
 			const conversation = await seedChatWithEdits(prefix)
 			await openChat(page, conversation.id, prefix)
@@ -308,8 +332,29 @@ test.describe('chat rail — phone drawer', () => {
 			const box = await name.boundingBox()
 			expect(box?.width ?? 0).toBeGreaterThan(20)
 			await expect(rows.first().locator('.console-files__stat.is-add')).toBeVisible()
+
+			// Nothing done in the drawer touches the fold, which belongs to the desktop column:
+			// not the Files tab, not opening a file, not closing it. The selection is saved on the
+			// same 400ms debounce, scheduled after the fold's, so once it has landed any fold
+			// write would already have been sent.
+			await rows.first().click()
+			await expect(drawer.locator('.console-prev__bar')).toContainText('src/lib/rail-demo/widget.ts')
+			const railPreviewRow = () => getSql()<{ kind: string; target: string | null }[]>`
+				select kind, target from chat_rail_preview where conversation_id = ${conversation.id}
+			`
+			await pollDb(railPreviewRow, (r) => r[0]?.target === 'src/lib/rail-demo/widget.ts', {
+				description: 'the drawer saved the open file',
+			})
+			await drawer.getByRole('button', { name: 'Close preview' }).click()
+			await pollDb(railPreviewRow, (r) => r[0]?.kind === 'none', { description: 'the drawer saved the closed preview' })
+
+			expect(railOpenWrites).toEqual([])
+			const stored = await readRailOpenPref()
+			expect((stored.panelLayout as { railOpen?: boolean } | null)?.railOpen).toBe(false)
 		} finally {
+			await page.close()
 			await cleanupPrefixedRecords(prefix)
+			await restorePref()
 		}
 	})
 })

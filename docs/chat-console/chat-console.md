@@ -68,6 +68,10 @@ On a phone the rail is not beside the conversation. The rail button in the chat'
 opens it as a drawer from the right, with the same two tabs. The drawer is opened and closed
 by hand, so it always shows the full rail and has no collapse button.
 
+Nothing you do on a phone changes the expanded-or-folded preference. Switching tabs in the
+drawer, opening a file from an edit card or from Files, and closing the preview all leave
+it alone, so your desktop rail stays the way you left it there.
+
 ### Files: changed in this chat
 
 Files lists what the agent actually edited or created in this conversation. It is built
@@ -139,7 +143,7 @@ that file is already the one open.
 | What | Remembered for | Stored in |
 | --- | --- | --- |
 | The active tab and the open file or URL | Each conversation separately | `chat_rail_preview`, one row per conversation, owned by its user |
-| Expanded or folded | You, across every chat | `chat_workbench_preferences.panel_layout.railOpen` (absent means folded) |
+| Expanded or folded | You, across every chat | `chat_workbench_preferences.panel_layout.railOpen` (absent means folded); only changes made on a desktop or tablet screen are saved |
 | The rail's width | This browser | The browser's local storage |
 
 Closing a chat and coming back later puts the same file or page back in Preview. If the rail
