@@ -14,6 +14,7 @@ import {
 	updateSkillFile,
 } from '$lib/skills/skills.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { withUserInputErrors } from '$lib/server/user-input-error'
 import { auditSkillDeleted } from '$lib/governance'
 
 /* ── Queries ────────────────────────────────────────────────── */
@@ -155,7 +156,8 @@ const importSkillSchema = z.object({
 
 export const importSkillCommand = command(importSkillSchema, async ({ source, mode, resources }) => {
 	requireAuthenticatedRequestUser()
-	return importSkillPackage({ source, mode, resources })
+	// A bad package or a name clash is a 400 with the reason, not a 500 reading "Internal Error".
+	return withUserInputErrors(() => importSkillPackage({ source, mode, resources }))
 })
 
 export const exportSkillCommand = command(skillIdSchema, async ({ id }) => {

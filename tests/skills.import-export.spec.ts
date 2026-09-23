@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 /**
@@ -287,5 +289,66 @@ test.describe('skills/import-export — a skill survives export and re-import', 
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}
+	})
+})
+
+test.describe('skills/import — a refused import says why', () => {
+	/*
+	 * The /skills Import dialog can only show a refusal's reason when it arrives as a 400,
+	 * and only a `UserInputError` becomes one (`withUserInputErrors`). The package checks,
+	 * the header checks and the name clash were plain Errors: SvelteKit answered with a 500
+	 * whose message is "Internal Error", and the dialog read "Import failed" for all of them.
+	 */
+	test('a bad package, header or resource file is refused with the reason, as a UserInputError', async () => {
+		const { importSkillPackage } = await import('../src/lib/skills/skills.server')
+		const { UserInputError } = await import('../src/lib/server/user-input-error')
+		const head = ['---', 'name: x', 'description: y', '---', 'body', '']
+		const cases: Array<{ source: string; reason: RegExp }> = [
+			{ source: '# A body with no header', reason: /frontmatter/ },
+			{ source: [...head, '<!-- skill-resource {"name":"a.md"} -->', 'text'].join('\n'), reason: /"a\.md" is missing its closing/ },
+			{ source: [...head, '<!-- skill-resource {not json} -->', '<!-- /skill-resource -->'].join('\n'), reason: /Unreadable resource header/ },
+			{
+				source: [...head, '<!-- skill-resource {"name":"empty.md"} -->', '<!-- /skill-resource -->'].join('\n'),
+				reason: /^Resource file "empty\.md": content is empty$/,
+			},
+		]
+		for (const { source, reason } of cases) {
+			const err = await importSkillPackage({ source, mode: 'create' }).then(
+				() => null,
+				(e: unknown) => e,
+			)
+			expect(err, source).toBeInstanceOf(UserInputError)
+			expect((err as Error).message, source).toMatch(reason)
+		}
+	})
+
+	test('importing a name that exists, without overwrite, is refused with the way out', async () => {
+		const { cleanupPrefixedRecords, seedSkill, uniquePrefix } = await import('./helpers')
+		const { importSkillPackage } = await import('../src/lib/skills/skills.server')
+		const { serializeSkillSource } = await import('../src/lib/skills/skill-source')
+		const { UserInputError } = await import('../src/lib/server/user-input-error')
+		const prefix = uniquePrefix('skill-import-clash')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const skill = await seedSkill(prefix)
+			const source = serializeSkillSource({ name: skill.name, description: 'Another one.', content: 'Body.' })
+			const err = await importSkillPackage({ source, mode: 'create' }).then(
+				() => null,
+				(e: unknown) => e,
+			)
+			expect(err).toBeInstanceOf(UserInputError)
+			expect((err as Error).message).toMatch(/already exists\. Use overwrite mode/)
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('the import command answers with the reason and the dialog shows it', async () => {
+		const remote = readFileSync(resolve('src/lib/skills/skills.remote.ts'), 'utf8')
+		const command = remote.slice(remote.indexOf('export const importSkillCommand'))
+		expect(command.slice(0, command.indexOf('\n})'))).toMatch(/withUserInputErrors\(\(\) => importSkillPackage\(/)
+		// An HttpError is not an Error, so `e instanceof Error ? e.message : …` showed the fallback.
+		const page = readFileSync(resolve('src/routes/skills/+page.svelte'), 'utf8')
+		expect(page).toMatch(/importError = remoteErrorMessage\(e, 'Import failed'\)/)
 	})
 })

@@ -46,5 +46,6 @@ AgentStudio has a single owner. The owner can view, create, edit, import, export
   - the **resource files** were pasted back as part of the body, and their descriptions were dropped;
   - a **description with quotation marks** gained an extra backslash before each quote on every export and import.
 - A pasted package is refused, with a reason, if a resource file has no closing marker line, has no name, or if there is stray text between resource files. Nothing is silently dropped.
+- Every refusal shows its reason in the Import dialog: a missing or incomplete header, a broken or empty resource file ("Resource file "notes.md": content is empty"), or a name that is already taken when overwrite is off ("A skill named … already exists. Use overwrite mode to replace it."). The dialog used to say only "Import failed" for all of these.
 - A resource file whose own content includes a line that is exactly `<!-- /skill-resource -->` cannot be carried in a package.
 - The header accepts `name` and `description` (both required, the description at most 500 characters), `category`, `tags` and `enabled`. Other keys are ignored.

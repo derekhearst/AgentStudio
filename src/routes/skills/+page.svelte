@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
 
@@ -45,7 +46,7 @@
 			await loadSkills();
 			void goto(`/skills/${result.id}`);
 		} catch (e) {
-			importError = e instanceof Error ? e.message : 'Import failed';
+			importError = remoteErrorMessage(e, 'Import failed');
 		} finally {
 			importBusy = false;
 		}
