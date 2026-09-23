@@ -17,6 +17,9 @@
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
 	let starting = $state(false);
+	// Its own message: sharing `loadError` let a click clear a real load failure, and a
+	// failed start hid the "No skills yet" state it was started from.
+	let startError = $state<string | null>(null);
 
 	/*
 	 * Three different empty lists, which the page used to report as one. "No skills yet"
@@ -69,11 +72,11 @@
 	async function startNewSkill() {
 		if (starting) return;
 		starting = true;
-		loadError = null;
+		startError = null;
 		try {
 			await startGuidedCreationChat({ kind: 'skill' });
 		} catch (e) {
-			loadError = remoteErrorMessage(e, 'Could not start the guided creation chat.');
+			startError = remoteErrorMessage(e, 'Could not start the guided creation chat.');
 		} finally {
 			starting = false;
 		}
@@ -161,6 +164,9 @@
 		<div class="min-h-0 flex-1 overflow-y-auto rounded-xl bg-base-200/40 px-3 sm:px-4">
 	{#if loadError}
 		<div role="alert" class="alert alert-error my-3 py-2 text-sm">{loadError}</div>
+	{/if}
+	{#if startError}
+		<div role="alert" class="alert alert-error my-3 py-2 text-sm">{startError}</div>
 	{/if}
 	{#if loading}
 		<div class="flex justify-center py-16">
