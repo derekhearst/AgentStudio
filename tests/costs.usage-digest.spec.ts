@@ -12,6 +12,7 @@ import {
 	TOKEN_SPIKE_FLOOR,
 	USAGE_DIGEST_PROMPT,
 	assembleUsageDigest,
+	automationHistoryCoversPreviousWindow,
 	detectAnomalies,
 	failureRate,
 	parseUsageDigestPrompt,
@@ -22,6 +23,7 @@ import {
 	type DigestMonitor,
 	type UsageDigestInput,
 } from '../src/lib/costs/usage-digest'
+import { AUTOMATION_RUN_RETENTION_DAYS } from '../src/lib/automations/failure-policy'
 
 /**
  * #38 — the usage digest's pure half: window math, anomaly thresholds, assembly and the
@@ -228,6 +230,31 @@ test.describe('costs/usage-digest — automations and monitors', () => {
 			'automation_newly_failing',
 		)
 		expect(kinds(baseInput({ automations: [automation()] }))).toEqual([])
+	})
+
+	test('"newly failing" is not judged once the previous window is older than the run history', () => {
+		// The ledger keeps AUTOMATION_RUN_RETENTION_DAYS of runs. For a 30-day window the
+		// previous 30 days are already pruned, so prevFailed is always 0 — a weekly job that
+		// fails every week would otherwise be reported as failing for the first time.
+		expect(AUTOMATION_RUN_RETENTION_DAYS).toBe(30)
+		expect(MAX_USAGE_DIGEST_DAYS).toBe(AUTOMATION_RUN_RETENTION_DAYS)
+		const failingEveryWeek = automation({ failed: 4, prevFailed: 0 })
+		const at = (days: number) =>
+			kinds(baseInput({ window: resolveDigestWindow(days, NOW), automations: [failingEveryWeek] }))
+
+		expect(at(30)).not.toContain('automation_newly_failing')
+		// The edge: half the retention is the longest window whose previous window is kept whole.
+		expect(at(AUTOMATION_RUN_RETENTION_DAYS / 2)).toContain('automation_newly_failing')
+		expect(at(AUTOMATION_RUN_RETENTION_DAYS / 2 + 1)).not.toContain('automation_newly_failing')
+		expect(at(7)).toContain('automation_newly_failing')
+		expect(automationHistoryCoversPreviousWindow(1)).toBe(true)
+		expect(automationHistoryCoversPreviousWindow(30)).toBe(false)
+
+		// Switched off is about the current window only, so it is still reported at 30 days.
+		const off = automation({ failed: 5, disabledReason: 'consecutive_failures', disabledInWindow: true })
+		expect(kinds(baseInput({ window: resolveDigestWindow(30, NOW), automations: [off] }))).toEqual([
+			'automation_disabled',
+		])
 	})
 
 	test('an automation the failure policy switched off in the window is critical, and said once', () => {

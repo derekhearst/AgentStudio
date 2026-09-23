@@ -76,7 +76,7 @@ Above the tiles, a row of short warnings appears when something in the window lo
 | Token spike | Input + output tokens are more than **2×** the previous window **and** at least **1M** | Warning |
 | Run failure rate | At least **25%** of finished runs failed, with at least 4 finished | Warning |
 | Automation switched off | The failure policy turned an automation off during the window after repeated failures | Critical |
-| Automation newly failing | An automation failed in this window and had **no** failures in the previous one | Warning |
+| Automation newly failing | An automation failed in this window and had **no** failures in the previous one. Only for windows up to 15 days (so not on the 30-day view); see Known gaps | Warning |
 | Monitor never fired | A monitor reached its deadline, used up its checks, or gave up after errors during the window without ever firing | Warning |
 | Monitor erroring | An active monitor's last **3** or more checks all errored | Warning |
 | Budget near limit | A budget limit is **80%** spent (critical once it is over) | Warning / Critical |
@@ -107,7 +107,7 @@ A digest can also be written by hand on `/automations`: a **maintenance** automa
 ### Known gaps
 
 - **Tool calls from the older agent loop are not counted.** Agent-attached automations, monitor actions and PR fixes still run tools through the older loop, which does not write tool-call rows. Chat turns (the SDK engine) are counted in full. The strip says this in its footnote.
-- **Automation history is kept for 30 days**, which is why the longest window is 30 days.
+- **Automation history is kept for 30 days**, which is why the longest window is 30 days. It also limits the "Automation newly failing" warning, which compares a window with the one before it: for any window longer than 15 days, part of the previous window has already been deleted, so the warning is not given at all rather than calling every failure new. On the 30-day view, failing automations are still counted and named in the Automation runs tile, and "Automation switched off" still appears.
 - **Token counts are approximate across sources.** Chat turns record input tokens net of cache (cache is counted separately), while some OpenRouter paths count input including cache.
 
 ## Roles & Permissions

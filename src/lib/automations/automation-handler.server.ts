@@ -10,6 +10,7 @@ import { recordTerminalAutomationFailure } from './automation-failure.server'
 import { pruneAutomationRuns, reapStalledAutomationRuns } from './automation-runs.server'
 import {
 	AUTOMATION_MAX_ATTEMPTS,
+	AUTOMATION_RUN_RETENTION_DAYS,
 	automationRetryDedupeKey,
 	automationTriggerPolicy,
 	computeRetryBackoffMs,
@@ -122,7 +123,7 @@ export function registerAutomationJobHandlers(): void {
 		// stuck in `running`, and the prune runs on the hour.
 		const now = new Date()
 		const reaped = await reapStalledAutomationRuns(undefined, now)
-		const pruned = now.getMinutes() === 0 ? await pruneAutomationRuns(30, now) : 0
+		const pruned = now.getMinutes() === 0 ? await pruneAutomationRuns(AUTOMATION_RUN_RETENTION_DAYS, now) : 0
 
 		return {
 			evaluated: result.evaluated,

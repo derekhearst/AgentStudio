@@ -24,15 +24,17 @@
  * about, with a bill attached.
  */
 
+import { AUTOMATION_RUN_RETENTION_DAYS } from '../automations/failure-policy'
+
 /** The windows the strip offers. The digest automation may ask for any 1–30 days. */
 export const USAGE_DIGEST_WINDOW_DAYS = [1, 7, 30] as const
 export type UsageDigestWindowDays = (typeof USAGE_DIGEST_WINDOW_DAYS)[number]
 export const DEFAULT_USAGE_DIGEST_DAYS = 7
 /**
- * The longest window. `automation_runs` is pruned at 30 days, so a longer window would
+ * The longest window. `automation_runs` keeps only this many days, so a longer window would
  * silently report fewer automation runs than actually happened.
  */
-export const MAX_USAGE_DIGEST_DAYS = 30
+export const MAX_USAGE_DIGEST_DAYS = AUTOMATION_RUN_RETENTION_DAYS
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -113,6 +115,17 @@ export function parseUsageDigestPrompt(prompt: string | null | undefined): numbe
 	const match = (prompt ?? '').trim().match(USAGE_DIGEST_PROMPT_RE)
 	if (!match) return null
 	return match[1] ? clampDigestDays(Number(match[1])) : DEFAULT_USAGE_DIGEST_DAYS
+}
+
+/**
+ * Whether the automation ledger still holds the whole previous window, which is what
+ * "newly failing" compares against.
+ *
+ * Past half the retention it does not: for a 30-day window the previous 30 days are already
+ * pruned, so every automation that failed at all would read as "no failures before".
+ */
+export function automationHistoryCoversPreviousWindow(days: number): boolean {
+	return days * 2 <= AUTOMATION_RUN_RETENTION_DAYS
 }
 
 /** "24 hours", "7 days", "30 days". */
@@ -405,6 +418,8 @@ export function detectAnomalies(input: UsageDigestInput): DigestAnomaly[] {
 		})
 	}
 
+	// A failure is only "new" against a previous window the ledger still holds in full.
+	const canJudgeNewFailures = automationHistoryCoversPreviousWindow(input.window.days)
 	for (const automation of input.automations) {
 		const name = oneLine(automation.description)
 		if (automation.disabledInWindow && automation.disabledReason === 'consecutive_failures') {
@@ -417,7 +432,7 @@ export function detectAnomalies(input: UsageDigestInput): DigestAnomaly[] {
 			// Switched off says everything "newly failing" would, and more.
 			continue
 		}
-		if (automation.failed > 0 && automation.prevFailed === 0) {
+		if (canJudgeNewFailures && automation.failed > 0 && automation.prevFailed === 0) {
 			anomalies.push({
 				kind: 'automation_newly_failing',
 				severity: 'warning',

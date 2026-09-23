@@ -66,7 +66,9 @@ bad cron expression) produce none at all. A join could only ever show a subset o
 never the failures.
 
 Rows are pruned at 30 days by the dispatch tick, which also reaps rows left in `running` by
-a worker that restarted mid-tick.
+a worker that restarted mid-tick. The 30 days is one named setting, and the usage digest
+reads it too: its longest window is 30 days, and it only says an automation is "newly
+failing" when the whole previous window is still kept.
 
 ### `automationDeliveries` table
 
