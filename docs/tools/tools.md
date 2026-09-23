@@ -81,7 +81,7 @@ The conversation's permission mode (Plan only, Ask, Accept edits, Bypass) applie
 ## Integrations
 
 - **Claude Agent SDK.** AgentStudio's tools are handed to it as an in-process tool server, so the agent sees them next to Claude's own.
-- **MCP endpoint (`/api/mcp`).** Other programs can call AgentStudio's tools over the Model Context Protocol. It lists the whole registry.
+- **MCP endpoint (`/api/mcp`).** Other programs can call AgentStudio's tools over the Model Context Protocol. It offers every AgentStudio tool except the ones that only work inside a chat: `ask_user` (there is no chat to ask in), the three mandatory-approval tools (there is nobody to press Allow) and `set_project_context` (there is no conversation to bind). They are not listed, and a request to run one is refused before anything happens.
 - **OpenRouter.** The old loop sends its tools to models through OpenRouter.
 - **GitHub.** The source-control tools use your connected GitHub account.
 - **SearXNG.** `web_search` goes to the self-hosted search engine.

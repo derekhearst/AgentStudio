@@ -159,3 +159,28 @@ export const BUILTIN_TOOLS: BuiltinTool[] = allToolNames
 	.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && !HOST_OWNED_TOOLS.has(name))
 	.map((name) => ({ name, description: toolDescriptions[name] ?? '' }))
 	.sort((a, b) => a.name.localeCompare(b.name))
+
+/**
+ * Registry tools that only work inside a chat run, so the MCP endpoint neither lists nor runs
+ * them. `/api/mcp` calls a tool with no run at all, and each of these refuses without one:
+ *
+ *   - `HOST_OWNED_TOOLS` (`ask_user`): the question is answered in the chat's own card; run
+ *     directly, the handler can only say it is not directly executable.
+ *   - `MANDATORY_APPROVAL_TOOLS`: they refuse anywhere nobody can press Allow, which is
+ *     every call that is not part of an interactive chat run.
+ *   - `set_project_context`: it changes the project of the conversation the run belongs to,
+ *     and an MCP call belongs to none.
+ */
+export const CHAT_RUN_ONLY_TOOLS: ReadonlySet<string> = new Set([
+	...HOST_OWNED_TOOLS,
+	...MANDATORY_APPROVAL_TOOLS,
+	'set_project_context',
+])
+
+/**
+ * The registry tools `/api/mcp` offers and will run. Listing a tool that always refuses is
+ * the same false promise as a setting that cannot take effect.
+ */
+export function mcpExposedToolNames(): typeof allToolNames {
+	return allToolNames.filter((name) => !CHAT_RUN_ONLY_TOOLS.has(name))
+}

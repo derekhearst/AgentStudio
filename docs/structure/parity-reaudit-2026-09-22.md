@@ -200,7 +200,10 @@ runs scripts in the workspace, and the model already makes independent tool call
 step. Both tools are now gone from the registry, not just from the engine, because an
 exclusion left them on every other surface that lists the registry (the settings approval
 list, `/api/mcp`). `search_tools` went with the always-loaded/searchable tier it existed
-for, and the settings "Programmatic tool calling" toggle with `run_code`.
+for, and the settings "Programmatic tool calling" toggle with `run_code`. `/api/mcp` also
+stopped offering the tools that refuse without a chat run — `ask_user`, the
+mandatory-approval tools and `set_project_context` (`mcpExposedToolNames` in
+`src/lib/tools/tools.ts`) — and refuses a call to one before any handler runs.
 
 That costs the old loop something, and it is worth saying where. Its unattended callers —
 automations with an agent attached, a monitor's `start_conversation`, CI fix runs — were
