@@ -60,7 +60,19 @@
 
 	let loading = $state(false);
 	let logsLoading = $state(false);
-	let loadError = $state<string | null>(null);
+
+	/*
+	 * One entry per section, so each load clears only its own failure. A single shared
+	 * message meant a logs-filter change that failed stayed on screen after the next one
+	 * worked, and replaced whatever Refresh had said about the other sections.
+	 */
+	const SECTIONS = ['inbox', 'cost', 'platform health', 'logs', 'log sources', 'recent failures', 'budget', 'settings'] as const;
+	type Section = (typeof SECTIONS)[number];
+	let sectionErrors = $state<Partial<Record<Section, string>>>({});
+	const loadError = $derived.by(() => {
+		const failed = SECTIONS.filter((s) => sectionErrors[s]).map((s) => `${s} (${sectionErrors[s]})`);
+		return failed.length > 0 ? `Could not load ${failed.join(', ')}.` : null;
+	});
 
 	const warnErrorCount24h = $derived.by(() => {
 		if (!logSources) return 0;
@@ -90,25 +102,26 @@
 	 * and said nothing. Now the sections that loaded render, and the ones that did not are
 	 * named in an error above them.
 	 */
+	async function loadSection<T>(section: Section, load: Promise<T>, apply: (value: T) => void) {
+		try {
+			apply(await load);
+			sectionErrors[section] = undefined;
+		} catch (err) {
+			sectionErrors[section] = remoteErrorMessage(err, 'failed');
+		}
+	}
+
 	async function loadAll() {
 		loading = true;
-		const failed: string[] = [];
-		async function section<T>(label: string, load: Promise<T>, apply: (value: T) => void) {
-			try {
-				apply(await load);
-			} catch (err) {
-				failed.push(`${label} (${remoteErrorMessage(err, 'failed')})`);
-			}
-		}
 		await Promise.all([
-			section('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v)),
-			section('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v)),
-			section('platform health', fetchFresh(getOperationalSnapshotQuery()), (v) => (snapshot = v)),
-			section('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v)),
-			section('log sources', fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })), (v) => (logSources = v)),
-			section('recent failures', fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })), (v) => (failures = v)),
-			section('budget', fetchFresh(getBudgetStatus()), (v) => (budget = v)),
-			section('settings', fetchFresh(getSettings()), (settingsRes) => {
+			loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v)),
+			loadSection('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v)),
+			loadSection('platform health', fetchFresh(getOperationalSnapshotQuery()), (v) => (snapshot = v)),
+			loadSection('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v)),
+			loadSection('log sources', fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })), (v) => (logSources = v)),
+			loadSection('recent failures', fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })), (v) => (failures = v)),
+			loadSection('budget', fetchFresh(getBudgetStatus()), (v) => (budget = v)),
+			loadSection('settings', fetchFresh(getSettings()), (settingsRes) => {
 				if (settingsRes?.budgetConfig) {
 					budgetConfig = {
 						dailyLimit: settingsRes.budgetConfig.dailyLimit ?? null,
@@ -117,7 +130,6 @@
 				}
 			}),
 		]);
-		loadError = failed.length > 0 ? `Could not load ${failed.join(', ')}.` : null;
 		loading = false;
 	}
 
@@ -140,30 +152,17 @@
 	}
 
 	async function reloadCost() {
-		try {
-			cost = await fetchFresh(getCostSummary({ period }));
-		} catch (err) {
-			loadError = `Could not load cost (${remoteErrorMessage(err, 'failed')}).`;
-		}
+		await loadSection('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v));
 	}
 
 	async function reloadInbox() {
-		try {
-			inbox = await fetchFresh(listReviewItemsQuery(buildInboxArgs()));
-		} catch (err) {
-			loadError = `Could not load inbox (${remoteErrorMessage(err, 'failed')}).`;
-		}
+		await loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v));
 	}
 
 	async function reloadLogs() {
 		logsLoading = true;
-		try {
-			logs = await fetchFresh(listAppLogsQuery(buildLogsArgs()));
-		} catch (err) {
-			loadError = `Could not load logs (${remoteErrorMessage(err, 'failed')}).`;
-		} finally {
-			logsLoading = false;
-		}
+		await loadSection('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v));
+		logsLoading = false;
 	}
 
 	function toggle(section: 'failures' | 'logs' | 'cost' | 'health') {

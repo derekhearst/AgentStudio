@@ -256,3 +256,30 @@ test.describe('a failed reload keeps the last good data under the error', () => 
 		}
 	})
 })
+
+test.describe('/review reports each section on its own', () => {
+	test('a section that loads again clears its own error and no other', async ({ page }) => {
+		await authenticateContext(page.context())
+		await failRemote(page, 'getBudgetStatus')
+		await page.goto('/review')
+		await waitForHydration(page)
+		await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible({ timeout: 15_000 })
+
+		const alert = page.getByRole('alert').filter({ hasText: 'Could not load' })
+		await expect(alert).toContainText('budget')
+
+		// A logs-filter change that fails adds to the message; it used to replace it.
+		const logs = await failRemote(page, 'listAppLogsQuery')
+		const minLevel = page.getByLabel('Min level')
+		await minLevel.selectOption('error')
+		await expect(alert).toContainText('logs (')
+		await expect(alert).toContainText('budget')
+
+		// The next change works, and takes only its own failure with it. It used to leave
+		// "Could not load logs" up for good.
+		await page.unroute(logs)
+		await minLevel.selectOption('info')
+		await expect(alert).not.toContainText('logs (')
+		await expect(alert).toContainText('budget')
+	})
+})
