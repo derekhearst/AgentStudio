@@ -7,6 +7,8 @@ import { logLlmUsage } from '$lib/costs/usage'
 import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
+import { parseUsageDigestPrompt, renderDigestMarkdown } from '$lib/costs/usage-digest'
+import { computeUsageDigest } from '$lib/costs/usage-digest.server'
 import { getOrCreateAutomationConversation } from './conversation-utils.server'
 
 /**
@@ -23,6 +25,10 @@ export async function runMaintenanceModeAutomation(
 	automation: typeof automations.$inferSelect,
 	now: Date,
 ) {
+	// #38 — a prompt that is only `{{usage_digest}}` is the usage digest, rendered by code.
+	const digestDays = parseUsageDigestPrompt(automation.prompt)
+	if (digestDays !== null) return runUsageDigest(automation, digestDays, now)
+
 	const settings = await getOrCreateSettings(automation.userId)
 	const model = settings.defaultModel
 
@@ -62,6 +68,33 @@ export async function runMaintenanceModeAutomation(
 }
 
 /**
+ * #38 — the usage digest: the same numbers as the `/activity` strip, as markdown, routed
+ * like any other maintenance output. No model is called, so the run costs nothing and
+ * cannot fail on model credentials; a query failure still throws, so the failure policy
+ * sees it.
+ */
+async function runUsageDigest(automation: typeof automations.$inferSelect, days: number, now: Date) {
+	const digest = await computeUsageDigest({ userId: automation.userId, days, now })
+	const markdown = renderDigestMarkdown(digest)
+
+	const route = await routeMaintenanceOutput(automation, markdown, null, now).catch((err) => {
+		logger.warn('[automations] usage digest routing failed (non-fatal)', { err })
+		return { target: 'none' as const }
+	})
+
+	return {
+		conversationId: route.target === 'chat_session' ? route.conversationId : null,
+		mode: 'maintenance' as const,
+		summary: markdown.slice(0, 500),
+		output: markdown,
+		costUsd: '0',
+		outputTarget: automation.outputTarget,
+		routedTo: route.target,
+		reviewItemId: route.target === 'review_inbox' ? route.reviewItemId : null,
+	}
+}
+
+/**
  * Wave 5 #21 phase 4 (output routing) — maintenance-mode result destination.
  *
  * Each `outputTarget` enum value gets a destination:
@@ -74,7 +107,8 @@ export async function runMaintenanceModeAutomation(
 async function routeMaintenanceOutput(
 	automation: typeof automations.$inferSelect,
 	summary: string,
-	model: string,
+	/** The model that wrote it; null for output rendered by code (the usage digest). */
+	model: string | null,
 	now: Date,
 ): Promise<
 	| { target: 'chat_session'; conversationId: string }
