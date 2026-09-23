@@ -16,7 +16,7 @@ async function seedConversation(prefix: string, turns: Array<'user' | 'assistant
 	const [agent] = await sql<{ id: string }[]>`select id from agents order by created_at limit 1`
 	const [conversation] = await sql<{ id: string }[]>`
 		insert into conversations (title, user_id, agent_id, model)
-		values (${`${prefix} reuse thread`}, ${userId}, ${agent.id}, 'claude-sonnet-5')
+		values (${`${prefix} reuse thread`}, ${userId}, ${agent?.id ?? null}, 'claude-sonnet-5')
 		returning id
 	`
 	let sequence = 0

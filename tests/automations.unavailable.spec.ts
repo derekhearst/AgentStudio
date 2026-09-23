@@ -136,6 +136,8 @@ test.describe('automations/unavailable — a run for an automation that can no l
 				actionConfig: { automationId },
 			})
 			monitorId = monitor.id
+			// Not due, so the running app's dispatcher leaves it to this spec.
+			await sql`update monitors set next_check_at = now() + interval '1 day' where id = ${monitorId}`
 
 			const { buildObservation } = await import('../src/lib/monitors/condition')
 			const { dispatchMonitorAction } = await import('../src/lib/monitors/actions.server')
