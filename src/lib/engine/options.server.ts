@@ -23,6 +23,7 @@ import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-
 import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
+import { engineSandboxSettings } from './engine-sandbox'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
 import { env } from '$env/dynamic/private'
@@ -216,6 +217,11 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		runSource: input.runSource ?? 'chat_stream',
 	})
 
+	const settingSources = resolveSettingSources({
+		settingsTrusted: input.projectSettingsTrusted,
+		hasWorkspace: Boolean(input.cwd),
+	})
+
 	return {
 		model: sdkModel,
 		thinking,
@@ -236,10 +242,7 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * with a working directory. `./setting-sources` explains what each tier means here
 		 * and why `local` and `user` are never among them.
 		 */
-		settingSources: resolveSettingSources({
-			settingsTrusted: input.projectSettingsTrusted,
-			hasWorkspace: Boolean(input.cwd),
-		}),
+		settingSources,
 		...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 		permissionMode: sdkPermissionModeFor(effectiveMode.mode),
 		/**
@@ -251,21 +254,16 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * run fails loudly rather than quietly executing unsandboxed, which is the whole
 		 * point. Enabled only on Linux — the image installs bubblewrap, a developer's
 		 * machine may not have it, and a hard failure there would block local work.
+		 *
+		 * What the sandbox allows is `./engine-sandbox`'s, including the trusted project's
+		 * configuration a shell may not rewrite.
 		 */
 		...(sandboxAvailable()
 			? {
-					sandbox: {
-						enabled: true,
-						autoAllowBashIfSandboxed: false,
-						// The SDK otherwise honours Bash's `dangerouslyDisableSandbox` flag and runs
-						// the command unconfined. `./workspace-guard` refuses the flag as well.
-						allowUnsandboxedCommands: false,
-						// The CLI needs its own login in its environment; a shell inside the
-						// sandbox does not, and `env` there would print it. `deny` unsets it there.
-						...(cliAuthEnv.length > 0
-							? { credentials: { envVars: cliAuthEnv.map((name) => ({ name, mode: 'deny' as const })) } }
-							: {}),
-					},
+					sandbox: engineSandboxSettings({
+						authEnvNames: cliAuthEnv,
+						protectedProjectRoot: settingSources.includes('project') && input.cwd ? input.cwd : null,
+					}),
 				}
 			: {}),
 		maxTurns: input.maxTurns ?? 64,

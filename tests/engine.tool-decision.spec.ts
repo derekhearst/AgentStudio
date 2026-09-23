@@ -180,7 +180,9 @@ test.describe('what buildEngineOptions hands the SDK', () => {
 		expect(source).not.toMatch(/\.\.\.\s*\(?process\.env/)
 	})
 
-	test('refuses to run a shell command outside the sandbox', () => {
-		expect(source).toMatch(/allowUnsandboxedCommands:\s*false/)
+	test('takes the sandbox from engine-sandbox, which refuses to run a shell command outside it', () => {
+		// The settings themselves are pinned in `engine.engine-sandbox.spec.ts`.
+		expect(source).toMatch(/sandbox:\s*engineSandboxSettings\(/)
+		expect(source).toMatch(/protectedProjectRoot:\s*settingSources\.includes\('project'\)/)
 	})
 })

@@ -69,7 +69,7 @@ A repository can carry configuration for the agent: `CLAUDE.md` instructions, `.
 
 Trust only applies when the chat is actually working in the project's own folder. An agent configured with its own persistent or worktree folder does not pick up the project's configuration.
 
-Once trusted, the agent cannot quietly rewrite what was reviewed: changing `.claude/settings.json`, the `.claude/` hooks, commands, agents or skills, `.mcp.json`, or `CLAUDE.md` always shows an approval card first.
+Once trusted, the agent cannot quietly rewrite what was reviewed. Changing `.claude/settings.json`, the `.claude/` hooks, commands, agents or skills, `.mcp.json`, or `CLAUDE.md` with a file tool always shows an approval card first. Shell commands cannot change the top-level copies of these files at all: the sandbox makes them read-only. A `CLAUDE.md` inside a subfolder is covered by the approval card only.
 
 ### Delete a project
 

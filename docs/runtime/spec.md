@@ -149,7 +149,7 @@ Being on an agent's list approves nothing — a listed tool still goes through c
 
 When the answer is "ask", the chat shows an **Allow / Deny card** for the call. The card carries the token the operator's answer is matched against. This works for a delegated subagent's calls too: the card appears in the conversation, marked as belonging to that subagent, and closes when the subagent's call finishes. A run with nobody to answer (an automation) refuses the call instead of waiting.
 
-**The agent's own configuration needs approval to change.** Writing, moving or deleting these files always asks, in every mode:
+**The agent's own configuration needs approval to change.** Writing, moving or deleting these files with a file tool always asks, in every mode:
 
 | File | Why |
 | --- | --- |
@@ -157,6 +157,8 @@ When the answer is "ask", the chat shows an **Allow / Deny card** for the call. 
 | `.claude/hooks/`, `.claude/commands/`, `.claude/agents/`, `.claude/skills/` | what the agent can be told to do |
 | `.mcp.json` | which tool servers connect |
 | `CLAUDE.md`, `CLAUDE.local.md` | only for a trusted project, where they are part of every prompt |
+
+A shell command cannot get around this in a **trusted** project: the sandbox makes the project's `.claude/settings.json` and `settings.local.json`, the `.claude/hooks/`, `skills/`, `commands/`, `agents/` and `rules/` folders, `.mcp.json`, `CLAUDE.md` and `CLAUDE.local.md` read-only to shell commands, so a command that tries to write one fails. Only the files at the project's top level are covered this way; a `CLAUDE.md` in a subfolder is protected by the approval card only. On a host with no sandbox, every shell command needs approval anyway. In a project that is not trusted, the agent does not load any of these files, so a shell command that writes one cannot change what the agent is told or allowed.
 
 **The agent process gets a minimal environment.** The Claude Code process that runs a chat turn does not inherit the server's environment, so a shell command cannot print the database URL or any other server secret. It receives only:
 
