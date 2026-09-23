@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, seedConversation, uniquePrefix } from './helpers'
 import { openAndSend, scriptDroppedRun } from './chat-stream-script'
+import { approvalAnswerProblem } from '../src/lib/chat/run-controls'
 
 /**
  * #129 — Stop is a request; a dropped connection is not a stop.
@@ -37,4 +38,13 @@ test('a dropped stream resumes without stopping the run; Stop asks the server to
 		await page.unrouteAll({ behavior: 'ignoreErrors' })
 		await cleanupPrefixedRecords(prefix)
 	}
+})
+
+test('an Allow or Deny answer counts only when the server recorded it', () => {
+	// `/tool-approve` answers an unknown token with a 200 and `resolved: false`; the card used
+	// to show "approved" anyway while the call waited out its timeout as a denial.
+	expect(approvalAnswerProblem(true, 200, { resolved: true })).toBeNull()
+	expect(approvalAnswerProblem(true, 200, { resolved: false })).toMatch(/no longer waiting/)
+	expect(approvalAnswerProblem(true, 200, null)).toMatch(/no longer waiting/)
+	expect(approvalAnswerProblem(false, 500, { error: 'boom' })).toMatch(/status 500/)
 })

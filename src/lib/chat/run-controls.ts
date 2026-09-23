@@ -50,3 +50,18 @@ export function stopTaskProblem(ok: boolean, body: unknown): { message: string; 
 			return { message: 'Could not stop the task. Try again in a moment.', taskGone: false }
 	}
 }
+
+/**
+ * What to tell the user when an Allow or Deny answer was not recorded, or null when it was.
+ *
+ * `/tool-approve` answers a token it cannot find with a 200 and `resolved: false`, and the
+ * page used to read only the status: the card showed "approved" while the call went on
+ * waiting and was later recorded as a denial. The card now keeps its buttons unless the
+ * answer actually landed.
+ */
+export function approvalAnswerProblem(ok: boolean, status: number, body: unknown): string | null {
+	if (!ok) return `The answer could not be sent (status ${status}). Try again.`
+	const answer = (body && typeof body === 'object' ? body : {}) as { resolved?: unknown }
+	if (answer.resolved === true) return null
+	return 'That approval is no longer waiting for an answer. It may have timed out, or been answered in another tab.'
+}

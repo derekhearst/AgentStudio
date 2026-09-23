@@ -1,11 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { and, eq, inArray, sql } from 'drizzle-orm'
-import { db } from '$lib/db.server'
-import { chatRuns } from '$lib/runs/runs.schema'
-import { recordApprovalDecision } from '$lib/runs/approvals.server'
+import { findRunAwaitingApproval, recordApprovalDecision } from '$lib/runs/approvals.server'
 import { logger } from '$lib/observability/logger'
-
-const RESOLVABLE_STATES = ['running', 'waiting_tool_approval'] as const
 
 export const POST: RequestHandler = async ({ request, params, locals }) => {
 	try {
@@ -26,21 +21,15 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			return json({ error: 'token and approved are required' }, { status: 400 })
 		}
 
-		const tokenJson = JSON.stringify([{ token: body.token }])
-		const [run] = await db
-			.select({ id: chatRuns.id })
-			.from(chatRuns)
-			.where(
-				and(
-					eq(chatRuns.conversationId, params.id),
-					eq(chatRuns.userId, locals.user.id),
-					inArray(chatRuns.state, RESOLVABLE_STATES),
-					sql`${chatRuns.pendingApprovals} @> ${tokenJson}::jsonb`,
-				),
-			)
-			.limit(1)
+		// Waits briefly: the card can reach the operator a moment before its approval is
+		// recorded. See `findRunAwaitingApproval`.
+		const runId = await findRunAwaitingApproval({
+			conversationId: params.id,
+			userId: locals.user.id,
+			token: body.token,
+		})
 
-		if (!run) {
+		if (!runId) {
 			logger.warn('[chat/tool-approve] Approval token not found in any active run', {
 				conversationId: params.id,
 				userId: locals.user.id,
@@ -50,12 +39,12 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			return json({ resolved: false })
 		}
 
-		const result = await recordApprovalDecision(run.id, body.token, body.approved)
+		const result = await recordApprovalDecision(runId, body.token, body.approved)
 		if (!result.resolved) {
 			logger.warn('[chat/tool-approve] Approval already resolved or missing', {
 				conversationId: params.id,
 				userId: locals.user.id,
-				runId: run.id,
+				runId,
 				token: body.token,
 				approved: body.approved,
 			})

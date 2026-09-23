@@ -82,7 +82,7 @@
 		stepThinkingFrame,
 	} from '$lib/chat/streaming-interpolation';
 	import { consumeSseStream } from '$lib/chat/sse-consumer';
-	import { requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
+	import { approvalAnswerProblem, requestRunStop, stopTaskProblem } from '$lib/chat/run-controls';
 	import { computeContextMetrics } from '$lib/chat/context-metrics';
 
 	type ChatAttachment = {
@@ -676,9 +676,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ token, approved: true }),
 			});
-			if (!response.ok) {
-				throw new Error(`Tool approval request failed with status ${response.status}`);
-			}
+			const problem = approvalAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem) throw new Error(problem);
 			clearRecoverableError();
 			streamingBlocks = streamingBlocks.map((b) =>
 				b.kind === 'tool' && b.token === token ? { ...b, status: 'approved' as const } : b
@@ -700,9 +699,8 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ token, approved: false }),
 			});
-			if (!response.ok) {
-				throw new Error(`Tool denial request failed with status ${response.status}`);
-			}
+			const problem = approvalAnswerProblem(response.ok, response.status, await response.json().catch(() => null));
+			if (problem) throw new Error(problem);
 			clearRecoverableError();
 			streamingBlocks = streamingBlocks.map((b) =>
 				b.kind === 'tool' && b.token === token ? { ...b, status: 'denied' as const } : b

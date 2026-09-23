@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { chatRuns, type PendingApprovalEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
@@ -58,6 +58,52 @@ export async function enqueuePendingApproval(
 			logger.warn('[approvals] review item open failed (non-fatal)', { err })
 		}
 	})()
+}
+
+/** Run states an approval answer can still land in. */
+const RESOLVABLE_STATES = ['running', 'waiting_tool_approval'] as const
+
+/**
+ * How long an operator's answer waits for the approval it answers to be recorded.
+ *
+ * The card with the Allow and Deny buttons goes out on the call's `tool_pending` frame, from
+ * the engine's assistant branch. The approval itself is recorded a moment later, when the SDK
+ * reaches `canUseTool` and `requestApproval` enqueues it. An answer that arrived inside that
+ * gap found no token, got `resolved: false`, and the call then waited out its timeout and was
+ * recorded as the user's denial. Normally the gap is milliseconds.
+ */
+export const APPROVAL_TOKEN_WAIT_MS = 3_000
+const APPROVAL_TOKEN_POLL_MS = 100
+
+/**
+ * The live run in a conversation, owned by `userId`, that has `token` pending — waiting up to
+ * `waitMs` for it to appear. Null when none does.
+ */
+export async function findRunAwaitingApproval(input: {
+	conversationId: string
+	userId: string
+	token: string
+	waitMs?: number
+}): Promise<string | null> {
+	const tokenJson = JSON.stringify([{ token: input.token }])
+	const deadline = Date.now() + (input.waitMs ?? APPROVAL_TOKEN_WAIT_MS)
+	while (true) {
+		const [run] = await db
+			.select({ id: chatRuns.id })
+			.from(chatRuns)
+			.where(
+				and(
+					eq(chatRuns.conversationId, input.conversationId),
+					eq(chatRuns.userId, input.userId),
+					inArray(chatRuns.state, RESOLVABLE_STATES),
+					sql`${chatRuns.pendingApprovals} @> ${tokenJson}::jsonb`,
+				),
+			)
+			.limit(1)
+		if (run) return run.id
+		if (Date.now() >= deadline) return null
+		await new Promise((resolve) => setTimeout(resolve, APPROVAL_TOKEN_POLL_MS))
+	}
 }
 
 export async function recordApprovalDecision(
