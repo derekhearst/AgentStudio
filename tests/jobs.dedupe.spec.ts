@@ -112,6 +112,16 @@ test.describe('jobs/dedupe — active scope (the default)', () => {
 })
 
 test.describe('jobs/dedupe — forever scope', () => {
+	test('the lookup it depends on is indexed over every row, not just the active ones', async () => {
+		// The partial unique index cannot answer "newest job with this key, whatever its
+		// status", so without a plain index a forever enqueue scanned the type's whole history.
+		const sql = getSql()
+		const [index] = await sql<{ indexdef: string }[]>`
+			select indexdef from pg_indexes where tablename = 'jobs' and indexname = 'jobs_type_dedupe_idx'
+		`
+		expect(index?.indexdef).toMatch(/\(type, dedupe_key\)$/)
+	})
+
 	test('collapses onto a finished job, so at-most-once work stays at most once', async () => {
 		const prefix = uniquePrefix('dedupe-forever')
 		const type = `${prefix}-eval`

@@ -93,7 +93,7 @@ When a job fails:
 
 Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same `type` and `dedupeKey` and a non-terminal status already exists, the new enqueue is a no-op and returns the existing job ID. Prevents double-mining a conversation when two hooks fire in quick succession. The database enforces this with a partial unique index over the non-terminal statuses (`jobs_type_dedupe_active_uidx`); once a job finishes, its key is free for the next one.
 
-A caller that needs at-most-once-ever semantics — one run per automation slot, one evaluation per chat run, one sample per metrics window — passes `dedupeScope: 'forever'`, and the enqueue returns the existing job whatever its status.
+A caller that needs at-most-once-ever semantics — one run per automation slot, one evaluation per chat run, one sample per metrics window — passes `dedupeScope: 'forever'`, and the enqueue returns the existing job whatever its status. That lookup reads finished jobs too, which the partial index cannot serve, so a plain index over `(type, dedupeKey)` (`jobs_type_dedupe_idx`) keeps it from scanning the type's whole history.
 
 ### Concurrency limits
 

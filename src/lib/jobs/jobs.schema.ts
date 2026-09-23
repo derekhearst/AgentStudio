@@ -97,6 +97,11 @@ export const jobs = pgTable(
 		dedupeActiveUnique: uniqueIndex('jobs_type_dedupe_active_uidx')
 			.on(t.type, t.dedupeKey)
 			.where(sql`${t.status} in ('pending', 'leased', 'running', 'retry_wait')`),
+		// The same columns over EVERY row, for lookups the partial index cannot answer: a
+		// `dedupeScope: 'forever'` enqueue asks for the newest job with a key whatever its
+		// status. That runs on hot paths — each due automation on every dispatch tick, each
+		// chat run's evaluation — and without this it scans every historical job of the type.
+		dedupeLookupIdx: index('jobs_type_dedupe_idx').on(t.type, t.dedupeKey),
 	}),
 )
 
