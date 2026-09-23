@@ -6,8 +6,8 @@
  * Only disposable databases can be reset: the name must end in dev, test or ci and must
  * not contain "prod" (the `agentstudio<env>` rule in docs/database/database.md#databases).
  * Dev and prod share one Postgres server and one role, and a shell-exported DATABASE_URL
- * overrides `.env`, so one stale variable was all it took to drop production. There is no
- * override flag on purpose; rename the database or use psql if you really mean it.
+ * overrides `.env`, so one stale variable was all it would take to drop production. There
+ * is no override flag on purpose; rename the database or use psql if you really mean it.
  *
  * Usage:
  *   DATABASE_URL="postgresql://..." bun scripts/reset-and-bootstrap.ts
