@@ -8,6 +8,8 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Conversations can be pinned to the top of the sidebar, archived (the everyday way to tidy the list: hidden, never deleted, restored from the Archived view or by replying), renamed, deleted behind a confirmation, and exported as a Markdown transcript or a complete JSON file. The sidebar's search box also searches the whole history on the server — message text and the work each turn did (file paths, commands, links a tool printed) — and shows highlighted extracts. See [docs/chat/chat.md](docs/chat/chat.md).
+
 Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
 
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
@@ -204,6 +206,7 @@ Notes:
 - Master implementation order: `docs/structure/implementation-order.md`
 - Architecture refactor plan: `docs/structure/plan.md`
 - Runtime spec: `docs/runtime/spec.md`
+- Chat (conversations: pin, archive, search, export): `docs/chat/chat.md`
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
 - Automations: `docs/automations/automations.md`
@@ -262,6 +265,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
+- `GET /chat/[id]/export?format=md|json` Download one conversation as a Markdown transcript or complete JSON ([docs](docs/chat/chat.md#export-a-conversation))
 - `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
 - `/review` Cost, recent failures, logs and the review inbox
 - `/agents` Agent management

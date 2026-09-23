@@ -236,7 +236,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
-| #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
+| #18 | Conversation pin/archive/search/export | **as filed**, trimmed — shipped | all four are cheap; make archive the default action, not delete |
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
@@ -472,6 +472,20 @@ All four parts are cheap and worth doing. Two opinions:
 
 Export to Markdown is ~50 lines and does not need a design.
 
+**Shipped.** Both opinions stand. `conversations.pinned_at` / `archived_at` (migration
+`0079`); archive is the one-click action on a sidebar row and first in its menu, delete is
+last and behind a confirmation that suggests archiving. A message the user sends unarchives;
+an automation posting into the chat does not. Search indexes tool blocks as argued above,
+in a `message_search` side table (a generated tsvector with a GIN index) so the chat page's
+message payload is untouched: each tool call contributes its name, paths, commands, short
+arguments and the links in its output, and every path is also spelled out as segments,
+because Postgres parses `src/lib/engine/options.server.ts` as one token and a search for
+`options` would otherwise miss it. Raw output and file bodies are not indexed. A boot
+backfill indexes history and rebuilds the index when the rules change. One correction to the
+opinion above: deleting a conversation does not take its cost ledger with it — the rows stay
+and lose their run link. Export is Markdown plus a complete JSON. Details in
+[docs/chat/chat.md](../chat/chat.md).
+
 ### #22 — composer
 
 Split it. `@`-mentions are unambiguous value and the issue's plan is fine.
@@ -568,7 +582,7 @@ unless one of those is the actual goal.
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
 6. **#17**, HTTP transport first.
-7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, ~~**#18**~~ (shipped), **#14**.
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or

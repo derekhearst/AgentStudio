@@ -26,6 +26,31 @@ Opening another chat from the sidebar gives that chat a fresh page. Nothing the 
 chat was doing (a reply streaming in, its tool cards, its Stop button, an error and its
 Retry) carries over. See "Switching conversations mid-turn" in the chat spec.
 
+### Pinned, archived, searched (#18)
+
+The rules behind these are in the [chat domain doc](../chat/chat.md); this is how the
+sidebar presents them.
+
+- **Pinned chats** sit in their own **Pinned** group above everything else, whichever way
+  the list is grouped (date, project, none).
+- **Each row has a "⋯" menu**: Archive, Pin to top / Unpin, Rename, Export as Markdown,
+  Export as JSON and, last and in red, Delete… (which asks first). On a computer the menu
+  button and a one-click **Archive** button appear when the pointer is over the row or a
+  row control has keyboard focus, covering the time label; on a touch screen or in the
+  phone's navigation drawer the "⋯" button is always shown and the row keeps room for it,
+  so the title never collapses. The menu opens inline under its row, so neither the
+  scrolling list nor the drawer can cut it off. Clicking anywhere else, or Escape, closes it.
+- **The Status filter** (in the menu under the search box) has three views: **All** (every
+  chat that is not archived), **Running** (chats with a turn in progress) and **Archived**.
+  The Archived view shows a bar with a **Back to chats** link. ("Archived" used to mean "not
+  running", and "Active" meant running; both were renamed when the real archive arrived.)
+- **The search box** filters the loaded list by title and latest reply as you type. After a
+  quarter-second pause it also searches the whole history on the server, and matches in
+  messages and tool calls appear under **In messages**: title, an *archived* badge where it
+  applies, when the matching message was written, and up to three lines of extract with the
+  matched words highlighted. The extract is always shown as text; the highlighting is added
+  by the page. Pinning, archiving, renaming or deleting a chat re-runs the search.
+
 ## The right rail
 
 The rail has four tabs.
