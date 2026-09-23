@@ -24,6 +24,9 @@ import {
  * every path the client sends goes through `safePathWithin` against the user's
  * own sandbox subtree. There is no code path here that will open an arbitrary
  * absolute path: a path that resolves outside `<sandbox>/<userId>` throws.
+ * "Resolves" includes symlinks — `safePathWithin` judges the path the OS will
+ * really open, so `ln -s / root` in a workspace does not make `root/etc/passwd`
+ * previewable. Directory listings skip symlinks entirely.
  */
 
 /** Text files above this are served as a prefix, with `truncated: true`. */

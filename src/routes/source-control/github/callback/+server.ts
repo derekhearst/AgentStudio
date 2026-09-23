@@ -7,6 +7,8 @@ import {
 	exchangeCodeForToken,
 	fetchGithubUser,
 	getGithubOAuthCredentials,
+	oauthFailureLocation,
+	sanitizeOAuthReturnPath,
 } from '$lib/source-control/github-oauth.server'
 import { encryptSecret } from '$lib/source-control/encryption.server'
 import { upsertConnection } from '$lib/source-control/source-control.server'
@@ -25,17 +27,19 @@ import { logger } from '$lib/observability/logger'
  *
  * On any failure, redirects back to the page the flow started from (default /projects, where
  * the Connections panel lives) with an `?error=` query param so the page can surface a
- * friendly message. Never bubbles a token through a query param or fragment.
+ * friendly message. Never bubbles a token through a query param or fragment. The return path
+ * comes from a cookie the client controls, so it is re-validated here, not only when connect
+ * set it.
  */
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const user = requireAuthenticatedRequestUser()
-	const returnTo = cookies.get(GITHUB_OAUTH_RETURN_COOKIE) ?? '/projects'
+	const returnTo = sanitizeOAuthReturnPath(cookies.get(GITHUB_OAUTH_RETURN_COOKIE))
 
 	function fail(reason: string): never {
 		cookies.delete(GITHUB_OAUTH_STATE_COOKIE, { path: '/source-control/github' })
 		cookies.delete(GITHUB_OAUTH_RETURN_COOKIE, { path: '/source-control/github' })
-		throw redirect(302, `${returnTo.split('?')[0]}?error=${encodeURIComponent(reason)}`)
+		throw redirect(302, oauthFailureLocation(returnTo, reason))
 	}
 
 	const code = url.searchParams.get('code')

@@ -12,18 +12,38 @@
  * Use the helpers below in domain code:
  *   - `requireOpenRouterApiKey()` — throws a uniform error if unset.
  *   - `getSandboxRoot()` — returns the sandbox root with documented default.
- *   - `getCronSecret()` — returns the trimmed secret, or `undefined`.
+ *   - `getCronSecret()` — returns the trimmed `/api/cron` bearer secret, or `undefined`.
+ *   - `getOwnerBootstrapConfig()` — the owner to create at boot from `AUTH_PASSWORD`, or `undefined`.
  *
  * For one-off vars, prefer adding a typed accessor here over reading inline.
  */
 
 const DEFAULT_SANDBOX_ROOT = '/workspace'
 
-function readEnv(key: string): string | undefined {
-	const raw = process.env[key]
+function readEnv(key: string, env: Record<string, string | undefined> = process.env): string | undefined {
+	const raw = env[key]
 	if (raw === undefined) return undefined
 	const trimmed = raw.trim()
 	return trimmed === '' ? undefined : trimmed
+}
+
+/**
+ * The owner account to create at boot, or `undefined` when `AUTH_PASSWORD` is unset.
+ *
+ * `AUTH_PASSWORD` creates the owner the first time the server starts against a database
+ * that has none, and is never used to overwrite an existing password — a password changed
+ * later would otherwise be silently undone on every restart. The name and username are
+ * optional and default in the provisioning code (`Owner` / `owner`).
+ *
+ * Read from `env` rather than `process.env` directly so the boot step can be tested with a
+ * fake environment; the boot step deletes `AUTH_PASSWORD` from `process.env` afterwards.
+ */
+export function getOwnerBootstrapConfig(
+	env: Record<string, string | undefined> = process.env,
+): { password: string; name?: string; username?: string } | undefined {
+	const password = readEnv('AUTH_PASSWORD', env)
+	if (!password) return undefined
+	return { password, name: readEnv('AUTH_OWNER_NAME', env), username: readEnv('AUTH_OWNER_USERNAME', env) }
 }
 
 /**
@@ -66,7 +86,10 @@ export function getSearxngUsername(): string {
 	return readEnv('SEARXNG_USERNAME') ?? 'derek'
 }
 
-/** Returns the cron-trigger shared secret, or `undefined` when cron auth is disabled. */
+/**
+ * The bearer secret an external scheduler sends to `POST /api/cron`, or `undefined` — in
+ * which case only a signed-in session can fire the route.
+ */
 export function getCronSecret(): string | undefined {
 	return readEnv('CRON_SECRET')
 }

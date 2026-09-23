@@ -43,9 +43,24 @@ Path layout:
 ${SANDBOX_WORKSPACE}/<userId>/runs/<runId>/          # ephemeral
 ${SANDBOX_WORKSPACE}/<userId>/persistent/<key>/      # persistent
 ${SANDBOX_WORKSPACE}/<userId>/worktrees/<runId>/     # worktree
+${SANDBOX_WORKSPACE}/<userId>/projects/<projectId>/  # conversation bound to a project
 ```
 
 Tools cannot traverse above the workspace root. Any path that resolves outside the root returns a `WORKSPACE_ESCAPE` error.
+
+"Resolves" means where the file really is, not just how the path is spelled. A workspace can contain symbolic links (shortcuts to another location): the agent's shell can create one, and an imported repository can include one. Before any server-side feature opens a workspace path, it follows every link in that path and checks that the real destination is still inside the workspace. So a link called `root` that points at `/` does not make `root/etc/passwd` readable, and a link into another user's folder does not let a tool delete or move their files.
+
+- A path that does not exist yet (a file about to be written) is judged by the nearest folder that does exist, since that is where it would be created.
+- A broken link is judged by where it points, because writing through it would create the file there.
+- A `..` ("go up one folder") that comes straight after a link is refused when its meaning depends on the operating system. Linux and macOS follow the link first and then go up from wherever it led; Windows goes up in the written path first. So `shortcut/../notes.txt`, where `shortcut` points at another user's folder, means "next to that folder" on the Linux servers the app runs on, even though it reads like "`notes.txt` in this workspace". Paths where both readings land in the same place, which is nearly all of them, work normally.
+- Links that stay inside the workspace keep working normally.
+- The same rule covers the agent's own file tools, the SDK's built-in `Read` / `Write` / `Edit` / `Glob` / `Grep` calls, the chat's file preview, attachment staging and project knowledge files.
+- For the SDK's built-in tools, a path is checked both as written and in its tidied form, since either may be what gets opened. A path starting with `~` (a home folder, to the SDK) is refused.
+- Directory listings never walk into a link. The agent's `list_files` shows the link itself as an entry; the chat's preview leaves it out.
+
+One limit remains: a process that swaps a link in the instant between the check and the file being opened can still win that race. Closing it fully needs operating-system support that Node.js does not offer today.
+
+For a chat run the root is worked out **once**, at the start of the turn, and the same value is used for three things: the agent process's working directory, the boundary its file tools are confined to, and the folder attachments are copied into. Because it is one value, a relative path like `notes.md` means the same file to the check and to the tool, and a file the agent is told to read is one it is allowed to read. The directory is created before the agent starts. A chat without a project gets a fresh `runs/<runId>` directory each turn; the conversation itself still continues, because the agent's session history is kept separately from the workspace.
 
 ### Workspace creation
 
@@ -77,6 +92,8 @@ Admins and run owners can browse a workspace's contents from `/runs/[id]/workspa
 
 The `Environment` descriptor can include `envVars` that are injected into the shell subprocess when the `shell` tool runs. These are scoped to the run and not inherited from the app process.
 
+The same rule holds for chat runs on the Agent SDK: the agent process receives a short allow-list of variables (path, home and temp directories, locale, proxy settings, and its own login), never the server's environment. See the runtime spec's "How every tool call is checked" for the full list.
+
 Sensitive values (API keys, secrets) should come from the policies domain's secret management, not from plaintext `envVars`. The runtime redacts known secret patterns from tool output before it enters the context window.
 
 ### Network policy
@@ -91,7 +108,7 @@ The `Environment.networkPolicy` field controls what the `shell` tool can reach:
 
 - Workspace creation is idempotent for persistent workspaces: calling `createWorkspace` with the same key twice returns the same path.
 - Workspace paths are never user-controlled strings. They are constructed solely from `userId`, `runId`, and `key` values from the DB.
-- A file path that escapes the workspace root is rejected before the tool executes.
+- A file path that escapes the workspace root is rejected before the tool executes, including a path that only escapes through a symbolic link.
 - GC never deletes a pinned workspace, regardless of TTL.
 - Worktree branches follow the naming convention `agent/<runId>`. Branch names are not configurable by the agent.
 - `envVars` are applied only to the shell subprocess, not to the app process or other tools.

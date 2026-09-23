@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { logger } from '$lib/observability/logger'
 import { safePathWithin } from '$lib/workspace/workspace.server'
@@ -96,9 +96,15 @@ export function sanitizeKnowledgeFilename(raw: string): string {
 	return name
 }
 
-/** Absolute path to a project's knowledge directory. Does not create it. */
+/**
+ * Absolute path to a project's knowledge directory. Does not create it.
+ *
+ * Validated against the project directory, not trusted: in an imported repo
+ * `.agentstudio` could be a committed symlink to somewhere else on the host, and every
+ * upload, listing and delete below would then happen there.
+ */
 export function knowledgeRoot(userId: string, projectId: string): string {
-	return join(getProjectPath(userId, projectId), KNOWLEDGE_DIR)
+	return safePathWithin(getProjectPath(userId, projectId), KNOWLEDGE_DIR)
 }
 
 /**
@@ -130,6 +136,9 @@ async function excludeFromGit(projectPath: string): Promise<void> {
 	}
 
 	try {
+		// The agent's Bash can write inside `.git`, so a symlinked `info/` or `exclude`
+		// would otherwise turn this append into a write anywhere on the host.
+		safePathWithin(projectPath, excludePath)
 		await mkdir(join(projectPath, '.git', 'info'), { recursive: true })
 		let current = ''
 		try {
@@ -164,9 +173,13 @@ export async function ensureKnowledgeDir(userId: string, projectId: string): Pro
  * creating it just to list nothing would put an `.agentstudio/` in every project.
  */
 export async function listKnowledgeFiles(userId: string, projectId: string): Promise<KnowledgeFile[]> {
-	const root = knowledgeRoot(userId, projectId)
+	let root: string
 	let entries: string[]
 	try {
+		// Inside the try: a knowledge directory that escapes the project (see
+		// `knowledgeRoot`) lists as empty rather than failing the project page. Writing
+		// to it is still refused, by `ensureKnowledgeDir`.
+		root = knowledgeRoot(userId, projectId)
 		entries = await readdir(root)
 	} catch {
 		return []
@@ -175,7 +188,8 @@ export async function listKnowledgeFiles(userId: string, projectId: string): Pro
 	const files: KnowledgeFile[] = []
 	for (const name of entries) {
 		try {
-			const info = await stat(join(root, name))
+			// lstat: a symlink is not a knowledge file, and stat would report on its target.
+			const info = await lstat(join(root, name))
 			if (!info.isFile()) continue
 			files.push({ name, size: info.size, modifiedAt: info.mtime.toISOString() })
 		} catch {

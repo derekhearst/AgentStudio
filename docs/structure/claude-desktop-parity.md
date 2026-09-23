@@ -46,9 +46,9 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 | Feature | Verdict | Ours | Theirs |
 | --- | --- | --- | --- |
-| Agent SDK session loop, resume | **even** | `$lib/engine`, session id persisted per conversation | same SDK |
+| Agent SDK session loop, resume | **even** | `$lib/engine`, session id persisted per conversation; a turn outlives a reload, the reopened page re-attaches to it with Stop, and a conversation runs one turn at a time (since 2026-09-23) | same SDK |
 | Streaming with thinking | **even** | `delta` + `reasoning` frames, adaptive thinking, effort picker | same |
-| Tool approval | **behind** | per-tool global settings + mandatory-approval list | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
+| Tool approval | **behind** | per-tool settings + mandatory-approval list, checked for every call (subagents' included) ahead of the SDK's own allow rules; inline Allow/Deny cards, which never rendered on the engine path until 2026-09-22 (the frame carried no approval token) | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
 | Permission modes (plan / acceptEdits / bypass) | **absent** (#19) | hardcoded `default`; the Plan agent is a persona, not a mode | four modes, switchable mid-session |
 | Diff rendering | **far behind** (#16) | raw JSON in a tool card | inline diffs with per-hunk accept/reject |
 | Checkpoints and rewind | **far behind** (#24) | rewinds the transcript only; files stay written | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both |

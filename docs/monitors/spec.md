@@ -52,7 +52,7 @@ Observable tools, all read-only: `web_fetch`, `web_search`, `search_files`, `fil
 | `start_conversation` | Opens a conversation seeded with the configured prompt plus what was observed, and runs the agent on it detached |
 | `review_item`        | Opens a `monitor_fired` item in the review inbox                                                                  |
 | `push`               | Writes an in-app notification row and sends a web push                                                            |
-| `run_automation`     | Enqueues an existing automation's `automation_run` job                                                            |
+| `run_automation`     | Runs one of the owner's own automations once (see Business rules)                                                 |
 
 ## User flows
 
@@ -123,6 +123,11 @@ The `tool_result` path costs nothing beyond whatever the tool itself costs, whic
 ## Business rules
 
 - A monitor's **condition is immutable**. Name, interval, budget, one-shot and action config can be edited; a different condition is a different monitor.
+- A `run_automation` monitor can only point at **one of its owner's own automations**. The automation is checked when the monitor is created, when its action config is edited, and again at the moment it fires (the automation may have been deleted in between). An automation that is missing or belongs to someone else is reported as "not found" either way.
+- A monitor-fired automation run is recorded with the trigger **monitor**. It sits between a scheduled run and "Run now":
+  - Like "Run now", it **does not move** the automation's next scheduled time.
+  - Like a scheduled run, it **respects the off switch**. If the automation is switched off — by its owner, or automatically after repeated failures — the monitor does not run it, and a review item says so instead.
+  - Like a scheduled run, a **failure is reported**: it is retried with the same backoff, then counts toward the automation's failure streak and opens a review item plus a notification. Nobody is watching a monitor-fired run, so a failure must not be silent.
 - A monitor's deadline applies while paused. Pausing buys no extra lifetime.
 - A `changed` monitor's first check is a baseline and never fires.
 - An unparseable model answer is an **error**, not a "no" — silently reading it as "condition not met" would make a monitor quietly useless for the rest of its life.

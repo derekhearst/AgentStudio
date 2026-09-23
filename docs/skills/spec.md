@@ -183,14 +183,15 @@ Skill slugs starting with `hook/` are treated as hook implementations. When a ho
 
 ## Roles & Permissions
 
-| Action             | Who can do it             |
-| ------------------ | ------------------------- |
-| View skills        | Authenticated user        |
-| Read skill content | Authenticated user        |
-| Create a skill     | Authenticated user, admin |
-| Edit a skill       | Owner user, admin         |
-| Delete a skill     | Admin only                |
-| View system skills | Admin only (edit)         |
+AgentStudio has a single owner (see `docs/auth/auth.md`), so there is no admin tier: the owner can do everything below, and nobody else can do anything.
+
+| Action                                           | Who can do it                               |
+| ------------------------------------------------ | ------------------------------------------- |
+| View, read, create, edit, import, export, delete | The signed-in owner                         |
+| Edit or delete a system skill                    | Nobody — system skills are read-only        |
+| Anything, without a session                      | Nobody                                      |
+
+The last row is enforced twice, because a skill's text reaches every agent's instructions: the request gate refuses anonymous calls before any skills code runs, and every skills function also checks for a signed-in user itself. Until September 2026 most of them did not, and an anonymous caller could import a skill.
 
 ## Rewrite Authority
 

@@ -67,6 +67,18 @@ Project names are auto-converted to URL-safe slugs (lowercase, dashes, no specia
 
 All of this runs through the same hardened git runner as the agent's tools, so settings the agent writes into the project's `.git` folder (or a submodule's) that would run a program are switched off rather than obeyed. Settings that would send the GitHub token elsewhere make pull and push refuse to run. When the runner cannot read the settings in full, it refuses the command rather than run it unprotected; the Repo tab then shows no status for the project until the settings are fixed. See [Running git safely](../source-control/spec.md#running-git-safely), including the one gap that remains.
 
+### Trust a project's own configuration
+
+A repository can carry configuration for the agent: `CLAUDE.md` instructions, `.claude/` commands and skills, and a `.claude/settings.json` that can grant permissions and run hooks. None of it is loaded until the operator marks the project **trusted** on its detail page.
+
+1. Review the repository's `.claude/` folder and `CLAUDE.md`.
+2. Turn trust on. From the next turn, chats bound to the project load that configuration.
+3. Turn it off at any time; the next turn runs isolated again.
+
+Trust only applies when the chat is actually working in the project's own folder. An agent configured with its own persistent or worktree folder does not pick up the project's configuration.
+
+Once trusted, the agent cannot quietly rewrite what was reviewed. Changing `.claude/settings.json`, the `.claude/` hooks, commands, agents or skills, `.mcp.json`, or `CLAUDE.md` with a file tool always shows an approval card first. Shell commands cannot change the top-level copies of these files at all: the sandbox makes them read-only. A `CLAUDE.md` inside a subfolder is covered by the approval card only.
+
 ### Delete a project
 
 Delete from the `/projects` list. Deleting removes the database row, and for `local` / `imported` projects the sandbox directory with it. There is no soft delete for projects.
@@ -99,12 +111,14 @@ Everything else the agent does inside a project goes through the ordinary filesy
 - **Imports need a source** — `repoMode: 'imported'` without a `source` is rejected outright rather than leaving a half-made project.
 - **Slug stability** — a project's slug is fixed at creation.
 - **Git is hardened** — every git command the server runs in a project folder switches off the settings in that folder that could run a program or redirect the GitHub token. The agent can write to `.git`; the server does not trust it.
+- **Trust is opt-in** — a cloned repository's own agent configuration never loads until the operator trusts the project, and changes the agent makes to that configuration always need approval.
 
 ## Edge cases
 
 - **Legacy `none` projects** — projects created before repos existed have no directory. They still list and bind fine; the agent simply has no project-local place to write.
 - **Clone timeouts** — a large import can take tens of seconds. The row is inserted first and rolled back on failure, so a timeout shows as "project disappeared" rather than a half-cloned directory.
 - **Deleting a user** — cascades through their projects. Sandbox directories are removed by the project delete path, not by the database.
+- **A repo that links out of itself** — an imported repo can contain symbolic links, and so can anything the agent's shell creates. If the project's `.agentstudio` knowledge folder turns out to be a link to somewhere outside the project, knowledge uploads and deletes are refused and the knowledge list shows as empty. The same check stops the "keep knowledge out of git" note from being written through a linked `.git/info` folder.
 
 ## Data model summary
 

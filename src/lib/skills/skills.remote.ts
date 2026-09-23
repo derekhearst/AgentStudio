@@ -27,11 +27,18 @@ const skillIdSchema = z.object({
 	id: z.string().uuid(),
 })
 
+// Skills are one library shared by every agent — there is no per-user owner to scope by —
+// so each function checks only that there is a session. That check is not optional: a
+// skill's text reaches every agent's system prompt, and until the hook's remote gate these
+// functions were the only thing standing between an anonymous caller and that prompt.
+
 export const listSkillsQuery = query(listSkillsSchema, async ({ search, enabled, limit }) => {
+	requireAuthenticatedRequestUser()
 	return listSkills({ search, enabled, limit })
 })
 
 export const getSkillByIdQuery = query(skillIdSchema, async ({ id }) => {
+	requireAuthenticatedRequestUser()
 	return getSkillById(id)
 })
 
@@ -80,10 +87,12 @@ const deleteSkillFileSchema = z.object({
 })
 
 export const createSkillCommand = command(createSkillSchema, async ({ name, description, content, tags, category }) => {
+	requireAuthenticatedRequestUser()
 	return createSkill(name, description, content, tags, category)
 })
 
 export const updateSkillCommand = command(updateSkillSchema, async ({ id, ...fields }) => {
+	requireAuthenticatedRequestUser()
 	return updateSkill(id, fields)
 })
 
@@ -110,6 +119,7 @@ export const deleteSkillCommand = command(skillIdSchema, async ({ id }) => {
 export const toggleSkillEnabledCommand = command(
 	z.object({ id: z.string().uuid(), enabled: z.boolean() }),
 	async ({ id, enabled }) => {
+		requireAuthenticatedRequestUser()
 		return updateSkill(id, { enabled })
 	},
 )
@@ -117,15 +127,18 @@ export const toggleSkillEnabledCommand = command(
 export const addSkillFileCommand = command(
 	addSkillFileSchema,
 	async ({ skillId, name, description, content, sortOrder }) => {
+		requireAuthenticatedRequestUser()
 		return addSkillFile(skillId, name, description, content, sortOrder)
 	},
 )
 
 export const updateSkillFileCommand = command(updateSkillFileSchema, async ({ fileId, ...fields }) => {
+	requireAuthenticatedRequestUser()
 	return updateSkillFile(fileId, fields)
 })
 
 export const deleteSkillFileCommand = command(deleteSkillFileSchema, async ({ fileId }) => {
+	requireAuthenticatedRequestUser()
 	await deleteSkillFile(fileId)
 	return { ok: true }
 })
@@ -147,6 +160,7 @@ const importSkillSchema = z.object({
 })
 
 export const importSkillCommand = command(importSkillSchema, async ({ source, mode, resources }) => {
+	requireAuthenticatedRequestUser()
 	const parsed = parseSkillSource(source)
 	const result = await upsertSkillFromSource({
 		mode,
@@ -162,6 +176,7 @@ export const importSkillCommand = command(importSkillSchema, async ({ source, mo
 })
 
 export const exportSkillCommand = command(skillIdSchema, async ({ id }) => {
+	requireAuthenticatedRequestUser()
 	const skill = await getSkillById(id)
 	if (!skill) throw new Error('Skill not found')
 	const skillMd = serializeSkillSource({

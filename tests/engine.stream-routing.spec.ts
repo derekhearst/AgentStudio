@@ -221,4 +221,32 @@ test.describe('subagent routing (#5)', () => {
 		const child = summary.blocks.find((b) => b.kind === 'subagent')
 		expect(child?.kind === 'subagent' && child.success).toBe(false)
 	})
+
+	test('a child\'s tool result is reported as the child\'s (#133)', async () => {
+		// The ledger counts both, but the pinned checklist must only ever take the parent's
+		// `TodoWrite` — so the caller has to be able to tell them apart.
+		const todos = { newTodos: [{ content: 'child step', status: 'pending', activeForm: 'Doing the child step' }] }
+		const seen: Array<{ name: string; subagentId?: string; kind?: string }> = []
+		await runEngineStream({
+			prompt: 'go',
+			options: {},
+			createQuery: () =>
+				scripted([
+					toolUse('task1', 'Task', { subagent_type: 'reviewer' }),
+					toolUse('c1', 'TodoWrite', {}, 'task1'),
+					toolResult('c1', 'ok', 'task1', todos),
+					toolUse('p1', 'TodoWrite', {}),
+					toolResult('p1', 'ok', null, todos),
+					RESULT,
+				]),
+			requiresApproval: () => false,
+			onToolResult: ({ name, subagentId, details }) => seen.push({ name, subagentId, kind: details?.kind }),
+			emit: async () => {},
+		})
+
+		expect(seen).toEqual([
+			{ name: 'TodoWrite', subagentId: 'task1', kind: 'todo' },
+			{ name: 'TodoWrite', subagentId: undefined, kind: 'todo' },
+		])
+	})
 })

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { listAutomationRunsQuery, listAutomationsQuery } from '$lib/automations'
-	import { formatDate, relativeTime } from './automation-format'
+	import { describeRunTrigger, formatDate, relativeTime } from './automation-format'
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number]
 	type AutomationRunRow = Awaited<ReturnType<typeof listAutomationRunsQuery>>[number]
@@ -114,7 +114,7 @@
 				{#if automation.lastRunStatus}
 					<span
 						class="badge badge-sm {statusBadgeClass(automation.lastRunStatus)}"
-						title="Most recent run ({automation.lastRunTrigger === 'manual' ? 'run now' : 'scheduled'})"
+						title="Most recent run ({describeRunTrigger(automation.lastRunTrigger)})"
 					>
 						{automation.lastRunStatus}
 					</span>
@@ -255,6 +255,8 @@
 									<span class="text-base-content/40">{formatDuration(run.durationMs)}</span>
 									{#if run.trigger === 'manual'}
 										<span class="badge badge-ghost badge-xs">manual</span>
+									{:else if run.trigger === 'monitor'}
+										<span class="badge badge-ghost badge-xs">monitor</span>
 									{/if}
 									{#if run.attempt > 1}
 										<span class="badge badge-ghost badge-xs">retry {run.attempt}</span>

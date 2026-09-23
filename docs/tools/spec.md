@@ -79,7 +79,7 @@ The sandbox capability group exposes exactly 7 filesystem verbs, matching the su
 | `delete_file`    | Delete a file (requires approval by default)       |
 | `shell`          | Run a shell command in the run's sandbox workspace |
 
-There is no `move_file`, `file_info`, `search_files`, or other overlapping verb. Search is done via `shell` + `grep`/`find` or the `web_search` tool.
+There is no `move_file`, `file_info`, `search_files`, or other overlapping verb. Search is done via `shell` + `grep`/`find` or the `web_search` tool. (The current implementation still ships `move_file`; its safety rules are under Tool sandboxing below.)
 
 ### Companion skills
 
@@ -126,7 +126,9 @@ Approval requests create a review inbox item and suspend the run durably (see ru
 
 ### Tool sandboxing
 
-All filesystem and shell tools operate against the run's isolated workspace directory (see workspace spec). They cannot access paths outside the workspace root. The shell tool runs in a subprocess with the workspace as the working directory and inherits only the environment variables declared in `environment.envVars`.
+All filesystem and shell tools operate against the run's isolated workspace directory (see workspace spec). They cannot access paths outside the workspace root, and that includes paths that only leave it through a symbolic link: the real destination of every path is checked, not just its spelling. The shell tool runs in a subprocess with the workspace as the working directory and inherits only the environment variables declared in `environment.envVars`.
+
+**Moving files.** `move_file` moves or renames a file or folder inside the workspace. When `overwrite` is on, whatever is already at the destination is replaced, but it is never deleted until the move has succeeded: the old destination is set aside first, and put back if the move fails. The tool refuses a move whose source does not exist, a move onto itself, a folder moved into itself, and a destination that contains the source (for example moving `src/a.ts` onto `src`). A case-only rename such as `readme.md` to `README.md` works on case-insensitive disks.
 
 ## Behavior Contracts
 
@@ -135,6 +137,7 @@ All filesystem and shell tools operate against the run's isolated workspace dire
 - Tool output archival happens before the next round begins. The model never sees an oversized raw output inline.
 - Tool definition descriptions are ≤2 sentences. All extended guidance lives in companion skills. This is enforced in CI.
 - `delete_file` and `shell` with destructive patterns (`rm -rf`, `DROP TABLE`, etc.) are flagged for approval unless the agent's policy explicitly permits them.
+- A failed `move_file` never leaves the destination deleted.
 
 ## Roles & Permissions
 

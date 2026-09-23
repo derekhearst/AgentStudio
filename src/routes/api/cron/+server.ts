@@ -4,18 +4,16 @@ import { runWorkspaceGc } from '$lib/workspace/gc.server'
 import { backfillSkillEmbeddings } from '$lib/skills/skills.server'
 import { logger } from '$lib/observability/logger'
 import { getCronSecret } from '$lib/server/config'
+import { hasCronAccess } from '$lib/automations/cron-trigger'
 
-function hasCronAccess(request: Request) {
-	const expected = getCronSecret()
-	if (!expected) return true
-	const auth = request.headers.get('authorization')
-	if (!auth) return false
-	const token = auth.replace(/^Bearer\s+/i, '').trim()
-	return token === expected
-}
-
-export const POST: RequestHandler = async ({ request }) => {
-	if (!hasCronAccess(request)) {
+// A public path (see PUBLIC_PATH_PREFIXES in src/lib/auth/gate.ts): this check is the whole of its access control.
+export const POST: RequestHandler = async ({ request, locals }) => {
+	const allowed = hasCronAccess({
+		authenticated: locals.authenticated === true,
+		authorization: request.headers.get('authorization'),
+		secret: getCronSecret(),
+	})
+	if (!allowed) {
 		return json({ error: 'Unauthorized' }, { status: 401 })
 	}
 

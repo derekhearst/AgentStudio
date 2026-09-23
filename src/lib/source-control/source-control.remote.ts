@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit'
 import { command, query } from '$app/server'
 import { z } from 'zod'
 import {
@@ -12,6 +13,7 @@ import {
 	pullRepositoryLatest,
 } from './source-control.server'
 import { isGithubOAuthConfigured } from './github-oauth.server'
+import { findPullRequestForFix } from './pr-fix.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 /**
@@ -170,8 +172,11 @@ export const listGithubImportCandidatesQuery = query(async () => {
  * and it must survive the request that started it. The operator gets a job id back
  * immediately and the run appears in the originating conversation when it finishes.
  *
- * Ownership is re-checked inside `startPullRequestFixRun` — this boundary establishes WHO
- * is asking, the job establishes whether the PR is theirs.
+ * Ownership is checked here, before anything is queued, and again inside
+ * `startPullRequestFixRun`. The first check is the one that matters for the button: the
+ * dedupe key below gives each review item exactly one job, forever, so a press that was
+ * going to be refused must not be the one that takes it. The returned `status` says whether
+ * that job is new or an earlier one — `describeFixRunJob` turns it into the message.
  */
 const startFixSchema = z.object({
 	pullRequestId: z.string().uuid(),
@@ -181,6 +186,9 @@ const startFixSchema = z.object({
 
 export const startPullRequestFixCommand = command(startFixSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	if (!(await findPullRequestForFix(user.id, input.pullRequestId))) {
+		error(404, 'Pull request not found')
+	}
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	const job = await enqueueJob({
 		type: 'pr_fix',

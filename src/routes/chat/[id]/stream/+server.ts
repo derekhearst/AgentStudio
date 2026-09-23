@@ -34,6 +34,9 @@ import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
+import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
+import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
 	buildBuiltinAgentPostureSlot,
@@ -61,12 +64,14 @@ import {
 } from '$lib/engine/options.server'
 import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
-import { registerRunHandle } from '$lib/engine/run-registry.server'
+import { claimRun, registerRunHandle } from '$lib/engine/run-registry.server'
+import { turnInProgress } from '$lib/runs/live-chat-run.server'
 import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
-import { resolveWorkspaceRoot } from '$lib/workspace/workspace.server'
+import { prepareRunWorkspace, type RunWorkspace } from '$lib/workspace/workspace.server'
+import { resolveToolScope } from '$lib/engine/tool-scope'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -99,6 +104,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		.limit(1)
 
 	if (!conversation) return json({ error: 'Conversation not found' }, { status: 404 })
+
+	// One turn at a time: a turn outlives the page that started it, and a second one would
+	// resume the same SDK session alongside it. The page attaches to the live one instead.
+	const liveRunId = await turnInProgress(body.conversationId, user.id)
+	if (liveRunId) {
+		return json({ error: 'This conversation already has a turn in progress.', runId: liveRunId }, { status: 409 })
+	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
 	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
@@ -224,6 +236,14 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			lastHeartbeatAt: new Date(),
 		})
 		.returning({ id: chatRuns.id, evalRequired: chatRuns.evalRequired })
+	// Until the turn ends, on every path: what marks this row as really being run.
+	const releaseClaim = claimRun(run.id)
+	/** For a setup step that throws: end the row and the claim, or the conversation stays blocked. */
+	const abandonSetup = async (error: unknown): Promise<never> => {
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: 'Could not start this turn.' }).catch(() => {})
+		releaseClaim()
+		throw error
+	}
 
 	const startedAt = Date.now()
 	// An agent can narrow the tool surface two ways: an explicit scoped list on a
@@ -232,10 +252,44 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const policyTools = agentToolPolicy.kind === 'readOnly' ? Array.from(agentToolPolicy.allow) : undefined
 	const scopedTools = workspaceConfig?.scopedAgentTools ?? policyTools
 
+	/*
+	 * The run's workspace, resolved once and created up front. It is the SDK's working
+	 * directory, the root the containment guard confines every file call to, and where
+	 * attachments are staged — one value, so they cannot disagree about where the workspace
+	 * is. They did: the guard ignored SANDBOX_WORKSPACE and the SDK was never given a cwd.
+	 *
+	 * A chat with no project gets a fresh `runs/<runId>` directory every turn. That does not
+	 * break `resume`: the CLI finds a session by id across working directories and keeps
+	 * appending to the transcript where it started (checked against the bundled CLI).
+	 */
+	let workspace: RunWorkspace
+	try {
+		workspace = await prepareRunWorkspace({
+			userId: user.id,
+			runId: run.id,
+			persistentKey: workspaceConfig?.persistentKey ?? null,
+			worktree: workspaceConfig?.worktreeConfig ?? null,
+			projectId: conversation.projectId ?? null,
+		})
+	} catch (error) {
+		logger.error('[chat/stream] workspace preparation failed', {
+			runId: run.id,
+			// Usually SANDBOX_WORKSPACE pointing somewhere this process cannot write.
+			sandboxRoot: process.env.SANDBOX_WORKSPACE ?? null,
+			error: String(error),
+		})
+		const message = 'Could not prepare the workspace for this run.'
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: message })
+		releaseClaim()
+		return json({ error: message }, { status: 500 })
+	}
+
 	// The tool server is constructed before the stream opens, but ask_user needs to
 	// push a frame, so the emitter is assigned once the stream starts.
 	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
 	let askUserSeq = 0
+	/** What an approval answer carries: on the call's `tool_pending` frame and in `pendingApprovals`. */
+	const approvalTokenFor = (toolUseId: string) => `${run.id}:${toolUseId}`
 
 	async function fulfilAskUser(questions: unknown[]): Promise<string> {
 		askUserSeq += 1
@@ -257,10 +311,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 		const answers = await awaitQuestionAnswers(run.id, token)
 
-		await db
-			.update(chatRuns)
-			.set({ state: 'running', label: 'Generating response' })
-			.where(eq(chatRuns.id, run.id))
+		await markChatRunRunning(run.id)
 
 		if (!answers) return 'The user did not answer in time.'
 		return Object.entries(answers)
@@ -278,26 +329,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
 
 	/*
-	 * Set while the SDK session is live, so the stream's `cancel` can stop the run.
-	 *
-	 * Without this, "Stop" only aborted the browser's fetch: the server's loop kept pulling
-	 * from the CLI, which kept spending tokens and kept executing tools until the turn ended
-	 * on its own. The socket was the only thing that stopped.
+	 * Set while the SDK session is live. The handle is published in the run registry, which
+	 * is how Stop (`/chat/[id]/stop`), a dismiss and the reaper reach this run from a
+	 * different request.
 	 */
 	let releaseRunHandle: (() => void) | null = null
-	let interruptSession: (() => Promise<void>) | null = null
 
 	/*
-	 * True once the client's connection is gone. `enqueue` on a cancelled controller throws,
-	 * and the run does not stop at the same instant the socket does — the interrupt still
-	 * has to travel to the CLI, produce a final `result`, and come back through persistence.
-	 * Every frame in that window would otherwise throw and turn an ordinary stop into a
+	 * True once the client's connection is gone. The run carries on without it — a reload,
+	 * a network blip or a proxy timeout is not a request to stop, and the client reconnects
+	 * through `stream/resume` — so every frame from then on has nowhere to go, and `enqueue`
+	 * on a cancelled controller throws. Unguarded, that turned a dropped connection into a
 	 * failed run with a `TypeError` where its reply should be.
 	 *
 	 * Run events keep being written either way: they are what `stream/resume` replays, so a
 	 * reconnecting client still sees the turn it walked away from.
 	 */
 	let clientGone = false
+
+	/** Keeps the row's `updatedAt` fresh while frames flow, so the stuck-run reaper leaves it be. */
+	const heartbeat = createRunHeartbeat(run.id)
 
 	/*
 	 * #36 — attachments used to be declared on the payload and then never read,
@@ -311,14 +362,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		text: body.content ?? '',
 		attachments: body.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
-		io: createAttachmentIo({
-			userId: user.id,
-			runId: run.id,
-			persistentKey: workspaceConfig?.persistentKey ?? null,
-			worktree: workspaceConfig?.worktreeConfig ?? null,
-			projectId: conversation.projectId ?? null,
-		}),
-	})
+		io: createAttachmentIo(workspace.context),
+	}).catch(abandonSetup)
 	const attachmentNotice = formatAttachmentWarnings(preparedPrompt.warnings)
 	if (preparedPrompt.warnings.length > 0) {
 		logger.warn('[chat/stream] attachments not fully delivered', {
@@ -330,14 +375,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	/*
 	 * Whether this project's committed `.claude/` config may load. Read per run rather than
 	 * cached: revoking trust has to take effect on the next turn, not on the next restart.
+	 * Only when the run is standing in the project's checkout — trust is about that
+	 * directory's content, not whatever persistent or worktree directory the agent uses.
 	 */
-	const projectSettingsTrusted = conversation.projectId
+	const projectSettingsTrusted = conversation.projectId && workspace.projectCheckout
 		? ((
 				await db
 					.select({ trusted: projects.settingsTrusted })
 					.from(projects)
 					.where(eq(projects.id, conversation.projectId))
 					.limit(1)
+					.catch(abandonSetup)
 			)[0]?.trusted ?? false)
 		: false
 
@@ -349,7 +397,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		parentAgentId: agent.id,
 		parentIsOrchestrator: isOrchestrator,
 		parentIsClaude: isClaudeModel(routedModel),
-	})
+	}).catch(abandonSetup)
+	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
 
 	let engineOptions
 	try {
@@ -359,7 +408,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			model: routedModel,
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
-			allowedTools: scopedTools,
+			toolScope,
+			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
 			resumeSessionId: conversation.sdkSessionId ?? undefined,
@@ -376,7 +426,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		})
 	} catch (error) {
 		const message = error instanceof GatewayNotConfiguredError ? error.message : 'Failed to configure model'
-		await db.update(chatRuns).set({ state: 'failed', label: 'Failed', error: message }).where(eq(chatRuns.id, run.id))
+		await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: message })
+		releaseClaim()
 		return json({ error: message }, { status: 400 })
 	}
 
@@ -423,6 +474,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			}
 
 			const emit = async (event: string, payload: unknown) => {
+				// Every frame counts, `tool_progress` included: it is the SDK's own heartbeat for
+				// a call still running, which is all a long build produces.
+				heartbeat.beat()
 				if (NON_PERSISTED.has(event)) {
 					send(encodeSseFrame(event, payload))
 					return
@@ -484,20 +538,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						 * which are accounted per run. Budget limits sum `cost`, so counting
 						 * cannot move a limit.
 						 */
-						onToolResult: ({ name, success, details }) => {
+						onToolResult: ({ name, success, details, subagentId }) => {
 							/*
 							 * #21 — keep the agent's checklist where it can be seen. The tool block
 							 * carries it into the transcript, but a list scrolls away the moment the
-							 * model says anything after it. Last write wins, which is what
-							 * `TodoWrite` means; on the conversation, because a plan routinely
-							 * outlives the run that wrote it.
+							 * model says anything after it. On the conversation, because a plan
+							 * routinely outlives the run that wrote it; the parent's own lists only
+							 * (`pinnedTodoListFrom`).
 							 */
-							if (details?.kind === 'todo') {
-								const todoList = {
-									items: details.items,
-									updatedAt: new Date().toISOString(),
-									runId: run.id,
-								}
+							const todoList = pinnedTodoListFrom({ details, subagentId }, run.id)
+							if (todoList) {
 								void db
 									.update(conversations)
 									.set({ todoList })
@@ -527,10 +577,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							)
 						},
 						onHandle: (handle) => {
-							// Published under the run id so a different request — the dock's
-							// dismiss — can stop this run too, not just this connection.
+							// Published under the run id so a different request — Stop, a
+							// dismiss — can reach this run. The connection cannot.
 							releaseRunHandle = registerRunHandle(run.id, handle)
-							interruptSession = () => handle.interrupt()
 						},
 						onSessionId: (sessionId) => {
 							// Persist immediately: if the run dies mid-turn we still want the
@@ -543,41 +592,34 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
 						},
+						// What the resumed session had already spent, so this turn logs its own share.
+						usageBaseline: await loadSessionUsageBaseline(body.conversationId, conversation.sdkSessionId),
 						// Settings-only view; `permissionMode` composes with it inside the engine's
 						// `resolveToolGate`, which is what decides allow / ask / deny.
 						requiresApproval: (name) =>
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
-						// Confines every built-in filesystem call to this run's workspace (#15).
-						// Resolved the same way the run's own tools resolve it, so the guard and
-						// the tools can never disagree about where the workspace is.
+						toolScope,
+						approvalToken: approvalTokenFor,
+						// Confines every built-in filesystem call to this run's workspace (#15) —
+						// the same root the SDK was given as its cwd, so a relative path means the
+						// same file to the guard and to the tool.
 						// Bash is confined by the OS where bubblewrap exists (the production image
 						// ships it) and gated on approval where it does not — never silently
 						// unconfined. Both halves read the same signal so they cannot disagree.
 						bashPolicy: resolveBashPolicy({ sandboxAvailable: sandboxAvailable() }),
-						workspaceRoot: resolveWorkspaceRoot({
-							userId: user.id,
-							runId: run.id,
-							persistentKey: workspaceConfig?.persistentKey ?? null,
-							worktree: workspaceConfig?.worktreeConfig ?? null,
-							projectId: conversation.projectId ?? null,
-						}),
+						workspaceRoot: workspace.root,
 						requestApproval:
 							approvalRequiredTools.size > 0
 								? async ({ id, name, input }) => {
-										const token = `${run.id}:${id}`
+										const token = approvalTokenFor(id)
 										await enqueuePendingApproval(
 											run.id,
 											{ token, toolName: name, args: input, requestedAt: new Date().toISOString() },
 											{ state: 'waiting_tool_approval', label: `Awaiting approval: ${name}` },
 										)
 										const approved = await awaitApprovalDecision(run.id, token)
-										if (approved) {
-											await db
-												.update(chatRuns)
-												.set({ state: 'running', label: 'Generating response' })
-												.where(eq(chatRuns.id, run.id))
-										}
+										if (approved) await markChatRunRunning(run.id)
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
@@ -601,7 +643,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						: null
 
 				// Subscription runs have no per-token price, so record tokens and force the
-				// dollar figure to zero rather than inventing one from list pricing.
+				// dollar figure to zero rather than inventing one from list pricing. A gateway
+				// run logs this turn's share of the SDK's estimate; when that share cannot be
+				// told apart (`costUsd: null`), the tokens are priced from the model table.
 				const messageCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
@@ -612,7 +656,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: claudeRun ? 0 : summary.usage.costUsd,
+					costOverride: claudeRun ? 0 : (summary.usage.costUsd ?? undefined),
 					metadata: { conversationId: body.conversationId, subscription: claudeRun },
 				})
 
@@ -635,6 +679,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
+						// The next turn's usage baseline — see `loadSessionUsageBaseline`.
+						sessionUsage: summary.sessionUsage ?? undefined,
 						numTurns: summary.numTurns,
 						blocks: summary.blocks.length > 0 ? summary.blocks : undefined,
 						attachmentWarnings:
@@ -655,17 +701,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					conversationId: body.conversationId,
 				})
 
-				await db
-					.update(chatRuns)
-					.set({
-						state: summary.error ? 'failed' : 'completed',
-						label: summary.error ? 'Failed' : 'Completed',
-						error: summary.error,
-						lastDelta: summary.text.slice(-500),
-						lastHeartbeatAt: new Date(),
-						finishedAt: new Date(),
-					})
-					.where(eq(chatRuns.id, run.id))
+				// A no-op when the reaper or a dismiss already ended the run: canceled stays canceled.
+				await finishChatRun(run.id, {
+					state: summary.error ? 'failed' : 'completed',
+					label: summary.error ? 'Failed' : 'Completed',
+					error: summary.error,
+					lastDelta: summary.text.slice(-500),
+				})
 
 				enqueueMemoryMineJob({
 					settings: currentSettings,
@@ -703,10 +745,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : 'Failed to stream response'
 				logger.error('[chat/stream] run failed', { runId: run.id, error: errorMessage })
-				await db
-					.update(chatRuns)
-					.set({ state: 'failed', label: 'Failed', error: errorMessage, finishedAt: new Date() })
-					.where(eq(chatRuns.id, run.id))
+				await finishChatRun(run.id, { state: 'failed', label: 'Failed', error: errorMessage })
 				await emit('done', { error: errorMessage })
 				closeStream(controller)
 			} finally {
@@ -714,36 +753,22 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				// later dismiss write to a CLI that has already exited.
 				releaseRunHandle?.()
 				releaseRunHandle = null
-				interruptSession = null
+				releaseClaim()
 			}
 		},
 
 		/**
-		 * The client went away — it hit Stop, navigated, or lost the connection.
+		 * The client went away — it navigated, reloaded, or lost the connection.
 		 *
-		 * `cancel` is the reliable signal for that: the browser aborting its fetch closes
-		 * the response, and the platform cancels this stream. Interrupting here is what
-		 * makes Stop actually stop, rather than merely stop *watching*: the CLI ends the
-		 * turn, the run loop sees an ordinary `result`, and the partial turn is persisted
-		 * and accounted like any other.
-		 *
-		 * Nothing is awaited on the caller's behalf beyond the interrupt itself — the
-		 * `start` body is still running and owns its own teardown.
+		 * That is not a request to stop, so the run carries on: its events keep going to
+		 * `run_events`, where `stream/resume` picks them up for a client that reconnects, and
+		 * the turn is persisted when it ends. Stop is a separate request (`/chat/[id]/stop`)
+		 * that interrupts the run through the registry. This used to interrupt on every
+		 * disconnect, so a reload or a network blip cut the turn short and the client's
+		 * automatic resume could only replay the truncated remains.
 		 */
-		async cancel() {
+		cancel() {
 			clientGone = true
-			const interrupt = interruptSession
-			if (!interrupt) return
-			try {
-				await interrupt()
-				logger.info('[chat/stream] client disconnected, interrupted the run', { runId: run.id })
-			} catch (error) {
-				// Commonest cause is benign: the turn finished as the connection dropped.
-				logger.warn('[chat/stream] interrupt after disconnect failed', {
-					runId: run.id,
-					error: String(error),
-				})
-			}
 		},
 	})
 
