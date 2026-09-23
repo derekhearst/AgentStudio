@@ -1,5 +1,7 @@
 <script lang="ts">
 	import {
+		answerQuestionReviewItemCommand,
+		decideApprovalReviewItemCommand,
 		listReviewItemsQuery,
 		resolveReviewItemCommand,
 	} from '$lib/observability/review.remote';
@@ -7,6 +9,7 @@
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
+	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
@@ -49,6 +52,56 @@
 			alert(remoteErrorMessage(e, 'Failed to resolve'));
 		}
 	}
+
+	/**
+	 * Approval requests and agent questions are answered, not resolved: the answer goes to
+	 * the paused run, exactly as the chat's cards send it, and the item closes because of it.
+	 */
+	let answering = $state<string | null>(null);
+
+	const NOT_ANSWERED: Record<string, string> = {
+		no_longer_waiting: 'The run is no longer waiting for this, so the item was closed.',
+		already_closed: 'This item was already closed.',
+		not_found: 'This item no longer exists.',
+		not_yours: 'This run belongs to someone else.',
+		wrong_type: 'This item cannot be answered here.',
+	};
+
+	async function answered(result: { resolved: boolean; reason?: string }) {
+		if (!result.resolved) alert(NOT_ANSWERED[result.reason ?? ''] ?? 'The run did not take the answer.');
+		onChange();
+	}
+
+	async function handleDecision(itemId: string, approved: boolean) {
+		answering = itemId;
+		try {
+			await answered(await decideApprovalReviewItemCommand({ itemId, approved }));
+		} catch (e) {
+			alert(remoteErrorMessage(e, approved ? 'Failed to approve' : 'Failed to deny'));
+		} finally {
+			answering = null;
+		}
+	}
+
+	async function handleAnswers(itemId: string, answers: Record<string, string>) {
+		answering = itemId;
+		try {
+			await answered(await answerQuestionReviewItemCommand({ itemId, answers }));
+		} catch (e) {
+			alert(remoteErrorMessage(e, 'Failed to send the answer'));
+		} finally {
+			answering = null;
+		}
+	}
+
+	type QuestionPayload = {
+		questions?: Array<{
+			header: string;
+			question: string;
+			options: Array<{ label: string; description?: string; recommended?: boolean }>;
+			allowFreeformInput?: boolean;
+		}>;
+	};
 
 	function fmtDate(d: Date | string) {
 		return new Date(d).toLocaleString();
@@ -223,7 +276,34 @@
 										{/if}
 									</div>
 								{/if}
-								{#if item.status === 'open' || item.status === 'in_progress'}
+								{#if (item.status === 'open' || item.status === 'in_progress') && item.type === 'approval_request'}
+									<div class="flex gap-2 pt-2">
+										<button
+											class="btn btn-xs btn-success"
+											type="button"
+											disabled={answering === item.id}
+											onclick={() => handleDecision(item.id, true)}
+										>
+											Approve
+										</button>
+										<button
+											class="btn btn-xs btn-error btn-outline"
+											type="button"
+											disabled={answering === item.id}
+											onclick={() => handleDecision(item.id, false)}
+										>
+											Deny
+										</button>
+									</div>
+								{:else if (item.status === 'open' || item.status === 'in_progress') && item.type === 'user_question'}
+									<div class="pt-2">
+										<AskUserCard
+											questions={(item.payload as QuestionPayload).questions ?? []}
+											status={answering === item.id ? 'executing' : 'pending'}
+											onSubmit={(answers: Record<string, string>) => handleAnswers(item.id, answers)}
+										/>
+									</div>
+								{:else if item.status === 'open' || item.status === 'in_progress'}
 									<div class="flex gap-2 pt-2">
 										{#if fixTarget(item.payload)}
 											<button

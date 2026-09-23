@@ -152,6 +152,46 @@ export async function resolveReviewItem(input: ResolveReviewItemInput): Promise<
 	return row ?? null
 }
 
+export type ResolveByDedupeKeyInput = {
+	type: ReviewItemType
+	dedupeKey: string
+	action: string
+	note?: string
+	/** Null when nobody acted — the system closed it (a timeout, a run that ended). */
+	resolvedBy?: string | null
+	finalStatus?: Extract<ReviewItemStatus, 'resolved' | 'dismissed'>
+}
+
+/**
+ * Close the open item a source opened under `dedupeKey`, if there still is one. For sources
+ * whose item stops meaning anything once something else settles it — an approval answered
+ * in the chat, a question that timed out. Best-effort, like opening: returns null on error.
+ */
+export async function resolveReviewItemsByDedupeKey(input: ResolveByDedupeKeyInput): Promise<ReviewItemRow[] | null> {
+	try {
+		return await db
+			.update(reviewItems)
+			.set({
+				status: input.finalStatus ?? 'resolved',
+				resolvedBy: input.resolvedBy ?? null,
+				resolution: { action: input.action, note: input.note },
+				resolvedAt: new Date(),
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(reviewItems.type, input.type),
+					drizzleSql`${reviewItems.payload}->>'dedupeKey' = ${input.dedupeKey}`,
+					drizzleSql`${reviewItems.status} in ('open', 'in_progress')`,
+				),
+			)
+			.returning()
+	} catch (err) {
+		logger.warn('[review] resolveReviewItemsByDedupeKey failed (non-fatal)', { err })
+		return null
+	}
+}
+
 export async function assignReviewItem(itemId: string, userId: string | null): Promise<ReviewItemRow | null> {
 	const [row] = await db
 		.update(reviewItems)

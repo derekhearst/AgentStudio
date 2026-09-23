@@ -4,6 +4,8 @@ import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
 import { scheduleNeedsInputNotification } from './needs-input.server'
+import { closePromptReviewItem, promptDedupeKey } from './prompt-review-items.server'
+import type { DecisionContext } from './approvals.server'
 
 export const QUESTION_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -42,7 +44,8 @@ export async function enqueuePendingQuestion(
 		await tx.update(chatRuns).set(patch).where(eq(chatRuns.id, runId))
 	})
 	// Wave 5 #20 — open a review item so user_question prompts show up in /review even
-	// when the SSE client is disconnected. Best-effort + deduped by token.
+	// when the SSE client is disconnected. Best-effort + deduped by token. It is closed again
+	// when the question is answered or given up on; see prompt-review-items.server.
 	void (async () => {
 		try {
 			const { openReviewItem } = await import('$lib/observability/review.server')
@@ -56,7 +59,7 @@ export async function enqueuePendingQuestion(
 				summary: `Agent asked: ${summaryFragment}`,
 				payload: { token: entry.token, questions: entry.questions ?? [] },
 				runId,
-				dedupeKey: `question:${entry.token}`,
+				dedupeKey: promptDedupeKey('question', entry.token),
 			})
 		} catch (err) {
 			logger.warn('[questions] review item open failed (non-fatal)', { err })
@@ -70,12 +73,14 @@ export async function enqueuePendingQuestion(
 	})
 }
 
+/** Record the answers to a pending question, from the chat or from /review; its review item closes with it. */
 export async function recordQuestionAnswers(
 	runId: string,
 	token: string,
 	answers: Record<string, string>,
+	context: DecisionContext = {},
 ): Promise<{ resolved: boolean }> {
-	return db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		const [row] = await tx
 			.select({ pendingQuestions: chatRuns.pendingQuestions })
 			.from(chatRuns)
@@ -100,6 +105,14 @@ export async function recordQuestionAnswers(
 		await tx.update(chatRuns).set({ pendingQuestions: next }).where(eq(chatRuns.id, runId))
 		return { resolved: true }
 	})
+	if (result.resolved) {
+		await closePromptReviewItem('question', token, {
+			action: 'answered',
+			decidedBy: context.decidedBy,
+			note: context.note,
+		})
+	}
+	return result
 }
 
 async function removePendingQuestion(runId: string, token: string): Promise<void> {
@@ -150,6 +163,7 @@ export async function awaitQuestionAnswers(
 
 		if (Date.now() >= deadline) {
 			await removePendingQuestion(runId, token)
+			await closePromptReviewItem('question', token, { action: 'timed_out' })
 			return null
 		}
 

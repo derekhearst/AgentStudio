@@ -137,7 +137,11 @@
 
 	async function reloadInbox() {
 		try {
-			inbox = await listReviewItemsQuery(buildInboxArgs());
+			// Refreshed, not just awaited: after an approve, answer or resolve the same filter's
+			// cached result would still show the item open.
+			const query = listReviewItemsQuery(buildInboxArgs());
+			await query.refresh();
+			inbox = await query;
 			inboxError = null;
 		} catch (e) {
 			inboxError = remoteErrorMessage(e, 'Could not load the inbox for this filter');
