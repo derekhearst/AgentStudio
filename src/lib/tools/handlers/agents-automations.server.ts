@@ -5,7 +5,7 @@
  */
 
 import { toolSchemas } from '../tool-schemas'
-import { setAgentStatus, updateAgentRecord } from '$lib/agents/agents.server'
+import { listAgentRoster, setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -15,6 +15,19 @@ import {
 import type { ToolHandler } from '../handler-types'
 
 export const agentAutomationHandlers: Record<string, ToolHandler> = {
+	// Agents are one catalogue shared by the whole instance, like the agents page, so the
+	// roster is not scoped to the caller.
+	list_agents: async (call, { startedAt }) => {
+		const input = toolSchemas.list_agents.parse(call.arguments)
+		return {
+			success: true,
+			tool: call.name,
+			input,
+			result: await listAgentRoster(),
+			executionMs: Date.now() - startedAt,
+		}
+	},
+
 	update_agent: async (call, { startedAt }) => {
 		const input = toolSchemas.update_agent.parse(call.arguments)
 		const updated = await updateAgentRecord(input.agentId, {
@@ -40,14 +53,17 @@ export const agentAutomationHandlers: Record<string, ToolHandler> = {
 		}
 	},
 
+	// #66 — both go through `setAgentPaused`, the path the Pause button uses, so the model is
+	// held to the same rule: a built-in or an evaluator cannot be paused, and resuming an agent
+	// that is not paused changes nothing.
 	pause_agent: async (call, { startedAt }) => {
 		const input = toolSchemas.pause_agent.parse(call.arguments)
-		const updated = await setAgentStatus(input.agentId, 'paused')
-		if (!updated) {
+		const result = await setAgentPaused(input.agentId, true)
+		if (!result.ok) {
 			return {
 				success: false,
 				tool: call.name,
-				error: 'Agent not found',
+				error: result.message,
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -55,19 +71,19 @@ export const agentAutomationHandlers: Record<string, ToolHandler> = {
 			success: true,
 			tool: call.name,
 			input,
-			result: { id: updated.id, status: updated.status },
+			result: { id: result.agent.id, status: result.agent.status },
 			executionMs: Date.now() - startedAt,
 		}
 	},
 
 	resume_agent: async (call, { startedAt }) => {
 		const input = toolSchemas.resume_agent.parse(call.arguments)
-		const updated = await setAgentStatus(input.agentId, 'active')
-		if (!updated) {
+		const result = await setAgentPaused(input.agentId, false)
+		if (!result.ok) {
 			return {
 				success: false,
 				tool: call.name,
-				error: 'Agent not found',
+				error: result.message,
 				executionMs: Date.now() - startedAt,
 			}
 		}
@@ -75,7 +91,7 @@ export const agentAutomationHandlers: Record<string, ToolHandler> = {
 			success: true,
 			tool: call.name,
 			input,
-			result: { id: updated.id, status: updated.status },
+			result: { id: result.agent.id, status: result.agent.status },
 			executionMs: Date.now() - startedAt,
 		}
 	},

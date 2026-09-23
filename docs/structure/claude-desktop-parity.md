@@ -59,7 +59,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Commit / push / PR | **even** | approval-gated tools, PR recorded and surfaced in `/review` | same, plus richer GitHub triggers |
 | Code review of a PR | **absent** | — | `/ultrareview`, merge-aware follow-up reviews |
 | CI watch and fix | **even** (#20 landed) | an opened PR's checks are watched (webhook, or polling every few minutes) for up to 14 days; a red check opens a review item and a notification, and **Fix it** hands the failure back to the conversation that wrote the code — a button, not an automatic run | cloud sessions react to CI |
-| Hooks | **even** | `/settings/hooks`, event bus, skill hooks | same idea, dialog-managed |
+| Hooks | **even** | `/settings/hooks`, event bus, skill hooks, per-agent bindings. Until the September 2026 audit the bus was never called on the chat engine path, so bindings and the built-in activity hooks only fired for automations; chats now raise run, tool, approval and question events too ([hooks.md](../hooks/hooks.md)) | same idea, dialog-managed |
 | Background tasks | **behind** (#35) | the job queue backgrounds automations and research; inside a chat turn a long command blocks the turn | background bash that survives turns, with a completion notice |
 | Session cost accounting | **win** | per-run rows, `/runs/[id]`, a ledger row per tool call, and the `/activity` usage strip (#38). Built-in calls write $0 call-count rows again since the ledger fix; tool calls made through the older loop (agent-attached automations, monitors, PR fix) are still not counted | session cost in a dialog |
 
@@ -73,10 +73,10 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped; files attached on the new-chat page go with the first message (they were silently dropped until 2026-09-23) | images, PDFs, office docs, with extraction |
 | Voice dictation | **even** | record → `/api/transcribe`; no live transcript while speaking | same |
 | Text-to-speech | **far behind** (#27) | endpoint + setting exist, nothing calls them | shipped |
-| Deep research | **even** | approval-gated plan, background run, cited report. Worse in one way: the loop is a fixed pipeline, so a run cannot be steered mid-flight — only approved or denied up front | agentic, steerable |
+| Deep research | **even** | in a chat, the Research agent writes a plan the user must approve, then hands it to Chat, which does the research as ordinary turns with the web tools — steerable, but no cited-report page or notification. The background pipeline (planner, fetch, reflection, cited report, notification) runs only from research-mode automations, and it is fixed: a run cannot be steered once started. The composer's Research button that would start one is not switched on | agentic, steerable |
 | Memory | **win** | Memory Palace: wing/room/closet/drawer, hybrid vector + tsvector + temporal recall, mining pipeline | categorized entries, Topics editor, sensitive-topics exclusion — thinner retrieval |
 | Memory management UI | **win** (#37 fixed) | per-drawer edit with mandatory re-embed, delete, pin / never-recall, per-conversation forget, exclusion rules applied *before* embedding with built-in credential patterns and a tester, plus a per-drawer "why was this recalled?" score breakdown | Topics editor, per-item delete, sensitive-topic exclusion — no recall explainability |
-| Skills | **even** | full CRUD, skill hooks, agent identity skills. No packaging or sharing, which only matters with a second user | same, plus a marketplace and `claude plugin eval` |
+| Skills | **even** | full CRUD, skill hooks, agent identity skills, and a copy-paste `SKILL.md` package (resource files included) that round-trips cleanly. No marketplace or sharing, which only matters with a second user | same, plus a marketplace and `claude plugin eval` |
 | Plugins / marketplace | **absent** | — | plugin system, marketplace, admin controls, `claude plugin eval` |
 | Connect external MCP servers | **absent** (#17) | we *serve* MCP at `/api/mcp`, we cannot consume one | first-class, OAuth, `/mcp`, managed policies |
 | Connectors (Slack, M365, Salesforce…) | **absent** | — | write-capable connectors, Claude Tag for Slack |
@@ -101,7 +101,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 **We are even on the core loop.** Same SDK, same models, same thinking, same research shape.
 
-**The evens are thinner than they look.** Three of them hide a real disadvantage: research runs on a fixed pipeline that cannot be steered once approved; `run_code` has no chart output; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
+**The evens are thinner than they look.** Three of them hide a real disadvantage: background research runs on a fixed pipeline that cannot be steered once started; `run_code` has no chart output; dictation has no live transcript. And the one former "even" that was actually a lie is scheduling — the cron parser rejects `0 9 * * 1-5`, and what it does accept runs on UTC, so a 9am job fires at 3am here.
 
 **We are far behind on the session surface.** Diffs, checkpoints, terminal output, todo list, permission modes — five things that turn a long run from opaque to legible.
 

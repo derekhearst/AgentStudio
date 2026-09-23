@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { listSkillsQuery, importSkillCommand } from '$lib/skills';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type SkillRow = Awaited<ReturnType<typeof listSkillsQuery>>[number];
 
@@ -45,7 +46,7 @@
 			await loadSkills();
 			void goto(`/skills/${result.id}`);
 		} catch (e) {
-			importError = e instanceof Error ? e.message : 'Import failed';
+			importError = remoteErrorMessage(e, 'Import failed');
 		} finally {
 			importBusy = false;
 		}
@@ -158,15 +159,15 @@
 		<div class="modal-box max-w-3xl">
 			<h3 class="mb-3 text-lg font-bold">Import SKILL.md package</h3>
 			<p class="mb-3 text-xs leading-snug opacity-60">
-				Paste a SKILL.md document (frontmatter + body). Supported frontmatter keys:
+				Paste a SKILL.md document (frontmatter + body), or a whole package copied from a skill's
+				Export dialog — its resource files come with it. Supported frontmatter keys:
 				<code class="font-mono">name</code>, <code class="font-mono">description</code> (required),
 				<code class="font-mono">category</code>, <code class="font-mono">tags</code>,
-				<code class="font-mono">companion_groups</code>, <code class="font-mono">companion_tools</code>,
 				<code class="font-mono">enabled</code>.
 			</p>
 			<textarea
 				class="textarea textarea-bordered min-h-72 w-full font-mono text-xs"
-				placeholder={"---\nname: tools/my-skill\ndescription: Short summary of what this skill teaches.\ntags: [example]\ncompanion_groups: [sandbox]\n---\n\n# Body of the skill\n\nInstructions go here…"}
+				placeholder={"---\nname: tools/my-skill\ndescription: Short summary of what this skill teaches.\ntags: [example]\n---\n\n# Body of the skill\n\nInstructions go here…"}
 				bind:value={importSource}
 			></textarea>
 			<div class="mt-3 flex items-center gap-3 text-xs">

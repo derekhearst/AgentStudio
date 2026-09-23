@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { serializeSkillPackage } from '$lib/skills/skill-source'
+
 	let {
 		open,
 		skillMd,
@@ -22,19 +24,8 @@
 	})
 
 	async function copyExportText() {
-		const text =
-			resources.length === 0
-				? skillMd
-				: [
-						skillMd,
-						'',
-						'---',
-						'',
-						...resources.map(
-							(r: { name: string; description?: string; content: string }) =>
-								`## resources/${r.name}\n\n${r.content}`,
-						),
-					].join('\n')
+		// The package format the Import dialog reads back, resource files and all.
+		const text = serializeSkillPackage(skillMd, resources)
 		try {
 			await navigator.clipboard.writeText(text)
 			copied = true
@@ -56,7 +47,9 @@
 			<div class="mb-3 flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-lg font-bold">Export as SKILL.md package</h3>
-					<p class="mt-0.5 text-xs opacity-60">Round-trip-clean — paste into the Import dialog on /skills to recreate this skill.</p>
+					<p class="mt-0.5 text-xs opacity-60">
+						Copy all, then paste into the Import dialog on /skills to recreate this skill with its category, tags and resource files.
+					</p>
 				</div>
 				<button class="btn btn-ghost btn-xs" onclick={copyExportText}>
 					{copied ? 'Copied!' : 'Copy all'}

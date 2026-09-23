@@ -61,10 +61,14 @@
 	}
 
 	async function handleDelete(project: ProjectRow) {
-		const fsNote = project.repoKind !== 'none' ? ' Filesystem and git repo will also be removed.' : '';
+		// Every project's directory goes with it, repository or not, so every kind gets a warning.
+		const fsNote =
+			project.repoKind === 'none'
+				? "The project's files (knowledge files and anything agents wrote there) will also be removed."
+				: "The project's files and git repo (including knowledge files and anything agents wrote there) will also be removed.";
 		const ok = await confirmDialog({
 			title: `Delete "${project.name}"?`,
-			message: `${fsNote.trim() ? fsNote.trim() + ' ' : ''}This cannot be undone.`,
+			message: `${fsNote} This cannot be undone.`,
 			confirmLabel: 'Delete',
 			variant: 'danger'
 		});

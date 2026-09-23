@@ -63,6 +63,11 @@ ENV GIT_SHA=$GIT_SHA
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# The largest request body the server accepts, on every route. adapter-node's default is
+# 512K, which refused any project knowledge file or chat attachment over half a megabyte.
+# 25M fits a 20MB upload plus its multipart framing; raise it for larger video
+# attachments. See src/lib/server/body-limit.ts.
+ENV BODY_SIZE_LIMIT=25M
 
 EXPOSE 3000
 USER bun

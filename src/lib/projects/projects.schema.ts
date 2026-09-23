@@ -58,7 +58,8 @@ export const projects = pgTable(
 		description: text('description'),
 		kind: projectKindEnum('kind').notNull().default('other'),
 		userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
-		// Repo-shape fields. `repoKind='none'` means no fs footprint; 'local' = git init'd
+		// Repo-shape fields. `repoKind='none'` means no repository (the project's directory may
+		// still hold knowledge files and what its chats wrote); 'local' = git init'd
 		// at the project's sandbox path; 'imported' = cloned from a remote (paired with a
 		// `repositories` sidecar row carrying provider/owner/name/cloneUrl).
 		repoKind: text('repo_kind').notNull().default('none').$type<RepoKind>(),

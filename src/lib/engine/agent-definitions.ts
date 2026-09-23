@@ -13,9 +13,10 @@
  *
  * ## The decisions, and why
  *
- * **A paused agent is not offered.** `agents.status` is the only thing that column currently
- * does anywhere in the app (#66 notes it is rendered in three places and settable in none),
- * and "paused" has to mean something. Excluding it here is the one place it can.
+ * **A paused agent is not offered.** That is half of what pausing means (#66); the other half
+ * is that automations and monitors skip it. The rule itself — paused or available, with
+ * `idle` and `active` both available — lives in `$lib/agents/agent-status`, which the Pause
+ * button, the automation gate and this filter all read.
  *
  * **`ask_user` is disallowed for every subagent.** The old loop refused it for
  * non-orchestrators — a child has no stream to ask down — and that rule has to survive the
@@ -28,6 +29,7 @@
  * is a documented value rather than a guess.
  */
 
+import { isAgentPaused } from '$lib/agents/agent-status'
 import { BUILTIN_TOOL_SET } from './builtin-tools'
 import { OWN_MCP_SERVER } from './permission-mode'
 
@@ -108,7 +110,7 @@ export function agentDefinitionFrom(
 	row: AgentRowForDefinition,
 	options: { parentIsClaude: boolean },
 ): { key: string; definition: EngineAgentDefinition } | null {
-	if (row.status === 'paused') return null
+	if (isAgentPaused(row.status)) return null
 
 	const prompt = row.prompt?.trim()
 	if (!prompt) return null

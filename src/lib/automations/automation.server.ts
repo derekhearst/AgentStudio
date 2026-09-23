@@ -24,6 +24,8 @@ export async function listAutomationsForUser(userId: string) {
 			updatedAt: automations.updatedAt,
 			agentId: automations.agentId,
 			agentName: agents.name,
+			// #66 — a paused agent's automations are skipped, so the card says so.
+			agentStatus: agents.status,
 			mode: automations.mode,
 			outputTarget: automations.outputTarget,
 			// #31 — failure state, so the card can distinguish "you turned this off" from

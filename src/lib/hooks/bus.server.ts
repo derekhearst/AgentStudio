@@ -61,7 +61,11 @@ export async function emitHook<E extends HookEvent>(
 	payload: HookPayload<E>,
 	opts: EmitOptions = {},
 ): Promise<void> {
-	const globalHandlers = registry.get(event) ?? []
+	const registered = registry.get(event) ?? []
+	// Opt-in handlers are not global: they run only where an agent binds them, below. They
+	// used to be dispatched with the rest, so an opt-in hook ran on every emit — and twice for
+	// an agent that bound it.
+	const globalHandlers = registered.filter((h) => !h.optInOnly)
 
 	// Wave 3 #13 phase 4 — per-agent hook config dispatch. When the payload carries an `agentId`,
 	// load `agents.config.hooks[event]`. Refs that match a global `optInOnly: true` handler run
@@ -77,7 +81,7 @@ export async function emitHook<E extends HookEvent>(
 			const cfg = (row?.config ?? {}) as { hooks?: Record<string, string[]> }
 			const refs = cfg.hooks?.[event] ?? []
 			for (const ref of refs) {
-				const match = globalHandlers.find((h) => h.name === ref)
+				const match = registered.find((h) => h.name === ref)
 				if (match && match.optInOnly) {
 					agentHandlers.push(match)
 				} else if (!match) {

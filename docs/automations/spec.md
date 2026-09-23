@@ -43,7 +43,7 @@ attempt starts and closed when it ends, so a run that dies mid-flight still leav
 | `id`             | uuid       | Primary key                                                      |
 | `automationId`   | uuid       | FK to `automations`, cascade delete                              |
 | `userId`         | uuid?      | Owner at run time                                                |
-| `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap)         |
+| `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap or paused agent) |
 | `trigger`        | text       | `schedule`, `manual` ("Run now") or `monitor` (a monitor fired)  |
 | `attempt`        | integer    | 1-based; >1 means this attempt is a retry of a failed tick        |
 | `mode`           | text       | Snapshot of the automation's mode at execution time              |
@@ -166,6 +166,7 @@ A maintenance automation whose prompt is exactly `{{usage_digest}}` is the **wee
 - **Opt-in only.** Nothing creates the digest on deploy. The owner turns it on from `/activity`, which creates "Weekly usage digest" for Monday 09:00 in their browser's time zone (or switches an existing, disabled one back on). After that it is managed here like any automation.
 - **Nothing new underneath.** It uses the existing dispatch tick, run history, retries and failure reporting.
 - **Budget limits do not stop it.** A limit that blocks automations still lets the digest run, because the digest cannot spend anything. The week a limit is exceeded is the week the digest reports it.
+- **A paused agent does.** The digest `/activity` creates has no agent, so pausing an agent never affects it. A digest someone assigned to an agent by hand is skipped while that agent is paused, like any other automation (see [Paused agents](#paused-agents)).
 - **A digest that is not delivered is a failed run.** If the review item or the chat message cannot be written, the run is marked failed, so it is retried and reported like any other failure. (For model-written maintenance output, a delivery failure is only logged, because running it again would pay for the model call again.)
 
 The card on `/automations` notes when a prompt is the digest. See [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what the digest contains.
@@ -180,6 +181,14 @@ Automations can attach project or repository context so recurring runs are not c
 ### Budget controls
 
 Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was. The weekly usage digest is the one exception: it cannot spend anything, so limits never block it.
+
+### Paused agents
+
+Pausing an agent on `/agents` (#66) stops the automations assigned to it. When one comes due, the run is skipped before anything is spent and recorded in the run history as `blocked`, with the reason "agent … is paused. Resume it on the Agents page to let this automation run." This applies to every trigger — the schedule, **Run now**, and a monitor firing — and to every mode, because the automation is assigned to that agent whether or not the mode runs the agent's own loop.
+
+A skipped run is not a failure: it does not count toward the disable streak, and it does not reset it. A skipped scheduled tick moves `nextRunAt` on to the next slot, so the dispatcher does not pick it up again every minute; a skipped Run now or monitor-fired run leaves the schedule alone. `lastRunAt` is not touched, because the automation did not run. Resuming the agent lets the next due tick run; skipped ticks are not replayed.
+
+The card shows "(paused)" beside the agent's name, and the agent picker marks paused agents, so an enabled automation that will not run does not look ready to. An automation with no agent is never affected. See [../agents/agents.md](../agents/agents.md).
 
 ### Review policies
 
@@ -352,6 +361,7 @@ A first-class automation recipe exists for your stated goal:
 - Automations execute through jobs, not inline HTTP handlers.
 - Disabled automations do not enqueue new runs.
 - Budget overage blocks execution and creates a review item (except for the usage digest, which spends nothing).
+- An automation assigned to a paused agent does not run; the attempt is recorded as `blocked` and is not a failure. This includes a usage digest assigned to that agent.
 - Automations are resumable only through underlying jobs, tasks, and runs primitives, not ad hoc engine state.
 - An automation may write to multiple surfaces, but each delivery is recorded explicitly in `automationDeliveries`.
 

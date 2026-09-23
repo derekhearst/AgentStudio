@@ -197,7 +197,7 @@ export type DigestAutomation = {
 	runs: number
 	completed: number
 	failed: number
-	/** Skipped because a budget limit blocked it. */
+	/** Skipped without running: a budget limit blocked it, or its agent was paused (#66). */
 	blocked: number
 	costUsd: number
 	/** Failed runs in the previous window — what makes a failure "new". */
@@ -632,7 +632,7 @@ export function renderDigestMarkdown(digest: UsageDigest): string {
 	const automations = digest.automations
 	lines.push(
 		`- **Automations:** ${automations.runs} runs, ${automations.failed} failed` +
-			(automations.blocked > 0 ? `, ${automations.blocked} blocked by a budget limit` : '') +
+			(automations.blocked > 0 ? `, ${automations.blocked} blocked (a budget limit or a paused agent)` : '') +
 			(automations.costUsd > 0 ? `, ${formatDigestUsd(automations.costUsd)} metered` : ''),
 	)
 	lines.push(`- **Tool calls:** ${digest.tools.calls} (${digest.tools.failed} failed)`)

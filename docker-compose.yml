@@ -45,6 +45,10 @@ services:
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY}
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      # BODY_SIZE_LIMIT (the largest upload the server accepts) is 25M, set by the image.
+      # To raise it, add a literal value here, e.g. `- BODY_SIZE_LIMIT=110M` for 100MB
+      # videos. Never `${BODY_SIZE_LIMIT}` without a default: an unset variable becomes an
+      # empty string, which the server reads as a limit of 0 bytes and refuses every upload.
     security_opt:
       - seccomp:unconfined
     shm_size: 1gb

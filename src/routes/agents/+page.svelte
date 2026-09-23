@@ -4,6 +4,9 @@
 	import { onMount, onDestroy } from 'svelte'
 	import { listAgents } from '$lib/agents'
 	import { formatCost } from '$lib/agents/agent-format'
+	import { setAgentPausedFromPage } from '$lib/agents/agent-pause'
+	import { agentPauseAction, agentStatusHint, agentStatusLabel, isAgentPaused } from '$lib/agents/agent-status'
+	import { remoteErrorMessage } from '$lib/ui/remote-error'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
@@ -26,6 +29,8 @@
 	let loading = $state(true)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 	let sortMode = $state<'last_active' | 'sessions' | 'cost'>('last_active')
+	let statusBusyId = $state<string | null>(null)
+	let statusError = $state<string | null>(null)
 
 	let eventSource: EventSource | null = null
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -96,6 +101,25 @@
 		loading = false
 	}
 
+	/**
+	 * #66 — the inline Pause / Resume. Only `status` is taken from what the command returns:
+	 * that is the bare agent record, without the session and cost figures the card also shows.
+	 */
+	async function togglePaused(agent: AgentRow) {
+		const action = agentPauseAction(agent)
+		if (!action) return
+		statusBusyId = agent.id
+		statusError = null
+		try {
+			const updated = await setAgentPausedFromPage(agent.id, action === 'pause')
+			if (updated) agents = agents.map((row) => (row.id === updated.id ? { ...row, status: updated.status } : row))
+		} catch (err) {
+			statusError = remoteErrorMessage(err, `Could not ${action} ${agent.name}.`)
+		} finally {
+			statusBusyId = null
+		}
+	}
+
 	function connectMonitor() {
 		eventSource?.close()
 		eventSource = new EventSource('/api/agents/monitor')
@@ -146,6 +170,9 @@
 	</PageHeader>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-5">
+	{#if statusError}
+		<div role="alert" class="alert alert-error py-2 text-sm">{statusError}</div>
+	{/if}
 	<!-- ── Grid ───────────────────────────────────────────────────────────── -->
 	{#if loading}
 		<div class="flex justify-center py-16">
@@ -161,6 +188,8 @@
 				{@const color = agentColor(agent.id)}
 				{@const streaming = streamForAgent(agent.id)}
 				{@const isStreaming = !!streaming}
+				{@const paused = isAgentPaused(agent.status)}
+				{@const pauseAction = agentPauseAction(agent)}
 				<article
 					class="group relative flex flex-col overflow-hidden bg-base-100 border-base-300 rounded-2xl border transition-all duration-200 hover:border-base-content/20 hover:shadow-xl hover:shadow-base-content/5"
 				>
@@ -182,7 +211,8 @@
 								</div>
 								<span
 									class="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-base-100
-										{isStreaming ? 'animate-pulse bg-primary' : agent.status === 'active' ? 'bg-success' : agent.status === 'paused' ? 'bg-warning' : 'bg-base-content/20'}"
+										{isStreaming ? 'animate-pulse bg-primary' : paused ? 'bg-warning' : 'bg-success'}"
+									title={isStreaming ? 'Streaming' : agentStatusLabel(agent.status)}
 								></span>
 							</div>
 
@@ -193,8 +223,9 @@
 							</div>
 
 							<span
-								class="badge badge-sm shrink-0 {agent.status === 'active' ? 'badge-success' : agent.status === 'paused' ? 'badge-warning' : 'badge-ghost'}"
-							>{agent.status}</span>
+								class="badge badge-sm shrink-0 {paused ? 'badge-warning' : 'badge-success'}"
+								title={agentStatusHint(agent)}
+							>{agentStatusLabel(agent.status)}</span>
 						</div>
 
 						<!-- Stats row -->
@@ -240,6 +271,19 @@
 						<!-- Footer -->
 						<div class="flex items-center gap-1.5">
 							<a class="btn btn-xs btn-outline flex-1" href="/agents/{agent.id}">View details</a>
+							{#if pauseAction}
+								<button
+									type="button"
+									class="btn btn-xs shrink-0 {pauseAction === 'resume' ? 'btn-primary' : 'btn-ghost'}"
+									disabled={statusBusyId === agent.id}
+									aria-label="{pauseAction === 'resume' ? 'Resume' : 'Pause'} {agent.name}"
+									title={agentStatusHint(agent)}
+									onclick={() => void togglePaused(agent)}
+								>
+									{#if statusBusyId === agent.id}<span class="loading loading-spinner loading-xs"></span>{/if}
+									{pauseAction === 'resume' ? 'Resume' : 'Pause'}
+								</button>
+							{/if}
 							{#if isStreaming && streaming}
 								<a class="btn btn-xs btn-primary shrink-0" href="/chat/{streaming.conversationId}">Watch live →</a>
 							{/if}
