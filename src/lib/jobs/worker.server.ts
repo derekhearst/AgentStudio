@@ -10,6 +10,7 @@ import {
 	type ClaimJobOptions,
 } from './jobs.server'
 import type { JobRow } from './jobs.schema'
+import { createInFlightTracker } from './in-flight'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -27,7 +28,10 @@ import { logger } from '$lib/observability/logger'
  *   - Calls `ctx.checkCancellation()` at safe boundaries to honor cancellation
  *
  * The worker is opt-in: callers wire `startJobWorker()` once on boot behind an env flag so
- * test environments don't spin up a polling loop.
+ * test environments don't spin up a polling loop. The boot path reads its options from the
+ * environment (worker-config.ts) and keeps the handle (db/process-state.server.ts), so a
+ * standalone worker can drain on shutdown and a re-evaluated dev module can stop the old
+ * loop.
  */
 
 export type JobHandlerContext = {
@@ -58,7 +62,10 @@ export function _resetJobHandlers(): void {
 export type WorkerOptions = {
 	/** Filter by queue. Default: all queues. */
 	queues?: string[]
-	/** Filter by job type. Default: all registered types. */
+	/**
+	 * Filter by job type. Default: all registered types. Types without a registered handler
+	 * are dropped from the filter — claiming one would only fail it for want of a handler.
+	 */
 	types?: string[]
 	/** Lease TTL — default 60s. Heartbeats every (leaseTtlMs/3). */
 	leaseTtlMs?: number
@@ -70,7 +77,14 @@ export type WorkerOptions = {
 
 export type Worker = {
 	readonly workerId: string
-	stop: () => Promise<void>
+	/**
+	 * Stop claiming jobs. With `timeoutMs`, also wait up to that long for the job in flight to
+	 * finish (heartbeats keep its lease alive meanwhile). Resolves true when nothing is left
+	 * running; false when a job was still in flight at the deadline — it is abandoned
+	 * mid-handler if the process then exits, and the next worker reclaims it once its lease
+	 * lapses.
+	 */
+	stop: (opts?: { timeoutMs?: number }) => Promise<boolean>
 	/** Process exactly one available job (returns false when queue is empty). For tests + Phase 1 manual ticks. */
 	tickOnce: () => Promise<boolean>
 }
@@ -80,24 +94,28 @@ export type Worker = {
  * callers will use a single instance per process; a future Phase 6 split runs N instances
  * across a worker pool.
  *
- * NOTE: this is opt-in — the SvelteKit server doesn't auto-start a worker. The intended
- * trigger is a boot-time check (`if (env.JOBS_WORKER_ENABLED) startJobWorker()`) or an
- * external worker process that imports this module.
+ * The boot path (db/bootstrap.server.ts) starts one per process unless
+ * `JOBS_WORKER_ENABLED=0`; `scripts/worker.ts` is that same boot path without the web tier.
  */
 export function startJobWorker(opts: WorkerOptions = {}): Worker {
 	const workerId = opts.workerId ?? `${hostname()}:${randomUUID().slice(0, 8)}`
 	const leaseTtlMs = opts.leaseTtlMs ?? 60_000
 	const pollIntervalMs = opts.pollIntervalMs ?? 1_000
 	let stopped = false
+	/** The `processOne` currently running, so `stop()` can wait for it. */
+	const inFlight = createInFlightTracker()
 
 	async function processOne(): Promise<boolean> {
 		if (stopped) return false
 		if (handlers.size === 0) return false
+		const types = opts.types ? opts.types.filter((type) => handlers.has(type)) : [...handlers.keys()]
+		// An empty list would build no type filter at all and claim EVERY type.
+		if (types.length === 0) return false
 		const claimOpts: ClaimJobOptions = {
 			workerId,
 			leaseTtlMs,
 			queues: opts.queues,
-			types: opts.types ?? [...handlers.keys()],
+			types,
 		}
 		const job = await claimNextJob(claimOpts).catch((err) => {
 			logger.warn('[jobs/worker] claimNextJob failed', { err })
@@ -153,7 +171,7 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 		await delay(2_000)
 		while (!stopped) {
 			try {
-				const processed = await processOne()
+				const processed = await inFlight.track(processOne())
 				if (!processed) {
 					await delay(pollIntervalMs)
 				}
@@ -168,10 +186,11 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 
 	return {
 		workerId,
-		stop: async () => {
+		stop: async ({ timeoutMs = 0 } = {}) => {
 			stopped = true
+			return inFlight.drain(timeoutMs)
 		},
-		tickOnce: () => processOne(),
+		tickOnce: () => inFlight.track(processOne()),
 	}
 }
 

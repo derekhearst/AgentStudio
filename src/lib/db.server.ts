@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { handleDatabaseNotice } from '$lib/db/migrations.server'
 import { bootstrapDatabase } from '$lib/db/bootstrap.server'
+import { beginBootstrapGeneration, reuseDatabaseClient } from '$lib/db/process-state.server'
 
 // Load .env into process.env so server modules can read directly without depending on
 // SvelteKit's `$env/dynamic/private` virtual module. Bun auto-loads .env when invoking
@@ -84,7 +85,11 @@ if (!databaseUrl && !skipDatabaseInitialization) {
 	throw new Error('DATABASE_URL is not set')
 }
 
-const client = skipDatabaseInitialization ? null : createDatabaseClient(databaseUrl!)
+// One pool per process, not per evaluation of this module: under `vite dev` an edit anywhere
+// in its import graph re-evaluates it, and each evaluation used to leak a whole pool. See
+// db/process-state.server.ts, which also stops the previous evaluation's job worker and
+// scheduler before this one's bootstrap starts new ones.
+const client = skipDatabaseInitialization ? null : reuseDatabaseClient(() => createDatabaseClient(databaseUrl!))
 
 // Top-level await intentionally removed: it caused a circular ESM-await deadlock when
 // bootstrap's own dynamic seeders (which transitively import db.server) waited on this
@@ -94,7 +99,7 @@ const client = skipDatabaseInitialization ? null : createDatabaseClient(database
 const databaseReadyPromise =
 	skipDatabaseInitialization || !client || !databaseUrl
 		? Promise.resolve()
-		: bootstrapDatabase({ client, databaseUrl })
+		: bootstrapDatabase({ client, databaseUrl, generation: beginBootstrapGeneration() })
 
 export async function ensureDatabaseReady() {
 	await databaseReadyPromise
