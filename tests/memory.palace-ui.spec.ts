@@ -273,7 +273,8 @@ test.describe('memory/palace-ui — Mine pending', () => {
 		await answerRemote(page, 'getMemoryStatsQuery', IDLE_STATS, () => (statsCalls += 1))
 		await openMemory(page)
 
-		const button = page.getByTitle(/Sweep all your conversations/)
+		// The header renders its actions once for desktop and once for phones; one is hidden.
+		const button = page.getByTitle(/Sweep all your conversations/).filter({ visible: true })
 		await button.click()
 		await expect(button).toHaveText('Mine pending')
 		await button.click()
