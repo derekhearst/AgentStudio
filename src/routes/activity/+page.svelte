@@ -5,6 +5,7 @@
 	import { listActivity } from '$lib/activity';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
 	type EventType = ActivityRow['type'];
@@ -12,6 +13,7 @@
 	let events = $state<ActivityRow[]>([]);
 	let filterType = $state<EventType | ''>('');
 	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	const eventTypes: Array<{ value: EventType | ''; label: string }> = [
 		{ value: '', label: 'All' },
@@ -33,16 +35,23 @@
 		void refresh();
 	});
 
+	// There was no `try` here at all: a failed load left `loading` true for good.
 	async function refresh() {
 		loading = true;
-		// Fresh, so the Refresh button actually brings in new events.
-		events = await fetchFresh(
-			listActivity({
-				type: filterType || undefined,
-				limit: 100,
-			}),
-		);
-		loading = false;
+		error = null;
+		try {
+			// Fresh, so the Refresh button actually brings in new events.
+			events = await fetchFresh(
+				listActivity({
+					type: filterType || undefined,
+					limit: 100,
+				}),
+			);
+		} catch (err) {
+			error = remoteErrorMessage(err, 'Could not load activity.');
+		} finally {
+			loading = false;
+		}
 	}
 
 	async function changeFilter(type: EventType | '') {
@@ -102,6 +111,8 @@
 
 	{#if loading}
 		<div class="flex justify-center p-8"><span class="loading loading-spinner loading-lg"></span></div>
+	{:else if error}
+		<div role="alert" class="alert alert-error py-2 text-sm">{error}</div>
 	{:else if events.length === 0}
 		<p class="text-sm text-base-content/70">No activity events yet.</p>
 	{:else}

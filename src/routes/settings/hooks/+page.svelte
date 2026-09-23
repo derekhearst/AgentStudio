@@ -6,11 +6,13 @@
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type Result = Awaited<ReturnType<typeof listHookInvocationsQuery>>;
 
 	let result = $state<Result | null>(null);
 	let loading = $state(false);
+	let error = $state<string | null>(null);
 	let eventFilter = $state<string>('');
 	let kindFilter = $state<string>('');
 	let failuresOnly = $state(false);
@@ -36,8 +38,12 @@
 
 	onMount(() => void load());
 
+	// A failed load says so. It used to have `finally` and no `catch`, and the page is
+	// gated on `result`, so any rejection — a lost session, a database error — was an
+	// endless spinner plus an unhandled rejection.
 	async function load() {
 		loading = true;
+		error = null;
 		try {
 			// Fresh, so Refresh shows invocations recorded after the page opened.
 			result = await fetchFresh(
@@ -47,6 +53,8 @@
 					failuresOnly: failuresOnly || undefined,
 				}),
 			);
+		} catch (err) {
+			error = remoteErrorMessage(err, 'Could not load hook invocations.');
 		} finally {
 			loading = false;
 		}
@@ -118,10 +126,15 @@
 			</label>
 		</div>
 
+	{#if error}
+		<div role="alert" class="alert alert-error py-2 text-sm">{error}</div>
+	{/if}
 	{#if !result}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
-		</div>
+		{#if !error}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else if result.adminOnly}
 		<div role="alert" class="alert alert-warning alert-soft border-warning/40 flex-col items-center text-center">
 			<p class="text-sm font-medium">Admin only</p>

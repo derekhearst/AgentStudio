@@ -13,6 +13,7 @@
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import KpiStrip from './_components/KpiStrip.svelte';
 	import RecentFailures from './_components/RecentFailures.svelte';
 	import LogsPanel from './_components/LogsPanel.svelte';
@@ -59,6 +60,7 @@
 
 	let loading = $state(false);
 	let logsLoading = $state(false);
+	let loadError = $state<string | null>(null);
 
 	const warnErrorCount24h = $derived.by(() => {
 		if (!logSources) return 0;
@@ -82,37 +84,41 @@
 	 * Refresh re-awaited the same eight queries with the same arguments and got back what
 	 * it already had, and resolving an inbox item left it on screen as "open", with its
 	 * buttons, inviting a second resolve.
+	 *
+	 * Each section loads on its own. This was one `Promise.all` with no `catch`, so a single
+	 * failing query — the budget status, say — left the whole dashboard on a spinner forever
+	 * and said nothing. Now the sections that loaded render, and the ones that did not are
+	 * named in an error above them.
 	 */
 	async function loadAll() {
 		loading = true;
-		try {
-			const [inboxRes, costRes, snapshotRes, logsRes, logSourcesRes, failuresRes, budgetRes, settingsRes] =
-				await Promise.all([
-					fetchFresh(listReviewItemsQuery(buildInboxArgs())),
-					fetchFresh(getCostSummary({ period })),
-					fetchFresh(getOperationalSnapshotQuery()),
-					fetchFresh(listAppLogsQuery(buildLogsArgs())),
-					fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })),
-					fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })),
-					fetchFresh(getBudgetStatus()),
-					fetchFresh(getSettings()),
-				]);
-			inbox = inboxRes;
-			cost = costRes;
-			snapshot = snapshotRes;
-			logs = logsRes;
-			logSources = logSourcesRes;
-			failures = failuresRes;
-			budget = budgetRes;
-			if (settingsRes?.budgetConfig) {
-				budgetConfig = {
-					dailyLimit: settingsRes.budgetConfig.dailyLimit ?? null,
-					monthlyLimit: settingsRes.budgetConfig.monthlyLimit ?? null,
-				};
+		const failed: string[] = [];
+		async function section<T>(label: string, load: Promise<T>, apply: (value: T) => void) {
+			try {
+				apply(await load);
+			} catch (err) {
+				failed.push(`${label} (${remoteErrorMessage(err, 'failed')})`);
 			}
-		} finally {
-			loading = false;
 		}
+		await Promise.all([
+			section('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v)),
+			section('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v)),
+			section('platform health', fetchFresh(getOperationalSnapshotQuery()), (v) => (snapshot = v)),
+			section('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v)),
+			section('log sources', fetchFresh(countLogsBySourceQuery({ windowMinutes: 60 * 24 })), (v) => (logSources = v)),
+			section('recent failures', fetchFresh(listRecentFailuresQuery({ hours: 24, limit: 20 })), (v) => (failures = v)),
+			section('budget', fetchFresh(getBudgetStatus()), (v) => (budget = v)),
+			section('settings', fetchFresh(getSettings()), (settingsRes) => {
+				if (settingsRes?.budgetConfig) {
+					budgetConfig = {
+						dailyLimit: settingsRes.budgetConfig.dailyLimit ?? null,
+						monthlyLimit: settingsRes.budgetConfig.monthlyLimit ?? null,
+					};
+				}
+			}),
+		]);
+		loadError = failed.length > 0 ? `Could not load ${failed.join(', ')}.` : null;
+		loading = false;
 	}
 
 	function buildInboxArgs() {
@@ -134,17 +140,27 @@
 	}
 
 	async function reloadCost() {
-		cost = await fetchFresh(getCostSummary({ period }));
+		try {
+			cost = await fetchFresh(getCostSummary({ period }));
+		} catch (err) {
+			loadError = `Could not load cost (${remoteErrorMessage(err, 'failed')}).`;
+		}
 	}
 
 	async function reloadInbox() {
-		inbox = await fetchFresh(listReviewItemsQuery(buildInboxArgs()));
+		try {
+			inbox = await fetchFresh(listReviewItemsQuery(buildInboxArgs()));
+		} catch (err) {
+			loadError = `Could not load inbox (${remoteErrorMessage(err, 'failed')}).`;
+		}
 	}
 
 	async function reloadLogs() {
 		logsLoading = true;
 		try {
 			logs = await fetchFresh(listAppLogsQuery(buildLogsArgs()));
+		} catch (err) {
+			loadError = `Could not load logs (${remoteErrorMessage(err, 'failed')}).`;
 		} finally {
 			logsLoading = false;
 		}
@@ -176,10 +192,15 @@
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
+	{#if loadError}
+		<div role="alert" class="alert alert-error py-2 text-sm">{loadError}</div>
+	{/if}
 	{#if !inbox}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
-		</div>
+		{#if !loadError}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else}
 		<!-- KPI strip -->
 		<KpiStrip

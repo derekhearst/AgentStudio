@@ -7,6 +7,7 @@
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
 	import { fetchFresh } from '$lib/ui/fresh-query'
+	import { isNotFoundError, remoteErrorMessage } from '$lib/ui/remote-error'
 	import AgentStatsGrid from '$lib/agents/AgentStatsGrid.svelte'
 	import AgentSessionsList from '$lib/agents/AgentSessionsList.svelte'
 	import AgentConfigEditor from '$lib/agents/AgentConfigEditor.svelte'
@@ -28,6 +29,7 @@
 	const agentId = $derived(page.params.id ?? '')
 	let data = $state<AgentData | null>(null)
 	let loading = $state(true)
+	let loadError = $state<string | null>(null)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 
 	let eventSource: EventSource | null = null
@@ -57,12 +59,24 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	/*
+	 * No `try` here used to mean any rejection spun forever — including the ordinary one:
+	 * `/agents/not-a-uuid` fails the query's id schema with a 400. That is "not found" to a
+	 * reader; anything else is shown as the error it is.
+	 */
 	async function loadData() {
 		loading = true
-		// Fresh, so coming back after saving the config below shows what was saved.
-		const result = await fetchFresh(getAgent(agentId))
-		data = result ?? null
-		loading = false
+		loadError = null
+		try {
+			// Fresh, so coming back after saving the config below shows what was saved.
+			const result = await fetchFresh(getAgent(agentId))
+			data = result ?? null
+		} catch (err) {
+			data = null
+			if (!isNotFoundError(err)) loadError = remoteErrorMessage(err, 'Could not load this agent.')
+		} finally {
+			loading = false
+		}
 	}
 
 	async function handleConfigSave(input: {
@@ -128,7 +142,11 @@
 	</div>
 {:else if !data}
 	<div class="py-20 text-center">
-		<p class="text-sm text-base-content/50">Agent not found.</p>
+		{#if loadError}
+			<p role="alert" class="text-sm text-error">{loadError}</p>
+		{:else}
+			<p class="text-sm text-base-content/50">Agent not found.</p>
+		{/if}
 		<a class="btn btn-ghost btn-sm mt-4" href="/agents">← Back to agents</a>
 	</div>
 {:else}

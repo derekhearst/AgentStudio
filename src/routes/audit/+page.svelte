@@ -5,12 +5,14 @@
 	import { listAuditEventsQuery } from '$lib/governance/governance.remote';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { fetchFresh } from '$lib/ui/fresh-query';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type Result = Awaited<ReturnType<typeof listAuditEventsQuery>>;
 	type Event = Result extends { events: infer E } ? (E extends Array<infer R> ? R : never) : never;
 
 	let result = $state<Result | null>(null);
 	let loading = $state(false);
+	let error = $state<string | null>(null);
 	let actionFilter = $state<string>('');
 	let targetTypeFilter = $state<string>('');
 	let expanded = $state<Set<string>>(new Set());
@@ -37,8 +39,12 @@
 
 	onMount(() => void load());
 
+	// A failed load says so. It used to have `finally` and no `catch`, and the page is
+	// gated on `result`, so any rejection — a lost session, a database error — was an
+	// endless spinner plus an unhandled rejection.
 	async function load() {
 		loading = true;
+		error = null;
 		try {
 			// Fresh, so Refresh (and returning to a filter already viewed) shows new events.
 			result = await fetchFresh(
@@ -47,6 +53,8 @@
 					targetType: targetTypeFilter || undefined,
 				}),
 			);
+		} catch (err) {
+			error = remoteErrorMessage(err, 'Could not load the audit log.');
 		} finally {
 			loading = false;
 		}
@@ -100,10 +108,15 @@
 
 	<div class="min-h-0 flex-1 flex flex-col overflow-hidden px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-3 sm:space-y-4">
 
+	{#if error}
+		<div role="alert" class="alert alert-error py-2 text-sm">{error}</div>
+	{/if}
 	{#if !result}
-		<div class="flex justify-center py-20">
-			<span class="loading loading-spinner loading-lg text-primary"></span>
-		</div>
+		{#if !error}
+			<div class="flex justify-center py-20">
+				<span class="loading loading-spinner loading-lg text-primary"></span>
+			</div>
+		{/if}
 	{:else if result.events.length === 0}
 		<div class="card card-body bg-base-200/30 border-base-300/60 rounded-2xl border p-12 text-center text-sm text-base-content/55">
 			No audit events match the current filters.

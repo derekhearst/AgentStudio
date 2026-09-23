@@ -6,6 +6,7 @@
 	import { formatCost, streamPreview, type AgentStreamEntry } from '$lib/agents/agent-format'
 	import PageHeader from '$lib/ui/PageHeader.svelte'
 	import { fetchFresh } from '$lib/ui/fresh-query'
+	import { remoteErrorMessage } from '$lib/ui/remote-error'
 	import { relativeTime as relativeTimeBase } from '$lib/util/relative-time'
 
 	const relativeTime = (date: Date | string | null) =>
@@ -17,6 +18,7 @@
 
 	let agents = $state<AgentRow[]>([])
 	let loading = $state(true)
+	let loadError = $state<string | null>(null)
 	let streamingMap = $state(new Map<string, StreamEntry>())
 	let sortMode = $state<'last_active' | 'sessions' | 'cost'>('last_active')
 
@@ -83,10 +85,17 @@
 		if (reconnectTimer) clearTimeout(reconnectTimer)
 	})
 
+	// No `try` here used to mean a failed load spun forever.
 	async function loadAgents() {
 		loading = true
-		agents = await fetchFresh(listAgents())
-		loading = false
+		loadError = null
+		try {
+			agents = await fetchFresh(listAgents())
+		} catch (err) {
+			loadError = remoteErrorMessage(err, 'Could not load agents.')
+		} finally {
+			loading = false
+		}
 	}
 
 	function connectMonitor() {
@@ -144,6 +153,8 @@
 		<div class="flex justify-center py-16">
 			<span class="loading loading-spinner loading-lg text-primary"></span>
 		</div>
+	{:else if loadError}
+		<div role="alert" class="alert alert-error py-2 text-sm">{loadError}</div>
 	{:else if sortedAgents.length === 0}
 		<div class="rounded-2xl border border-dashed border-base-300 py-16 text-center text-sm text-base-content/50">
 			No agents yet. Ask the orchestrator to create one.
