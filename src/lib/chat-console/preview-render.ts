@@ -1,5 +1,6 @@
 import { Marked, type Token, type Tokens } from 'marked'
 import hljs from 'highlight.js/lib/core'
+import { escapeHtml, sanitizedText, sanitizerHolds } from '$lib/util/safe-markdown'
 import { dirName, normalizePreviewUrl } from './preview-kinds'
 
 /**
@@ -111,15 +112,6 @@ async function ensureLanguage(raw: string | null | undefined): Promise<string | 
 	}
 }
 
-export function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#39;')
-}
-
 function highlightSync(code: string, language: string | null): string {
 	if (language && hljs.getLanguage(language)) {
 		try {
@@ -190,6 +182,12 @@ previewMarked.use({
 			return escapeHtml(text)
 		},
 
+		/**
+		 * After an inline `<kbd>`/`<code>`/`<pre>`/`<script>` tag, marked emits the
+		 * following text raw, so escaping the tag above is not enough on its own.
+		 */
+		text: sanitizedText,
+
 		link(this: RendererThis, { href, title, tokens }: Tokens.Link): string {
 			const inner = this.parser.parseInline(tokens)
 			const safe = normalizePreviewUrl(href)
@@ -220,14 +218,7 @@ previewMarked.use({
  * unsanitized HTML pipe without a single test failing. If the probe leaks, we
  * stop rendering markdown at all and show the source instead.
  */
-const SANITIZER_INTACT = (() => {
-	try {
-		const probe = previewMarked.parse('<img src=x onerror=y>\n\n[a](javascript:1)') as string
-		return !/<img/i.test(probe) && !/href="javascript:/i.test(probe)
-	} catch {
-		return false
-	}
-})()
+const SANITIZER_INTACT = sanitizerHolds((source) => previewMarked.parse(source) as string)
 
 const FENCE_LANG = /^[ \t]*(?:```|~~~)[ \t]*([A-Za-z0-9_+#.-]+)/gm
 

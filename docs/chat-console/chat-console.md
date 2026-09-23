@@ -101,8 +101,11 @@ These are the constraints that matter, and why:
 - **Framed pages are sandboxed.** Scripts and forms are allowed; a page on the app's own
   origin additionally loses `allow-same-origin` so it cannot script the app.
 - **Previewed markdown is sanitized.** Raw HTML in the file is escaped rather than
-  executed, and links and images that are not `http(s)` are dropped. A start-up self-check
-  proves the sanitizer is active; if it ever is not, markdown falls back to plain source.
+  executed, and links and images that are not `http(s)` are dropped. That includes text
+  that follows an inline `<code>`, `<kbd>` or `<pre>` tag, which the markdown library
+  would otherwise pass through untouched. A start-up self-check runs a set of hostile
+  samples through the renderer; if any gets through, markdown falls back to plain source.
+  The chat transcript uses the same rules (see the chat spec).
 
 ## Integrations
 
