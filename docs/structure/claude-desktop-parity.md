@@ -67,7 +67,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 
 | Feature | Verdict | Ours | Theirs |
 | --- | --- | --- | --- |
-| Streaming, thinking, model picker | **even** | | |
+| Streaming, thinking, model picker | **even** (#9) | the picker offers only models that can run here, each labelled by backend: Claude on the subscription (included), and — only when an Anthropic-compatible gateway such as OpenRouter's is configured — the gateway's models, marked **Gateway · paid** with their price. A conversation on a model that cannot run says so in the composer, and a send on it is refused before anything is saved. Gateway turns run with thinking off and are priced from OpenRouter's catalogue. See [llm.md](../llm/llm.md) | Claude models only |
 | Web search + fetch | **even** | `web_search`, `web_fetch`, `pdf_read` | same |
 | Code execution | **broken** | `run_code` throws on the engine path — it needs a runtime context only the old loop supplies, so every call since the engine migration has returned "can only be invoked from inside the chat loop". Unregistered from the engine surface rather than left advertised; see the re-audit | analysis tool / sandboxed Python, renders charts |
 | File attachments | **even** (#36 fixed) | images inline as base64 content blocks on the SDK's streaming-input prompt; PDFs and other files are staged into the run's sandbox workspace and read with `pdf_read` / `file_read`; anything undeliverable (video, oversized or unsupported images) warns on the message instead of being dropped; files attached on the new-chat page go with the first message (they were silently dropped until 2026-09-23) | images, PDFs, office docs, with extraction |

@@ -241,7 +241,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
 | #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
-| #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
+| #9 | Gateway for non-Claude models | **as filed**, deprioritize → **shipped, off by default** | costs money and degrades tool fidelity to replace something that is currently free. The picker defect was live either way; see below |
 | #8 | Delete dead engine code | **as filed** | grows once #5 lands; `search_tools` joins the list |
 
 ### #16 — diffs
@@ -547,6 +547,31 @@ real money *and* degrade multi-step tool fidelity, which is the entire workload 
 case for it is local/offline models or a specific cheap model for a specific job (the
 monitor `model_question` checks are the obvious candidate), not general use. I would close it
 unless one of those is the actual goal.
+
+**Corrections, 2026-09-23.** Three points above were wrong:
+
+- The monitor `model_question` check does not use the engine or the gateway. It calls
+  OpenRouter directly (`chat()` in `$lib/llm/chat.server`) with any OpenRouter model, so the
+  "cheap model for a cheap job" case was already covered and was never a reason for #9.
+- LiteLLM is not needed. OpenRouter serves Anthropic's Messages API at
+  `https://openrouter.ai/api` (the OpenRouter key as `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`
+  explicitly empty), and the app already holds an OpenRouter key and prices from its catalogue.
+  That removes the extra container and the LiteLLM 1.82.7/1.82.8 supply-chain exposure;
+  LiteLLM is only needed for local models.
+- The picker was not empty waiting for discovery — it was over-populated. The composer, the
+  default model and the agent editor listed OpenRouter's whole catalogue, and every non-Claude
+  row failed on the first message with no gateway configured.
+
+**What shipped.** The engine pickers list only runnable models, labelled Subscription or
+Gateway · paid; dotted Anthropic ids are stored in the CLI's spelling; a send, a default-model
+save or an agent-model save naming an unrunnable model is refused before anything is written.
+The gateway works through OpenRouter's endpoint and stays off unless `LLM_GATEWAY_URL` and
+`LLM_GATEWAY_TOKEN` are set: its environment carries only the `ANTHROPIC_*` it needs, pins
+every model class to the chosen model, and drops the subscription login; a gateway turn runs
+with thinking off and is priced per turn from the OpenRouter catalogue rather than the SDK's
+guess at a Claude rate. Not verified against a live gateway: switching one conversation between
+Claude and a gateway model, and each non-Claude model's multi-step tool use. See
+[`docs/llm/llm.md`](../llm/llm.md).
 
 ---
 

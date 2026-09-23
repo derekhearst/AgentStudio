@@ -1,0 +1,109 @@
+# Models and engine backends
+
+This page describes, in plain English, which AI models a chat can run on, what each one costs, and how an operator turns on models other than Claude. For the adapter code and the OpenRouter calls behind the app's smaller features, see [spec.md](spec.md).
+
+## Overview
+
+Every chat turn runs on the **engine**: the Claude Agent SDK, which drives the Claude Code program behind the scenes. The engine can reach a model in one of two ways, called **backends**:
+
+| Backend | Which models | What it costs | Default |
+| --- | --- | --- | --- |
+| **Subscription** | Claude models | Nothing per token. The turn runs on the Claude subscription that Claude Code is signed in with. | Always on |
+| **Gateway** | Any other model the gateway serves (Kimi, GPT, GLM, a local model…) | Billed per token by the gateway provider. | Off |
+
+The gateway is off unless the operator sets it up. With it off, only Claude models are offered anywhere a chat's model is chosen, so it is not possible to pick a model that cannot run.
+
+The app's smaller features — conversation titles, memory, monitors' yes/no checks, evaluations, image and speech — do not use the engine. They call OpenRouter directly with `OPENROUTER_API_KEY` and are unaffected by anything on this page.
+
+## Key concepts
+
+| Term | Meaning |
+| --- | --- |
+| **Engine model** | A model a chat turn can run on here: a Claude model, or a model the configured gateway serves. |
+| **Model catalogue** | OpenRouter's public list of models with their names, context sizes and prices. The pickers use it for names and prices; the usage ledger uses it for prices. |
+| **Gateway** | A service that accepts requests in Anthropic's format and forwards them to another model. OpenRouter offers one at `https://openrouter.ai/api`; a self-hosted LiteLLM proxy is another. |
+| **Model id** | The name a model is asked for by. The engine spells Claude models the way Claude Code does (`claude-haiku-4-5`); OpenRouter spells the same model `anthropic/claude-haiku-4.5`. The app converts between them automatically. |
+
+## Where a model is picked
+
+Three pickers choose the model a chat runs on. All three list only engine models:
+
+1. **The chat composer**, for the conversation in front of you.
+2. **Settings → Model & AI → Default Model**, for new conversations.
+3. **An agent's configuration** (`/agents/[id]`), for conversations that agent starts — from a monitor, a pull-request fix, and so on.
+
+Each row in these pickers is labelled:
+
+- **Subscription** / *Included* — a Claude model. No per-token cost.
+- **Gateway · paid** with its price per million tokens — a gateway model. *Price unknown* means the gateway serves it but OpenRouter's catalogue has no price for it (a local model, for example).
+
+A note at the top of the picker says which backends are available. When a conversation is already on a model that cannot run — it was set before the gateway was turned off, say — the composer marks it **Unavailable** next to the model name. A gateway model is marked **Paid**.
+
+The **Transcription Model** picker is different: transcription calls OpenRouter directly, so it still lists OpenRouter's whole catalogue.
+
+## User flows
+
+### Choosing a model for a chat
+
+1. Open the model picker in the composer.
+2. Pick a row. Claude rows run on the subscription; gateway rows are billed per token.
+3. Send a message. If the model is a gateway model, the reasoning control is switched off (see Business rules).
+
+### Sending a message on a model that cannot run
+
+1. The conversation's model is a non-Claude model, and no gateway is configured.
+2. The composer already shows **Unavailable** beside the model.
+3. On **Send**, the server refuses the turn straight away with a message naming the model and the two settings that would fix it. Nothing is saved — no message, no failed run — so the conversation is unchanged.
+4. Pick a Claude model and send again.
+
+### Turning the gateway on (operator)
+
+1. Set `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` in the server's environment (`.env`, or the host's environment for Docker).
+2. For OpenRouter: `LLM_GATEWAY_URL="https://openrouter.ai/api"`, and the token is an OpenRouter API key.
+3. Restart the server. Settings → System shows **Model gateway** as configured.
+4. The pickers now also list the models the gateway reports at `{LLM_GATEWAY_URL}/v1/models`, labelled **Gateway · paid**.
+
+To turn it off again, clear either variable and restart.
+
+## Roles and permissions
+
+AgentStudio has one owner. The owner picks models in all three pickers. Only the operator — whoever controls the server's environment — can turn the gateway on or off. Saving a model that cannot run is refused by the server, not just hidden in the picker: a default model or an agent's model can only be changed to a model something here can run.
+
+## Integrations
+
+| System | Used for |
+| --- | --- |
+| **Claude Code** (via the Agent SDK) | Runs every chat turn. Signed in with the Claude subscription for Claude models. |
+| **OpenRouter model catalogue** | Names, context sizes and prices for the pickers and the ledger. |
+| **The gateway** (`LLM_GATEWAY_URL`) | Serves non-Claude models to the engine, and lists them at `/v1/models`. |
+
+### What a gateway run is given
+
+The Claude Code process for a gateway turn gets only what the gateway needs:
+
+- the gateway's address and token (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`), and `ANTHROPIC_API_KEY` set to empty — OpenRouter's guide requires that, because a key there can send the request to Anthropic instead;
+- the chosen model for every job Claude Code does on its own — the main loop, its small helper calls and any subagent it hands work to — so nothing quietly asks the gateway for a (paid) Claude model;
+- not the Claude subscription's login token, which a paid gateway run has no use for.
+
+Nothing else from the server's environment reaches it, the same as for any turn (see [../runtime/spec.md](../runtime/spec.md)).
+
+## Business rules
+
+- **Claude always runs on the subscription.** Even when the gateway also serves Claude, a Claude model is never sent through it.
+- **Off by default.** No gateway settings means Claude only. Both `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` are needed; an empty value counts as unset.
+- **Only models the gateway serves are offered.** If the gateway's model list cannot be fetched, no gateway models are offered (the app retries a minute later) rather than guessing.
+- **Reasoning is off on gateway models.** Claude's adaptive thinking and effort levels are Anthropic features; whether a gateway passes them on to another model is unverified, so a gateway turn runs with thinking off and the composer's reasoning control is disabled.
+- **Cost.** A Claude turn records its tokens and $0. A gateway turn is priced from OpenRouter's catalogue over that turn's own tokens — input, output, and cached prompt tokens at the catalogue's cache prices where it lists them. The ledger row notes `backend: gateway` and where the price came from (`costBasis`): `catalogue`, or `cli-estimate` for a model the catalogue does not price (Claude Code's own estimate), or `unpriced` when there is neither. Claude Code's own estimate is not used when the catalogue has a price, because for a model it does not know it guesses at a Claude rate.
+- **Budgets apply.** Gateway turns count toward budget limits like any other metered spend.
+- **Tool use is weaker off Claude.** Claude Code is built for Claude models; OpenRouter says other models may not work correctly through it, and multi-step tool use is where they fall short. The gateway is a deliberate, labelled choice, never a default.
+- **Switching backends mid-conversation** keeps the same agent session. Whether every gateway model accepts a session that started on Claude has not been checked against a live gateway; if one refuses, start a new conversation for it.
+- **Stored ids are tidied.** A Claude model saved in OpenRouter's spelling (`anthropic/claude-haiku-4.5`) is stored and sent as `claude-haiku-4-5`.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `LLM_GATEWAY_URL` | Optional. The gateway's base address, e.g. `https://openrouter.ai/api`. |
+| `LLM_GATEWAY_TOKEN` | Optional. The gateway's key, e.g. an OpenRouter API key. |
+
+Both are passed through `docker-compose.yml` and default to empty (off). For a self-hosted LiteLLM proxy, pin a known-good version and never use LiteLLM 1.82.7 or 1.82.8.

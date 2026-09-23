@@ -107,7 +107,7 @@ Before this, the handoff could not complete: `request_plan_approval` needs a ful
 
 ## Roles & permissions
 
-AgentStudio has a single owner and no admin tier. The owner can view every agent, pause and resume custom agents, and edit an agent's model, system prompt and hooks.
+AgentStudio has a single owner and no admin tier. The owner can view every agent, pause and resume custom agents, and edit an agent's model, system prompt and hooks. The model picker offers only models a chat can run on here — Claude, plus gateway models when a gateway is configured — and a change to any other model is refused, because an agent's model is what the conversations it starts run on. An agent already on such a model keeps it until it is changed. See [../llm/llm.md](../llm/llm.md).
 
 Some agents cannot be paused:
 
