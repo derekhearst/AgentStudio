@@ -10,7 +10,9 @@ import { uniquePrefix } from './helpers'
  * meanwhile (up to a cap) and records how many entries never made it.
  *
  * These run against the logger module in the test process with a fake sink, so nothing is
- * written to the database.
+ * written to the database. Other modules loaded in the same worker may log while they run,
+ * so each assertion is about this spec's own entries, or is worked out from what the sink
+ * actually received.
  */
 
 type Entry = { message: string; level: string; context: Record<string, unknown> | null }
@@ -50,6 +52,7 @@ test.describe('observability/logger — a failed flush pauses the DB sink, it do
 
 		logger.error(`${tag} before the outage`)
 		await until(() => calls.length === 1)
+		expect(calls[0].map((e) => e.message)).toContain(`${tag} before the outage`)
 
 		// The database is back, but the sink is still waiting out its pause.
 		failing = false
@@ -62,13 +65,14 @@ test.describe('observability/logger — a failed flush pauses the DB sink, it do
 		expect(saved.map((e) => e.message)).toContain(`${tag} during the pause`)
 		const notice = saved.find((e) => e.context?.unsaved !== undefined)
 		expect(notice?.level).toBe('warn')
-		// The batch that failed went to the console only.
-		expect(notice?.context?.unsaved).toBe(1)
+		// The batch that failed went to the console only, and the notice says how much that was.
+		expect(notice?.context?.unsaved).toBe(calls[0].length)
 
 		// And it stays on: the next error is saved at once, with no further notice.
 		logger.error(`${tag} after recovery`)
-		await until(() => calls.length === 3)
-		expect(calls[2].map((e) => e.message)).toEqual([`${tag} after recovery`])
+		await until(() => calls.some((batch) => batch.some((e) => e.message === `${tag} after recovery`)))
+		const after = calls.find((batch) => batch.some((e) => e.message === `${tag} after recovery`))!
+		expect(after.some((e) => e.context?.unsaved !== undefined)).toBe(false)
 	})
 
 	test('while paused, the oldest entries past the cap are dropped and counted', async () => {
@@ -84,16 +88,20 @@ test.describe('observability/logger — a failed flush pauses the DB sink, it do
 
 		logger.error(`${tag} 0`)
 		await until(() => calls.length === 1)
-		for (let i = 1; i <= 5; i++) logger.warn(`${tag} ${i}`)
 
+		// Logged and flushed in one synchronous run, so nothing else can land in between.
+		for (let i = 1; i <= 5; i++) logger.warn(`${tag} ${i}`)
 		failing = false
 		// A shutdown flush does not wait out the pause.
 		await logger.flush()
 
 		expect(calls).toHaveLength(2)
-		const messages = calls[1].map((e) => e.message)
-		expect(messages.filter((m) => m.startsWith(tag))).toEqual([`${tag} 3`, `${tag} 4`, `${tag} 5`])
-		// The failed batch (1) and the two pushed out by the cap.
-		expect(calls[1].find((e) => e.context?.unsaved !== undefined)?.context?.unsaved).toBe(3)
+		const saved = calls[1]
+		// The newest three kept, the two before them pushed out by the cap.
+		expect(saved.map((e) => e.message).filter((m) => m.startsWith(tag))).toEqual([`${tag} 3`, `${tag} 4`, `${tag} 5`])
+		// At least the failed batch and the two the cap pushed out (more if something else was
+		// logged during the pause and pushed out with them).
+		const unsaved = saved.find((e) => e.context?.unsaved !== undefined)?.context?.unsaved
+		expect(unsaved).toBeGreaterThanOrEqual(calls[0].length + 2)
 	})
 })

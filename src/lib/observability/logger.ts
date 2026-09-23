@@ -182,7 +182,7 @@ async function flushBuffer(force = false): Promise<void> {
 		unsavedCount += batch.length
 		const failureNote = err instanceof Error ? err.message : String(err)
 		console.error(
-			`${new Date().toISOString()} ERROR [observability/logger] DB sink flush failed; emitting batch to console instead, retrying in ${Math.round(waitMs / 1000)}s`,
+			`${new Date().toISOString()} ERROR [observability/logger] DB sink flush failed; emitting batch to console instead, retrying in ${Math.ceil(waitMs / 1000)}s`,
 			{ batchSize: batch.length, consecutiveFailures, error: failureNote },
 		)
 		for (const entry of batch) {
