@@ -37,6 +37,7 @@
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
 	import SubagentBlockCard from '$lib/chat/SubagentBlockCard.svelte';
 	import PermissionModeSelect from '$lib/chat/PermissionModeSelect.svelte';
+	import AutoRead from '$lib/speech/AutoRead.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		parseJsonFallback,
@@ -1704,6 +1705,9 @@
 					onSkipToChat={skipAskUserToChat}
 				/>
 			{/if}
+
+			<!-- #27 — opt-in: speak each new reply when its turn finishes. -->
+			<AutoRead {messages} {streaming} />
 
 			<ChatInput
 				busy={streaming && !pendingAskUser}

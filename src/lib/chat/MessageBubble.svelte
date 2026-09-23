@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ToolCallCard from './ToolCallCard.svelte';
 	import MessageBlocks from './MessageBlocks.svelte';
+	import SpeakButton from '$lib/speech/SpeakButton.svelte';
 	import { renderMarkdown } from '$lib/chat/chat';
 	import {
 		asArray,
@@ -307,6 +308,9 @@
 					<i class="mdi mdi-content-copy" aria-hidden="true"></i>
 				{/if}
 			</button>
+			{#if message.content?.trim() && !message.optimistic}
+				<SpeakButton messageId={message.id} text={message.content} />
+			{/if}
 			<div class="dropdown dropdown-top">
 				<button tabindex="0" class="console-pill" type="button" title="Message stats" aria-label="Message stats">
 					<i class="mdi mdi-information-outline" aria-hidden="true"></i>
