@@ -59,7 +59,9 @@ const emptyResult = (): MineResult => ({
 	roomIds: [],
 	closetIds: [],
 	excludedTurns: 0,
+	timedOutTurns: 0,
 	excludedByRule: [],
+	extractorFallback: false,
 })
 
 /** A `memory_mine` job that is mid-run, the way a worker leaves it while the handler runs. */

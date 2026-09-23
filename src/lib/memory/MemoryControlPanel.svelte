@@ -13,7 +13,7 @@
 		listMemoryExclusionRulesQuery,
 		listMinedConversationsQuery,
 		saveMemoryExclusionRuleCommand,
-		testMemoryExclusionRulesQuery,
+		testMemoryExclusionRulesCommand,
 		toggleMemoryExclusionRuleCommand,
 		type MemoryExclusionRuleRow,
 		type MemoryMinedConversationRow,
@@ -43,7 +43,13 @@
 
 	// --- rule tester -----------------------------------------------------------
 	let sample = $state('');
-	let testResult = $state<{ matched: boolean; ruleName?: string; sample?: string } | null>(null);
+	let testResult = $state<{
+		matched: boolean;
+		ruleName?: string;
+		sample?: string;
+		timedOut?: boolean;
+		busy?: boolean;
+	} | null>(null);
 	let testing = $state(false);
 
 	let busyConversationId = $state<string | null>(null);
@@ -108,7 +114,7 @@
 				description: form.description.trim() || undefined,
 				kind: form.kind,
 				pattern: form.pattern.trim(),
-				enabled: true,
+				// No `enabled`: a new rule starts on, and an edit leaves the rule's switch as it is.
 			});
 			if (!result.ok) {
 				formError = result.error;
@@ -149,11 +155,7 @@
 		if (testing || sample.trim().length === 0) return;
 		testing = true;
 		try {
-			testResult = (await testMemoryExclusionRulesQuery({ sample })) as {
-				matched: boolean;
-				ruleName?: string;
-				sample?: string;
-			};
+			testResult = await testMemoryExclusionRulesCommand({ sample });
 		} finally {
 			testing = false;
 		}
@@ -216,8 +218,9 @@
 			{:else if tab === 'rules'}
 				<p class="control-panel__intro">
 					The miner checks every turn against these patterns <strong>before</strong> it embeds or stores anything. A
-					match drops the turn entirely — it never reaches the embedding provider and never becomes a drawer. The
-					credential rules are built in; you can disable or reword them, but not delete them.
+					match drops the turn entirely — it never reaches the embedding provider and never becomes a drawer. A
+					message that matches is not used to search memory either. The credential rules are built in; you can
+					disable or reword them, but not delete them.
 				</p>
 
 				<ul class="rule-list">
@@ -248,6 +251,9 @@
 								<div class="rule__desc">{rule.description}</div>
 							{/if}
 							<code class="rule__pattern">{rule.pattern}</code>
+							{#if rule.problem}
+								<p class="rule__problem">{rule.problem}</p>
+							{/if}
 						</li>
 					{:else}
 						<li class="control-panel__empty">No exclusion rules yet.</li>
@@ -310,8 +316,15 @@
 							{testing ? 'Checking…' : 'Check'}
 						</button>
 						{#if testResult}
-							{#if testResult.matched}
+							{#if testResult.matched && testResult.timedOut}
+								<span class="rule-test__hit"
+									>Blocked: “{testResult.ruleName}” could not finish checking this in time, so it would be treated as a
+									match.</span
+								>
+							{:else if testResult.matched}
 								<span class="rule-test__hit">Blocked by “{testResult.ruleName}” (matched {testResult.sample})</span>
+							{:else if testResult.busy}
+								<span class="rule-test__miss">Another check is still running. Try again in a moment.</span>
 							{:else}
 								<span class="rule-test__miss">No rule matches — this would be mined.</span>
 							{/if}
@@ -321,8 +334,8 @@
 			{:else}
 				<p class="control-panel__intro">
 					Each row is one conversation's footprint in the palace. Forgetting deletes its rooms, closets, and drawers
-					— and any wing left empty as a result. The chat transcript itself is untouched, so a later
-					<strong>Mine pending</strong> would memorize it again unless you add an exclusion rule first.
+					— and any wing left empty as a result. The chat transcript itself is untouched, and what it held so far
+					stays forgotten; anything said in it afterwards is remembered as usual, unless an exclusion rule blocks it.
 				</p>
 				<ul class="convo-list">
 					{#each conversations as row (row.conversationId)}
@@ -558,6 +571,12 @@
 	.rule__desc {
 		font-size: 10.5px;
 		color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	}
+
+	.rule__problem {
+		margin: 0;
+		font-size: 10.5px;
+		color: var(--color-warning);
 	}
 
 	.rule__pattern {

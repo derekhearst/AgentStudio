@@ -14,6 +14,10 @@ The implementation is consolidated under `src/lib/llm/`.
 - **Model selection UI** — `ModelSelector` component for picking a model across the app.
 - **Text-to-speech** — `tts.server.ts` turns reply text into MP3 through OpenRouter's speech endpoint, prices it from the separate speech-model catalogue (speech models are not in the chat-model list), checks budget limits and records the spend under `tts`. See [../speech/speech.md](../speech/speech.md).
 
+## Model ids
+
+The app keeps two spellings of a Claude model. The Agent SDK engine uses Anthropic's bare id (`claude-haiku-4-5`), and since the engine migration that is what the app's defaults and stored settings hold. OpenRouter only accepts its own catalogue names (`anthropic/claude-haiku-4.5`) and refuses anything else. So `chat()` and `streamChat()` convert before sending (`toOpenRouterModelId` in `src/lib/llm/openrouter-model.ts`): a bare Claude id gains the `anthropic/` prefix, loses any snapshot date or `[1m]` suffix, and has its version written with a dot. An id that already names a vendor (`openai/gpt-4o-mini`) is sent as it is. Callers that log usage log the converted id, since that is the one the model catalogue prices.
+
 ## Data Model
 
 LLM has no DB tables of its own. The model catalog is fetched from OpenRouter and cached in memory. Pricing data feeds into the `llm_usage` rows owned by the `costs` domain.
@@ -61,7 +65,7 @@ Options accepted by `streamChat()`:
 
 | Field         | Type                     | Notes                                              |
 | ------------- | ------------------------ | -------------------------------------------------- |
-| `model`       | string                   | OpenRouter model ID                                |
+| `model`       | string                   | OpenRouter model ID, or a bare Claude id           |
 | `messages`    | `LlmMessage[]`           | Conversation history                               |
 | `tools`       | tool definitions[]       | Optional tool schemas                              |
 | `temperature` | number                   | Optional                                           |

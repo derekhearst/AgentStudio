@@ -11,6 +11,8 @@ import { mineSession, mineSessions, type MineResult, type MiningSession } from '
 import { recall, type RecallOptions, type RetrievedDrawer } from '$lib/memory/retrieval.server'
 import { recordRecallEvents, type RecallSource } from '$lib/memory/recall-log.server'
 import { rerank } from '$lib/memory/rerank.server'
+import { matchExclusionRules } from '$lib/memory/exclusions.server'
+import { logger } from '$lib/observability/logger'
 
 export type { RetrievedDrawer, RecallOptions } from '$lib/memory/retrieval.server'
 export type { MineResult } from '$lib/memory/mining.server'
@@ -33,7 +35,9 @@ export async function mineConversation(opts: {
 		roomIds: [],
 		closetIds: [],
 		excludedTurns: 0,
+		timedOutTurns: 0,
 		excludedByRule: [],
+		extractorFallback: false,
 	}
 	const [conversation] = await db.select().from(conversations).where(eq(conversations.id, opts.conversationId)).limit(1)
 	if (!conversation) return empty
@@ -72,6 +76,9 @@ export async function mineConversation(opts: {
 				role: row.role as 'user' | 'assistant' | 'system',
 				content: typeof row.content === 'string' ? row.content : String(row.content ?? ''),
 				sourceMessageId: row.id,
+				// When it was said, not when the conversation started: a conversation runs for
+				// weeks, and recall ranks by how recent a drawer is.
+				occurredAt: row.createdAt,
 			}))
 			.filter((turn) => turn.content.trim().length > 0),
 	}
@@ -135,6 +142,14 @@ export function unminedMessagesOf(conversationId: string) {
 /**
  * High-level recall used by chat — returns ranked drawers, optionally reranked.
  *
+ * The query is checked against the user's exclusion rules first. It is the user's raw
+ * message, and recall would send it to the embeddings provider and keep it in the recall log
+ * for 30 days — so a message the miner will drop, because it holds a key or a password, is
+ * not recalled on at all: no memory for that turn, and nothing leaves the process.
+ *
+ * Recency counts from now unless the caller says otherwise (`queryDate`); without a date the
+ * temporal part of the score is 0 for every drawer.
+ *
  * Every recall writes its component scores to `memory_recall_events` (unless
  * `logRecall: false`), which is what powers "why was this recalled?" on the drawer.
  * Logging is best-effort and never fails the recall.
@@ -149,9 +164,20 @@ export async function recallForUser(
 		recallSource?: RecallSource
 	} = {},
 ): Promise<RetrievedDrawer[]> {
+	const excluded = await matchExclusionRules(userId, query)
+	if (excluded) {
+		logger.info('[memory] recall skipped: the query matches an exclusion rule', {
+			rule: excluded.ruleName,
+			sample: excluded.sample,
+			source: options.recallSource ?? 'chat',
+		})
+		return []
+	}
+
 	const candidatePoolSize = options.candidatePoolSize ?? (options.useRerank ? 20 : 50)
 	const initial = await recall(userId, query, {
 		...options,
+		queryDate: options.queryDate ?? new Date(),
 		topK: options.useRerank ? candidatePoolSize : (options.topK ?? 5),
 		candidatePoolSize,
 	})

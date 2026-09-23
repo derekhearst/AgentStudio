@@ -12,6 +12,7 @@
 
 import { count, desc, eq } from 'drizzle-orm'
 import { DEFAULT_MODEL, chat } from '$lib/llm/chat.server'
+import { toOpenRouterModelId } from '$lib/llm/openrouter-model'
 import { db } from '$lib/db.server'
 import { logLlmUsage } from '$lib/costs/usage'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
@@ -20,10 +21,9 @@ import { embed } from '$lib/memory/embeddings.server'
 import { encodeAaak, type AaakTags } from '$lib/memory/aaak.server'
 import {
 	ensureBuiltinExclusionRules,
-	findExclusionMatch,
 	loadCompiledExclusionRules,
 	recordExclusionHits,
-	type CompiledExclusionRule,
+	scanForExclusions,
 } from '$lib/memory/exclusions.server'
 import { tombstoneMessages } from '$lib/memory/tombstones.server'
 import { logger } from '$lib/observability/logger'
@@ -33,6 +33,8 @@ export type MiningTurn = {
 	content: string
 	hasAnswer?: boolean
 	sourceMessageId?: string | null
+	/** When the turn was said; its drawer's `occurredAt`. Defaults to the session's. */
+	occurredAt?: Date
 }
 
 export type MiningSession = {
@@ -49,8 +51,20 @@ export type MineResult = {
 	drawerIds: string[]
 	/** Turns dropped by an exclusion rule before embedding/insert. */
 	excludedTurns: number
+	/**
+	 * Of `excludedTurns`, those dropped because their check ran out of time rather than because
+	 * a rule matched. They are set aside, not excluded for good: the next change to the user's
+	 * rules, or Mine pending, lets the miner check them again.
+	 */
+	timedOutTurns: number
 	/** Names of the rules that fired, for the job result + activity feed. */
 	excludedByRule: string[]
+	/**
+	 * True when the extractor call failed or answered with something unusable, so the turns were
+	 * filed under the conversation title and a `general` closet with no tags. Mining still
+	 * succeeds; this is what makes a broken extractor visible in `/settings/jobs`.
+	 */
+	extractorFallback: boolean
 }
 
 const EXTRACTOR_BASE = `You are an information extractor for a hierarchical memory system.
@@ -97,6 +111,9 @@ type ExtractorOutput = {
 	turns: Array<{ topic: string; tags: AaakTags }>
 }
 
+/** The extractor's model, as OpenRouter names it — the app default is the Agent SDK's bare id. */
+const EXTRACTOR_MODEL = toOpenRouterModelId(DEFAULT_MODEL)
+
 function fallbackExtraction(session: MiningSession): ExtractorOutput {
 	return {
 		primaryWing: { kind: 'topic', name: session.sessionLabel ?? 'general', aliases: [] },
@@ -120,25 +137,31 @@ function tryParseExtractor(content: string): ExtractorOutput | null {
 	return null
 }
 
+/** What the extractor made of a session, and whether that is the fallback rather than its answer. */
+type Extraction = ExtractorOutput & { fallback: boolean }
+
 async function extractSession(
 	session: MiningSession,
 	existingWings: ExtractorWingCandidate[] = [],
-): Promise<ExtractorOutput> {
+): Promise<Extraction> {
 	if (session.turns.length === 0) {
-		return fallbackExtraction(session)
+		return { ...fallbackExtraction(session), fallback: false }
 	}
 
 	const transcript = session.turns.map((turn, i) => `[${i + 1}] ${turn.role.toUpperCase()}: ${turn.content}`).join('\n')
 
 	try {
-		const result = await chat([
-			{ role: 'system', content: buildExtractorSystem(existingWings) },
-			{ role: 'user', content: transcript },
-		])
+		const result = await chat(
+			[
+				{ role: 'system', content: buildExtractorSystem(existingWings) },
+				{ role: 'user', content: transcript },
+			],
+			EXTRACTOR_MODEL,
+		)
 
 		await logLlmUsage({
 			source: 'memory_extract',
-			model: DEFAULT_MODEL,
+			model: EXTRACTOR_MODEL,
 			tokensIn: result.usage?.promptTokens ?? 0,
 			tokensOut: result.usage?.completionTokens ?? 0,
 			metadata: { conversationId: session.conversationId ?? null, turns: session.turns.length },
@@ -165,14 +188,21 @@ async function extractSession(
 			} else if (parsed.turns.length > session.turns.length) {
 				parsed.turns.length = session.turns.length
 			}
-			return parsed
+			return { ...parsed, fallback: false }
 		}
-		logger.warn('[memory] extractor returned unusable JSON, using fallback')
+		logger.warn('[memory] extractor returned unusable JSON; filing the turns under the fallback wing', {
+			model: EXTRACTOR_MODEL,
+			conversationId: session.conversationId ?? null,
+		})
 	} catch (error) {
-		logger.warn('[memory] extractor call failed', { err: error })
+		logger.warn('[memory] extractor call failed; filing the turns under the fallback wing', {
+			model: EXTRACTOR_MODEL,
+			conversationId: session.conversationId ?? null,
+			err: error,
+		})
 	}
 
-	return fallbackExtraction(session)
+	return { ...fallbackExtraction(session), fallback: true }
 }
 
 async function nextDrawerNumber(closetId: string): Promise<number> {
@@ -202,7 +232,16 @@ export async function mineSession(opts: {
 }): Promise<MineResult> {
 	const { userId, agentId } = opts
 	if (opts.session.turns.length === 0) {
-		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns: 0, excludedByRule: [] }
+		return {
+			wingIds: [],
+			roomIds: [],
+			closetIds: [],
+			drawerIds: [],
+			excludedTurns: 0,
+			timedOutTurns: 0,
+			excludedByRule: [],
+			extractorFallback: false,
+		}
 	}
 
 	// Exclusion pass runs FIRST — before the extractor LLM call and before embedding — so
@@ -210,24 +249,43 @@ export async function mineSession(opts: {
 	await ensureBuiltinExclusionRules(userId).catch((error) => {
 		logger.warn('[memory] failed to seed built-in exclusion rules', { err: error })
 	})
-	const exclusionRules = await loadCompiledExclusionRules(userId).catch((error) => {
-		logger.warn('[memory] failed to load exclusion rules; mining without a deny list', { err: error })
-		return [] as CompiledExclusionRule[]
-	})
+	// No deny list, no mining: a load failure (a dropped connection, say) fails the job, which
+	// is retried, rather than sending every turn — secrets included — out unchecked. Recall
+	// fails closed on the same error.
+	const exclusionRules = await loadCompiledExclusionRules(userId)
+
+	// The whole of every turn, on a worker thread with a time limit: a user's regex cannot
+	// freeze the server, and a secret past the first 40,000 characters is still caught. A turn
+	// whose check runs out of time counts as matched.
+	const matches = await scanForExclusions(
+		opts.session.turns.map((turn) => turn.content),
+		exclusionRules,
+	)
 
 	const keptTurns: MiningTurn[] = []
 	const firedRuleIds: Array<string | null> = []
 	const firedRuleNames: string[] = []
 	const excludedMessageIds: string[] = []
-	for (const turn of opts.session.turns) {
-		const match = exclusionRules.length > 0 ? findExclusionMatch(turn.content, exclusionRules) : null
+	const timedOutMessageIds: string[] = []
+	let timedOutTurns = 0
+	for (const [index, turn] of opts.session.turns.entries()) {
+		const match = matches[index]
 		if (match) {
-			firedRuleIds.push(match.ruleId)
 			firedRuleNames.push(match.ruleName)
-			if (turn.sourceMessageId) excludedMessageIds.push(turn.sourceMessageId)
+			// A check that ran out of time never saw the rule match, so it is not a hit for it,
+			// and the turn is only set aside: excluding it for good would lose a harmless paste
+			// to a rule it never matched, with no way back once the rule is fixed.
+			if (match.timedOut) {
+				timedOutTurns += 1
+				if (turn.sourceMessageId) timedOutMessageIds.push(turn.sourceMessageId)
+			} else {
+				firedRuleIds.push(match.ruleId)
+				if (turn.sourceMessageId) excludedMessageIds.push(turn.sourceMessageId)
+			}
 			logger.info('[memory] exclusion rule dropped a turn before mining', {
 				rule: match.ruleName,
 				sample: match.sample,
+				timedOut: match.timedOut,
 				conversationId: opts.session.conversationId ?? null,
 			})
 			continue
@@ -237,17 +295,30 @@ export async function mineSession(opts: {
 
 	const excludedTurns = firedRuleNames.length
 	const excludedByRule = [...new Set(firedRuleNames)]
-	if (excludedTurns > 0) {
-		await recordExclusionHits(firedRuleIds)
-		// A conversation is mined again after every exchange; without a tombstone the same
-		// dropped turn would be re-checked, and re-counted against its rule, every time.
-		await tombstoneMessages(userId, excludedMessageIds, 'excluded_by_rule').catch((error) => {
-			logger.warn('[memory] failed to tombstone excluded turns', { err: error })
-		})
-	}
+	if (firedRuleIds.length > 0) await recordExclusionHits(firedRuleIds)
+	// A conversation is mined again after every exchange; without a tombstone the same dropped
+	// turn would be re-checked, and re-counted against its rule, every time. A timed-out turn
+	// gets one too — or its conversation would never count as mined, and every pass would spend
+	// the full time limit on it again — but under its own reason, which a change to the rules
+	// or Mine pending clears (`releaseTimedOutTurns`).
+	await tombstoneMessages(userId, excludedMessageIds, 'excluded_by_rule').catch((error) => {
+		logger.warn('[memory] failed to tombstone excluded turns', { err: error })
+	})
+	await tombstoneMessages(userId, timedOutMessageIds, 'exclusion_timed_out').catch((error) => {
+		logger.warn('[memory] failed to set aside turns whose exclusion check timed out', { err: error })
+	})
 
 	if (keptTurns.length === 0) {
-		return { wingIds: [], roomIds: [], closetIds: [], drawerIds: [], excludedTurns, excludedByRule }
+		return {
+			wingIds: [],
+			roomIds: [],
+			closetIds: [],
+			drawerIds: [],
+			excludedTurns,
+			timedOutTurns,
+			excludedByRule,
+			extractorFallback: false,
+		}
 	}
 
 	const session: MiningSession = { ...opts.session, turns: keptTurns }
@@ -266,6 +337,10 @@ export async function mineSession(opts: {
 	logger.debug('[memory] extractor candidates', { count: candidates.length })
 
 	const extraction = await extractSession(session, candidates)
+
+	// Before anything is written: if embedding fails (rate limit, no credit, no key) the job
+	// fails with nothing half-built, instead of leaving an empty room behind to retry around.
+	const embeddings = await embed(session.turns.map((turn) => turn.content))
 
 	const allowedKinds: WingKind[] = ['person', 'project', 'topic', 'agent']
 	const wingKind: WingKind = allowedKinds.includes(extraction.primaryWing.kind as WingKind)
@@ -297,8 +372,6 @@ export async function mineSession(opts: {
 	const drawerIds: string[] = []
 	const closetIdsSet = new Set<string>()
 
-	const embeddings = await embed(session.turns.map((turn) => turn.content))
-
 	for (let i = 0; i < session.turns.length; i += 1) {
 		const turn = session.turns[i]
 		const meta = extraction.turns[i] ?? { topic: 'general', tags: {} }
@@ -312,12 +385,13 @@ export async function mineSession(opts: {
 		}
 		closetIdsSet.add(closetId)
 
+		const occurredAt = turn.occurredAt ?? session.occurredAt
 		const drawerNumber = await nextDrawerNumber(closetId)
 		const aaak = encodeAaak(
 			{ wing: wingIndex, room: roomIndex, drawer: drawerNumber },
 			{
 				...meta.tags,
-				t: meta.tags.t && meta.tags.t.length > 0 ? meta.tags.t : [session.occurredAt.toISOString()],
+				t: meta.tags.t && meta.tags.t.length > 0 ? meta.tags.t : [occurredAt.toISOString()],
 			},
 		)
 
@@ -333,7 +407,7 @@ export async function mineSession(opts: {
 				aaak,
 				tokenCount: Math.ceil(turn.content.length / 4),
 				sourceMessageId: turn.sourceMessageId ?? null,
-				occurredAt: session.occurredAt,
+				occurredAt,
 			})
 			.returning({ id: memoryDrawers.id })
 		drawerIds.push(drawer.id)
@@ -345,7 +419,9 @@ export async function mineSession(opts: {
 		closetIds: [...closetIdsSet],
 		drawerIds,
 		excludedTurns,
+		timedOutTurns,
 		excludedByRule,
+		extractorFallback: extraction.fallback,
 	}
 }
 
@@ -361,7 +437,9 @@ export async function mineSessions(opts: {
 		closetIds: [],
 		drawerIds: [],
 		excludedTurns: 0,
+		timedOutTurns: 0,
 		excludedByRule: [],
+		extractorFallback: false,
 	}
 	for (const session of opts.sessions) {
 		const result = await mineSession({ userId: opts.userId, agentId: opts.agentId, session })
@@ -370,7 +448,9 @@ export async function mineSessions(opts: {
 		totals.closetIds.push(...result.closetIds)
 		totals.drawerIds.push(...result.drawerIds)
 		totals.excludedTurns += result.excludedTurns
+		totals.timedOutTurns += result.timedOutTurns
 		totals.excludedByRule.push(...result.excludedByRule)
+		totals.extractorFallback ||= result.extractorFallback
 	}
 	totals.excludedByRule = [...new Set(totals.excludedByRule)]
 	return totals

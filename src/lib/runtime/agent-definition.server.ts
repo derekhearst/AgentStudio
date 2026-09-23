@@ -124,7 +124,7 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 	const fallbackAll = process.env.RUNTIME_SKILL_FALLBACK_ALL === '1'
 	const skillSummaries = fallbackAll
 		? await listSkillSummaries()
-		: await listRelevantSkillSummaries(input.intent ?? '', input.skillTopK ?? 8)
+		: await listRelevantSkillSummaries(input.intent ?? '', input.skillTopK ?? 8, { userId: input.userId })
 	if (skillSummaries.length > 0) {
 		const text = skillSummaries
 			.map((s) => {

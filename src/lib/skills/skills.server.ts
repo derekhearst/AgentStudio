@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { skillFiles, skills } from '$lib/skills/skills.schema'
 import { emitActivityInBackground } from '$lib/activity/activity.server'
 import { embedOne, toPgVector } from '$lib/memory/embeddings.server'
+import { matchExclusionRules } from '$lib/memory/exclusions.server'
 import { logger } from '$lib/observability/logger'
 import {
 	SYSTEM_SKILL_FILES,
@@ -417,6 +418,22 @@ export async function bumpSkillAccess(id: string) {
 
 export type SkillSummary = Awaited<ReturnType<typeof listSkillSummaries>>[number]
 
+/** Whether the user's exclusion rules keep `query` in the process; true when they cannot be read. */
+async function queryIsExcluded(userId: string, query: string): Promise<boolean> {
+	try {
+		const match = await matchExclusionRules(userId, query)
+		if (!match) return false
+		logger.info('[skills] relevance ranking skipped: the query matches an exclusion rule', {
+			rule: match.ruleName,
+			sample: match.sample,
+		})
+		return true
+	} catch (err) {
+		logger.warn('[skills] could not check the query against the exclusion rules; listing every skill', { err })
+		return true
+	}
+}
+
 /**
  * Return the top-K most relevant skill summaries for the given query text by cosine similarity
  * over the persisted `description_embedding` vectors.
@@ -428,14 +445,26 @@ export type SkillSummary = Awaited<ReturnType<typeof listSkillSummaries>>[number
  *
  * Falls back to `listSkillSummaries()` when the query embedding fails or no skills have
  * embeddings yet — the system stays usable even if OPENROUTER_API_KEY is unset.
+ *
+ * The query is usually the user's chat message as typed, so it is held to the user's memory
+ * exclusion rules first, like memory recall on the same turn: a message holding a key or a
+ * password is not sent to the embeddings provider to rank skills either, and every skill is
+ * listed instead. Rules that cannot be loaded count as a match. What is sent goes without
+ * OpenRouter's response cache, for the reason recall gives: it is embedded once.
  */
-export async function listRelevantSkillSummaries(query: string, topK = 8): Promise<SkillSummary[]> {
+export async function listRelevantSkillSummaries(
+	query: string,
+	topK: number,
+	options: { userId: string },
+): Promise<SkillSummary[]> {
 	const trimmed = (query ?? '').trim()
 	if (!trimmed) return listSkillSummaries()
 
+	if (await queryIsExcluded(options.userId, trimmed)) return listSkillSummaries()
+
 	let queryVector: number[]
 	try {
-		queryVector = await embedOne(trimmed)
+		queryVector = await embedOne(trimmed, { cache: false })
 	} catch (err) {
 		logger.warn('[skills] listRelevantSkillSummaries embedding failed; falling back to all', { err })
 		return listSkillSummaries()
