@@ -13,7 +13,9 @@ import { logger } from '$lib/observability/logger'
  * Lifecycle invariants:
  *   - enqueue → status='pending', attemptCount=0
  *   - claimNextJob → status='leased', leaseExpiresAt set, attemptCount unchanged (incremented
- *     when the worker actually starts the work via beginJob)
+ *     when the worker actually starts the work via beginJob). Also reclaims a `leased` OR
+ *     `running` job whose lease has lapsed — its worker died — or, when that job has no
+ *     attempts left or lapsed too long ago, fails it instead (see `claimNextJob`)
  *   - beginJob → status='running', startedAt set, attemptCount += 1
  *   - heartbeatJob → extends lease + updates lease row's heartbeatAt
  *   - completeJob → status='completed', finishedAt set, result stored
@@ -164,16 +166,78 @@ export type ClaimJobOptions = {
 }
 
 /**
+ * A `running` job whose lease lapsed longer ago than this is failed, not resumed. Its worker
+ * died mid-handler; picking the job up minutes later is what the lease is for, but a job a
+ * dev server left behind last week — an automation run, a research run, a PR fix — would
+ * otherwise re-run against a world that has moved on the first time a worker comes up.
+ */
+const ABANDONED_LEASE_MS = 60 * 60_000
+
+/** Dead `running` jobs one claim call may retire before it gives up looking for real work. */
+const MAX_RETIRED_PER_CLAIM = 5
+
+type ClaimCandidate = {
+	id: string
+	status: JobStatus
+	attempt_count: number
+	max_attempts: number
+	lease_expires_at: Date | string | null
+}
+
+/**
+ * What to do with a candidate whose lease lapsed while it was `running`: its handler started
+ * (beginJob already counted the attempt) and then the worker stopped heartbeating, which in
+ * practice means the process died — a deploy, a crash, an OOM. Out of attempts means the
+ * handler probably IS what kills the process, so re-leasing it would crash the next worker
+ * too. Returns null to re-lease, or the reason to fail it.
+ */
+export function staleRunningJobVerdict(
+	job: { attemptCount: number; maxAttempts: number; leaseExpiresAt: Date },
+	now = new Date(),
+): string | null {
+	const lapsedMs = now.getTime() - job.leaseExpiresAt.getTime()
+	if (job.attemptCount >= job.maxAttempts) {
+		return `The worker running this job stopped heartbeating on attempt ${job.attemptCount} of ${job.maxAttempts}, and no attempts are left.`
+	}
+	if (lapsedMs > ABANDONED_LEASE_MS) {
+		return `The worker running this job stopped heartbeating ${Math.round(lapsedMs / 60_000)} minutes ago — too long ago to resume it safely.`
+	}
+	return null
+}
+
+/**
  * Atomic claim of the next eligible job. Uses `FOR UPDATE SKIP LOCKED` so concurrent workers
  * don't fight over the same row. Returns null when no job is available.
  *
  * Eligible:
  *   status IN (pending, retry_wait) AND scheduled_at <= now()
- *   OR status = leased AND lease_expires_at < now() (re-claim a stale lease)
+ *   OR status IN (leased, running) AND lease_expires_at < now() (its worker died)
+ *
+ * A lapsed `leased` job never started, so it is simply re-leased. A lapsed `running` job
+ * started and then lost its worker mid-handler; it is re-leased too — beginJob counts the
+ * new attempt — unless `staleRunningJobVerdict` says to fail it, in which case it is failed
+ * with a `job_stuck` review item and the claim looks again. Before `running` was eligible
+ * here, a job whose worker died mid-handler stayed `running` forever, and for automations
+ * that wedged the schedule: every tick's enqueue collided with the dead row.
  *
  * Ordering: priority desc, scheduled_at asc (oldest within priority first).
  */
 export async function claimNextJob(opts: ClaimJobOptions): Promise<JobRow | null> {
+	for (let retired = 0; retired <= MAX_RETIRED_PER_CLAIM; retired += 1) {
+		const outcome = await claimOnce(opts)
+		if (outcome.kind === 'claimed') return outcome.job
+		if (outcome.kind === 'empty') return null
+		await reportRetiredJob(outcome.job, outcome.reason)
+	}
+	return null
+}
+
+type ClaimOutcome =
+	| { kind: 'claimed'; job: JobRow }
+	| { kind: 'retired'; job: JobRow; reason: string }
+	| { kind: 'empty' }
+
+async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
 	const leaseTtlMs = opts.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS
 	const newLeaseExpiresAt = new Date(Date.now() + leaseTtlMs)
 
@@ -187,12 +251,12 @@ export async function claimNextJob(opts: ClaimJobOptions): Promise<JobRow | null
 	// avoids the postgres.js prepared-statement re-parsing issues we hit with conditional CTE
 	// fragments. The transaction is short-lived (single round-trip-ish) so lock contention
 	// stays low.
-	const claimedJob = await db.transaction(async (tx) => {
+	const outcome = await db.transaction(async (tx): Promise<ClaimOutcome> => {
 		const candidateText = `
-			select id from jobs
+			select id, status, attempt_count, max_attempts, lease_expires_at from jobs
 			where (
 				(status in ('pending'::job_status, 'retry_wait'::job_status) and scheduled_at <= now())
-				or (status = 'leased'::job_status and lease_expires_at < now())
+				or (status in ('leased'::job_status, 'running'::job_status) and lease_expires_at < now())
 			)
 			${queueClause}
 			${typeClause}
@@ -201,30 +265,81 @@ export async function claimNextJob(opts: ClaimJobOptions): Promise<JobRow | null
 			for update skip locked
 		`
 		const candidateResult = await tx.execute(drizzleSql.raw(candidateText))
-		const candidateRows = (candidateResult as unknown as { rows?: { id: string }[] }).rows
-			?? (candidateResult as unknown as { id: string }[])
+		const candidateRows = (candidateResult as unknown as { rows?: ClaimCandidate[] }).rows
+			?? (candidateResult as unknown as ClaimCandidate[])
 		const candidate = Array.isArray(candidateRows) ? candidateRows[0] : null
-		if (!candidate) return null
+		if (!candidate) return { kind: 'empty' }
+
+		if (candidate.status === 'running' && candidate.lease_expires_at) {
+			const reason = staleRunningJobVerdict({
+				attemptCount: candidate.attempt_count,
+				maxAttempts: candidate.max_attempts,
+				leaseExpiresAt: new Date(candidate.lease_expires_at),
+			})
+			if (reason) {
+				const [failed] = await tx
+					.update(jobs)
+					.set({
+						status: 'failed',
+						finishedAt: new Date(),
+						leaseExpiresAt: null,
+						error: { message: reason },
+						updatedAt: new Date(),
+					})
+					.where(eq(jobs.id, candidate.id))
+					.returning()
+				return failed ? { kind: 'retired', job: failed, reason } : { kind: 'empty' }
+			}
+		}
+
 		const [updated] = await tx
 			.update(jobs)
 			.set({ status: 'leased', leaseExpiresAt: newLeaseExpiresAt, updatedAt: new Date() })
 			.where(eq(jobs.id, candidate.id))
 			.returning()
-		return updated ?? null
+		return updated ? { kind: 'claimed', job: updated } : { kind: 'empty' }
 	})
 
-	if (!claimedJob) return null
+	if (outcome.kind !== 'claimed') return outcome
 	const now = new Date()
 
 	// Insert the lease record so the audit history shows what worker has the job.
 	await db.insert(jobLeases).values({
-		jobId: claimedJob.id,
+		jobId: outcome.job.id,
 		workerId: opts.workerId,
 		heartbeatAt: now,
 		expiresAt: newLeaseExpiresAt,
 	})
 
-	return claimedJob
+	return outcome
+}
+
+/**
+ * A job retired by the claim path gets the same visibility as one that exhausted its
+ * retries: a review item and a lifecycle metric. Best-effort, like `failJob`'s.
+ */
+async function reportRetiredJob(row: JobRow, reason: string): Promise<void> {
+	logger.warn('[jobs] retired a running job whose worker died', { jobId: row.id, type: row.type, reason })
+	try {
+		const { openReviewItem } = await import('$lib/observability/review.server')
+		await openReviewItem({
+			type: 'job_stuck',
+			severity: 'warning',
+			summary: `Job ${row.type} lost its worker mid-run and was failed: ${reason.slice(0, 160)}`,
+			payload: {
+				jobType: row.type,
+				attemptCount: row.attemptCount,
+				maxAttempts: row.maxAttempts,
+				error: { message: reason },
+			},
+			runId: row.runId,
+			jobId: row.id,
+			dedupeKey: `job:${row.id}`,
+		})
+	} catch (err) {
+		logger.warn('[jobs] review item open failed (non-fatal)', { err })
+	}
+	void emitJobLifecycleMetric(row, 'failed')
 }
 
 /**
@@ -461,14 +576,15 @@ export async function listJobs(filters: ListJobsFilters = {}): Promise<JobRow[]>
 }
 
 /**
- * Find jobs whose lease has expired without a recent heartbeat. The worker calls this on a
- * separate timer to recover stuck jobs — re-eligible for claim.
+ * Find jobs whose lease has expired without a recent heartbeat — claimed or running on a
+ * worker that has since died. `claimNextJob` recovers these on its own; this is for
+ * inspection.
  */
 export async function findStaleLeases(now = new Date()): Promise<JobRow[]> {
 	return db
 		.select()
 		.from(jobs)
-		.where(and(eq(jobs.status, 'leased'), lte(jobs.leaseExpiresAt, now)))
+		.where(and(inArray(jobs.status, ['leased', 'running']), lte(jobs.leaseExpiresAt, now)))
 		.orderBy(asc(jobs.leaseExpiresAt))
 }
 
