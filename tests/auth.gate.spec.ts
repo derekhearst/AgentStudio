@@ -110,6 +110,31 @@ test.describe('auth/setup-token', () => {
 		expect(setupTokenRequired({ devBuild: true })).toBe(false)
 	})
 
+	test('setup checks the token before creating the owner, and retires it after', () => {
+		// The test server is a dev build, where no token is asked for, so no request-level spec
+		// can see this check. Pin the wiring instead: deleting it, or feeding it a runtime guess
+		// such as NODE_ENV instead of the build-time `dev` flag, would leave every rule above green.
+		const remote = readFileSync(join(process.cwd(), 'src/lib/auth/auth.remote.ts'), 'utf8')
+		expect(remote).toMatch(/import \{ dev \} from '\$app\/environment'/)
+		const start = remote.indexOf('export const setupCommand')
+		expect(start).toBeGreaterThan(-1)
+		const body = remote.slice(start, remote.indexOf('\n})\n', start))
+
+		const check = body.search(
+			/if \(setupTokenRequired\(\{ devBuild: dev \}\) && !setupTokenMatches\(input\.setupToken\)\) \{\s*error\(403,/,
+		)
+		const provision = body.indexOf('await provisionOwner(')
+		const refused = body.indexOf('if (!result.created)')
+		const retire = body.indexOf('retireSetupToken()')
+		const session = body.indexOf('await createSessionForUser(')
+		expect(check, 'the token check').toBeGreaterThan(-1)
+		expect(provision, 'provisionOwner').toBeGreaterThan(check)
+		expect(refused, 'the "already completed" refusal').toBeGreaterThan(provision)
+		expect(retire, 'the token is retired only after a successful create').toBeGreaterThan(refused)
+		expect(session).toBeGreaterThan(retire)
+		// Exactly one check, and nothing that could short-circuit it.
+		expect(body.match(/setupTokenMatches\(/g)).toHaveLength(1)
+	})
 
 	test('only the announced token opens setup, and only until setup completes', () => {
 		// The operator finds the token in the server log, so it must be printed — once per token.
