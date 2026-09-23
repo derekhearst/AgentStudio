@@ -1,12 +1,12 @@
-import { and, eq } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
-import { automations } from '$lib/automations/automation.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { logger } from '$lib/observability/logger'
 import type { MonitorRow } from './monitors.schema'
+import { findOwnedAutomation } from './monitors.server'
 import { describeCondition, monitorConditionSchema, type MonitorObservation } from './condition'
 
 /**
@@ -138,30 +138,50 @@ async function firePush(monitor: MonitorRow, observation: MonitorObservation): P
 
 // ─────────── run_automation ───────────
 
+/**
+ * The `automation_run` job a monitor enqueues.
+ *
+ * `trigger: 'monitor'` because an event, not the schedule, asked for this run. Without a
+ * trigger the handler treated it as a scheduled tick, and every firing moved the
+ * automation's `nextRunAt`. It is not a manual run either: "Run now" may run a switched-off
+ * automation and does not escalate failures, because a person is watching. Nobody watches a
+ * monitor, so a monitor-fired run respects the off switch and reports its failures like a
+ * scheduled one, and leaves the schedule alone like a manual one. See
+ * `automationTriggerPolicy` in the automations domain.
+ */
+export function monitorAutomationJob(monitor: Pick<MonitorRow, 'id' | 'userId' | 'fireCount'>, automationId: string) {
+	return {
+		type: 'automation_run',
+		queue: 'default',
+		priority: 60,
+		payload: { automationId, attempt: 1, trigger: 'monitor' as const },
+		userId: monitor.userId,
+		dedupeKey: `monitor_fire:${monitor.id}:${monitor.fireCount}`,
+	}
+}
+
 async function fireAutomation(monitor: MonitorRow, observation: MonitorObservation): Promise<MonitorFireResult> {
 	const automationId = monitor.actionConfig.automationId
 	if (!automationId) throw new Error('actionConfig.automationId is missing')
-	// Checked here, where a throw still reaches the review-item fallback. The job would only
-	// skip a missing or switched-off automation, and the observation would go nowhere.
-	const [automation] = await db
-		.select({ enabled: automations.enabled })
-		.from(automations)
-		.where(and(eq(automations.id, automationId), eq(automations.userId, monitor.userId)))
-		.limit(1)
-	if (!automation) throw new Error(`automation ${automationId} no longer exists`)
-	if (!automation.enabled) throw new Error(`automation ${automationId} is disabled — switch it back on to let this monitor run it`)
+	// Re-checked at fire time, not only when the monitor was saved: the automation may have
+	// been deleted since. The job handler runs an automation as its own owner, so this is the
+	// last point where "whose automation is this" can be asked.
+	const automation = await findOwnedAutomation(monitor.userId, automationId)
+	if (!automation) {
+		throw new Error(`automation ${automationId} not found for this monitor's owner`)
+	}
+	// Switched off by its owner, or by the failure policy after repeated failures: either way
+	// it must not run unattended. Refused here, where a throw still reaches the review-item
+	// fallback: the job itself would only skip a missing or switched-off automation, and the
+	// observation would reach nobody.
+	if (!automation.enabled) {
+		throw new Error(`automation ${automationId} is switched off, so the monitor did not run it`)
+	}
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	// Enqueued by job type rather than by importing the automations engine — the monitor
 	// domain stays decoupled from whatever that engine looks like, and the job queue already
 	// owns retries and forensics for the run.
-	const job = await enqueueJob({
-		type: 'automation_run',
-		queue: 'default',
-		priority: 60,
-		payload: { automationId },
-		userId: monitor.userId,
-		dedupeKey: `monitor_fire:${monitor.id}:${monitor.fireCount}`,
-	})
+	const job = await enqueueJob(monitorAutomationJob(monitor, automationId))
 	return { kind: 'run_automation', ok: true, detail: { automationId, jobId: job.id, observed: observation.hash } }
 }
 

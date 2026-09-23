@@ -13,6 +13,7 @@ import {
 	resetAutomationFailureState,
 	startAutomationRun,
 } from './automation-runs.server'
+import { automationTriggerPolicy } from './failure-policy'
 
 export { computeNextRunAt } from './cron'
 
@@ -30,12 +31,13 @@ export type RunAutomationOptions = {
 	/**
 	 * Leave `next_run_at` exactly as it is. "Run now" must not move the schedule — pressing
 	 * the button at 09:58 should not push a 10:00 tick to tomorrow. Defaults to true for
-	 * manual runs, false for scheduled ones.
+	 * manual and monitor-fired runs, false for scheduled ones (`automationTriggerPolicy`).
 	 */
 	preserveSchedule?: boolean
 	/**
 	 * Execute even when the row is disabled. Manual runs default to true so an operator can
-	 * verify a fix on an automation that the failure policy switched off.
+	 * verify a fix on an automation that the failure policy switched off. Monitor-fired runs
+	 * do not: nobody is watching them, so the off switch has to hold.
 	 */
 	allowDisabled?: boolean
 }
@@ -93,8 +95,9 @@ export async function runAutomationById(
 ) {
 	const trigger: AutomationRunTrigger = options.trigger ?? 'schedule'
 	const attempt = Math.max(1, Math.floor(options.attempt ?? 1))
-	const preserveSchedule = options.preserveSchedule ?? trigger === 'manual'
-	const allowDisabled = options.allowDisabled ?? trigger === 'manual'
+	const policy = automationTriggerPolicy(trigger)
+	const preserveSchedule = options.preserveSchedule ?? policy.preserveSchedule
+	const allowDisabled = options.allowDisabled ?? policy.allowDisabled
 
 	const [automation] = await db.select().from(automations).where(eq(automations.id, automationId)).limit(1)
 	if (!automation) {
@@ -117,6 +120,7 @@ export async function runAutomationById(
 			trigger,
 			attempt,
 			jobId: options.jobId ?? null,
+			preserveSchedule,
 		})
 	}
 
@@ -217,7 +221,7 @@ async function handleAutomationBudgetBlocked(
 	automation: typeof automations.$inferSelect,
 	blockedBy: BudgetLimitRow,
 	now: Date,
-	context: { trigger: AutomationRunTrigger; attempt: number; jobId: string | null },
+	context: { trigger: AutomationRunTrigger; attempt: number; jobId: string | null; preserveSchedule: boolean },
 ) {
 	// #31 — a blocked tick is part of the run history too, with its own status so it is not
 	// confused with a failure (nothing is broken; a cap was hit).
@@ -272,12 +276,16 @@ async function handleAutomationBudgetBlocked(
 		}
 	})()
 
-	let nextRunAt: Date | null = null
-	try {
-		nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
-	} catch {
-		// Bad cron expression — leave nextRunAt unchanged so the dispatcher won't keep
-		// re-evaluating; the same condition would re-trigger immediately otherwise.
+	// Only the schedule's own tick moves the schedule — a blocked "Run now" or monitor firing
+	// must not push the next scheduled run out, any more than a successful one does.
+	let nextRunAt: Date | null = context.preserveSchedule ? automation.nextRunAt : null
+	if (!context.preserveSchedule) {
+		try {
+			nextRunAt = computeNextRunAt(automation.cronExpression, now, automation.timezone)
+		} catch {
+			// Bad cron expression — leave nextRunAt unchanged so the dispatcher won't keep
+			// re-evaluating; the same condition would re-trigger immediately otherwise.
+		}
 	}
 	await db
 		.update(automations)

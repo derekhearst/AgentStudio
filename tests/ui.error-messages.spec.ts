@@ -14,9 +14,9 @@ import { getActiveUserId } from './helpers'
  * reached it.
  *
  * Pinned in three places: the server throws `UserInputError`; `withUserInputErrors` turns it
- * into a 400 carrying the message and leaves other errors alone; `describeError` shows a 4xx
- * message and keeps the page's fallback for a 5xx. The UI half is in
- * crud/automations.crud.spec.ts.
+ * into a 400 carrying the message and leaves other errors alone; `remoteErrorMessage` shows a
+ * 4xx message and keeps the page's fallback for a 5xx (its handling of a plain Error is pinned
+ * in source-control.pr-fix-ownership.spec.ts). The UI half is in crud/automations.crud.spec.ts.
  */
 
 test.describe('user-input errors — server side', () => {
@@ -72,19 +72,12 @@ test.describe('user-input errors — what the page shows', () => {
 	}
 
 	test('a 4xx shows its message, a 5xx keeps the page’s own wording', async () => {
-		const { describeError } = await import('../src/lib/ui/error-message')
+		const { remoteErrorMessage } = await import('../src/lib/ui/remote-error')
 		const badRequest = capture(() => httpError(400, 'Invalid cron hour field "25": value 25 is out of range 0-23'))
-		expect(describeError(badRequest, 'Failed to create automation.')).toBe(
+		expect(remoteErrorMessage(badRequest, 'Failed to create automation.')).toBe(
 			'Invalid cron hour field "25": value 25 is out of range 0-23',
 		)
 		const internal = capture(() => httpError(500, 'Internal Error'))
-		expect(describeError(internal, 'Failed to create automation.')).toBe('Failed to create automation.')
-	})
-
-	test('an Error raised in the page is shown as is, and anything else falls back', async () => {
-		const { describeError } = await import('../src/lib/ui/error-message')
-		expect(describeError(new Error('Arguments must be valid JSON'), 'fallback')).toBe('Arguments must be valid JSON')
-		expect(describeError('a string', 'fallback')).toBe('fallback')
-		expect(describeError(undefined, 'fallback')).toBe('fallback')
+		expect(remoteErrorMessage(internal, 'Failed to create automation.')).toBe('Failed to create automation.')
 	})
 })

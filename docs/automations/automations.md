@@ -18,8 +18,8 @@ This page describes how automations behave. The data model and design history ar
 | **Mode** | What a run does. **Chat follow-up** writes the prompt into a conversation and has the model (or an attached agent) reply. **Research** starts a research report on the prompt. **Maintenance** runs the prompt and routes a summary somewhere. |
 | **Conversation mode** | For chat follow-up: a **new conversation each run**, or **reuse** one conversation as a running log. A run sees the last 12 messages of its conversation. |
 | **Output target** | Where the result lands: the automation's **chat session** (the default) or the **Review inbox**. |
-| **Run** | One attempt at a slot, recorded in the run history with its status (`running`, `completed`, `failed`, `blocked`), trigger (scheduled or manual), attempt number, duration, cost, and a link to what it produced. |
-| **Failure streak** | How many scheduled slots in a row ended in failure. Five in a row switches the automation off. |
+| **Run** | One attempt at a slot, recorded in the run history with its status (`running`, `completed`, `failed`, `blocked`), trigger (scheduled, manual, or fired by a monitor), attempt number, duration, cost, and a link to what it produced. |
+| **Failure streak** | How many unattended runs in a row — scheduled slots, and runs fired by a monitor — ended in failure. Five in a row switches the automation off. |
 
 ## User flows
 
@@ -57,6 +57,14 @@ If the job queue itself gives up on an attempt — the server kept dying while r
 
 Manual runs are not retried and do not count toward the failure streak; the person who pressed the button can press it again.
 
+### Fired by a monitor
+
+1. A monitor with the **run an automation** action sees its condition come true.
+2. It checks that the automation still exists, belongs to the monitor's owner and is switched on. If not, nothing runs and the monitor opens a review item saying so.
+3. Otherwise a run is queued and appears in the history as fired by a monitor.
+
+Nobody is watching a monitor-fired run, so it follows the scheduled run's rules for safety — it never runs a switched-off automation, and a failure is retried, counts toward the failure streak and sends a review item and notification. Like **Run now**, it never moves the schedule.
+
 ### Switching an automation off
 
 Switching an automation off stops new runs. A retry that was already waiting is skipped when its turn comes — quietly, without a failure notification, because nothing failed. Switching it back on works out a fresh next slot from the schedule, so it does not fire immediately for a slot that passed while it was off.
@@ -79,7 +87,8 @@ A monitor can trigger an existing automation (see [../monitors/spec.md](../monit
 - **Research** — research mode starts a research report and links it to the automation's conversation.
 - **Budgets** — before each run, the owner's spend caps are checked. A run that would exceed a blocking cap is not executed; it is recorded as **blocked**, the slot moves on, and a review item lets the owner lift or keep the cap.
 - **Review inbox and notifications** — failures, budget blocks and maintenance summaries routed to the inbox appear there; failures also send a notification.
-- **Monitors** — a monitor's "run an automation" action queues a run of an existing, switched-on automation.
+- **Monitors** — a monitor's "run an automation" action queues a run of one of the owner's own switched-on automations (see "Fired by a monitor" above).
+- **External scheduler** — with the built-in scheduler turned off, a system cron job can call `POST /api/cron` with `Authorization: Bearer <CRON_SECRET>` to run the same once-a-minute check. Without a secret configured, only a signed-in session can call it.
 
 ## Business rules
 
@@ -87,5 +96,5 @@ A monitor can trigger an existing automation (see [../monitors/spec.md](../monit
 - `@reboot` is not accepted — automations have no boot event.
 - One run per slot. Retries belong to the slot they are retrying.
 - Giving up on a slot moves the schedule on; it never gives up on the automation until five slots in a row have failed.
-- A disabled automation is never queued by the scheduler, but can always be run by hand.
+- A disabled automation is never run by the scheduler or a monitor, but can always be run by hand.
 - Run history is kept for 30 days.

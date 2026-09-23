@@ -1,18 +1,20 @@
 import { command, getRequestEvent, query } from '$app/server'
+import { dev } from '$app/environment'
+import { error } from '@sveltejs/kit'
 import { z } from 'zod'
-import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { users } from '$lib/auth/auth.schema'
 import {
 	clearSessionCookie,
 	createSessionForUser,
 	findUserForLogin,
-	getProvisionedUser,
-	isProvisioned,
+	forgetOwnerExists,
+	ownerExists,
 	touchUserLastLogin,
-	validateUsername,
 } from '$lib/auth/auth.server'
-import { hashPassword, verifyPassword } from '$lib/auth/password.server'
+import { verifyPassword } from '$lib/auth/password.server'
+import { provisionOwner } from '$lib/auth/provision.server'
+import { retireSetupToken, setupTokenMatches, setupTokenRequired } from '$lib/auth/setup-token.server'
+import { MIN_PASSWORD_LENGTH } from '$lib/auth/username'
 
 export const getSession = query(async () => {
 	const event = getRequestEvent()
@@ -23,9 +25,9 @@ export const getSession = query(async () => {
 	}
 })
 
-export const isProvisionedQuery = query(async () => {
-	return { provisioned: await isProvisioned() }
-})
+// Refusals are thrown with `error(status, message)`, not `new Error(message)`. SvelteKit hides
+// the message of a plain Error from the client ("Internal Error") and logs it as a server
+// fault, so a wrong password or setup token read as a crash on the page and in the log.
 
 const loginSchema = z.object({
 	password: z.string().min(1).max(512),
@@ -35,12 +37,15 @@ export const loginCommand = command(loginSchema, async ({ password }) => {
 	const event = getRequestEvent()
 	const user = await findUserForLogin()
 	if (!user || !user.passwordHash) {
-		throw new Error('Invalid password')
+		// The owner is gone from under a running server (a `db:reset` beside `bun run dev`, or
+		// a password cleared to reopen setup): stop the gate sending everyone to /login.
+		forgetOwnerExists()
+		error(409, 'This instance has no owner yet. Reload the page to set it up.')
 	}
 
 	const ok = await verifyPassword(password, user.passwordHash)
 	if (!ok) {
-		throw new Error('Invalid password')
+		error(401, 'Invalid password')
 	}
 
 	await createSessionForUser(event.cookies, user.id)
@@ -48,40 +53,43 @@ export const loginCommand = command(loginSchema, async ({ password }) => {
 	return { success: true as const }
 })
 
+// First run asks for the account only — a display name and a password. The username is
+// optional (nobody types it to sign in) and defaults to `owner`. Everything else an instance
+// needs (model credential, sandbox, gateway, integrations) is deploy-time configuration,
+// shown read-only under Settings > System.
 const setupSchema = z.object({
 	name: z.string().trim().min(1).max(64),
-	username: z.string().trim().min(3).max(32),
-	password: z.string().min(8).max(512),
+	username: z
+		.string()
+		.trim()
+		.regex(/^[a-zA-Z0-9_-]{3,32}$/)
+		.optional(),
+	password: z.string().min(MIN_PASSWORD_LENGTH).max(512),
+	setupToken: z.string().trim().max(256).optional(),
 })
 
 export const setupCommand = command(setupSchema, async (input) => {
 	const event = getRequestEvent()
 
-	if (await isProvisioned()) {
-		throw new Error('Setup already completed')
+	if (await ownerExists()) {
+		error(409, 'Setup already completed')
 	}
 
-	const username = validateUsername(input.username)
-	const passwordHash = await hashPassword(input.password)
-	const existing = await getProvisionedUser()
-
-	let userId: string
-	if (existing) {
-		await db
-			.update(users)
-			.set({ name: input.name, username, passwordHash })
-			.where(eq(users.id, existing.id))
-		userId = existing.id
-	} else {
-		const [created] = await db
-			.insert(users)
-			.values({ name: input.name, username, passwordHash })
-			.returning({ id: users.id })
-		userId = created.id
+	// On a production server `/setup` belongs to whoever holds the token from the server
+	// log, not to whoever loads the page first. See setup-token.server.ts.
+	if (setupTokenRequired({ devBuild: dev }) && !setupTokenMatches(input.setupToken)) {
+		error(403, 'That setup token is not right. Copy it from the server log.')
 	}
 
-	await createSessionForUser(event.cookies, userId)
-	await touchUserLastLogin(userId)
+	// Race-safe: of two submissions at the same moment, exactly one creates the owner.
+	const result = await provisionOwner(db, input, { overwrite: false })
+	if (!result.created) {
+		error(409, 'Setup already completed')
+	}
+	retireSetupToken()
+
+	await createSessionForUser(event.cookies, result.userId)
+	await touchUserLastLogin(result.userId)
 	return { success: true as const }
 })
 

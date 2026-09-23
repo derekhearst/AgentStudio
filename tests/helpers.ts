@@ -79,15 +79,15 @@ async function ensureSeededUser(): Promise<string> {
 	if (existing?.id && existing.password_hash) return existing.id
 
 	// Single-user singleton: insert if missing, otherwise update with a hash from AUTH_PASSWORD.
+	// The server normally gets here first — it creates the owner from AUTH_PASSWORD at boot
+	// (src/lib/auth/provision.server.ts) — so this is the fallback for a server started
+	// without it.
 	const password = readEnvVar('AUTH_PASSWORD')
 	if (!password) throw new Error('AUTH_PASSWORD must be set in .env for E2E user seeding')
 
-	const { hash } = await import('@node-rs/argon2')
-	const passwordHash = await hash(password, {
-		memoryCost: 65536,
-		timeCost: 3,
-		parallelism: 1,
-	})
+	// The app's own hashing, so the settings cannot drift from what login verifies.
+	const { hashPassword } = await import('../src/lib/auth/password.server')
+	const passwordHash = await hashPassword(password)
 
 	if (existing?.id) {
 		await sql`update users set password_hash = ${passwordHash} where id = ${existing.id}`

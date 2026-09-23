@@ -14,7 +14,7 @@
 	import AutomationCard from '$lib/automations/AutomationCard.svelte';
 	import AutomationCreateForm from '$lib/automations/AutomationCreateForm.svelte';
 	import { isDueSoon, toTime } from '$lib/automations/automation-format';
-	import { describeError } from '$lib/ui/error-message';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type AutomationRow = Awaited<ReturnType<typeof listAutomationsQuery>>[number];
 	type AgentChoice = Awaited<ReturnType<typeof getAgentChoices>>[number];
@@ -126,7 +126,7 @@
 			await updateAutomationCommand({ id: automation.id, enabled: !automation.enabled });
 			await loadPageData();
 		} catch (err) {
-			formError = describeError(err, 'Unable to update automation status right now.');
+			formError = remoteErrorMessage(err, 'Unable to update automation status right now.');
 		} finally {
 			togglingAutomationId = null;
 		}
@@ -145,7 +145,7 @@
 				void loadPageData();
 			}, 3000);
 		} catch (err) {
-			formError = describeError(err, 'Unable to queue this automation right now.');
+			formError = remoteErrorMessage(err, 'Unable to queue this automation right now.');
 		} finally {
 			runningAutomationId = null;
 		}
@@ -167,7 +167,7 @@
 			await deleteAutomationCommand({ id: automation.id });
 			await loadPageData();
 		} catch (err) {
-			formError = describeError(err, 'Unable to delete automation right now.');
+			formError = remoteErrorMessage(err, 'Unable to delete automation right now.');
 		} finally {
 			deletingAutomationId = null;
 		}

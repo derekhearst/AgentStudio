@@ -69,6 +69,8 @@ If the user pauses or cancels a monitor while a check is running, that check's r
 - The deadline keeps running while a monitor is paused.
 - An action runs once per change from false to true, never once per check.
 - The monitor's state is saved before its action runs, so a crash can lose an action but can never run it twice.
+- A "run an automation" action can only point at one of the owner's own automations. That is checked when the monitor is saved and again each time it fires. An automation that has been deleted or switched off by then is not run; a review item says so instead, so the observation is not lost.
+- A monitor-fired automation run never moves the automation's schedule. Its failures are retried and reported like a scheduled run's (see [../automations/automations.md](../automations/automations.md)).
 - A model answer that is not a clear yes or no is an error, not a "no".
 - File monitors stay inside the owner's sandbox. They do not follow symbolic links, read files over 2 MB, or return more than 1,000 results. A `Grep` check gives up after 10 seconds or rather than read more than 50 MB, so a badly written pattern cannot slow the rest of the app down.
 - A user can have at most 50 monitors active or paused at once.

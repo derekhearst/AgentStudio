@@ -8,6 +8,8 @@
  *   2. Installs required Postgres extensions (pgvector, etc).
  *   3. Runs Drizzle migrations against the latest local revision. On dev, recovers
  *      from drift by resetting app schemas + retrying once.
+ *   3b. Creates the owner account from AUTH_PASSWORD if there is none yet, then drops
+ *      AUTH_PASSWORD from the environment.
  *   4. Seeds the built-in agents, the default evaluator, and any AGENTS.md /
  *      SKILL.md repo-discovered rows.
  *   5. Registers job handlers (research, memory mining, evaluations, workspace gc,
@@ -116,12 +118,40 @@ export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
 			console.log('[db] Database ready')
 		}
 
+		await provisionOwnerFromEnvironment(client)
 		await runSeeders(client)
 		await registerJobHandlers()
 		await startWorkerAndScheduler(generation)
 		kickoffBackgroundBackfills()
 	} catch (err) {
 		console.error('[db] Bootstrap failed — database may be unavailable:', err)
+	}
+}
+
+/**
+ * Create the owner from `AUTH_PASSWORD` when the database has none — the non-interactive
+ * first run, and what makes a fresh CI database or Docker deploy usable without `/setup`.
+ * Never overwrites an existing owner's password. Removes `AUTH_PASSWORD` from
+ * `process.env` whatever happens, because Agent SDK subprocesses inherit it. Details in
+ * src/lib/auth/provision.server.ts.
+ *
+ * Runs before the seeders and before the web tier serves anything (every request awaits
+ * this pipeline), so the setup gate never sees a window where the owner is missing.
+ */
+async function provisionOwnerFromEnvironment(client: Client): Promise<void> {
+	try {
+		const { provisionOwnerFromEnv } = await import('$lib/auth/provision.server')
+		const outcome = await provisionOwnerFromEnv(createSchemaDb(client))
+		if (outcome.status === 'created') {
+			console.log(`[db] Created the owner account "${outcome.username}" from AUTH_PASSWORD`)
+		} else if (outcome.status === 'placeholder') {
+			console.warn(
+				'[db] AUTH_PASSWORD is still the .env.example placeholder; not creating an owner with it. Set a real password, or finish setup at /setup.',
+			)
+		}
+	} catch (err) {
+		delete process.env.AUTH_PASSWORD
+		console.warn('[db] Creating the owner from AUTH_PASSWORD failed (non-fatal; /setup stays open):', err)
 	}
 }
 

@@ -22,6 +22,7 @@
 	import SettingsBudgetPanel from '$lib/settings/panels/SettingsBudgetPanel.svelte';
 	import SettingsAppPushPanel from '$lib/settings/panels/SettingsAppPushPanel.svelte';
 	import SettingsDevToolsPanel from '$lib/settings/panels/SettingsDevToolsPanel.svelte';
+	import SettingsSystemPanel from '$lib/settings/panels/SettingsSystemPanel.svelte';
 
 	type NotificationRow = Awaited<ReturnType<typeof listNotificationFeed>>[number];
 	type SubscriptionRow = Awaited<ReturnType<typeof listSubscriptions>>[number];
@@ -54,6 +55,7 @@
 		{ id: 'notifications', label: 'Notifications', color: 'accent', keywords: 'notification task completed needs input agent errors' },
 		{ id: 'budget', label: 'Budget', color: 'warning', keywords: 'budget daily monthly limit cost' },
 		{ id: 'app', label: 'App & Push', color: 'info', keywords: 'app push install pwa subscribe' },
+		{ id: 'system', label: 'System', color: 'success', keywords: 'system readiness setup environment claude credential login sandbox workspace gateway github webhook search openrouter vapid cron database migrations' },
 		{ id: 'devtools', label: 'Developer Tools', color: 'error', keywords: 'developer tools test notification feed debug' },
 	] as const;
 
@@ -401,6 +403,15 @@
 							onEnablePush={enablePush}
 							onDisablePush={disablePush}
 						/>
+					</div>
+				{/if}
+
+				<!-- ════════════════════════════════════════════════
+				     SYSTEM (read-only deploy-time configuration)
+				     ════════════════════════════════════════════════ -->
+				{#if isVisible('system')}
+					<div id="sec-system" data-settings-section class="scroll-mt-4">
+						<SettingsSystemPanel />
 					</div>
 				{/if}
 
