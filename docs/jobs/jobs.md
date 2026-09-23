@@ -96,3 +96,5 @@ These environment variables configure every worker, the web server's included. A
 ### Development note
 
 In development, editing a schema file or a job handler makes the dev server reload the database module. Each reload now reuses the same database connection pool and stops the previous worker and scheduler before starting new ones, so edits to a job handler take effect and connections do not pile up.
+
+In the Playwright suite only the test server runs the scheduler. The suite's own worker processes import server code, which would otherwise start a scheduler in each of them; `playwright.config.ts` sets `JOBS_SCHEDULER_ENABLED=0` for them. Specs that seed an automation and run it themselves give it a next run time well in the future, so the test server's dispatcher does not run it at the same time.

@@ -51,7 +51,9 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string; conversation_id: string | null }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
 				values (
@@ -60,7 +62,7 @@ test.describe('automations/mode-dispatch — research mode', () => {
 					'0 9 * * *',
 					${`${prefix} What changed in the project this week?`},
 					'research'::automation_mode,
-					${past}
+					${notDue}
 				)
 				returning id, conversation_id
 			`
@@ -182,10 +184,12 @@ test.describe('automations/mode-dispatch — research mode', () => {
 		await sql_clear`delete from llm_usage where user_id = ${userId} and cost::numeric > 1`
 
 		try {
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due: the spec runs it directly (`runAutomationById` ignores nextRunAt), and a
+			// slot a week out keeps the dev server's dispatcher from running it concurrently.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, mode, next_run_at)
-				values (${userId}, ${`${prefix} M1`}, '0 9 * * *', ${`${prefix} Q1`}, 'research'::automation_mode, ${past})
+				values (${userId}, ${`${prefix} M1`}, '0 9 * * *', ${`${prefix} Q1`}, 'research'::automation_mode, ${notDue})
 				returning id
 			`
 
