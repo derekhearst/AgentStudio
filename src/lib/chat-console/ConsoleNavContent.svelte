@@ -2,11 +2,14 @@
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
 	import favicon from '$lib/assets/favicon.svg';
-	import { getConversations } from '$lib/chat';
+	import { getArchivedConversations, getConversations, searchConversations } from '$lib/chat';
 	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
+	import { SEARCH_QUERY_MAX_CHARS, SEARCH_QUERY_MIN_CHARS, splitSnippet } from '$lib/chat/conversation-search';
+	import { fetchFresh } from '$lib/ui/fresh-query';
 	import { page } from '$app/state';
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
+	import ConversationRowMenu from './ConversationRowMenu.svelte';
 	import { dayKey, dayLabel } from '$lib/util/relative-time';
 
 	const THEME_STORAGE_KEY = 'AgentStudio-theme';
@@ -28,6 +31,7 @@
 	}
 
 	type Conversation = Awaited<ReturnType<typeof getConversations>>[number];
+	type SearchHit = Awaited<ReturnType<typeof searchConversations>>[number];
 
 	type LiveRun = {
 		id: string;
@@ -63,7 +67,6 @@
 	 * failed read (no session yet) is just an empty list, as before.
 	 */
 	const conversationsQuery = $derived(browser && authenticated ? getConversations() : null);
-	const conversations = $derived<Conversation[]>(conversationsQuery?.current ?? []);
 
 	function formatUsd(value: number): string {
 		if (value >= 100) return `$${value.toFixed(0)}`;
@@ -83,14 +86,27 @@
 	}
 	let chatFilter = $state('');
 	let openMenu = $state(false);
+	/** `All` is every unarchived chat, `Running` those with a live turn, `Archived` the archive (#18). */
 	let filters = $state({ status: 'All', project: 'All', env: 'All', lastActivity: 'All' });
 	let groupBy = $state<'Project' | 'Status' | 'Environment' | 'Date' | 'None'>('Date');
 	let sortBy = $state<'Recency' | 'Name' | 'Project'>('Recency');
 
+	/*
+	 * #18 — the archive is its own list, read only while it is being looked at. The default
+	 * list leaves archived chats out on the server.
+	 */
+	const showingArchive = $derived(filters.status === 'Archived');
+	const archivedQuery = $derived(browser && authenticated && showingArchive ? getArchivedConversations() : null);
+	const conversations = $derived<Conversation[]>(
+		(showingArchive ? archivedQuery?.current : conversationsQuery?.current) ?? [],
+	);
+
 	onMount(() => {
 		if (!browser) return;
 		const source = new EventSource('/api/chat/monitor');
-		onConversationListChange(source, () => getConversations().refresh());
+		onConversationListChange(source, () =>
+			Promise.all([getConversations().refresh(), showingArchive ? getArchivedConversations().refresh() : null]),
+		);
 		source.onmessage = (event) => {
 			try {
 				const runs = JSON.parse(event.data) as LiveRun[];
@@ -124,8 +140,7 @@
 		const isActiveRun = (c: Conversation) => Boolean(runFor(c));
 		return conversations.filter((c) => {
 			if (q && !(c.title.toLowerCase().includes(q) || (c.lastMessage?.toLowerCase().includes(q)))) return false;
-			if (filters.status === 'Active' && !isActiveRun(c)) return false;
-			if (filters.status === 'Archived' && isActiveRun(c)) return false;
+			if (filters.status === 'Running' && !isActiveRun(c)) return false;
 			return true;
 		});
 	});
@@ -143,11 +158,26 @@
 		return arr.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 	});
 
-	const grouped = $derived.by(() => {
-		if (groupBy === 'None') return [['', sorted] as [string, Conversation[]]];
+	type Group = { key: string; label: string; items: Conversation[] };
+
+	/**
+	 * Pinned chats (#18) form their own group above the others whatever the grouping, and are
+	 * left out of the groups below. The archive has no pinned group: archiving unpins.
+	 */
+	const grouped = $derived.by((): Group[] => {
+		const pinned = showingArchive ? [] : sorted.filter((c) => c.pinnedAt);
+		const rest = pinned.length > 0 ? sorted.filter((c) => !c.pinnedAt) : sorted;
+		const groups = groupConversations(rest, pinned.length > 0)
+			.filter(([, items]) => items.length > 0)
+			.map(([label, items]) => ({ key: `group:${label}`, label, items }));
+		return pinned.length > 0 ? [{ key: 'pinned', label: 'Pinned', items: pinned }, ...groups] : groups;
+	});
+
+	function groupConversations(list: Conversation[], labelFlat: boolean): Array<[string, Conversation[]]> {
+		if (groupBy === 'None') return [[labelFlat ? 'Recent' : '', list]];
 		if (groupBy === 'Date') {
 			const m = new Map<string, { label: string; ts: number; items: Conversation[] }>();
-			for (const c of sorted) {
+			for (const c of list) {
 				const key = dayKey(c.updatedAt);
 				const existing = m.get(key);
 				if (existing) existing.items.push(c);
@@ -163,13 +193,59 @@
 		}
 		const fieldKey: keyof Conversation = groupBy === 'Project' ? 'category' : groupBy === 'Status' ? 'category' : 'category';
 		const m = new Map<string, Conversation[]>();
-		for (const c of sorted) {
+		for (const c of list) {
 			const key = (c[fieldKey] as string | null) ?? 'Uncategorized';
 			if (!m.has(key)) m.set(key, []);
 			m.get(key)!.push(c);
 		}
 		return [...m.entries()];
+	}
+
+	/*
+	 * #18 — search in messages and tool calls, on the server. The filter above stays instant
+	 * over the loaded titles; this runs a quarter-second after typing stops, and finds chats
+	 * the list does not hold (older than the recent 50, or archived while the archive is open).
+	 */
+	let searchHits = $state<SearchHit[]>([]);
+	let searchStatus = $state<'idle' | 'loading' | 'done' | 'error'>('idle');
+	let searchNonce = $state(0);
+	let searchSeq = 0;
+
+	$effect(() => {
+		const q = chatFilter.trim().slice(0, SEARCH_QUERY_MAX_CHARS);
+		const includeArchived = showingArchive;
+		void searchNonce;
+		const seq = ++searchSeq;
+		if (!browser || !authenticated || q.length < SEARCH_QUERY_MIN_CHARS) {
+			searchHits = [];
+			searchStatus = 'idle';
+			return;
+		}
+		searchStatus = 'loading';
+		const timer = setTimeout(async () => {
+			try {
+				const hits = await fetchFresh(searchConversations({ q, includeArchived }));
+				if (seq !== searchSeq) return;
+				searchHits = hits;
+				searchStatus = 'done';
+			} catch {
+				if (seq !== searchSeq) return;
+				searchHits = [];
+				searchStatus = 'error';
+			}
+		}, 250);
+		return () => clearTimeout(timer);
 	});
+
+	/** Server hits worth showing: a matching message, or a title the loaded list does not hold. */
+	const messageHits = $derived.by(() => {
+		const shown = new Set(filtered.map((c) => c.id));
+		return searchHits.filter((hit) => hit.match || !shown.has(hit.conversationId));
+	});
+
+	function rerunSearch() {
+		searchNonce += 1;
+	}
 
 	const activeChatId = $derived.by(() => {
 		const match = /^\/chat\/([^/]+)$/.exec(activePath);
@@ -268,10 +344,10 @@
 		<div class="console-fmenu" onmouseleave={() => (openMenu = false)}>
 			<div class="console-fmenu__row">
 				<span class="l">Status</span>
-				<select class="console-fmenu__sel" bind:value={filters.status}>
-					<option>Active</option>
-					<option>Archived</option>
+				<select class="console-fmenu__sel" bind:value={filters.status} aria-label="Status">
 					<option>All</option>
+					<option>Running</option>
+					<option>Archived</option>
 				</select>
 			</div>
 			<div class="console-fmenu__sep"></div>
@@ -296,36 +372,87 @@
 	{/if}
 
 	<div class="console-sb__chatlist">
-		{#each grouped as [label, items] (label || 'flat')}
-			{#if label}
-				<div class="console-chatgroup">
-					<span>{label}</span>
-					<span class="ct">{items.length}</span>
+		{#if showingArchive}
+			<div class="console-archivebar">
+				<span>Archived chats</span>
+				<button type="button" onclick={() => (filters.status = 'All')}>Back to chats</button>
+			</div>
+		{/if}
+		{#each grouped as group (group.key)}
+			{#if group.label}
+				<div class="console-chatgroup {group.key === 'pinned' ? 'is-pinned' : ''}">
+					<span>{group.label}</span>
+					<span class="ct">{group.items.length}</span>
 				</div>
 			{/if}
-			{#each items as conversation (conversation.id)}
+			{#each group.items as conversation (conversation.id)}
 				{@const run = runFor(conversation)}
-				<a
-					class="console-chatrow {activeChatId === conversation.id ? 'active' : ''}"
-					href={`/chat/${conversation.id}`}
-					onclick={onNavigate}
-				>
-					<span>
-						{#if run}
-							<span class="pulse-dot"></span>
-						{:else}
-							<span class="pulse-dot idle"></span>
-						{/if}
-					</span>
-					<span class="t">{conversation.title}</span>
-					<span class="s">· {relativeShort(conversation.updatedAt)}</span>
-				</a>
+				<div class="console-chatitem" data-conversation-id={conversation.id}>
+					<a
+						class="console-chatrow {activeChatId === conversation.id ? 'active' : ''}"
+						href={`/chat/${conversation.id}`}
+						onclick={onNavigate}
+					>
+						<span>
+							{#if run}
+								<span class="pulse-dot"></span>
+							{:else}
+								<span class="pulse-dot idle"></span>
+							{/if}
+						</span>
+						<span class="t">{conversation.title}</span>
+						<span class="s">· {relativeShort(conversation.updatedAt)}</span>
+					</a>
+					<ConversationRowMenu
+						{conversation}
+						active={activeChatId === conversation.id}
+						onChanged={rerunSearch}
+						{onNavigate}
+					/>
+				</div>
 			{/each}
 		{/each}
-		{#if conversations.length === 0}
-			<div class="console-chatempty">No conversations yet</div>
-		{:else if sorted.length === 0}
+		{#if conversations.length === 0 && messageHits.length === 0}
+			<div class="console-chatempty">{showingArchive ? 'Nothing archived.' : 'No conversations yet'}</div>
+		{:else if sorted.length === 0 && messageHits.length === 0 && searchStatus !== 'loading'}
 			<div class="console-chatempty">No chats match.</div>
+		{/if}
+
+		{#if searchStatus !== 'idle'}
+			<section class="console-searchhits" aria-label="Search results in messages">
+				<div class="console-chatgroup">
+					<span>In messages</span>
+					<span class="ct">{searchStatus === 'loading' ? '…' : messageHits.length}</span>
+				</div>
+				{#if searchStatus === 'error'}
+					<div class="console-chatempty">Search failed. Try again.</div>
+				{:else if searchStatus === 'done' && messageHits.length === 0}
+					<div class="console-chatempty">Nothing found in messages.</div>
+				{/if}
+				{#each messageHits as hit (hit.conversationId)}
+					{@const when = new Date(hit.match?.createdAt ?? hit.updatedAt)}
+					<a
+						class="console-searchhit {activeChatId === hit.conversationId ? 'active' : ''}"
+						href={`/chat/${hit.conversationId}`}
+						onclick={onNavigate}
+					>
+						<span class="console-searchhit__head">
+							<span class="t">{hit.title}</span>
+							{#if hit.archived}
+								<span class="console-searchhit__badge">archived</span>
+							{/if}
+							<time class="s" datetime={when.toISOString()} title={when.toLocaleString()}>{relativeShort(when)}</time>
+						</span>
+						{#if hit.match}
+							<span class="console-searchhit__snippet">
+								{#each splitSnippet(hit.match.snippet) as part, i (i)}
+									{#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
+								{/each}
+							</span>
+						{/if}
+					</a>
+				{/each}
+			</section>
 		{/if}
 	</div>
 </div>
