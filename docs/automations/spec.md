@@ -203,6 +203,12 @@ tick, not on the automation. Manual runs are never retried: a person is standing
 can press the button again, and a manual failure does not count against the schedule's
 failure streak.
 
+Each scheduled slot gets exactly one `automation_run` job, however many dispatch ticks see it
+due while its retries play out. If the job queue itself gives up on that job before the
+retry policy could — the worker running it kept dying mid-run, or someone canceled it in
+`/settings/jobs` — the next dispatch tick skips the slot the same way, so the automation
+carries on from its following slot instead of staying stuck on a dead one.
+
 ### Failure surfacing
 
 When a tick gives up, three things happen, for automations of **every** mode (not just the

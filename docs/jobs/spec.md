@@ -77,7 +77,9 @@ Workers pick from queues in priority order within each queue.
 
 A worker acquires a job by setting `status = leased` and writing a `jobLeases` row. The lease has a TTL. If the worker crashes or hangs, the lease expires and another worker picks up the job on the next scan. This prevents jobs from being stuck due to worker failure.
 
-Workers renew their lease via heartbeat while the job is running.
+Workers renew their lease via heartbeat while the job is running. A lapsed lease is reclaimable whether the job is still `leased` (claimed, never started) or already `running` (its worker died mid-handler). Two cases are failed instead of re-leased, with a `job_stuck` review item: a `running` job with no attempts left — a handler that keeps killing its worker would otherwise crash every worker in turn — and a `running` job whose lease lapsed more than an hour ago, which is too stale to resume safely.
+
+A standalone worker (`scripts/worker.ts`) drains on SIGINT/SIGTERM: it stops claiming and waits up to `JOBS_WORKER_DRAIN_MS` for the job in flight before exiting. Worker settings come from the `JOBS_WORKER_*` environment variables; see [jobs.md](jobs.md#worker-configuration).
 
 ### Retry with exponential backoff
 
@@ -89,7 +91,9 @@ When a job fails:
 
 ### Deduplication
 
-Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same `dedupeKey` and a non-terminal status already exists, the new enqueue is a no-op and returns the existing job ID. Prevents double-mining a conversation when two hooks fire in quick succession.
+Jobs with a `dedupeKey` are deduplicated at enqueue time. If a job with the same `type` and `dedupeKey` and a non-terminal status already exists, the new enqueue is a no-op and returns the existing job ID. Prevents double-mining a conversation when two hooks fire in quick succession. The database enforces this with a partial unique index over the non-terminal statuses (`jobs_type_dedupe_active_uidx`); once a job finishes, its key is free for the next one.
+
+A caller that needs at-most-once-ever semantics — one run per automation slot, one evaluation per chat run, one sample per metrics window — passes `dedupeScope: 'forever'`, and the enqueue returns the existing job whatever its status.
 
 ### Concurrency limits
 

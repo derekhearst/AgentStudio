@@ -183,6 +183,10 @@ Notes:
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 
+## Background Jobs
+
+Scheduled automations, monitor checks, PR CI polling, memory mining, research runs and workspace cleanup run on a durable job queue in PostgreSQL. Every server process runs a worker and the scheduler by default; `bun run worker` starts a worker without the web tier, for deployments that scale them separately. Workers are configured with optional `JOBS_WORKER_*` environment variables (queues, job types, poll interval, lease length, worker id, shutdown drain time), and `JOBS_WORKER_ENABLED=0` / `JOBS_SCHEDULER_ENABLED=0` turn them off. Job history is at `/settings/jobs`. See [docs/jobs/jobs.md](docs/jobs/jobs.md) for how the queue behaves and the full variable list.
+
 ## Projects
 
 Projects are durable containers for the work users produce with their agents. Most projects have a real working directory on disk — either a fresh `git init` or a clone imported from GitHub — and the agent writes files there, with git as the version history. Browse at `/projects`; a conversation can be bound to a project with `set_project_context` so the agent knows where to work. See [docs/projects/projects.md](docs/projects/projects.md) for the user-facing domain doc, [docs/projects/spec.md](docs/projects/spec.md) for the full data model + behavior contracts, or [docs/projects/plan.md](docs/projects/plan.md) for the phased build sequence.
