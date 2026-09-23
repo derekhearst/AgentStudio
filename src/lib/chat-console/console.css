@@ -2647,6 +2647,8 @@ a.console-crumbs__seg:hover {
 	border-radius: 4px;
 	background: var(--color-base-200);
 	opacity: 0;
+	/* Hidden means untouchable too: a tap on the time label must not archive the chat. */
+	pointer-events: none;
 	transition: opacity 100ms ease-out;
 }
 
@@ -2654,6 +2656,7 @@ a.console-crumbs__seg:hover {
 .console-chatitem:focus-within .console-rowactions,
 .console-rowactions.is-open {
 	opacity: 1;
+	pointer-events: auto;
 }
 
 .console-rowactions__btn {
@@ -2682,6 +2685,7 @@ a.console-crumbs__seg:hover {
 	.console-chatitem .console-chatrow { padding-right: 36px; }
 	.console-rowactions {
 		opacity: 1;
+		pointer-events: auto;
 		background: transparent;
 	}
 	/* One-tap archive is a hover convenience; on touch it lives in the menu. */
