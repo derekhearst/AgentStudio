@@ -3,6 +3,7 @@
 	import ContentPanel from '$lib/ui/ContentPanel.svelte'
 	import { getSystemReadiness } from '$lib/settings/settings.remote'
 	import type { ReadinessRow } from '$lib/settings/readiness'
+	import { remoteErrorMessage } from '$lib/ui/remote-error'
 
 	/**
 	 * Settings > System: read-only. These are set where the server is deployed (environment
@@ -17,7 +18,7 @@
 	onMount(() => {
 		getSystemReadiness()
 			.then((result) => (rows = result))
-			.catch((err) => (loadError = err instanceof Error ? err.message : String(err)))
+			.catch((err) => (loadError = remoteErrorMessage(err, 'Could not load the system checklist')))
 	})
 </script>
 

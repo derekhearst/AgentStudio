@@ -5,6 +5,7 @@
 	} from '$lib/observability/review.remote';
 	import { startPullRequestFixCommand } from '$lib/source-control/source-control.remote';
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
 	type Inbox = Extract<Result, { adminOnly: false }>;
@@ -53,7 +54,7 @@
 			});
 			onChange();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to resolve');
+			alert(remoteErrorMessage(e, 'Failed to resolve'));
 		}
 	}
 
@@ -92,7 +93,7 @@
 			alert(describeFixRunJob(result));
 			onChange();
 		} catch (e) {
-			alert(e instanceof Error ? e.message : 'Failed to queue the fix run');
+			alert(remoteErrorMessage(e, 'Failed to queue the fix run'));
 		} finally {
 			fixing = null;
 		}

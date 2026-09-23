@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
+import { error } from '@sveltejs/kit'
 import * as devalue from 'devalue'
 import { authenticateContext, getActiveUserId, getSql, uniquePrefix } from './helpers'
 import { listRemoteFunctions } from './remote-functions'
 import { describeFixRunJob, mayFixPullRequest } from '../src/lib/source-control/pr-fix'
 import { findPullRequestForFix } from '../src/lib/source-control/pr-fix.server'
+import { remoteErrorMessage } from '../src/lib/ui/remote-error'
 
 /**
  * #20 follow-up — "Fix it" checks the pull request is yours before it queues anything, and
@@ -88,5 +92,28 @@ test.describe('source-control/pr-fix — ownership is asked before the job exist
 		expect(body).toMatchObject({ type: 'error', status: 404, error: { message: 'Pull request not found' } })
 
 		expect(await sql`select id from jobs where type = 'pr_fix' and dedupe_key = ${`pr_fix:item:${reviewItemId}`}`).toHaveLength(0)
+	})
+})
+
+test.describe('source-control/pr-fix — the button says what the server said', () => {
+	test('a refusal shows its own message, not the generic fallback', () => {
+		// A remote call rejects with SvelteKit's HttpError, which is not an Error, so the old
+		// `e instanceof Error ? e.message : fallback` showed "Failed to queue the fix run" for
+		// the 404 above. `remoteErrorMessage` reads the message the server chose.
+		let refusal: unknown
+		try {
+			error(404, 'Pull request not found')
+		} catch (err) {
+			refusal = err
+		}
+		expect(refusal instanceof Error).toBe(false)
+		expect(remoteErrorMessage(refusal, 'Failed to queue the fix run')).toBe('Pull request not found')
+		expect(remoteErrorMessage(new Error('Network down'), 'fallback')).toBe('Network down')
+		expect(remoteErrorMessage('???', 'fallback')).toBe('fallback')
+
+		const inbox = readFileSync(join(process.cwd(), 'src/routes/review/_components/InboxList.svelte'), 'utf8')
+		expect(inbox).toContain("alert(remoteErrorMessage(e, 'Failed to queue the fix run'))")
+		expect(inbox).toContain("alert(remoteErrorMessage(e, 'Failed to resolve'))")
+		expect(inbox).not.toMatch(/e instanceof Error \? e\.message/)
 	})
 })

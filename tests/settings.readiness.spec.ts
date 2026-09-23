@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { authenticateContext } from './helpers'
 import { buildReadinessRows, type ReadinessFacts } from '../src/lib/settings/readiness'
@@ -93,5 +95,13 @@ test.describe('settings/readiness — the panel', () => {
 		for (const id of ['claude', 'sandbox', 'gateway', 'github', 'push']) {
 			await expect(list.locator(`[data-readiness="${id}"]`), id).toHaveCount(1)
 		}
+	})
+
+	test('a failed load shows the message the server chose', () => {
+		// A remote call rejects with an HttpError, which is not an Error, so the old
+		// `err instanceof Error ? err.message : String(err)` printed the error object itself.
+		const panel = readFileSync(join(process.cwd(), 'src/lib/settings/panels/SettingsSystemPanel.svelte'), 'utf8')
+		expect(panel).toContain('loadError = remoteErrorMessage(err, ')
+		expect(panel).not.toContain('err instanceof Error')
 	})
 })
