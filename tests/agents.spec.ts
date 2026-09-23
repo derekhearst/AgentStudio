@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { acquireGlobalStateLock, authenticateContext, cleanupPrefixedRecords, seedAgent, uniquePrefix } from './helpers'
+import {
+	acquireGlobalStateLock,
+	authenticateContext,
+	cleanupPrefixedRecords,
+	getSql,
+	seedAgent,
+	uniquePrefix,
+	waitForHydration,
+} from './helpers'
 
 /**
  * Takes the same lock the budget specs use. Anything that runs the model has to: a
@@ -46,6 +54,37 @@ test('agents/new opens a guided creation chat rather than a form', async ({ page
 	// prompt in the query string. The redirect is the whole behaviour of this route.
 	await page.waitForURL(/\/chat\/[0-9a-f-]+/, { timeout: 30_000 })
 	expect(page.url()).toMatch(/\/chat\/[0-9a-f-]+/)
+})
+
+/**
+ * /agents/new used to push the chat on top of itself. Back from the chat then landed on
+ * /agents/new, which created another conversation, started another model run and jumped
+ * forward again — Back could never get past it, and every attempt cost a run.
+ */
+test('Back from the guided creation chat returns to where you came from', async ({ page }) => {
+	const sql = getSql()
+	await authenticateContext(page.context())
+	// The database's clock, not this machine's: the two need not agree.
+	const [{ startedAt }] = await sql<{ startedAt: Date }[]>`select now() as "startedAt"`
+	const created = () => sql<{ id: string }[]>`
+		select id from conversations where title = 'Create agent' and created_at >= ${startedAt}
+	`
+
+	try {
+		await page.goto('/agents')
+		await waitForHydration(page)
+		await page.goto('/agents/new')
+		await page.waitForURL(/\/chat\/[0-9a-f-]+/, { timeout: 30_000 })
+
+		await page.goBack()
+		await expect(page).toHaveURL(/\/agents$/)
+		// Give a re-mounted /agents/new every chance to fire before counting.
+		await page.waitForTimeout(1_500)
+		await expect(page).toHaveURL(/\/agents$/)
+		expect(await created()).toHaveLength(1)
+	} finally {
+		for (const row of await created()) await sql`delete from conversations where id = ${row.id}`
+	}
 })
 
 test('the agent detail page renders the agent', async ({ page }) => {
