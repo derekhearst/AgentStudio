@@ -181,7 +181,8 @@ type ClaimCandidate = {
 	status: JobStatus
 	attempt_count: number
 	max_attempts: number
-	lease_expires_at: Date | string | null
+	/** Seconds since the lease lapsed, by the database clock; null when there is no lease. */
+	lease_lapsed_seconds: number | null
 }
 
 /**
@@ -191,16 +192,16 @@ type ClaimCandidate = {
  * handler probably IS what kills the process, so re-leasing it would crash the next worker
  * too. Returns null to re-lease, or the reason to fail it.
  */
-export function staleRunningJobVerdict(
-	job: { attemptCount: number; maxAttempts: number; leaseExpiresAt: Date },
-	now = new Date(),
-): string | null {
-	const lapsedMs = now.getTime() - job.leaseExpiresAt.getTime()
+export function staleRunningJobVerdict(job: {
+	attemptCount: number
+	maxAttempts: number
+	leaseLapsedMs: number
+}): string | null {
 	if (job.attemptCount >= job.maxAttempts) {
 		return `The worker running this job stopped heartbeating on attempt ${job.attemptCount} of ${job.maxAttempts}, and no attempts are left.`
 	}
-	if (lapsedMs > ABANDONED_LEASE_MS) {
-		return `The worker running this job stopped heartbeating ${Math.round(lapsedMs / 60_000)} minutes ago — too long ago to resume it safely.`
+	if (job.leaseLapsedMs > ABANDONED_LEASE_MS) {
+		return `The worker running this job stopped heartbeating ${Math.round(job.leaseLapsedMs / 60_000)} minutes ago — too long ago to resume it safely.`
 	}
 	return null
 }
@@ -253,7 +254,9 @@ async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
 	// stays low.
 	const outcome = await db.transaction(async (tx): Promise<ClaimOutcome> => {
 		const candidateText = `
-			select id, status, attempt_count, max_attempts, lease_expires_at from jobs
+			select id, status, attempt_count, max_attempts,
+				extract(epoch from (now() - lease_expires_at))::float8 as lease_lapsed_seconds
+			from jobs
 			where (
 				(status in ('pending'::job_status, 'retry_wait'::job_status) and scheduled_at <= now())
 				or (status in ('leased'::job_status, 'running'::job_status) and lease_expires_at < now())
@@ -270,11 +273,13 @@ async function claimOnce(opts: ClaimJobOptions): Promise<ClaimOutcome> {
 		const candidate = Array.isArray(candidateRows) ? candidateRows[0] : null
 		if (!candidate) return { kind: 'empty' }
 
-		if (candidate.status === 'running' && candidate.lease_expires_at) {
+		// The lapse is computed in SQL: this client returns timestamps as raw strings, and the
+		// candidate filter above already judged "lapsed" by the database clock.
+		if (candidate.status === 'running' && candidate.lease_lapsed_seconds !== null) {
 			const reason = staleRunningJobVerdict({
-				attemptCount: candidate.attempt_count,
-				maxAttempts: candidate.max_attempts,
-				leaseExpiresAt: new Date(candidate.lease_expires_at),
+				attemptCount: Number(candidate.attempt_count),
+				maxAttempts: Number(candidate.max_attempts),
+				leaseLapsedMs: Number(candidate.lease_lapsed_seconds) * 1000,
 			})
 			if (reason) {
 				const [failed] = await tx

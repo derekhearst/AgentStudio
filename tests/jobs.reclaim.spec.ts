@@ -175,16 +175,13 @@ test.describe('jobs/reclaim — a leased job whose lease lapsed', () => {
 test.describe('jobs/reclaim — staleRunningJobVerdict', () => {
 	test('re-leases with attempts left and a recent lapse; fails otherwise', async () => {
 		const { staleRunningJobVerdict } = await import('../src/lib/jobs/jobs.server')
-		const now = new Date('2026-09-22T12:00:00.000Z')
-		const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000)
+		const minutes = (m: number) => m * 60_000
 
-		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseExpiresAt: minutesAgo(2) }, now)).toBeNull()
-		expect(staleRunningJobVerdict({ attemptCount: 2, maxAttempts: 3, leaseExpiresAt: minutesAgo(59) }, now)).toBeNull()
-		expect(staleRunningJobVerdict({ attemptCount: 3, maxAttempts: 3, leaseExpiresAt: minutesAgo(2) }, now)).toMatch(
+		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseLapsedMs: minutes(2) })).toBeNull()
+		expect(staleRunningJobVerdict({ attemptCount: 2, maxAttempts: 3, leaseLapsedMs: minutes(59) })).toBeNull()
+		expect(staleRunningJobVerdict({ attemptCount: 3, maxAttempts: 3, leaseLapsedMs: minutes(2) })).toMatch(
 			/no attempts are left/,
 		)
-		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseExpiresAt: minutesAgo(61) }, now)).toMatch(
-			/too long ago/,
-		)
+		expect(staleRunningJobVerdict({ attemptCount: 1, maxAttempts: 3, leaseLapsedMs: minutes(61) })).toMatch(/too long ago/)
 	})
 })
