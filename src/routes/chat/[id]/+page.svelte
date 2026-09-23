@@ -479,7 +479,7 @@
 			stats,
 			messages,
 			totalBudget: activeContextLimit,
-			liveTokenEstimate: liveContextStats?.tokenEstimate ?? null,
+			systemPromptTokens: liveContextStats?.systemPromptTokens ?? null,
 		}),
 	);
 
@@ -1396,13 +1396,14 @@
 		consoleState.persistedToolCalls = persisted;
 	});
 
+	// The rail shows the same figure as the header's meter (#78): the stream's own estimate is
+	// the system prompt alone, which read as a nearly empty context from the first turn on.
 	$effect(() => {
-		const lc = liveContextStats;
-		consoleState.liveContext = lc
+		consoleState.liveContext = conversationData
 			? {
-					tokenEstimate: lc.tokenEstimate,
-					contextWindow: lc.contextWindow,
-					didCompact: lc.didCompact,
+					tokenEstimate: contextMetrics.used,
+					contextWindow: contextMetrics.total,
+					didCompact: liveContextStats?.didCompact ?? false,
 				}
 			: null;
 	});
