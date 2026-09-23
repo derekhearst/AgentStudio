@@ -60,3 +60,48 @@ test('built-in filesystem calls are confined to the run workspace', () => {
 	check('prefix is not inside', String(isInside(WS, `${WS}-evil`)), 'false')
 
 })
+
+test('a home-directory path is refused: the SDK expands `~`, path.resolve does not', () => {
+	const WS = process.platform === 'win32' ? 'C:\\sandbox\\user-aaa' : '/sandbox/user-aaa'
+	// Nothing below needs the disk: every spelling resolves to itself.
+	const g = (file_path: string) =>
+		guardWorkspaceAccess({
+			toolName: 'Read',
+			toolInput: { file_path },
+			workspaceRoot: WS,
+			bashPolicy: 'sandboxed',
+			resolveRealPath: (p) => p,
+		}).verdict
+
+	expect(g('~/.ssh/id_rsa')).toBe('deny')
+	expect(g('~')).toBe('deny')
+	expect(g('~root/.bashrc')).toBe('deny')
+	// Not a home-directory prefix: a tilde further in, or an Office lock file.
+	expect(g('notes/~/draft.md')).toBe('allow')
+	expect(g('~$budget.xlsx')).toBe('allow')
+})
+
+test('a `..` argument is also resolved exactly as written, since the SDK may open it that way', () => {
+	const WS = process.platform === 'win32' ? 'C:\\sandbox\\user-aaa' : '/sandbox/user-aaa'
+	const HOST = process.platform === 'win32' ? 'C:\\host\\x' : '/host/x'
+	const seen: string[] = []
+	// Stands in for the disk: `link` is a symlink out of the workspace, so any spelling that
+	// goes through it and then `..` lands outside. The normalised spelling never contains it.
+	const resolveRealPath = (p: string) => {
+		seen.push(p)
+		return /link[\\/]\.\./.test(p) ? HOST : p
+	}
+	const g = (file_path: string) =>
+		guardWorkspaceAccess({
+			toolName: 'Write',
+			toolInput: { file_path, content: 'x' },
+			workspaceRoot: WS,
+			bashPolicy: 'sandboxed',
+			resolveRealPath,
+		}).verdict
+
+	expect(g('link/../x.txt')).toBe('deny')
+	expect(seen.some((p) => /link[\\/]\.\./.test(p))).toBe(true)
+	expect(g('dir/../x.txt')).toBe('allow')
+	expect(g('x.txt')).toBe('allow')
+})

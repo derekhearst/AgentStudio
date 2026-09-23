@@ -51,9 +51,11 @@ Tools cannot traverse above the workspace root. Any path that resolves outside t
 
 - A path that does not exist yet (a file about to be written) is judged by the nearest folder that does exist, since that is where it would be created.
 - A broken link is judged by where it points, because writing through it would create the file there.
+- A `..` ("go up one folder") that comes straight after a link is refused when its meaning depends on the operating system. Linux and macOS follow the link first and then go up from wherever it led; Windows goes up in the written path first. So `shortcut/../notes.txt`, where `shortcut` points at another user's folder, means "next to that folder" on the Linux servers the app runs on, even though it reads like "`notes.txt` in this workspace". Paths where both readings land in the same place, which is nearly all of them, work normally.
 - Links that stay inside the workspace keep working normally.
 - The same rule covers the agent's own file tools, the SDK's built-in `Read` / `Write` / `Edit` / `Glob` / `Grep` calls, the chat's file preview, attachment staging and project knowledge files.
-- Directory listings show a link as an entry but never walk into it.
+- For the SDK's built-in tools, a path is checked both as written and in its tidied form, since either may be what gets opened. A path starting with `~` (a home folder, to the SDK) is refused.
+- Directory listings never walk into a link. The agent's `list_files` shows the link itself as an entry; the chat's preview leaves it out.
 
 One limit remains: a process that swaps a link in the instant between the check and the file being opened can still win that race. Closing it fully needs operating-system support that Node.js does not offer today.
 

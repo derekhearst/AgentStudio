@@ -12,7 +12,7 @@ import {
 } from '../src/lib/chat-console/preview.server'
 
 /**
- * #29 — the rail preview reads files with the server's privileges and hands the bytes to
+ * The rail preview (#29) reads files with the server's privileges and hands the bytes to
  * the browser, so its containment is what stands between a workspace symlink and the
  * server's environment or another user's projects. The docs promise there is no way to ask
  * it for an arbitrary file on the server; these specs hold it to that with real links.

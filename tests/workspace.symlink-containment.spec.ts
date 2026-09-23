@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { safePathWithin } from '../src/lib/workspace/workspace.server'
@@ -128,6 +128,92 @@ test.describe('workspace/containment — resolveRealPath', () => {
 		expect(resolveRealPath(join(ws, 'root', 'a', 'b.txt'))).toBe(join(resolveRealPath(outside), 'a', 'b.txt'))
 		expect(isRealPathWithin(ws, join(ws, 'root', 'a'))).toBe(false)
 		expect(isRealPathWithin(ws, join(ws, 'src', 'a'))).toBe(true)
+	})
+})
+
+/**
+ * `..` straight after a link. Linux and macOS follow the link first and then take `..`
+ * from wherever it really led; `path.resolve` (and Windows) collapse it in the string.
+ * So `s/../x` with `s -> <elsewhere>/dir` is `<workspace>/x` on paper and `<elsewhere>/x`
+ * to the kernel, and a dangling link spelled that way was a create-anywhere primitive on
+ * the POSIX hosts production runs on. A spelling whose two readings differ is refused on
+ * every host; one whose readings agree keeps working.
+ */
+test.describe('workspace/containment — `..` after a link is judged the way the kernel reads it', () => {
+	/** Another user's git hooks: the kind of not-yet-existing file an attacker wants to plant. */
+	function hooksOfOtherUser() {
+		const hooks = join(layout.sibling, 'projects', 'p1', '.git', 'hooks')
+		mkdirSync(hooks, { recursive: true })
+		return hooks
+	}
+
+	test("a dangling link spelled `s/../x`, where `s` leads out, cannot plant a file in another user's tree", () => {
+		const { ws } = layout
+		link(hooksOfOtherUser(), join(ws, 's'), 'dir')
+		// The kernel creates this at <sibling>/projects/p1/.git/pre-commit; the string says <ws>/pre-commit.
+		link('s/../pre-commit', join(ws, 'L'), 'file')
+
+		expect(() => safePathWithin(ws, 'L')).toThrow(/Path escapes sandbox workspace/)
+		expect(() => resolveRealPath(join(ws, 'L'))).toThrow(/different things depending on how ".." is resolved/)
+		const g = (toolName: string, toolInput: unknown) =>
+			guardWorkspaceAccess({ toolName, toolInput, workspaceRoot: ws, bashPolicy: 'sandboxed' }).verdict
+		expect(g('Write', { file_path: 'L', content: '#!/bin/sh' })).toBe('deny')
+		expect(g('Write', { file_path: join(ws, 'L'), content: '#!/bin/sh' })).toBe('deny')
+	})
+
+	test('the mirror case, a `..` that only Windows would collapse out of the workspace, is refused too', () => {
+		const { ws } = layout
+		const deep = join(ws, 'src', 'deep', 'er')
+		mkdirSync(deep, { recursive: true })
+		link(deep, join(ws, 'in'), 'dir')
+		// Kernel: <ws>/src/x. Windows: <ws>/../x, outside.
+		link('in/../../x', join(ws, 'W'), 'file')
+		expect(() => safePathWithin(ws, 'W')).toThrow(/Path escapes sandbox workspace/)
+	})
+
+	test('`..` in a link target that does not follow a link still works', () => {
+		const { ws } = layout
+		mkdirSync(join(ws, 'd'))
+		link('d/../src/later.ts', join(ws, 'M'), 'file')
+		// Leaves the workspace in the string and comes straight back: both readings agree.
+		link('../r1/src/later.ts', join(ws, 'N'), 'file')
+		expect(safePathWithin(ws, 'M')).toBe(join(ws, 'M'))
+		expect(safePathWithin(ws, 'N')).toBe(join(ws, 'N'))
+		expect(resolveRealPath(join(ws, 'M'))).toBe(join(resolveRealPath(ws), 'src', 'later.ts'))
+	})
+
+	test('a raw path argument is resolved as written, not as `path.resolve` tidies it', () => {
+		const { ws, outside } = layout
+		mkdirSync(join(outside, 'dir'))
+		link(join(outside, 'dir'), join(ws, 's'), 'dir')
+		link(join(ws, 'src'), join(ws, 'alias'), 'dir')
+		const g = (toolName: string, toolInput: unknown) =>
+			guardWorkspaceAccess({ toolName, toolInput, workspaceRoot: ws, bashPolicy: 'sandboxed' }).verdict
+
+		// Normalised, this is <ws>/x. Opened as written on Linux, it is <outside>/x.
+		expect(g('Write', { file_path: 's/../x', content: 'x' })).toBe('deny')
+		expect(g('Write', { file_path: `${ws}${sep}s${sep}..${sep}x`, content: 'x' })).toBe('deny')
+		expect(() => resolveRealPath(`${ws}${sep}s${sep}..${sep}x`)).toThrow(/different things/)
+
+		// `alias` is <ws>/src, whose parent is the workspace either way.
+		expect(g('Write', { file_path: 'alias/../new.ts', content: 'x' })).toBe('allow')
+		expect(g('Read', { file_path: 'src/../src/index.ts' })).toBe('allow')
+		// A folder that does not exist yet, then `..`: where mkdir -p then open would land.
+		expect(resolveRealPath(`${ws}${sep}missing${sep}..${sep}src${sep}index.ts`)).toBe(
+			join(resolveRealPath(ws), 'src', 'index.ts'),
+		)
+	})
+
+	test('a chain of links that each double back is refused quickly instead of fanning out', () => {
+		const { ws } = layout
+		mkdirSync(join(ws, 'c0'))
+		// Each link names the previous one twice. Resolved naively that is 2^n walks.
+		for (let i = 1; i <= 24; i++) link(`c${i - 1}/../c${i - 1}`, join(ws, `c${i}`), 'dir')
+		const started = Date.now()
+		expect(() => safePathWithin(ws, 'c24/new.txt')).toThrow(/Path escapes sandbox workspace/)
+		expect(Date.now() - started).toBeLessThan(2_000)
+		// A short chain of the same shape is fine.
+		expect(safePathWithin(ws, 'c2/new.txt')).toBe(join(ws, 'c2', 'new.txt'))
 	})
 })
 
