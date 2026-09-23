@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupExtendedPrefix, getSql, seedSkill, uniquePrefix, waitForHydration } from './helpers'
+import {
+	acquireGlobalStateLock,
+	authenticateContext,
+	cleanupExtendedPrefix,
+	getActiveUserId,
+	getSql,
+	seedSkill,
+	uniquePrefix,
+	waitForHydration,
+} from './helpers'
 
 /**
  * /skills tells "loading", "nothing matches" and "no skills" apart.
@@ -54,25 +63,36 @@ test.describe('/skills list states', () => {
 	})
 
 	test('+ New skill opens the guided creation chat', async ({ page }) => {
+		// The chat page sends the opening prompt, which starts a model run, so this holds the
+		// budget lock like every other spec that runs the model (see agents.spec.ts).
+		const releaseBudgetLock = await acquireGlobalStateLock('budget-state')
 		const sql = getSql()
-		await authenticateContext(page.context())
-		const [{ startedAt }] = await sql<{ startedAt: Date }[]>`select now() as "startedAt"`
-		const created = () => sql<{ id: string }[]>`
-			select id from conversations where title = 'Create skill' and created_at >= ${startedAt}
-		`
+		const userId = await getActiveUserId()
+		let conversationId: string | undefined
 
 		try {
+			await authenticateContext(page.context())
 			await page.goto('/skills')
 			await waitForHydration(page)
 			await page.getByRole('button', { name: '+ New skill' }).click()
 			await page.waitForURL(/\/chat\/[0-9a-f-]+/, { timeout: 30_000 })
-			expect(await created()).toHaveLength(1)
+
+			// This click's conversation, by the id in the URL. Counting "Create skill" rows by
+			// time also counted, and then deleted, one another worker was still streaming —
+			// this file's own mobile run among them.
+			conversationId = /\/chat\/([0-9a-f-]+)/.exec(new URL(page.url()).pathname)?.[1]
+			expect(conversationId).toBeTruthy()
+			const rows = await sql<{ title: string }[]>`
+				select title from conversations where id = ${conversationId!} and user_id = ${userId}
+			`
+			expect(rows.map((row) => row.title)).toEqual(['Create skill'])
 
 			// A deliberate click, so the list stays in history: Back returns to it.
 			await page.goBack()
 			await expect(page).toHaveURL(/\/skills$/)
 		} finally {
-			for (const row of await created()) await sql`delete from conversations where id = ${row.id}`
+			if (conversationId) await sql`delete from conversations where id = ${conversationId} and user_id = ${userId}`
+			await releaseBudgetLock()
 		}
 	})
 })

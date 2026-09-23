@@ -64,11 +64,18 @@ test('agents/new opens a guided creation chat rather than a form', async ({ page
 test('Back from the guided creation chat returns to where you came from', async ({ page }) => {
 	const sql = getSql()
 	await authenticateContext(page.context())
-	// The database's clock, not this machine's: the two need not agree.
-	const [{ startedAt }] = await sql<{ startedAt: Date }[]>`select now() as "startedAt"`
-	const created = () => sql<{ id: string }[]>`
-		select id from conversations where title = 'Create agent' and created_at >= ${startedAt}
-	`
+	// Counted from this page's own traffic, not by title in the database: other specs (and
+	// this file's run in the other project) open /agents/new too, and a count by title would
+	// include, then delete, their conversations.
+	let creates = 0
+	page.on('request', (request) => {
+		if (request.method() === 'POST' && /\/_app\/remote\/[^/]+\/createConversation$/.test(new URL(request.url()).pathname)) creates++
+	})
+	const chatIds = new Set<string>()
+	page.on('framenavigated', (frame) => {
+		const id = frame === page.mainFrame() ? /\/chat\/([0-9a-f-]+)/.exec(new URL(frame.url()).pathname)?.[1] : undefined
+		if (id) chatIds.add(id)
+	})
 
 	try {
 		await page.goto('/agents')
@@ -81,9 +88,9 @@ test('Back from the guided creation chat returns to where you came from', async 
 		// Give a re-mounted /agents/new every chance to fire before counting.
 		await page.waitForTimeout(1_500)
 		await expect(page).toHaveURL(/\/agents$/)
-		expect(await created()).toHaveLength(1)
+		expect(creates).toBe(1)
 	} finally {
-		for (const row of await created()) await sql`delete from conversations where id = ${row.id}`
+		for (const id of chatIds) await sql`delete from conversations where id = ${id}`
 	}
 })
 
