@@ -161,4 +161,57 @@ test.describe('review/page-ui — renders all Wave 5 item types', () => {
 			await clearItems(prefix)
 		}
 	})
+
+	test('under "Open queue" the type and severity filters still narrow the list', async ({ page }) => {
+		// "Open queue" read only the limit, so every type and severity filter listed the whole
+		// queue under its own label. The queue sorts by severity first, so the items that must
+		// show unfiltered are critical: the newest criticals head it however full it is.
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('review-open-queue-filter')
+		await authenticateContext(page.context())
+
+		try {
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'warning',
+				summary: `${prefix} CI failed on #9 — build`,
+				payload: { checkName: 'build', prNumber: 9 },
+			})
+			await seedReviewItem({
+				type: 'policy_override_request',
+				severity: 'critical',
+				summary: `${prefix} override request`,
+				payload: { reason: 'spec' },
+			})
+			await seedReviewItem({
+				type: 'pull_request_checks_failed',
+				severity: 'critical',
+				summary: `${prefix} CI failed on #8 — lint`,
+				payload: { checkName: 'lint', prNumber: 8 },
+			})
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await page.goto('/review', { waitUntil: 'domcontentloaded' })
+			await expect(page.locator('body')).toContainText(`${prefix} override request`, { timeout: 30_000 })
+
+			const statusFilter = page.locator('select', { has: page.locator('option[value="in_progress"]') })
+			await statusFilter.selectOption({ label: 'Open queue' })
+			await expect(page.locator('body')).toContainText(`${prefix} override request`)
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+
+			const typeFilter = page.locator('select', { has: page.locator('option[value="pull_request_checks_failed"]') })
+			await typeFilter.selectOption('pull_request_checks_failed')
+			await expect(page.locator('body')).not.toContainText(`${prefix} override request`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #9`)
+
+			const severityFilter = page.locator('select', { has: page.locator('option[value="critical"]') })
+			await severityFilter.selectOption('critical')
+			await expect(page.locator('body')).not.toContainText(`${prefix} CI failed on #9`, { timeout: 15_000 })
+			await expect(page.locator('body')).toContainText(`${prefix} CI failed on #8`)
+			await expect(page.getByTestId('inbox-error')).toHaveCount(0)
+		} finally {
+			await clearItems(prefix)
+		}
+	})
 })

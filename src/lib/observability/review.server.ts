@@ -111,17 +111,28 @@ export async function listReviewItems(filters: ListReviewItemsFilters = {}): Pro
 		.limit(filters.limit ?? 200)
 }
 
-/** Default open-queue view: open + in_progress items ordered by severity desc + age. */
-export async function listOpenReviewItems(limit = 200): Promise<ReviewItemRow[]> {
+/**
+ * Default open-queue view: open + in_progress items ordered by severity desc + age.
+ *
+ * Takes the inbox's type and severity filters too. It used to take only a limit, so under
+ * "Open queue" every type and severity filter listed the whole queue under its own label.
+ */
+export async function listOpenReviewItems(
+	filters: Pick<ListReviewItemsFilters, 'type' | 'severity' | 'limit'> = {},
+): Promise<ReviewItemRow[]> {
+	const where = [drizzleSql`${reviewItems.status} in ('open', 'in_progress')`]
+	if (filters.type) where.push(eq(reviewItems.type, filters.type))
+	if (filters.severity) where.push(eq(reviewItems.severity, filters.severity))
+
 	return db
 		.select()
 		.from(reviewItems)
-		.where(drizzleSql`${reviewItems.status} in ('open', 'in_progress')`)
+		.where(and(...where))
 		.orderBy(
 			drizzleSql`case ${reviewItems.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`,
 			desc(reviewItems.createdAt),
 		)
-		.limit(limit)
+		.limit(filters.limit ?? 200)
 }
 
 export async function getReviewItemById(itemId: string): Promise<ReviewItemRow | null> {

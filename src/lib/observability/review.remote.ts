@@ -26,7 +26,7 @@ import { listMetricSnapshotsWithSeries } from './metrics.server'
 export const listReviewItemsQuery = query(reviewItemListSchema, async (input) => {
 	requireAuthenticatedRequestUser()
 	const items = input.openOnly
-		? await listOpenReviewItems(input.limit)
+		? await listOpenReviewItems({ type: input.type, severity: input.severity, limit: input.limit })
 		: await listReviewItems({
 				status: input.status,
 				type: input.type,

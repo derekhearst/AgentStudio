@@ -77,7 +77,7 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 | `budget_exceeded`         | warning  | A run was blocked or mid-run spending exceeded a hard limit |
 | `pull_request_checks_failed` | warning | A check failed on a pull request an agent opened            |
 
-The inbox's type filter offers every item type the database has, and the server accepts every one of them. (Before 2026-09-23 the server's list was a hand-kept copy that missed "PR checks failed": choosing it failed, and the list kept showing the previous filter's items under the new label.) If a reload of the list fails, the inbox says why above the list and that the items shown are from the previous filter.
+The inbox's type filter offers every item type the database has, and the server accepts every one of them. (Before 2026-09-23 the server's list was a hand-kept copy that missed "PR checks failed": choosing it failed, and the list kept showing the previous filter's items under the new label.) If a reload of the list fails, the inbox says why above the list and that the items shown are from the previous filter. The type and severity filters apply under every status, including "Open queue" (open and in-progress items, most severe first). Before 2026-09-23 "Open queue" ignored them and listed every open item whichever type or severity was picked.
 
 ### Inbox actions
 
