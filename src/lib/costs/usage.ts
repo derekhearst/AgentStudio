@@ -45,7 +45,20 @@ let modelCache: ModelInfo[] | null = null
 let modelCacheTime = 0
 const MODEL_CACHE_TTL = 1000 * 60 * 60 // 1 hour
 
-async function getModelPricing(modelId: string): Promise<{ promptPrice: number; completionPrice: number } | null> {
+export type ModelPricing = {
+	promptPrice: number
+	completionPrice: number
+	/** Null when the catalogue lists no separate cache price for the model. */
+	cacheReadPrice: number | null
+	cacheWritePrice: number | null
+}
+
+/**
+ * A model's per-token prices from the OpenRouter catalogue, or null when the catalogue has no
+ * entry for it (or cannot be reached). Exported for the gateway's per-turn pricing, which
+ * also prices cached prompt tokens (`$lib/engine/gateway-run.server`).
+ */
+export async function getModelPricing(modelId: string): Promise<ModelPricing | null> {
 	if (!modelCache || Date.now() - modelCacheTime > MODEL_CACHE_TTL) {
 		try {
 			modelCache = await listModels()
@@ -58,9 +71,15 @@ async function getModelPricing(modelId: string): Promise<{ promptPrice: number; 
 	const model = modelCache.find((m) => m.id === modelId)
 	if (!model) return null
 
+	const optional = (value: string | null | undefined) => {
+		const parsed = value == null ? NaN : parseFloat(value)
+		return Number.isFinite(parsed) ? parsed : null
+	}
 	return {
 		promptPrice: parseFloat(model.promptPrice),
 		completionPrice: parseFloat(model.completionPrice),
+		cacheReadPrice: optional(model.cacheReadPrice),
+		cacheWritePrice: optional(model.cacheWritePrice),
 	}
 }
 
