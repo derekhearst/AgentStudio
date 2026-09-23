@@ -33,7 +33,9 @@ test.describe('api/tts — refusals', () => {
 
 		const broken = await page.request.post('/api/tts', {
 			headers: { 'content-type': 'application/json' },
-			data: '{"text": ',
+			// A Buffer, not a string: Playwright JSON-encodes a string body when the content type is
+			// JSON, which would arrive as a valid JSON string rather than broken JSON.
+			data: Buffer.from('{"text": '),
 		})
 		expect(broken.status()).toBe(400)
 		expect((await broken.json()).message).toContain('not valid JSON')
