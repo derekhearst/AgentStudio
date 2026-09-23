@@ -109,7 +109,9 @@ export function buildReadinessRows(facts: ReadinessFacts): ReadinessRow[] {
 		label: 'Model gateway',
 		required: false,
 		ok: gateway,
-		detail: gateway ? 'Non-Claude models run through the configured gateway.' : 'Not configured: only Claude models can run.',
+		detail: gateway
+			? 'Non-Claude models run through the configured gateway, billed per token.'
+			: 'Not configured: only Claude models are offered, and they run on the subscription.',
 		envVars: ['LLM_GATEWAY_URL', 'LLM_GATEWAY_TOKEN'],
 	})
 
