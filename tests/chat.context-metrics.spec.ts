@@ -59,3 +59,48 @@ test('tool output saved on a reply counts as context', () => {
 	expect(withBlocks.used - withoutBlocks.used).toBe(50_000)
 	expect(withBlocks.breakdown.results).toBe(25)
 })
+
+test('a stopped reply saved with its tool output twice counts it once', () => {
+	// `persistPartialIfIncomplete` saves a Stop or error partial with the finished calls on
+	// `toolCalls` and the same results on `metadata.blocks`.
+	const output = 'y'.repeat(200_000) // ~50K tokens
+	const base = {
+		stats: [],
+		messages: [],
+		totalBudget: 1_000_000,
+		systemPromptTokens: null,
+	}
+	const both = computeContextMetrics({
+		...base,
+		displayedMessages: [
+			{
+				id: 'a1',
+				role: 'assistant',
+				content: '',
+				toolCalls: [{ result: output }],
+				metadata: { blocks: [{ kind: 'text', text: '' }, { kind: 'tool', name: 'Bash', result: output }] },
+			},
+		],
+	})
+	const callsOnly = computeContextMetrics({
+		...base,
+		displayedMessages: [{ id: 'a1', role: 'assistant', content: '', toolCalls: [{ result: output }] }],
+	})
+	// Blocks with no tool call leave the reply's `toolCalls` as the source.
+	const textBlocksOnly = computeContextMetrics({
+		...base,
+		displayedMessages: [
+			{
+				id: 'a1',
+				role: 'assistant',
+				content: '',
+				toolCalls: [{ result: output }],
+				metadata: { blocks: [{ kind: 'text', text: '' }] },
+			},
+		],
+	})
+
+	expect(both.breakdown.results).toBe(5)
+	expect(both.used).toBe(callsOnly.used)
+	expect(textBlocksOnly.used).toBe(callsOnly.used)
+})

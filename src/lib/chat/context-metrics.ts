@@ -71,19 +71,33 @@ function resultTokens(result: unknown): number {
 }
 
 /**
- * Tool output recorded on a saved reply's blocks. A turn run through the Agent SDK saves
- * its calls there (with `toolCalls` left empty), and the output stays in the session's
- * context, so leaving it out made a tool-heavy conversation look nearly empty.
+ * Tool output recorded on a saved reply's blocks, or null when the blocks hold no tool call.
+ * A turn run through the Agent SDK saves its calls there (with `toolCalls` left empty), and
+ * the output stays in the session's context, so leaving it out made a tool-heavy
+ * conversation look nearly empty.
  */
-function blockResultTokens(metadata: unknown): number {
+function blockResultTokens(metadata: unknown): number | null {
 	const blocks = metadata && typeof metadata === 'object' ? (metadata as { blocks?: unknown }).blocks : null
-	if (!Array.isArray(blocks)) return 0
-	let sum = 0
+	if (!Array.isArray(blocks)) return null
+	let sum: number | null = null
 	for (const block of blocks) {
 		if (block && typeof block === 'object' && (block as { kind?: unknown }).kind === 'tool') {
-			sum += resultTokens((block as { result?: unknown }).result)
+			sum = (sum ?? 0) + resultTokens((block as { result?: unknown }).result)
 		}
 	}
+	return sum
+}
+
+/**
+ * One reply's tool output, read from one source. A stopped or failed partial is saved with
+ * the same results on both `toolCalls` and the blocks, so adding the two counted every
+ * result twice. The blocks win when they hold a tool call, as they do in MessageBubble.
+ */
+function messageResultTokens(message: ContextMetricsInput['displayedMessages'][number]): number {
+	const fromBlocks = blockResultTokens(message.metadata)
+	if (fromBlocks !== null) return fromBlocks
+	let sum = 0
+	for (const call of message.toolCalls ?? []) sum += resultTokens(call.result)
 	return sum
 }
 
@@ -95,10 +109,7 @@ export function computeContextMetrics(input: ContextMetricsInput): ContextMetric
 		0,
 	)
 
-	const toolResultTokens = displayedMessages.reduce((sum, message) => {
-		for (const call of message.toolCalls ?? []) sum += resultTokens(call.result)
-		return sum + blockResultTokens(message.metadata)
-	}, 0)
+	const toolResultTokens = displayedMessages.reduce((sum, message) => sum + messageResultTokens(message), 0)
 
 	const otherTokens = 0
 
