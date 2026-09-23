@@ -76,6 +76,9 @@ export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	'prepare_commit',
 	// Projects: read-only.
 	'list_projects',
+	// Agents: read-only. The handoff needs the implementer's full id, and this is where the
+	// model gets it (see `builtinHandoffNote`).
+	'list_agents',
 	// Automations: read-only.
 	'list_automations',
 	// Memory: read-only retrieval.
@@ -98,7 +101,7 @@ You are the Chat agent — the default workbench. Be conversational and collabor
 `,
 	research: `# Agent: Research
 
-You are the Research agent. Your job is to draft a research plan as a markdown file the user can review, then hand off the conversation to a research-runner agent on approval.
+You are the Research agent. Your job is to draft a research plan as a markdown file the user can review, then hand off the conversation on approval to the agent that carries it out — the Chat agent unless the user asks for another.
 
 ## Workflow: write the plan → request approval → handoff
 
@@ -109,7 +112,7 @@ When the user asks something substantive that warrants evidence + citations:
    - **Sub-questions**: 4-8 concrete, googleable items covering definitions, mechanisms, evidence (studies, benchmarks, real-world data), edge cases, comparisons, and recent developments. Avoid vague ones — prefer specifics.
    - **Rationale** (optional): one sentence on why this decomposition.
 2. Post the plan in your reply too, so the user can read it without opening the file.
-3. Call \`request_plan_approval\` with that \`path\` and the \`implementerAgentId\` of a research-runner agent. The user approves in the inline card; on approve the conversation flips to the runner agent, which reads the file and executes.
+3. Call \`request_plan_approval\` with that \`path\` and the \`implementerAgentId\` of the agent that should carry out the research (typically Chat; \`list_agents\` gives every agent's id). The user approves in the inline card; on approve the conversation flips to that agent, which reads the file and executes.
 
 If the user denies, they typically reply with feedback. Read it and start the cycle again — rewrite the file with \`Write\` and re-request approval.
 
@@ -126,7 +129,7 @@ If the user denies, they typically reply with feedback. Read it and start the cy
 - Call out unknowns: state what you couldn't verify and what would resolve it.
 - Structure substantive claims as: claim → evidence → confidence.
 
-Read-only tool access apart from writing the plan file — every other write action happens in the runner / Chat / Autonomous agents.
+Read-only tool access apart from writing the plan file — every other write action happens in the Chat / Autonomous agents.
 `,
 	plan: `# Agent: Plan
 
@@ -170,7 +173,7 @@ You are the Autonomous agent. Execute autonomously. Minimize interruptions.
 const ANCHOR_PROMPTS: Record<BuiltinAgentKey, string> = {
 	chat: '[Agent changed to Chat] You are now the Chat agent. Be conversational and collaborative. Keep responses concise; ask clarifying questions when intent is ambiguous.',
 	research:
-		'[Agent changed to Research] You are now the Research agent. For substantive questions, write a research plan to a markdown file (Write, e.g. RESEARCH-PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to a research-runner agent. For trivial lookups or follow-ups on completed runs, answer directly.',
+		'[Agent changed to Research] You are now the Research agent. For substantive questions, write a research plan to a markdown file (Write, e.g. RESEARCH-PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to the agent that carries it out (usually Chat). For trivial lookups or follow-ups on completed runs, answer directly.',
 	plan: '[Agent changed to Plan] You are now the Plan agent. Before any non-readonly action, write the plan to a markdown file (Write, e.g. PLAN.md), post it in your reply, then call request_plan_approval with that path to hand off to an implementer agent. Wait for approval before executing anything.',
 	autonomous:
 		'[Agent changed to Autonomous] You are now the Autonomous agent. Execute autonomously with minimal interruptions. Report progress concisely; only stop for blocking decisions or hard failures.',
@@ -188,6 +191,31 @@ const NAMES: Record<BuiltinAgentKey, string> = {
 	research: 'Research',
 	plan: 'Plan',
 	autonomous: 'Autonomous',
+}
+
+/**
+ * What the Plan and Research agents need to know to hand off, appended to their posture slot
+ * on every run (`buildBuiltinAgentPostureSlot`).
+ *
+ * Kept in code rather than in the persona because the persona is seeded once and then belongs
+ * to the operator: a fact written into it stays whatever it was the day the row was created.
+ * That is how Research came to name a `research-runner` agent nobody ever seeded, and Plan a
+ * `list_agents` tool that did not exist — while `request_plan_approval` only accepts a full
+ * agent id, which nothing gave the model. The built-in ids never change, so they can be
+ * stated outright; any other agent's id comes from `list_agents`.
+ */
+export function builtinHandoffNote(key: string | null | undefined): string | null {
+	if (key !== 'plan' && key !== 'research') return null
+	const lines = [
+		'## Handing off',
+		`\`request_plan_approval\` takes the implementer's full agent id. The built-in Chat agent is \`${BUILTIN_AGENT_IDS.chat}\` and Autonomous is \`${BUILTIN_AGENT_IDS.autonomous}\`. For any other agent, call \`list_agents\` and pass the \`id\` it returns.`,
+	]
+	if (key === 'research') {
+		lines.push(
+			'There is no separate research-runner agent. Hand an approved research plan to Chat, which has web_search, web_fetch and pdf_read, unless the user asks for a different agent.',
+		)
+	}
+	return lines.join('\n\n')
 }
 
 function buildToolPolicyConfig(key: BuiltinAgentKey): Record<string, unknown> {

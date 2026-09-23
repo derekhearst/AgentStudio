@@ -126,6 +126,7 @@ export const toolSchemas = {
 		/** Cap on poll-wait time before returning a still-pending job. */
 		timeoutSeconds: z.number().int().min(30).max(600).default(300),
 	}),
+	list_agents: z.object({}),
 	update_agent: z.object({
 		agentId: z.string().uuid(),
 		name: z.string().min(1).max(120).optional(),
@@ -300,6 +301,8 @@ export const toolDescriptions: Record<ToolName, string> = {
 	image_generate: 'Generate an image from a text prompt.',
 	video_generate:
 		'Generate a video from a text prompt via async OpenRouter video generation (Veo, Wan, etc.). Submits a job and waits up to `timeoutSeconds` for completion. Returns the job id, status, and (when ready) URLs to download. If the job is still in progress when the timeout hits, the response includes a poll URL the agent can call later.',
+	list_agents:
+		'List every agent with the full id the other agent tools take: id, name, role, kind, builtinKey (chat, research, plan or autonomous for the built-ins, listed first; null for agents the user created) and availability (available or paused). Read-only. Use it to find the implementerAgentId for request_plan_approval, or the agentId for update_agent, pause_agent and resume_agent.',
 	update_agent: 'Update an existing agent fields such as name, role, model, or system prompt.',
 	pause_agent:
 		'Pause a user-created agent: it is no longer offered for delegation, and automations and monitors that use it are skipped. Direct chats with it still work. Built-in and evaluator agents cannot be paused.',
@@ -339,7 +342,7 @@ export const toolDescriptions: Record<ToolName, string> = {
 	git_diff:
 		'Show diff between the working tree and `ref` (default: HEAD), or `--staged` against the index. Optional `paths` filter scopes the diff. Read-only; worktree mode only.',
 	request_plan_approval:
-		'Ask the user to approve a plan file and hand the conversation to an implementer agent. Write the plan into the workspace first (file_write, e.g. PLAN.md), then pass its path. Mandatory approval: the user must approve in the inline card before this runs. On approve the bound agent flips to implementerAgentId and the next round runs under that agent, which can read the file with file_read. On deny the planner stays bound. Use list_agents to find an implementer.',
+		'Ask the user to approve a plan file and hand the conversation to an implementer agent. Write the plan into the workspace first (Write, e.g. PLAN.md), then pass its path. Mandatory approval: the user must approve in the inline card before this runs. On approve the bound agent flips to implementerAgentId and the next round runs under that agent, which can read the file with Read. On deny the planner stays bound. implementerAgentId is the full agent id — call list_agents to get it; the built-in Chat and Autonomous agents are the usual implementers.',
 	search_tools:
 		'Search the tool registry for tools relevant to the user\'s request, then loads them into your tool surface for the NEXT round. Only a small "always loaded" core (web_search, ask_user, run_code, search_tools itself) is exposed by default — the rest of the registry is gated behind this search to keep tool definitions out of your prompt until you actually need them. Pass a free-text `query` describing what you need (e.g. "image generation", "git diff", "file edit", "create pull request"). Returns matching tool names + short descriptions; the matched tools then appear in your tools array on the next round and can be invoked normally. Optional `limit` caps the number of matches (default 10). Call once per logical capability you need — repeated searches in the same round are wasteful since the loaded set persists for the rest of the conversation.',
 	run_code:

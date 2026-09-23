@@ -8,11 +8,33 @@ import { logger } from '$lib/observability/logger'
 import {
 	AVAILABLE_AGENT_STATUS,
 	PAUSED_AGENT_STATUS,
+	agentAvailability,
 	isAgentPaused,
 	pauseRefusal,
 } from '$lib/agents/agent-status'
 
 export type AgentStatus = (typeof agents.$inferSelect)['status']
+
+/**
+ * Every agent as the model sees it through `list_agents`: the full id every agent tool takes,
+ * built-ins included and listed first. Before this there was no way for the model to learn an
+ * id at all — the Plan agent's handoff (`request_plan_approval`) takes a full UUID, and so do
+ * `update_agent`, `pause_agent` and `resume_agent`.
+ */
+export async function listAgentRoster() {
+	const rows = await db
+		.select({
+			id: agents.id,
+			name: agents.name,
+			role: agents.role,
+			kind: agents.kind,
+			builtinKey: agents.builtinKey,
+			status: agents.status,
+		})
+		.from(agents)
+		.orderBy(sql`${agents.builtinKey} IS NULL`, asc(agents.createdAt))
+	return rows.map(({ status, ...agent }) => ({ ...agent, availability: agentAvailability(status) }))
+}
 
 /** Every agent, with usage aggregated over `userId`'s own conversations. */
 export async function listAgentsWithCounts(userId: string) {

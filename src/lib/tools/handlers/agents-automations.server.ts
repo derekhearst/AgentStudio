@@ -5,7 +5,7 @@
  */
 
 import { toolSchemas } from '../tool-schemas'
-import { setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
+import { listAgentRoster, setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -15,6 +15,19 @@ import {
 import type { ToolHandler } from '../handler-types'
 
 export const agentAutomationHandlers: Record<string, ToolHandler> = {
+	// Agents are one catalogue shared by the whole instance, like the agents page, so the
+	// roster is not scoped to the caller.
+	list_agents: async (call, { startedAt }) => {
+		const input = toolSchemas.list_agents.parse(call.arguments)
+		return {
+			success: true,
+			tool: call.name,
+			input,
+			result: await listAgentRoster(),
+			executionMs: Date.now() - startedAt,
+		}
+	},
+
 	update_agent: async (call, { startedAt }) => {
 		const input = toolSchemas.update_agent.parse(call.arguments)
 		const updated = await updateAgentRecord(input.agentId, {

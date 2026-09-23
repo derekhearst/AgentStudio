@@ -223,8 +223,8 @@
 
 	async function handleComposerSubmit(content: string) {
 		// All agents — including Research — go through handleNewChat. The Research agent
-		// writes a plan file and hands off via request_plan_approval to a research-runner
-		// agent on approval.
+		// writes a plan file and hands off via request_plan_approval to the agent that
+		// carries it out (usually Chat) on approval.
 		await handleNewChat(content);
 	}
 </script>
