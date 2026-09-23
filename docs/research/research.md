@@ -50,7 +50,7 @@ For a trivial lookup (a definition, a current price, a single fact) the Research
 1. A **research-mode automation** fires, on its schedule or from **Run now**. It creates a `research` row with the automation's prompt as the question, links it to the automation's conversation, and queues a `research_run` job at priority 100.
    `startResearchCommand({ query, conversationId?, runId?, model? })` does the same for an interactive caller, at priority 150. The chat composer has a **Research** button built to call it, but the chat page does not currently turn that button on.
 2. The job worker runs the orchestrator (`runResearchLoop`): it plans sub-questions, searches for each, reads the best pages, looks for gaps and searches again, then writes the cited report.
-3. When the run completes, the user gets an in-app notification and, when configured, a web push. The report is at `/research/{id}` and listed on `/research`. If the run is linked to a conversation, it also shows in that chat's right-hand rail under **Research**, with its status and progress while it runs.
+3. When the run completes, the user gets an in-app notification and, when configured, a web push. The report is at `/research/{id}` and listed on `/research`. If the run is linked to a conversation, that page's **Back** button and breadcrumb lead to the chat. The chat itself no longer lists its research runs: its right-hand rail lost the **Research** tab in #14, and the report is not posted into the chat.
 
 ### C) Discussion of completed reports
 
