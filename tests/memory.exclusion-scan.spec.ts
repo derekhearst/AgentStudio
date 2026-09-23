@@ -321,4 +321,26 @@ test.describe('memory/mining — exclusion scan in the miner', () => {
 			await releaseRuleChanges()
 		}
 	})
+
+	test('when the rules cannot be loaded, the pass fails and nothing is sent anywhere', async () => {
+		// It used to log "mining without a deny list" and carry on: one dropped connection and
+		// every turn, secrets included, went to the extractor and the embeddings and was stored.
+		// Recall already failed closed on the same error. An id that is not a uuid makes every
+		// query on the rules table fail, as it would with the database unreachable.
+		stub = stubOpenRouter()
+		const { mineSession } = await import('../src/lib/memory/mining.server')
+
+		await expect(
+			mineSession({
+				userId: 'not-a-user-id',
+				session: {
+					conversationId: null,
+					occurredAt: new Date(),
+					sessionLabel: `${prefix} chat`,
+					turns: [{ role: 'user', content: 'DATABASE_URL=postgres://app:hunter2@db:5432/app' }],
+				},
+			}),
+		).rejects.toThrow()
+		expect(stub.calls, 'nothing reached the extractor or the embeddings').toHaveLength(0)
+	})
 })

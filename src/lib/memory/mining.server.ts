@@ -24,7 +24,6 @@ import {
 	loadCompiledExclusionRules,
 	recordExclusionHits,
 	scanForExclusions,
-	type CompiledExclusionRule,
 } from '$lib/memory/exclusions.server'
 import { tombstoneMessages } from '$lib/memory/tombstones.server'
 import { logger } from '$lib/observability/logger'
@@ -250,10 +249,10 @@ export async function mineSession(opts: {
 	await ensureBuiltinExclusionRules(userId).catch((error) => {
 		logger.warn('[memory] failed to seed built-in exclusion rules', { err: error })
 	})
-	const exclusionRules = await loadCompiledExclusionRules(userId).catch((error) => {
-		logger.warn('[memory] failed to load exclusion rules; mining without a deny list', { err: error })
-		return [] as CompiledExclusionRule[]
-	})
+	// No deny list, no mining: a load failure (a dropped connection, say) fails the job, which
+	// is retried, rather than sending every turn — secrets included — out unchecked. Recall
+	// fails closed on the same error.
+	const exclusionRules = await loadCompiledExclusionRules(userId)
 
 	// The whole of every turn, on a worker thread with a time limit: a user's regex cannot
 	// freeze the server, and a secret past the first 40,000 characters is still caught. A turn
