@@ -7,11 +7,15 @@ import { authenticateContext, waitForHydration } from './helpers'
  * The creation forms on /automations and /monitors sit in a right-hand column on a wide
  * screen and stack under the list on a narrow one.
  *
- * Both pages asked for that with `xl:grid-cols-[1.2fr,0.8fr]`. Tailwind v4 passes an
- * arbitrary value through as written, so that compiled to
- * `grid-template-columns: 1.2fr,.8fr` — which is not valid CSS, so the browser dropped
- * the declaration and the form rendered below the whole list at every width. Spaces in an
- * arbitrary value are written as underscores: `[1.2fr_0.8fr]`.
+ * Both pages asked for that with an arbitrary `xl:grid-cols-…` value whose two tracks
+ * were separated by a comma (`1.2fr,0.8fr`). Tailwind v4 passes an arbitrary value
+ * through as written, so that compiled to `grid-template-columns: 1.2fr,.8fr` — which is
+ * not valid CSS, so the browser dropped the declaration and the form rendered below the
+ * whole list at every width. Spaces in an arbitrary value are written as underscores:
+ * `[1.2fr_0.8fr]`.
+ *
+ * (Written out of class form on purpose: Tailwind scans this file too, and the literal
+ * class would put the broken rule back into the built CSS.)
  */
 
 test.describe('two-column creation layout', () => {
