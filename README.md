@@ -1,6 +1,6 @@
 # AgentStudio
 
-Self-hosted autonomous AI agent platform with user-scoped tool sandboxes and passkey authentication.
+Self-hosted autonomous AI agent platform for a single owner, with a sandboxed workspace and password sign-in.
 
 ## Feature Overview
 
@@ -18,6 +18,8 @@ Agent detail pages allow editing the assigned model and system prompt.
 ### Settings
 
 Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
+
+Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 
 Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved.
 
@@ -71,6 +73,7 @@ cp .env.example .env
 3. Update `.env` values for your services:
 
 - `DATABASE_URL`
+- `AUTH_PASSWORD` (creates the owner account the first time the server starts against an empty database; never overwrites an existing password. Optional `AUTH_OWNER_NAME` / `AUTH_OWNER_USERNAME` default to `Owner` / `owner`)
 - `OPENROUTER_API_KEY`
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
@@ -78,6 +81,7 @@ cp .env.example .env
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub at `/source-control` for repo sync, clone, push, and PR creation)
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
+- `CRON_SECRET` (optional; lets an external scheduler fire `POST /api/cron` with `Authorization: Bearer <secret>` when the in-process scheduler is turned off; unset → only a signed-in session can fire it)
 
 Database note:
 
@@ -86,13 +90,23 @@ Database note:
 - A database with existing tables but no Drizzle migration history is refused at startup, never wiped automatically. See the database doc for the one-time `DB_ALLOW_LEGACY_SCHEMA_RESET=1` escape hatch.
 - To force a clean rebuild of a development database, run `bun run db:reset` — drops the target database and reruns the same ensure-exists → migrate → seed bootstrap the server runs at boot. It refuses any database whose name does not end in `dev`, `test` or `ci`, and any name containing `prod`.
 
-4. Run the app:
+4. Provision the instance (optional — the server does the same on first start when `AUTH_PASSWORD` is set):
+
+```sh
+bun run db:bootstrap                    # create the database, the owner (from AUTH_PASSWORD) and the sandbox folder
+bun run db:bootstrap --reset-password   # forgot the dev password: set it to AUTH_PASSWORD again (signs every session out)
+bun run db:bootstrap --reset            # start over: drops the database first (dev/test/ci names only)
+```
+
+It is idempotent, never prints the password, and refuses to run with `NODE_ENV=production`. Like `db:reset`, `--reset` refuses any database whose name does not end in `dev`, `test` or `ci`, or that contains `prod`.
+
+5. Run the app:
 
 ```sh
 bun run dev
 ```
 
-5. Run checks/tests:
+6. Run checks/tests:
 
 ```sh
 bun run check
@@ -179,9 +193,17 @@ Notes:
 - Runtime spec: `docs/runtime/spec.md`
 - Chat plan: `docs/chat/plan.md`
 - Memory spec: `docs/memory/spec.md`
+- Automations: `docs/automations/automations.md`
+- Monitors: `docs/monitors/monitors.md`
+- Background jobs: `docs/jobs/jobs.md`
 - UI spec: `docs/ui/spec.md`
 - Chat console + right-rail preview: `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
+- Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
+
+## Background Jobs
+
+Scheduled automations, monitor checks, PR CI polling, memory mining, research runs and workspace cleanup run on a durable job queue in PostgreSQL. Every server process runs a worker and the scheduler by default; `bun run worker` starts a worker without the web tier, for deployments that scale them separately. Workers are configured with optional `JOBS_WORKER_*` environment variables (queues, job types, poll interval, lease length, worker id, shutdown drain time), and `JOBS_WORKER_ENABLED=0` / `JOBS_SCHEDULER_ENABLED=0` turn them off. Job history is at `/settings/jobs`. See [docs/jobs/jobs.md](docs/jobs/jobs.md) for how the queue behaves and the full variable list.
 
 ## Projects
 
@@ -203,26 +225,29 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - Domain-first API boundaries: browser-consumed remote functions live in `src/lib/{domain}`.
 - Server-only internals are colocated in domain folders under `src/lib/**` and are only imported by remote functions or `+server` routes.
 - Route and component imports should prefer domain barrels (for example, `$lib/chat`, `$lib/agents`) over deep `*.remote` paths.
+- Every remote function starts with `requireAuthenticatedRequestUser()` and scopes owned data to that user. The hook also refuses anonymous remote calls on its own, but a spec (`tests/auth.remote-guards.spec.ts`) fails if a remote function is added without the check.
 
-## Auth and Users
+## Authentication
 
-- Authentication uses WebAuthn passkeys (no OAuth or password login).
-- Native mobile/desktop webviews that do not expose WebAuthn now show an Open in browser to sign in fallback on the login page.
-- On first startup, the server seeds an unclaimed `admin` account and logs a one-time bootstrap claim URL/key.
-- Admins create new accounts from `/users`.
-- Accounts are claimed by the first successful passkey registration for that username.
-- User removal is soft-delete; access is blocked while historical data remains owned by that user.
+- One owner account per instance, signed in with a password. There are no other users, roles, invitations or passkeys.
+- First run creates that account and nothing else. Two ways: set `AUTH_PASSWORD` and the server creates the owner when it starts (the Docker deployment does this), or open the app and fill in `/setup` (display name and password). Until an owner exists every page redirects to `/setup`; `/api/health` stays reachable and reports `ownerProvisioned`.
+- On a production build, `/setup` also asks for a **one-time setup token printed in the server log**, so the first visitor to a public URL cannot claim a fresh or reset instance. A development server does not ask.
+- Model credential, workspace, gateway and integrations are deploy-time environment settings, shown read-only under Settings → System.
+- Sessions are 30-day HTTP-only cookies, and setting a new password on an existing account ends all of them (see "Recovering a lost password" in the auth doc). Everything except `/login`, `/setup`, `/demo`, `/api/health`, `/api/webhooks` (signature-checked) and `/api/cron` (session or `CRON_SECRET`) requires one.
+- Remote functions are gated on the real request path: without a session only the sign-in and setup commands can run.
+- `AUTH_DEV_BYPASS=1` signs every visitor in as the owner on a development server only, and only once an owner with a password exists; production builds ignore it.
+- See [docs/auth/auth.md](docs/auth/auth.md) for the flows and rules.
 
 ## Route Map
 
 - `/` Redirects to chat
-- `/login` Authentication
-- `/users` Admin user management
+- `/login` Sign in
+- `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
 - `/cost` Cost dashboard
 - `/agents` Agent management
-- `/automations` Scheduled automation workflows
-- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/spec.md))
+- `/automations` Scheduled automation workflows ([docs](docs/automations/automations.md))
+- `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
-- `/settings` App configuration
+- `/settings` App configuration, including the read-only System checklist

@@ -25,6 +25,10 @@ services:
       - HOME=/data
       - DATABASE_URL=${DATABASE_URL}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # Creates the owner on first boot against an empty (or reset) database, so /setup
+      # never opens on this public host. Never overwrites an existing password — change
+      # it here and the old one still applies. Unset it and a reset instance falls back
+      # to /setup, which then asks for the one-time token printed in the container log.
       - AUTH_PASSWORD=${AUTH_PASSWORD}
       - SEARXNG_URL=${SEARXNG_URL}
       - SEARXNG_PASSWORD=${SEARXNG_PASSWORD}

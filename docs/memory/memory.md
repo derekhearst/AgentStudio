@@ -69,12 +69,19 @@ When `useRerank` is enabled in settings, the top 20 candidates are sent to a che
 
 ## User flows
 
-### Automatic mining (after every conversation)
+### Automatic mining (after every exchange)
 
 1. The user finishes a chat exchange (or the run completes naturally).
-2. The system kicks off `mineConversation(conversationId)` in the background — the user sees their assistant reply immediately and never waits.
-3. Mining extracts entities and topics via a small LLM call, then writes one drawer per turn into the palace, computing AAAK indexes and embeddings inline.
-4. An `agent_action` activity event of type `memory_mined` records what landed.
+2. The system queues a background mining job for that conversation — the user sees their assistant reply immediately and never waits.
+3. The job mines only what is new: turns that already have a drawer are skipped, and so are turns the user removed from memory (see **Managing what was remembered** below).
+4. Mining extracts entities and topics via a small LLM call, then writes one drawer per new turn into the palace, computing AAAK indexes and embeddings inline.
+5. An `agent_action` activity event of type `memory_mined` records what landed.
+
+A conversation holds at most one queued mining job at a time: if the user sends several messages while a job is still waiting, they all fold into that one job. If an exchange finishes while the job is already mining, the job goes round again for the new turns before it finishes — so the last exchange of a conversation is mined too, not left for an exchange that may never come. (It goes round at most five times; anything still left after that waits for the next exchange or **Mine pending**.) Once the job is done, the next exchange queues a fresh one. (Until September 2026 a conversation's mining job could only ever run once, so everything said after its first exchange was never memorized. **Mine pending** on the Memory page catches up any conversation left behind.)
+
+### Mine pending
+
+The **Mine pending** button on the Memory page queues a mining job for every conversation that still holds a turn the miner would pick up — a turn with some text, no drawer, and not removed by the user. It reports how many conversations it scanned and how many new jobs it queued; a conversation whose mining job was already waiting is not counted twice.
 
 ### Automatic recall (on every user message)
 
@@ -121,13 +128,19 @@ Open a drawer and the **Why was this recalled?** section replays the most recent
 
 The **Manage → Mined conversations** tab lists every conversation that currently has memories, with its drawer and room counts. **Forget** deletes that conversation's rooms, which cascades through its closets to its drawers, and removes any wing left empty as a result.
 
-The chat transcript itself is untouched, so a later **Mine pending** sweep would memorize it again — add an exclusion rule first if the point was to keep that content out permanently.
+The chat transcript itself is untouched, but everything it held at the moment of forgetting is marked as removed from memory, so neither the next exchange's mining run nor a **Mine pending** sweep brings it back. Messages sent in that conversation *after* forgetting are mined as usual.
+
+#### Deleting a single drawer
+
+Deleting a drawer works the same way: the message it came from is marked as removed, so the drawer does not reappear the next time the conversation is mined.
 
 #### Exclusion rules
 
 Exclusion rules are a deny list the miner checks **before** it calls the embedding provider and before it writes anything. A turn that matches an enabled rule is dropped entirely: it never leaves the process and never becomes a drawer. Ordering matters here — filtering after insert would mean the secret had already been embedded and stored.
 
 Each rule has a name, a match kind (`regex` or `substring`), a pattern, an on/off switch, and a running count of how many turns it has blocked.
+
+A turn a rule has blocked stays out of memory for good — it is marked so that later mining runs skip it, which also keeps the rule's count honest (one blocked turn counts once, not once per exchange). Disabling the rule afterwards does not bring earlier blocked turns back; it only stops blocking new ones.
 
 A set of credential rules is built in and enabled for every user:
 
@@ -204,7 +217,8 @@ The benchmark uses an isolated test schema scoped per-run so it never pollutes t
 - **Agent with `memory.disabled = true`** — recall is skipped for that agent's chats but mining still runs (so other agents in the same user's palace benefit).
 - **Embedding API failure** — drawer is still written but with a null embedding; a backfill job (future work, queued onto the `#17` jobs system) re-embeds nullable rows.
 - **Massive conversations (>50 turns)** — mining batches the entity-extraction call across windows of 8-10 turns to keep the LLM input bounded.
-- **Duplicate detection** — wings/rooms/closets dedupe by slug + alias matching; mining the same conversation twice is idempotent.
+- **Duplicate detection** — wings/rooms/closets dedupe by slug + alias matching; mining the same conversation twice is idempotent, because a turn that already has a drawer is skipped.
+- **A turn that arrives while its conversation is being mined** — the running job has already read the conversation, so that turn waits for the next exchange's job (or a **Mine pending** sweep).
 - **Every turn in a conversation is excluded** — mining reports the exclusion count and the rules that fired (visible on the job in `/settings/jobs`), so "nothing was mined" is distinguishable from "a rule blocked it".
 - **A broken exclusion pattern** — a rule whose regex no longer compiles is logged and treated as never matching, rather than throwing and wedging the mining job. The rule editor validates patterns on save, so this only happens to rules written before a validation change.
 - **Editing a drawer while the embedding provider is down** — the text is saved and the vector is cleared. The drawer keeps working in keyword search and stays browsable; **Reorganize** re-embeds it later.

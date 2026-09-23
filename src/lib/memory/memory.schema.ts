@@ -247,6 +247,29 @@ export const memoryKgRelations = pgTable(
 	],
 )
 
+/**
+ * Tombstones — messages the miner must not mine again. A conversation is re-mined after every
+ * exchange, and the miner treats a message as done when a drawer still points at it; without
+ * a tombstone, a drawer the user deleted, or a conversation they forgot, came straight back
+ * on the next turn. A turn an exclusion rule dropped is tombstoned too, so re-mining does not
+ * re-count it against the rule.
+ *
+ * Keyed on the message, so deleting the conversation (which deletes its messages) clears
+ * them. Existing drawers need no tombstone: the drawer itself marks its message as mined.
+ */
+export type MemoryTombstoneReason = 'drawer_deleted' | 'conversation_forgotten' | 'excluded_by_rule'
+
+export const memoryMessageTombstones = pgTable('memory_message_tombstones', {
+	messageId: uuid('message_id')
+		.primaryKey()
+		.references(() => messages.id, { onDelete: 'cascade' }),
+	userId: uuid('user_id')
+		.notNull()
+		.references(() => users.id, { onDelete: 'cascade' }),
+	reason: text('reason').$type<MemoryTombstoneReason>().notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export type MemoryWing = typeof memoryWings.$inferSelect
 export type MemoryRoom = typeof memoryRooms.$inferSelect
 export type MemoryCloset = typeof memoryClosets.$inferSelect

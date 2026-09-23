@@ -43,13 +43,14 @@ export function registerLogsJobHandlers(): void {
 		// the operator might want to inspect after restart.
 		initialDelayMs: 60 * 60 * 1000,
 		enqueue: () => {
-			// Daily bucket so re-fires within the same UTC day collapse on (type, dedupeKey).
+			// Daily bucket, `forever`: one purge per UTC day, including across restarts.
 			const dayBucket = Math.floor(Date.now() / DAY_MS)
 			return {
 				type: 'app_logs_purge',
 				queue: 'maintenance',
 				priority: 10,
 				dedupeKey: `app_logs_purge:${dayBucket}`,
+				dedupeScope: 'forever',
 				payload: {},
 			}
 		},

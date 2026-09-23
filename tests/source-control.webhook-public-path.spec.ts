@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test'
  * Wave 5 #19 phase 5 — verify `/api/webhooks/github` bypasses auth.
  *
  * GitHub doesn't send session cookies; the route handler verifies the HMAC signature
- * itself. The path-level auth bypass lives in `hooks.server.ts` PUBLIC_PATH_PREFIXES
+ * itself. The path-level auth bypass lives in `src/lib/auth/gate.ts` PUBLIC_PATH_PREFIXES
  * — without it, an unauthenticated GitHub POST would 303 to /login and never reach
  * the handler. This test confirms the bypass is actually in place by asserting the
  * route returns a webhook-specific response (503 when no secret OR 401 when secret

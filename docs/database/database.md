@@ -24,7 +24,7 @@ glance.
 
 | Database | Used by | Notes |
 | --- | --- | --- |
-| `agentstudioprod` | The live TrueNAS app `agentstudio` | Set through the app's `DATABASE_URL` environment variable. Can never be reset with `db:reset`. |
+| `agentstudioprod` | The live TrueNAS app `agentstudio` | Set through the app's `DATABASE_URL` environment variable. Can never be reset with `db:reset` or `db:bootstrap --reset`. |
 | `agentstudiodev` | Local `bun run dev` and local Playwright runs | Holds the developer's own data as well as test data. The test suite only deletes rows whose names start with `E2E:`. |
 | `agentstudio_ci` | GitHub Actions | A throwaway database in the CI job's own Postgres container, fresh on every run. |
 
@@ -39,9 +39,10 @@ Things worth knowing:
   a name that is not all lowercase has to be written in double quotes: an unquoted
   `DROP DATABASE AGENTSTUDIO` drops `agentstudio` instead. Keeping every name lowercase
   avoids the problem entirely.
-- **Only dev, test and CI databases can be reset.** `bun run db:reset` refuses unless the name
-  ends in `dev`, `test` or `ci`, and always refuses a name containing `prod`. There is no
-  override: rename the database or use `psql` if a reset is really intended.
+- **Only dev, test and CI databases can be reset.** `bun run db:reset` and
+  `bun run db:bootstrap --reset` refuse unless the name ends in `dev`, `test` or `ci`, and
+  always refuse a name containing `prod`. They check before connecting to anything. There is
+  no override: rename the database or use `psql` if a reset is really intended.
 - **Older names.** Earlier versions of the app used `drokbot`, then `AGENTSTUDIO` (April 2026),
   then `AgentStudio`. Leftover databases with those names, and a lowercase `agentstudio`, may
   still exist on the server. Backing them up and removing them is tracked in GitHub issue #3.
@@ -72,7 +73,9 @@ The application migrates itself at boot — there is no separate deploy step.
    it cannot safely handle (see "Databases without migration history").
 4. Installs `pgcrypto` and `vector`.
 5. Runs every pending migration via `drizzle-orm/postgres-js/migrator`.
-6. Seeds built-in agents, registers job handlers and starts the job worker.
+6. Creates the owner account from `AUTH_PASSWORD` if there is none yet (see
+   [`docs/auth/auth.md`](../auth/auth.md)), seeds built-in agents, registers job handlers and
+   starts the job worker and scheduler (see [`docs/jobs/jobs.md`](../jobs/jobs.md)).
 
 Drizzle decides what is "pending" by comparing the `when` timestamp of each journal entry
 against the newest `created_at` already recorded in `drizzle.__drizzle_migrations`. Anything
@@ -140,11 +143,13 @@ healthy:
 - The web server answers every request with an error until the problem is fixed. Thirty
   seconds after a failure, the next request triggers a fresh attempt, so the app recovers by
   itself once Postgres is back.
-- `bun run worker` exits, so its container's restart policy tries again.
-- `bun run db:reset` exits with an error code instead of reporting success.
+- `bun run worker` exits, so its container's restart policy tries again. It also exits if
+  its job worker fails to start, rather than sitting idle.
+- `bun run db:reset` and `bun run db:bootstrap` exit with an error code instead of reporting
+  success.
 
 `/api/health` also reports `jobWorker`: `running`, `disabled` (when `JOBS_WORKER_ENABLED=0`),
-`pending` (for a moment after startup) or `failed`. A failed worker marks the deploy as
+`pending` (until startup reaches the worker) or `failed`. A failed worker marks the deploy as
 degraded (HTTP 503), because pages still load while queued memory mining, evaluations and
 automations never run.
 
@@ -228,6 +233,7 @@ migration fails"), but it has to be edited to apply cleanly to existing database
 | `bun run db:migrate` | Apply pending migrations to `DATABASE_URL` |
 | `bun run db:studio` | Open Drizzle Studio |
 | `bun run db:reset` | Drop the target database and rerun the full bootstrap. Only for names ending in `dev`, `test` or `ci`; never a name containing `prod` |
+| `bun run db:bootstrap` | Run the bootstrap, then create the owner and the sandbox folder (see [`docs/auth/auth.md`](../auth/auth.md)). `--reset` drops the database first, under the same name rule as `db:reset` |
 
 `db:check` needs its dialect and out-folder passed explicitly; `drizzle-kit check` misparses
 `drizzle.config.ts` and reports a spurious AWS Data API error otherwise. The script in

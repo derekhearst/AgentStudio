@@ -12,8 +12,9 @@
  * Nothing in here drops data on its own initiative. The only destructive helper,
  * `resetAppSchemas`, is reached solely through `reconcileLegacySchemaState`, and only
  * for a positively identified AgentStudio schema with the operator's explicit opt-in.
- * Keep this module free of `$lib` imports: `scripts/reset-and-bootstrap.ts` imports it
- * directly to run its safety guard before it connects to anything.
+ * Keep this module free of `$lib` imports: `scripts/drop-database.ts` (behind `db:reset`
+ * and `db:bootstrap --reset`) imports it directly to run its safety guard before it
+ * connects to anything.
  */
 
 import { existsSync } from 'node:fs'
@@ -139,7 +140,7 @@ export function getTargetDatabaseName(databaseUrl: string) {
 }
 
 /**
- * Whether `bun run db:reset` may drop this database. Names follow `agentstudio<env>`
+ * Whether `bun run db:reset` (or `db:bootstrap --reset`) may drop this database. Names follow `agentstudio<env>`
  * (docs/database/database.md#databases): one ending in dev, test or ci is a throwaway by
  * convention. A name containing "prod" never is, whatever it ends in.
  */

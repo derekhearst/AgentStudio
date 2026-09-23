@@ -10,59 +10,73 @@
  * Usage:
  *   $ bun scripts/worker.ts
  *
- * Options (via env):
+ * Options (via env). The bootstrap reads the JOBS_WORKER_* settings for every process that
+ * runs a worker, the web tier included — see src/lib/jobs/worker-config.ts:
  *   DATABASE_URL          — required, same Postgres URL as the web tier
  *   JOBS_WORKER_QUEUES    — comma-separated queue list (e.g. "default,maintenance"). Default: all queues.
- *   JOBS_WORKER_TYPES     — comma-separated job-type list. Default: all registered types.
+ *   JOBS_WORKER_TYPES     — comma-separated job-type list. Default: all registered types; listed
+ *                           types with no registered handler are ignored.
  *   JOBS_WORKER_POLL_MS   — poll interval when queue is empty. Default 2000.
- *   JOBS_WORKER_LEASE_MS  — lease TTL. Default 120000.
- *   JOBS_WORKER_ID        — worker identifier (logged into job_leases). Default hostname:randomSuffix.
+ *   JOBS_WORKER_LEASE_MS  — lease TTL. Default 120000, minimum 5000.
+ *   JOBS_WORKER_ID        — worker identifier (logged into job_leases). Default <hostname>:<random>.
+ *   JOBS_WORKER_DRAIN_MS  — how long a shutdown waits for the job in flight. Default 25000.
  *   JOBS_SCHEDULER_ENABLED=0 — opt out of the in-process scheduler in this worker. Use when running
  *                              N worker processes — only ONE should run the scheduler to avoid
  *                              duplicate scheduled-job ticks.
  *
- * The worker stays alive until SIGINT or SIGTERM. On signal it stops claiming new jobs but
- * lets in-flight handlers finish (lease heartbeats keep firing during the drain).
+ * The worker stays alive until SIGINT or SIGTERM. On the first signal it stops the scheduler,
+ * stops claiming new jobs, and waits up to JOBS_WORKER_DRAIN_MS for the job in flight to
+ * finish (lease heartbeats keep firing during the drain). A job still running when the wait
+ * runs out is abandoned mid-handler; its lease lapses and the next worker reclaims it. A
+ * second signal exits immediately.
  */
 
-// Booting the schema + handlers requires importing db.server which auto-runs bootstrap.
-// The bootstrap also starts a worker by default — we let that worker do the work and just
-// keep this process alive so it doesn't exit. (Setting JOBS_WORKER_ENABLED=0 here would
-// disable the auto-start; we LEAVE it enabled because that's the bootstrap-managed worker.)
-import { db, ensureDatabaseReady } from '$lib/db.server'
+// Importing db.server runs the bootstrap: migrate, seed, register every handler, start the
+// worker and scheduler. This script's only job is to keep that process up and shut it down
+// cleanly. (JOBS_WORKER_ENABLED=0 would leave it nothing to run, so it exits.)
+import { ensureDatabaseReady } from '$lib/db.server'
+import { backgroundJobs } from '$lib/db/process-state.server'
+import { drainTimeoutFromEnv } from '$lib/jobs/worker-config'
 
-// Touch db so the import isn't tree-shaken (it has side effects).
-void db
-
-const workerId = process.env.JOBS_WORKER_ID ?? `worker:${process.pid}`
-console.log(`[worker] standalone job worker process started (id=${workerId})`)
-console.log('[worker] DB bootstrap + handler registration + in-process worker loop running.')
-console.log('[worker] Send SIGINT or SIGTERM to drain + exit.')
-
-// A worker whose bootstrap failed has no handlers and no loop, and would otherwise idle
-// here forever looking alive. Exit instead, so the container's restart policy retries.
-ensureDatabaseReady().catch((err) => {
+// The first bootstrap already waits out a Postgres that is still starting. If it fails
+// anyway, a worker with no handlers and no loop would idle here forever looking alive, so
+// exit instead and let the container's restart policy retry.
+try {
+	await ensureDatabaseReady()
+} catch (err) {
 	console.error('[worker] database bootstrap failed; exiting so the process is restarted:', err)
 	process.exit(1)
-})
-
-let shuttingDown = false
-function shutdown(reason: string) {
-	if (shuttingDown) return
-	shuttingDown = true
-	console.log(`[worker] ${reason} received — draining…`)
-	// The in-process worker loop has its own check via process events; we just give it a few
-	// seconds to finish in-flight handlers before exiting.
-	setTimeout(() => {
-		console.log('[worker] drain complete, exiting.')
-		process.exit(0)
-	}, 5000)
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'))
-process.on('SIGTERM', () => shutdown('SIGTERM'))
+const { worker } = backgroundJobs()
+if (!worker) {
+	console.error('[worker] No job worker is running — it failed to start (see above) or JOBS_WORKER_ENABLED=0. Exiting.')
+	process.exit(1)
+}
 
-// Keep process alive — the worker loop runs in the background.
-setInterval(() => {
-	// Heartbeat tick (no-op). Just prevents the event loop from idling out.
-}, 60_000)
+console.log(`[worker] standalone job worker process started (id=${worker.workerId})`)
+console.log('[worker] Send SIGINT or SIGTERM to drain + exit.')
+
+let shuttingDown = false
+async function shutdown(reason: string) {
+	if (shuttingDown) {
+		console.log(`[worker] ${reason} received again — exiting without waiting.`)
+		process.exit(1)
+	}
+	shuttingDown = true
+
+	const drainMs = drainTimeoutFromEnv()
+	console.log(`[worker] ${reason} received — no longer claiming; waiting up to ${drainMs}ms for the job in flight…`)
+	const { worker: running, scheduler } = backgroundJobs()
+	scheduler?.stop()
+	const drained = running ? await running.stop({ timeoutMs: drainMs }) : true
+	console.log(
+		drained
+			? '[worker] drain complete, exiting.'
+			: '[worker] drain timed out — the job in flight will be reclaimed by the next worker once its lease lapses. Exiting.',
+	)
+	process.exit(0)
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'))
+process.on('SIGTERM', () => void shutdown('SIGTERM'))

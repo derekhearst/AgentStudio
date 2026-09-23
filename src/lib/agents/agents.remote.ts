@@ -67,15 +67,21 @@ const updateAgentSchema = z
 		{ message: 'Provide at least one field to update' },
 	)
 
+// Agents are a shared catalogue, but what hangs off them is not: the session counts, the
+// recent conversations and the automations are the caller's own. The agent rows carry
+// system prompts, so even the catalogue needs the session check.
 export const listAgents = query(async () => {
-	return listAgentsWithCounts()
+	const user = requireAuthenticatedRequestUser()
+	return listAgentsWithCounts(user.id)
 })
 
 export const getAgent = query(agentIdSchema, async (agentId) => {
-	return getAgentDetail(agentId)
+	const user = requireAuthenticatedRequestUser()
+	return getAgentDetail(agentId, user.id)
 })
 
 export const getAgentChoices = query(async () => {
+	requireAuthenticatedRequestUser()
 	return db
 		.select({
 			id: agents.id,

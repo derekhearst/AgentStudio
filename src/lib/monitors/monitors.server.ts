@@ -1,6 +1,8 @@
 import { and, asc, desc, eq, gt, lte, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
+import { UserInputError } from '$lib/server/user-input-error'
 import { monitors, type MonitorRow, type MonitorStatus } from './monitors.schema'
+import { automations } from '$lib/automations/automation.schema'
 import {
 	clampDeadline,
 	clampInterval,
@@ -42,22 +44,55 @@ export type CreateMonitorInput = {
 	oneShot?: boolean
 }
 
+/**
+ * The automation a `run_automation` monitor may fire: one that exists and belongs to the
+ * monitor's owner. Null for anything else — a foreign id and a missing one look the same, so
+ * the check cannot be used to learn which ids exist.
+ *
+ * The action config used to be validated as "a UUID" and nothing more, and the job handler
+ * looks an automation up by id alone and runs it as ITS owner — so a monitor could fire
+ * someone else's automation, on their budget. Checked when the monitor is written and again
+ * when it fires, because the automation can change hands or disappear in between.
+ *
+ * `enabled` rides along for the fire-time check: a monitor may point at an automation that is
+ * switched off (saving it is fine — it may be switched on later), but must not run one.
+ */
+export async function findOwnedAutomation(
+	userId: string,
+	automationId: string,
+): Promise<{ id: string; enabled: boolean } | null> {
+	const [row] = await db
+		.select({ id: automations.id, enabled: automations.enabled })
+		.from(automations)
+		.where(and(eq(automations.id, automationId), eq(automations.userId, userId)))
+		.limit(1)
+	return row ?? null
+}
+
+async function assertActionTargetsOwned(userId: string, action: MonitorAction, config: MonitorActionConfig) {
+	if (action !== 'run_automation' || !config.automationId) return
+	if (!(await findOwnedAutomation(userId, config.automationId))) {
+		throw new UserInputError(`automation ${config.automationId} not found — run_automation needs one of your own automations`)
+	}
+}
+
 export async function createMonitor(input: CreateMonitorInput, now = new Date()): Promise<MonitorRow> {
 	const condition = monitorConditionSchema.parse(input.condition)
 	const action = monitorActionSchema.parse(input.action)
 	const actionConfig = monitorActionConfigSchema.parse(input.actionConfig ?? {})
 	const configError = validateActionConfig(action, actionConfig)
-	if (configError) throw new Error(configError)
+	if (configError) throw new UserInputError(configError)
+	await assertActionTargetsOwned(input.userId, action, actionConfig)
 
 	const name = input.name.trim()
-	if (name.length === 0) throw new Error('monitor name is required')
+	if (name.length === 0) throw new UserInputError('monitor name is required')
 
 	const [{ activeCount }] = await db
 		.select({ activeCount: drizzleSql<number>`count(*)::int` })
 		.from(monitors)
 		.where(and(eq(monitors.userId, input.userId), drizzleSql`${monitors.status} in ('active', 'paused')`))
 	if (Number(activeCount) >= MONITOR_MAX_ACTIVE_PER_USER) {
-		throw new Error(
+		throw new UserInputError(
 			`monitor limit reached — ${MONITOR_MAX_ACTIVE_PER_USER} active monitors already exist. Cancel one first.`,
 		)
 	}
@@ -256,7 +291,7 @@ export async function extendMonitor(
 ): Promise<MonitorRow | null> {
 	const existing = await getMonitorForUser(userId, monitorId)
 	if (!existing) return null
-	if (existing.status === 'canceled') throw new Error('a canceled monitor cannot be extended — create a new one')
+	if (existing.status === 'canceled') throw new UserInputError('a canceled monitor cannot be extended — create a new one')
 
 	const days = Math.min(MONITOR_MAX_DEADLINE_DAYS, Math.max(0, Math.floor(input.additionalDays ?? 0)))
 	const requested = days > 0 ? new Date(now.getTime() + days * 24 * 60 * 60 * 1000) : existing.deadlineAt
@@ -306,7 +341,7 @@ export async function updateMonitorSettings(
 	const patch: Partial<typeof monitors.$inferInsert> = { updatedAt: now }
 	if (input.name !== undefined) {
 		const name = input.name.trim()
-		if (name.length === 0) throw new Error('monitor name is required')
+		if (name.length === 0) throw new UserInputError('monitor name is required')
 		patch.name = name.slice(0, 200)
 	}
 	if (input.intervalSeconds !== undefined) patch.intervalSeconds = clampInterval(input.intervalSeconds)
@@ -315,7 +350,8 @@ export async function updateMonitorSettings(
 	if (input.actionConfig !== undefined) {
 		const actionConfig = monitorActionConfigSchema.parse(input.actionConfig)
 		const configError = validateActionConfig(existing.action, actionConfig)
-		if (configError) throw new Error(configError)
+		if (configError) throw new UserInputError(configError)
+		await assertActionTargetsOwned(userId, existing.action, actionConfig)
 		patch.actionConfig = actionConfig
 	}
 	const [row] = await db

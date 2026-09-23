@@ -80,16 +80,20 @@ test.describe('automations/budget-gate — pre-check skip', () => {
 				values (${userId}, 'chat', 'anthropic/claude-sonnet-4', 1000, 1000, '5.00')
 			`
 
-			// Schedule the automation in the past so the engine treats this tick as "now".
-			const past = new Date(Date.now() - 5 * 60_000)
+			// The spec drives the run itself, and `runAutomationById` does not look at nextRunAt.
+			// A slot a week out keeps the dev server's dispatcher from running the same
+			// automation behind the test's back — and lets the assertion below see that the
+			// blocked tick rescheduled it to the next 09:00.
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, next_run_at)
-				values (${userId}, ${`${prefix} blocked`}, '0 9 * * *', ${`${prefix} prompt`}, ${past})
+				values (${userId}, ${`${prefix} blocked`}, '0 9 * * *', ${`${prefix} prompt`}, ${notDue})
 				returning id
 			`
 
+			const tickAt = new Date()
 			const { runAutomationById } = await import('../src/lib/automations/engine')
-			const result = await runAutomationById(automation.id)
+			const result = await runAutomationById(automation.id, tickAt)
 			expect((result as { blocked?: boolean }).blocked).toBe(true)
 			expect((result as { conversationId: string | null }).conversationId).toBeNull()
 
@@ -132,7 +136,9 @@ test.describe('automations/budget-gate — pre-check skip', () => {
 			`
 			expect(updated.last_run_at).not.toBeNull()
 			expect(updated.next_run_at).not.toBeNull()
-			expect(new Date(updated.next_run_at!).getTime()).toBeGreaterThan(past.getTime())
+			const nextRunAt = new Date(updated.next_run_at!).getTime()
+			expect(nextRunAt, 'rescheduled from this tick').toBeGreaterThan(tickAt.getTime())
+			expect(nextRunAt, 'to the next 09:00, not left on the seeded slot').toBeLessThan(notDue.getTime())
 
 			// Block alert recorded.
 			const alerts = await sql<{ trigger_type: string }[]>`
@@ -177,17 +183,18 @@ test.describe('automations/budget-gate — pre-check skip', () => {
 				values (${userId}, 'chat', 'anthropic/claude-sonnet-4', 1000, 1000, '5.00')
 			`
 
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due, so only this spec runs it (see the test above).
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, next_run_at)
-				values (${userId}, ${`${prefix} dedupe`}, '0 9 * * *', ${`${prefix} prompt`}, ${past})
+				values (${userId}, ${`${prefix} dedupe`}, '0 9 * * *', ${`${prefix} prompt`}, ${notDue})
 				returning id
 			`
 
+			// Two blocked ticks in a row. `runAutomationById` does not consult nextRunAt, so the
+			// second call is a second tick whatever the first did to the schedule.
 			const { runAutomationById } = await import('../src/lib/automations/engine')
 			await runAutomationById(automation.id)
-			// Bump nextRunAt back into the past so the second call also "ticks" and re-attempts.
-			await sql`update automations set next_run_at = ${past} where id = ${automation.id}`
 			await runAutomationById(automation.id)
 
 			await settleMicrotasks()
@@ -227,10 +234,11 @@ test.describe('automations/budget-gate — happy path passthrough', () => {
 				values (${userId}, 'global', 'day', '999999.99', 'block', true)
 			`
 
-			const past = new Date(Date.now() - 5 * 60_000)
+			// Not due, so only this spec runs it (see the first test).
+			const notDue = new Date(Date.now() + 7 * 24 * 60 * 60_000)
 			const [automation] = await sql<{ id: string }[]>`
 				insert into automations (user_id, description, cron_expression, prompt, next_run_at)
-				values (${userId}, ${`${prefix} ok`}, '0 9 * * *', ${`${prefix} prompt`}, ${past})
+				values (${userId}, ${`${prefix} ok`}, '0 9 * * *', ${`${prefix} prompt`}, ${notDue})
 				returning id
 			`
 

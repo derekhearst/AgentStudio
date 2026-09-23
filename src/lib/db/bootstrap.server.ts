@@ -11,16 +11,21 @@
  *   4. Installs required Postgres extensions (pgvector, etc).
  *   5. Runs Drizzle migrations against the latest local revision. A failure is reported
  *      with instructions; it never triggers a reset.
- *   6. Seeds the built-in agents, the default evaluator, and any AGENTS.md /
+ *   6. Creates the owner account from AUTH_PASSWORD if there is none yet, then drops
+ *      AUTH_PASSWORD from the environment.
+ *   7. Seeds the built-in agents, the default evaluator, and any AGENTS.md /
  *      SKILL.md repo-discovered rows.
- *   7. Registers job handlers (research, memory mining, evaluations, workspace gc,
+ *   8. Registers job handlers (research, memory mining, evaluations, workspace gc,
  *      automations, metrics sampler, runs reaper, logs retention).
- *   8. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0.
- *   9. Kicks off the skill-embedding backfill in the background.
+ *   9. Starts the in-process worker + scheduler unless JOBS_WORKER_ENABLED=0, configured
+ *      from the JOBS_WORKER_* env vars (see jobs/worker-config.ts), and records their handles
+ *      in db/process-state.server.ts — so a standalone worker can drain them on shutdown, and
+ *      a dev-mode re-evaluation of db.server.ts can stop them before starting new ones.
+ *  10. Kicks off the skill-embedding backfill in the background.
  *
  * Steps 1–5 retry while Postgres is unreachable and otherwise throw: a database that
  * could not be prepared is reported by `ensureDatabaseReady()` rejecting (see
- * `readiness.server.ts`), not logged and forgotten. Steps 6–9 are fail-isolated: a
+ * `readiness.server.ts`), not logged and forgotten. Steps 6–10 are fail-isolated: a
  * single broken seeder or handler-registration call logs a warning and continues.
  *
  * `console.*` is used here intentionally — the `app_logs` table doesn't exist
@@ -47,6 +52,8 @@ import {
 } from '$lib/db/migrations.server'
 import { retryOnTransientConnectionError } from '$lib/db/readiness.server'
 import { schema } from '$lib/db/schema.server'
+import { adoptBackgroundJobs, isCurrentBootstrapGeneration } from '$lib/db/process-state.server'
+import { workerOptionsFromEnv } from '$lib/jobs/worker-config'
 import type postgres from 'postgres'
 
 type Client = ReturnType<typeof postgres>
@@ -60,12 +67,14 @@ const createSchemaDb = (client: Client) => drizzle(client, { schema })
 export type BootstrapInput = {
 	client: Client
 	databaseUrl: string
+	/** From `beginBootstrapGeneration()`; a bootstrap overtaken by a newer one starts no jobs. */
+	generation: number
 	/** Backoff between connection retries; defaults to BOOTSTRAP_RETRY_DELAYS_MS. */
 	retryDelaysMs?: readonly number[]
 }
 
 export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
-	const { client, databaseUrl } = input
+	const { client, databaseUrl, generation } = input
 	let databaseName = '(unnamed)'
 
 	try {
@@ -84,7 +93,7 @@ export async function bootstrapDatabase(input: BootstrapInput): Promise<void> {
 		throw err
 	}
 
-	await startServices(client)
+	await startServices(client, generation)
 }
 
 /**
@@ -136,17 +145,47 @@ async function prepareSchema(client: Client, databaseUrl: string, databaseName: 
 	})
 }
 
-// Steps 6–9 run once per process, however many times the schema steps are attempted.
-let servicesStarted = false
+// Steps 6–10 run once per bootstrap generation, however many times the schema steps are
+// attempted. A new generation (a dev-mode re-evaluation of db.server.ts) has stopped the
+// previous one's worker and scheduler, so it starts its own.
+let servicesStartedForGeneration: number | null = null
 
-async function startServices(client: Client): Promise<void> {
-	if (servicesStarted) return
-	servicesStarted = true
+async function startServices(client: Client, generation: number): Promise<void> {
+	if (servicesStartedForGeneration === generation) return
+	servicesStartedForGeneration = generation
 
+	await provisionOwnerFromEnvironment(client)
 	await runSeeders(client)
 	await registerJobHandlers()
-	startWorkerAndScheduler()
+	await startWorkerAndScheduler(generation)
 	kickoffBackgroundBackfills()
+}
+
+/**
+ * Create the owner from `AUTH_PASSWORD` when the database has none — the non-interactive
+ * first run, and what makes a fresh CI database or Docker deploy usable without `/setup`.
+ * Never overwrites an existing owner's password. Removes `AUTH_PASSWORD` from
+ * `process.env` whatever happens, because Agent SDK subprocesses inherit it. Details in
+ * src/lib/auth/provision.server.ts.
+ *
+ * Runs before the seeders and before the web tier serves anything (every request awaits
+ * this pipeline), so the setup gate never sees a window where the owner is missing.
+ */
+async function provisionOwnerFromEnvironment(client: Client): Promise<void> {
+	try {
+		const { provisionOwnerFromEnv } = await import('$lib/auth/provision.server')
+		const outcome = await provisionOwnerFromEnv(createSchemaDb(client))
+		if (outcome.status === 'created') {
+			console.log(`[db] Created the owner account "${outcome.username}" from AUTH_PASSWORD`)
+		} else if (outcome.status === 'placeholder') {
+			console.warn(
+				'[db] AUTH_PASSWORD is still the .env.example placeholder; not creating an owner with it. Set a real password, or finish setup at /setup.',
+			)
+		}
+	} catch (err) {
+		delete process.env.AUTH_PASSWORD
+		console.warn('[db] Creating the owner from AUTH_PASSWORD failed (non-fatal; /setup stays open):', err)
+	}
 }
 
 /**
@@ -320,8 +359,9 @@ async function registerJobHandlers(): Promise<void> {
 }
 
 /**
- * Whether this process's job worker is running, for `/api/health`. `pending` covers the
- * moment between bootstrap finishing and the worker module loading; `disabled` means
+ * Whether this process's job worker is running, for `/api/health`. `pending` means the
+ * bootstrap has not reached the worker step yet (the worker start is awaited, so it is
+ * settled by the time `ensureDatabaseReady()` resolves); `disabled` means
  * JOBS_WORKER_ENABLED=0 (a one-shot script, or a web tier paired with worker containers).
  */
 export type JobWorkerStatus = 'pending' | 'disabled' | 'running' | 'failed'
@@ -336,41 +376,53 @@ export function getJobWorkerStatus(): JobWorkerStatus {
  * Start the in-process worker + scheduler. Both opt-out via env vars
  * (JOBS_WORKER_ENABLED=0, JOBS_SCHEDULER_ENABLED=0) so a one-shot migration
  * script doesn't accidentally claim jobs.
+ *
+ * Awaited by the bootstrap, so once `ensureDatabaseReady()` resolves the handles are in
+ * `backgroundJobs()`. Each start checks the generation right before it happens — with no
+ * await in between — so a bootstrap that a newer one overtook starts nothing.
  */
-function startWorkerAndScheduler(): void {
+async function startWorkerAndScheduler(generation: number): Promise<void> {
 	if (process.env.JOBS_WORKER_ENABLED === '0') {
 		jobWorkerStatus = 'disabled'
 		return
 	}
 
-	void (async () => {
-		try {
-			const { startJobWorker } = await import('$lib/jobs/worker.server')
-			const worker = startJobWorker({ pollIntervalMs: 2000, leaseTtlMs: 120_000 })
-			jobWorkerStatus = 'running'
-			console.log(`[db] Started in-process job worker (id=${worker.workerId})`)
-		} catch (err) {
-			jobWorkerStatus = 'failed'
-			console.error('[db] Job worker start failed; queued jobs will not run in this process:', err)
-		}
-	})()
+	try {
+		const { startJobWorker } = await import('$lib/jobs/worker.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const options = workerOptionsFromEnv()
+		const worker = startJobWorker(options)
+		adoptBackgroundJobs(generation, { worker })
+		jobWorkerStatus = 'running'
+		const filters = [
+			options.queues ? `queues=${options.queues.join(',')}` : null,
+			options.types ? `types=${options.types.join(',')}` : null,
+		].filter(Boolean)
+		console.log(
+			`[db] Started in-process job worker (id=${worker.workerId}, poll=${options.pollIntervalMs}ms, lease=${options.leaseTtlMs}ms${filters.length > 0 ? `, ${filters.join(', ')}` : ''})`,
+		)
+	} catch (err) {
+		// A newer generation owns the status once this one has been overtaken.
+		if (isCurrentBootstrapGeneration(generation)) jobWorkerStatus = 'failed'
+		console.error('[db] Job worker start failed; queued jobs will not run in this process:', err)
+	}
 
 	if (process.env.JOBS_SCHEDULER_ENABLED === '0') return
 
-	void (async () => {
-		try {
-			const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
-			startScheduler()
-			const scheduled = listScheduledJobs()
-			if (scheduled.length > 0) {
-				console.log(
-					`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
-				)
-			}
-		} catch (err) {
-			console.warn('[db] Scheduler start failed (non-fatal):', err)
+	try {
+		const { startScheduler, listScheduledJobs } = await import('$lib/jobs/scheduler.server')
+		if (!isCurrentBootstrapGeneration(generation)) return
+		const scheduler = startScheduler()
+		adoptBackgroundJobs(generation, { scheduler })
+		const scheduled = listScheduledJobs()
+		if (scheduled.length > 0) {
+			console.log(
+				`[db] Started job scheduler with ${scheduled.length} recurring job(s): ${scheduled.map((s) => s.name).join(', ')}`,
+			)
 		}
-	})()
+	} catch (err) {
+		console.warn('[db] Scheduler start failed (non-fatal):', err)
+	}
 }
 
 /**

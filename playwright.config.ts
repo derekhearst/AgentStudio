@@ -32,6 +32,19 @@ import {
 process.env.DATABASE_POOL_MAX ??= '3'
 
 /*
+ * No job scheduler in the worker processes.
+ *
+ * Importing a server module boots the database, and the boot starts a job worker and a
+ * scheduler — so every Playwright worker process ran its own scheduler beside the dev
+ * server's. Now that recurring dispatchers really do run every minute, that was up to nine
+ * automation, monitor and PR-watch dispatchers at once, racing specs that seed an automation
+ * and drive it themselves. The dev server keeps its scheduler: `webServer.env` below sets it
+ * explicitly, because that env is copied from this process. A spec that wants a dispatch
+ * calls the dispatcher directly.
+ */
+process.env.JOBS_SCHEDULER_ENABLED ??= '0'
+
+/*
  * Strip model credentials from the worker processes too, when asked.
  *
  * This file is loaded by the runner and by every worker, which is the only hook that
@@ -84,8 +97,9 @@ export default defineConfig({
 	],
 	webServer: {
 		command: `bun run dev --host 127.0.0.1 --port ${TEST_SERVER_PORT}`,
-		// Shared with `bun run dev:test` so a reused server is configured identically.
-		env: testServerEnv(),
+		// Shared with `bun run dev:test` so a reused server is configured identically. The
+		// scheduler is on by default, so that script's server runs it too.
+		env: { ...testServerEnv(), JOBS_SCHEDULER_ENABLED: '1' },
 		/**
 		 * Wait for a real response, not just an open socket.
 		 *

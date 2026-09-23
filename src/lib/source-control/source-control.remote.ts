@@ -1,3 +1,4 @@
+import { error } from '@sveltejs/kit'
 import { command, query } from '$app/server'
 import { z } from 'zod'
 import {
@@ -12,6 +13,7 @@ import {
 	pullRepositoryLatest,
 } from './source-control.server'
 import { isGithubOAuthConfigured } from './github-oauth.server'
+import { findPullRequestForFix } from './pr-fix.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 
 /**
@@ -169,8 +171,11 @@ export const listGithubImportCandidatesQuery = query(async () => {
  * and it must survive the request that started it. The operator gets a job id back
  * immediately and the run appears in the originating conversation when it finishes.
  *
- * Ownership is re-checked inside `startPullRequestFixRun` — this boundary establishes WHO
- * is asking, the job establishes whether the PR is theirs.
+ * Ownership is checked here, before anything is queued, and again inside
+ * `startPullRequestFixRun`. The first check is the one that matters for the button: the
+ * dedupe key below gives each review item exactly one job, forever, so a press that was
+ * going to be refused must not be the one that takes it. The returned `status` says whether
+ * that job is new or an earlier one — `describeFixRunJob` turns it into the message.
  */
 const startFixSchema = z.object({
 	pullRequestId: z.string().uuid(),
@@ -180,24 +185,27 @@ const startFixSchema = z.object({
 
 export const startPullRequestFixCommand = command(startFixSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	if (!(await findPullRequestForFix(user.id, input.pullRequestId))) {
+		error(404, 'Pull request not found')
+	}
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	const job = await enqueueJob({
 		type: 'pr_fix',
 		queue: 'default',
 		// Operator pressed a button; this outranks background polling.
 		priority: 90,
-		// Keyed on the review item, not on (PR, check). `(type, dedupeKey)` is unique
-		// FOREVER — a key that does not move would make the second press of "Fix it" hand
-		// back the first, long-completed job instead of running anything. One review item
-		// is one failure on one commit, so one fix run per item is the right grain, and a
-		// later failure opens a new item and is therefore fixable again. Without an item
-		// id we fall back to a minute bucket: a double-click collapses, a deliberate retry
-		// a minute later does not.
+		// Keyed on the review item, not on (PR, check), and held `forever`: one review item
+		// is one failure on one commit, so one fix run per item is the right grain — a second
+		// press hands back the first job — and a later failure opens a new item and is
+		// therefore fixable again. Without an item id we fall back to a minute bucket that
+		// only covers a fix still in flight: a double-click collapses, a deliberate retry a
+		// minute later does not.
 		dedupeKey: input.reviewItemId
 			? `pr_fix:item:${input.reviewItemId}`
 			: `pr_fix:${input.pullRequestId}:${input.checkName ?? 'latest'}:${new Date(
 					Math.floor(Date.now() / 60_000) * 60_000,
 				).toISOString()}`,
+		dedupeScope: input.reviewItemId ? 'forever' : 'active',
 		payload: {
 			pullRequestId: input.pullRequestId,
 			userId: user.id,

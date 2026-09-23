@@ -44,7 +44,7 @@ attempt starts and closed when it ends, so a run that dies mid-flight still leav
 | `automationId`   | uuid       | FK to `automations`, cascade delete                              |
 | `userId`         | uuid?      | Owner at run time                                                |
 | `status`         | text       | `running`, `completed`, `failed`, `blocked` (budget cap)         |
-| `trigger`        | text       | `schedule` or `manual` ("Run now")                               |
+| `trigger`        | text       | `schedule`, `manual` ("Run now") or `monitor` (a monitor fired)  |
 | `attempt`        | integer    | 1-based; >1 means this attempt is a retry of a failed tick        |
 | `mode`           | text       | Snapshot of the automation's mode at execution time              |
 | `startedAt`      | timestamp  |                                                                  |
@@ -119,7 +119,9 @@ match. That is what makes `0 9 * * 1-5` mean "weekdays at 9" rather than "never"
 
 `@reboot` is rejected: automations have no boot event to hang a schedule on. Anything the
 parser cannot read is rejected with a message naming the field and the reason, for example
-`Invalid cron day-of-week field "FUNDAY": unrecognized value "FUNDAY"`.
+`Invalid cron day-of-week field "FUNDAY": unrecognized value "FUNDAY"`. That message is what
+the creation form shows, so a typo in the schedule says which field is wrong and why rather
+than "Failed to create automation".
 
 **Daylight saving.** Schedules keep their wall-clock time across a transition, so a 9am
 automation is 9am in both winter and summer. In the two edge hours:
@@ -128,6 +130,18 @@ automation is 9am in both winter and summer. In the two edge hours:
   Mountain time) runs once, at the moment the clock jumps, rather than being skipped for the day.
 - **Fall back** — a schedule inside the hour that happens twice runs once, on the first pass,
   rather than firing twice.
+
+### Conversation mode
+
+A `chat_followup` automation writes each run into a conversation. **New each run** opens a
+fresh conversation every time. **Reuse thread** keeps writing into the same one, so the
+thread becomes a running log of every run.
+
+Each run hands the model the **most recent 12 messages** of that conversation as context,
+oldest first, followed by this run's prompt. In a reused thread that means the model always
+sees the last few runs — including the one right before it — which is what a prompt like
+"summarize what changed since the last run" needs. If the cut falls between a prompt and
+its reply, the orphaned reply is left out so the context starts on a prompt.
 
 ### Output routing
 
@@ -149,7 +163,7 @@ Automations can attach project or repository context so recurring runs are not c
 
 ### Budget controls
 
-Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created.
+Automations can define monthly spend limits. If an execution would exceed the cap, the automation is blocked and a review item is created. A blocked scheduled tick moves on to the next scheduled slot; a blocked "Run now" or monitor-fired run leaves the schedule where it was.
 
 ### Review policies
 
@@ -165,23 +179,75 @@ Automations can require human approval before:
 Users can inspect past automation runs, including summaries, failures, linked tasks, linked runs, and linked pull requests.
 
 Each card on `/automations` has a **History** disclosure listing the last ten runs: status,
-when it started, how long it took, whether it was scheduled or a manual run, which retry
-attempt it was, what it cost, and a link straight to the conversation or research run it
-produced. A failed run shows its error; a successful one shows an excerpt of its output.
+when it started, how long it took, whether it was scheduled, a manual run or fired by a
+monitor, which retry attempt it was, what it cost, and a link straight to the conversation or
+research run it produced. A failed run shows its error; a successful one shows an excerpt of its output.
+
+The status strip on each card — the last run's outcome, and how many runs failed in the
+past 24 hours — is worked out for that automation alone. A busy automation that runs every
+minute cannot push a quieter one's failure out of view, and the page header's "failing"
+count includes every automation whose last run failed.
 
 ### Run now
 
 Every card has a **Run now** button. It queues a manual `automation_run` job (priority above
 the scheduled tier) rather than executing inline, because a tick can take minutes and a web
-request must not be held open that long. Two guarantees:
+request must not be held open that long. Three guarantees:
 
 1. **The schedule is not disturbed.** A manual run updates `lastRunAt` and the run history,
    and leaves `nextRunAt` exactly where it was. Pressing the button at 09:58 does not push a
    10:00 tick to tomorrow.
-2. **A disabled automation can still be run.** That is the point: fix the cause, run once to
+2. **A manual run never stands in for a scheduled one.** Both happen, separately. In
+   research mode each run — manual or scheduled — starts its own research report; pressing
+   the button today does not use up tomorrow's scheduled report.
+3. **A disabled automation can still be run.** That is the point: fix the cause, run once to
    verify, then switch it back on.
 
-Double-clicking is harmless — manual runs within the same minute collapse into one job.
+Double-clicking is harmless — a second press in the same minute, while the first manual run
+is still queued or running, collapses into it.
+
+### Duplicate
+
+**Duplicate** copies a card's settings into the creation form: description (with "(copy)"
+added), schedule and time zone, prompt, agent, conversation mode, execution mode and output
+target. Nothing is created until **Create automation** is pressed, so the copy can be
+adjusted first.
+
+### Fired by a monitor
+
+A monitor with the `run_automation` action runs one of its owner's automations when it fires
+(see the monitors spec). That run is recorded with the trigger `monitor`, and follows its own
+rules because nobody is watching it:
+
+| | Scheduled tick | Run now | Monitor-fired |
+| - | -------------- | ------- | ------------- |
+| Moves `nextRunAt` | Yes | No | No |
+| Runs a switched-off automation | No | Yes | No |
+| Retried on failure | Yes | No | Yes |
+| Failure counts toward the disable streak, opens a review item and a notification | Yes | No | Yes |
+
+A monitor that fires while its automation is switched off does not run it; the monitor opens a
+review item saying so instead.
+
+### External trigger
+
+Automations normally run from the scheduler built into the server, which checks for due
+automations every minute. An operator who turns that scheduler off
+(`JOBS_SCHEDULER_ENABLED=0`) can drive the same check from outside by calling
+`POST /api/cron`, for example from a system cron job. Each call does what one scheduler tick
+does: queue every due automation, clean up expired run workspaces, and embed any skills that
+are missing an embedding.
+
+The route accepts two kinds of caller:
+
+| Caller | How it proves itself |
+| ------ | -------------------- |
+| A signed-in person (or a test) | The normal session cookie |
+| An external scheduler | The header `Authorization: Bearer <CRON_SECRET>` |
+
+With no `CRON_SECRET` configured, only a signed-in session is accepted. Anything else gets a
+`401 Unauthorized` — never a redirect to the login page, so a misconfigured scheduler sees a
+clear failure instead of an apparent success.
 
 ### Retries, backoff, and giving up
 
@@ -197,7 +263,26 @@ per-type backoff, so an operator can see the policy:
 Giving up rolls `nextRunAt` forward to the next scheduled slot — the system gives up on the
 tick, not on the automation. Manual runs are never retried: a person is standing there and
 can press the button again, and a manual failure does not count against the schedule's
-failure streak.
+failure streak. A monitor-fired run is retried and escalated like a scheduled tick, but giving
+up on it leaves `nextRunAt` alone — the schedule did not fail.
+
+**Turning an automation off stops its retries too.** A retry that was already waiting when
+the user disabled the automation — or deleted it — is skipped when its turn comes. It is not
+a failure: nothing ran, so no further retry is queued, the failure streak is untouched, and
+no review item or "Automation run failed" notification goes out. The same applies to a
+monitor's `run_automation` job for an automation that has since been switched off.
+
+Each scheduled slot gets exactly one `automation_run` job, however many dispatch ticks see it
+due while its retries play out; each retry is a job of its own, linked from the attempt
+before it. While any job in that chain can still run, the dispatcher leaves the slot alone.
+Once the whole chain has finished, the slot is normally no longer due — a successful run and
+an exhausted retry policy both move `nextRunAt` on. If it is still due, the job queue gave up
+on one of those jobs before the retry policy could: the worker running an attempt kept dying
+mid-run, its lease lapsed during a long outage, or someone canceled it in `/settings/jobs`.
+The next dispatch tick then skips the slot, so the automation carries on from its following
+slot instead of staying stuck on a dead one. A skipped slot is logged, not counted as a
+failure: the queue's own records (a *Job stuck* review item for a crash loop, the job's error
+in `/settings/jobs`) already say what went wrong.
 
 ### Failure surfacing
 

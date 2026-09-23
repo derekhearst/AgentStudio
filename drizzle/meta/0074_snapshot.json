@@ -1,5 +1,5 @@
 {
-  "id": "ecdea8dc-c695-4a89-89c4-310bcf1aef3d",
+  "id": "c0fc0399-44ca-4e29-bed5-bb9d659ea64b",
   "prevId": "c8da04fe-98bf-4821-9afc-c9159b8a1d7f",
   "version": "7",
   "dialect": "postgresql",
@@ -2837,6 +2837,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "jobs_type_dedupe_active_uidx": {
+          "name": "jobs_type_dedupe_active_uidx",
+          "columns": [
+            {
+              "expression": "type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dedupe_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"jobs\".\"status\" in ('pending', 'leased', 'running', 'retry_wait')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2855,16 +2877,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "jobs_type_dedupe_unique": {
-          "name": "jobs_type_dedupe_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "type",
-            "dedupe_key"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3098,21 +3111,6 @@
             },
             {
               "expression": "pinned",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "memory_drawers_source_message_idx": {
-          "name": "memory_drawers_source_message_idx",
-          "columns": [
-            {
-              "expression": "source_message_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -3863,21 +3861,6 @@
             },
             {
               "expression": "occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "memory_rooms_conversation_idx": {
-          "name": "memory_rooms_conversation_idx",
-          "columns": [
-            {
-              "expression": "conversation_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

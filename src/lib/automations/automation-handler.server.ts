@@ -3,14 +3,15 @@ import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
-import { automations } from '$lib/automations/automation.schema'
+import { automations, type AutomationRunTrigger } from '$lib/automations/automation.schema'
 import { logger } from '$lib/observability/logger'
-import { runAutomationById, checkAndRunAutomations } from './engine'
+import { AutomationUnavailableError, runAutomationById, checkAndRunAutomations } from './engine'
 import { recordTerminalAutomationFailure } from './automation-failure.server'
 import { pruneAutomationRuns, reapStalledAutomationRuns } from './automation-runs.server'
 import {
 	AUTOMATION_MAX_ATTEMPTS,
 	automationRetryDedupeKey,
+	automationTriggerPolicy,
 	computeRetryBackoffMs,
 	describeRetryDecision,
 	nextRetryAt,
@@ -29,13 +30,14 @@ import {
  *     `runAutomationById` which delegates to the existing runAutomation pipeline + updates
  *     last_run_at / next_run_at on success.
  *
- * Benefits: ticks survive restart, per-automation dedupe via `automation:<id>:<minute>`
- * prevents double-execution within the same tick window, failures show up in
- * `/settings/jobs` for forensics.
+ * Benefits: ticks survive restart, per-automation dedupe via `automation:<id>:<slot>`
+ * gives each scheduled slot exactly one job however many ticks see it due, failures show up
+ * in `/settings/jobs` for forensics.
  *
  * The cron route (`/api/cron`) still works as an external trigger — it just calls the same
  * `checkAndRunAutomations` enqueue path. Useful for environments that prefer external cron
- * over the in-process scheduler.
+ * over the in-process scheduler: send `Authorization: Bearer $CRON_SECRET` (see
+ * `cron-trigger.ts`; with no secret configured only a signed-in session can fire it).
  *
  * #31 — failure handling lives HERE rather than in the generic queue retry, and the handler
  * deliberately does not rethrow. Two reasons:
@@ -52,53 +54,75 @@ const AUTOMATION_RUN_PAYLOAD = z.object({
 	automationId: z.string().uuid(),
 	/** 1-based attempt within the current tick; retries carry attempt+1 forward. */
 	attempt: z.number().int().min(1).max(10).optional(),
-	trigger: z.enum(['schedule', 'manual']).optional(),
+	trigger: z.enum(['schedule', 'manual', 'monitor']).optional(),
 })
 
 let registered = false
 
+/**
+ * The `automation_run` handler body, exported so specs can drive one job end to end without
+ * a worker.
+ *
+ * An automation that is gone, or was switched off after this job was queued, is SKIPPED —
+ * not failed. That case is typically a retry that was already waiting when the user
+ * disabled the automation, or a monitor firing at one they turned off. Sending it through
+ * the failure policy would queue yet more attempts, bump the failure streak and push an
+ * "Automation run failed" notification about something the user deliberately stopped.
+ */
+export async function executeAutomationRunJob(job: { id: string; payload: unknown }): Promise<Record<string, unknown>> {
+	const parsed = AUTOMATION_RUN_PAYLOAD.safeParse(job.payload)
+	if (!parsed.success) {
+		throw new Error(`automation_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
+	}
+	const { automationId } = parsed.data
+	const attempt = parsed.data.attempt ?? 1
+	const trigger = parsed.data.trigger ?? 'schedule'
+
+	try {
+		const result = await runAutomationById(automationId, new Date(), {
+			trigger,
+			attempt,
+			jobId: job.id,
+		})
+		return {
+			automationId,
+			attempt,
+			trigger,
+			status: 'completed',
+			conversationId: result.conversationId,
+			nextRunAt: result.nextRunAt,
+		}
+	} catch (error) {
+		if (error instanceof AutomationUnavailableError) {
+			logger.info('[automations] run skipped — automation is no longer runnable', {
+				automationId,
+				attempt,
+				trigger,
+				reason: error.reason,
+			})
+			return { automationId, attempt, trigger, status: 'skipped', reason: error.reason }
+		}
+		const outcome = await handleAutomationRunFailure({
+			automationId,
+			attempt,
+			trigger,
+			jobId: job.id,
+			error,
+		})
+		return { automationId, attempt, trigger, status: 'failed', ...outcome }
+	}
+}
+
 export function registerAutomationJobHandlers(): void {
 	if (registered) return
 
-	registerJobHandler('automation_run', async ({ job }) => {
-		const parsed = AUTOMATION_RUN_PAYLOAD.safeParse(job.payload)
-		if (!parsed.success) {
-			throw new Error(`automation_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
-		}
-		const { automationId } = parsed.data
-		const attempt = parsed.data.attempt ?? 1
-		const trigger = parsed.data.trigger ?? 'schedule'
-
-		try {
-			const result = await runAutomationById(automationId, new Date(), {
-				trigger,
-				attempt,
-				jobId: job.id,
-			})
-			return {
-				automationId,
-				attempt,
-				trigger,
-				status: 'completed',
-				conversationId: result.conversationId,
-				nextRunAt: result.nextRunAt,
-			}
-		} catch (error) {
-			const outcome = await handleAutomationRunFailure({
-				automationId,
-				attempt,
-				trigger,
-				jobId: job.id,
-				error,
-			})
-			return { automationId, attempt, trigger, status: 'failed', ...outcome }
-		}
-	})
+	registerJobHandler('automation_run', ({ job }) => executeAutomationRunJob(job))
 
 	// Dispatch tick — every 60s, look for due automations and enqueue per-automation jobs.
-	// Idempotent: dedupeKey on each enqueue collapses double-fires within the same tick window.
-	// Note: `checkAndRunAutomations` itself doesn't need a dedupeKey because it's the
-	// dispatcher (it INSPECTS due automations); only its enqueued automation_run jobs do.
+	// The fixed key only collapses a tick onto one that is still queued or running (dedupe
+	// covers active jobs), so a backed-up worker never stacks ticks, and every tick after the
+	// previous one finished gets a job of its own. Idempotency per automation lives on the
+	// automation_run jobs the tick enqueues, not here.
 	registerScheduledJob({
 		name: 'automations.dispatch',
 		intervalMs: 60_000,
@@ -124,7 +148,7 @@ export function registerAutomationJobHandlers(): void {
 
 		return {
 			evaluated: result.evaluated,
-			enqueued: result.enqueued.filter((e) => !!e.jobId).length,
+			enqueued: result.enqueued.filter((e) => e.created).length,
 			errors: result.enqueued.filter((e) => !!e.error).length,
 			reapedRuns: reaped,
 			prunedRuns: pruned,
@@ -145,17 +169,22 @@ export function registerAutomationJobHandlers(): void {
  * Manual runs are never retried — a human is standing there and can press the button again;
  * silently queuing background retries behind a button press is surprising. A manual failure
  * also does not count toward the disable streak, because the streak is about the schedule.
+ *
+ * A monitor-fired run is escalated like a scheduled one: nobody is watching it either, and a
+ * failure nobody hears about is the silence #31 set out to end. The retry carries the
+ * trigger forward, and giving up leaves the schedule where it is — the schedule did not fail.
  */
 async function handleAutomationRunFailure(args: {
 	automationId: string
 	attempt: number
-	trigger: 'schedule' | 'manual'
+	trigger: AutomationRunTrigger
 	jobId: string
 	error: unknown
 }): Promise<Record<string, unknown>> {
 	const message = args.error instanceof Error ? args.error.message : String(args.error)
+	const policy = automationTriggerPolicy(args.trigger)
 
-	if (args.trigger === 'manual') {
+	if (!policy.escalateFailures) {
 		logger.warn('[automations] manual run failed', {
 			automationId: args.automationId,
 			error: message,
@@ -182,10 +211,12 @@ async function handleAutomationRunFailure(args: {
 				queue: 'default',
 				priority: 50,
 				scheduledAt: runAt,
-				// Keyed on the job that failed, so re-delivery of the same failure can't fan
-				// out into a second retry chain.
+				// Keyed on the job that failed, and `forever`, so re-delivery of the same
+				// failure can't fan out into a second retry chain even after the first retry
+				// has already run.
 				dedupeKey: automationRetryDedupeKey(args.jobId, args.automationId, nextAttempt),
-				payload: { automationId: args.automationId, attempt: nextAttempt, trigger: 'schedule' },
+				dedupeScope: 'forever',
+				payload: { automationId: args.automationId, attempt: nextAttempt, trigger: args.trigger },
 				userId: automation?.userId ?? null,
 			})
 			return {
@@ -216,6 +247,7 @@ async function handleAutomationRunFailure(args: {
 		error: args.error,
 		attempts: args.attempt,
 		jobId: args.jobId,
+		advanceSchedule: !policy.preserveSchedule,
 	})
 
 	return {

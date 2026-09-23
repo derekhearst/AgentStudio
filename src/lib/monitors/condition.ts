@@ -33,7 +33,10 @@ export const MONITOR_HARD_MAX_CHECKS = 2_000
 export const MONITOR_MAX_CONSECUTIVE_ERRORS = 5
 /** Errored checks back off geometrically, but never past this multiple of the interval. */
 export const MONITOR_MAX_ERROR_BACKOFF_MULTIPLIER = 8
-/** How much of an observed value we keep on the row. The hash covers the whole thing. */
+/**
+ * How much of an observed value we keep on the row, for display. The hash covers the whole
+ * thing, and so do the comparisons — this cap is about row size, not about what is seen.
+ */
 export const MONITOR_OBSERVATION_MAX_CHARS = 4_000
 /** How much fetched context we hand the cheap model. Keeps the yes/no call cheap. */
 export const MONITOR_MODEL_CONTEXT_MAX_CHARS = 12_000
@@ -44,23 +47,92 @@ export const MONITOR_DEFAULT_MODEL = 'anthropic/claude-haiku-4.5'
  * Tools a condition may observe with. Deliberately a read-only allowlist — a monitor runs
  * unattended on a timer with no human in the loop, so it may look at the world but never
  * change it. `Bash`, `Write`, `push_branch` and friends are absent by construction.
+ *
+ * Every entry must be something a monitor can actually run; the monitors spec checks that.
+ * `git_status` / `git_log` / `git_diff` are left out on purpose: they only run inside a
+ * per-run git worktree, and a monitor has no run and no worktree, so every check of one
+ * failed.
  */
 export const MONITOR_OBSERVABLE_TOOLS = [
 	'web_fetch',
 	'web_search',
-	'Grep',
 	'Read',
-	'file_info',
+	'Grep',
 	'Glob',
-	'git_status',
-	'git_log',
-	'git_diff',
+	'file_info',
 	'list_pull_requests',
 	'get_pull_request',
 	'list_projects',
 ] as const
 
 export type MonitorObservableTool = (typeof MONITOR_OBSERVABLE_TOOLS)[number]
+
+/**
+ * The Agent SDK's own file tools. The engine gives them to the model directly, so the
+ * in-house executor that runs every other observable tool has no handler for them — a monitor
+ * runs these itself, read-only, over its owner's sandbox (`observe-files.server.ts`).
+ */
+export const MONITOR_FILE_TOOLS = ['Read', 'Grep', 'Glob'] as const satisfies readonly MonitorObservableTool[]
+export type MonitorFileTool = (typeof MONITOR_FILE_TOOLS)[number]
+
+export function isMonitorFileTool(tool: string): tool is MonitorFileTool {
+	return (MONITOR_FILE_TOOLS as readonly string[]).includes(tool)
+}
+
+/** Largest file a monitor will read or search. A watcher is not a bulk reader. */
+export const MONITOR_FILE_MAX_BYTES = 2 * 1024 * 1024
+/** Most paths, matches or counts a file observation returns. */
+export const MONITOR_FILE_MAX_RESULTS = 1_000
+
+/**
+ * Arguments for the file tools, in the SDK's own shapes so a condition reads the way an agent
+ * would call the tool. Strict: an option this implementation does not support is rejected
+ * when the monitor is created, rather than silently ignored on every check. Paths are
+ * relative to the owner's sandbox (an absolute path must lie inside it).
+ */
+export const monitorFileToolArgsSchemas = {
+	Read: z.strictObject({
+		file_path: z.string().trim().min(1).max(1_000),
+		/** 1-based line to start from. */
+		offset: z.number().int().min(1).optional(),
+		/** How many lines to read. */
+		limit: z.number().int().min(1).max(100_000).optional(),
+	}),
+	Grep: z.strictObject({
+		/** A regular expression, matched line by line. */
+		pattern: z.string().min(1).max(1_000),
+		/** File or directory to search. Defaults to the whole sandbox. */
+		path: z.string().trim().min(1).max(1_000).optional(),
+		/** Only search files whose name matches, e.g. `*.log`. */
+		glob: z.string().trim().min(1).max(200).optional(),
+		output_mode: z.enum(['files_with_matches', 'content', 'count']).optional(),
+		'-i': z.boolean().optional(),
+		/** Cap on results; 0 means the maximum. Defaults to 250, as in the SDK. */
+		head_limit: z.number().int().min(0).max(MONITOR_FILE_MAX_RESULTS).optional(),
+	}),
+	Glob: z.strictObject({
+		pattern: z.string().trim().min(1).max(200),
+		/** Directory to match under. Defaults to the whole sandbox. */
+		path: z.string().trim().min(1).max(1_000).optional(),
+	}),
+} satisfies Record<MonitorFileTool, z.ZodType>
+
+/** Reject file-tool arguments at creation, pointing at the argument that is wrong. */
+function checkObservationArgs(
+	source: { tool: MonitorObservableTool; args: Record<string, unknown> },
+	ctx: z.RefinementCtx,
+): void {
+	if (!isMonitorFileTool(source.tool)) return
+	const parsed = monitorFileToolArgsSchemas[source.tool].safeParse(source.args)
+	if (parsed.success) return
+	for (const issue of parsed.error.issues) {
+		ctx.addIssue({
+			code: 'custom',
+			message: `${source.tool} arguments: ${issue.message}`,
+			path: ['args', ...issue.path],
+		})
+	}
+}
 
 // ─────────── Condition schemas ───────────
 
@@ -77,10 +149,12 @@ export const monitorCompareSchema = z.enum([
 
 export type MonitorCompare = z.infer<typeof monitorCompareSchema>
 
-const observationSourceSchema = z.object({
-	tool: z.enum(MONITOR_OBSERVABLE_TOOLS),
-	args: z.record(z.string(), z.unknown()).default({}),
-})
+const observationSourceSchema = z
+	.object({
+		tool: z.enum(MONITOR_OBSERVABLE_TOOLS),
+		args: z.record(z.string(), z.unknown()).default({}),
+	})
+	.superRefine((source, ctx) => checkObservationArgs(source, ctx))
 
 export const toolResultConditionSchema = z.object({
 	kind: z.literal('tool_result'),
@@ -95,7 +169,7 @@ export const toolResultConditionSchema = z.object({
 	compare: monitorCompareSchema.default('changed'),
 	/** Operand for equals / contains / matches. Ignored by `changed` and `not_empty`. */
 	value: z.string().max(2_000).optional(),
-})
+}).superRefine((condition, ctx) => checkObservationArgs(condition, ctx))
 
 export const modelQuestionConditionSchema = z.object({
 	kind: z.literal('model_question'),
@@ -158,7 +232,10 @@ export function validateActionConfig(action: MonitorAction, config: MonitorActio
 // ─────────── Observation ───────────
 
 export type MonitorObservation = {
-	/** Normalized, truncated rendering of what was seen. Shown in the UI. */
+	/**
+	 * Normalized rendering of what was seen, cut at `MONITOR_OBSERVATION_MAX_CHARS`. For
+	 * display only: a comparison reads the full value, which is never stored.
+	 */
 	value: string
 	/** Hash of the FULL normalized value — the change-detection key. */
 	hash: string
@@ -215,7 +292,11 @@ export function hashValue(input: string): string {
 }
 
 export function buildObservation(raw: unknown, met: boolean, note?: string, now = new Date()): MonitorObservation {
-	const full = stableStringify(raw)
+	return observationFromText(stableStringify(raw), met, note, now)
+}
+
+/** `buildObservation` for a value already rendered by `stableStringify`. */
+export function observationFromText(full: string, met: boolean, note?: string, now = new Date()): MonitorObservation {
 	const truncated = full.length > MONITOR_OBSERVATION_MAX_CHARS
 	return {
 		value: truncated ? `${full.slice(0, MONITOR_OBSERVATION_MAX_CHARS)}…` : full,
@@ -260,6 +341,13 @@ export type ComparisonInput = {
 	previous: MonitorObservation | null
 	/** Operand for equals / contains / matches. */
 	expected?: string
+	/**
+	 * The full normalized value, when the caller has it. `current.value` is cut at
+	 * `MONITOR_OBSERVATION_MAX_CHARS` with a trailing "…", so comparing against it would miss
+	 * anything past the cut — a `not_contains "Out of stock"` whose phrase sits at character
+	 * 9,000 fired on the first check — and `equals` could never match a long value.
+	 */
+	fullValue?: string
 }
 
 export type ComparisonResult = { met: boolean; reason: string }
@@ -274,7 +362,7 @@ export type ComparisonResult = { met: boolean; reason: string }
  */
 export function evaluateComparison(input: ComparisonInput): ComparisonResult {
 	const { compare, current, previous, expected } = input
-	const value = current.value
+	const value = input.fullValue ?? current.value
 	switch (compare) {
 		case 'changed': {
 			if (!previous) return { met: false, reason: 'baseline recorded — first observation never fires' }
@@ -329,6 +417,51 @@ function normalizeScalar(value: string): string {
 function isEmptyRendering(value: string): boolean {
 	const trimmed = value.trim()
 	return trimmed === '' || trimmed === '""' || trimmed === 'null' || trimmed === '[]' || trimmed === '{}'
+}
+
+export type ToolResultObservation =
+	| { outcome: 'observed'; observation: MonitorObservation; met: boolean }
+	| { outcome: 'error'; message: string }
+
+/**
+ * The `tool_result` half of a check once the tool has answered: narrow the result, compare
+ * it, and build the observation to store. Pure, so the rules are pinned without a tool call.
+ *
+ * Two rules live here:
+ *   - the comparison reads the FULL value; only the stored `value` is truncated;
+ *   - an `extract` path that is not in the result is an ERROR, not an observation of
+ *     "null". The create form pre-fills `text` (right for `web_fetch`), and a tool whose
+ *     result has no `text` would otherwise observe the literal "null" on every check —
+ *     a `changed` monitor never fires and quietly burns its budget, a `not_equals` one
+ *     fires on the first check. An explicit `null` at the path is still a real value.
+ */
+export function observeToolResult(
+	condition: ToolResultCondition,
+	raw: unknown,
+	previous: MonitorObservation | null,
+	now = new Date(),
+): ToolResultObservation {
+	const extracted = extractPath(raw, condition.extract)
+	if (extracted === undefined && condition.extract?.trim()) {
+		return {
+			outcome: 'error',
+			message: `extract path "${condition.extract.trim()}" was not found in the ${condition.tool} result`,
+		}
+	}
+	const full = stableStringify(extracted)
+	const candidate = observationFromText(full, false, undefined, now)
+	const comparison = evaluateComparison({
+		compare: condition.compare,
+		current: candidate,
+		previous,
+		expected: condition.value,
+		fullValue: full,
+	})
+	return {
+		outcome: 'observed',
+		met: comparison.met,
+		observation: { ...candidate, met: comparison.met, note: comparison.reason },
+	}
 }
 
 /**

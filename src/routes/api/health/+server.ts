@@ -1,9 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit'
-import { sql } from 'drizzle-orm'
-import { db } from '$lib/db.server'
+import { ownerExists } from '$lib/auth/auth.server'
 import { getJobWorkerStatus } from '$lib/db/bootstrap.server'
-import { getMigrationsFolder } from '$lib/db/migrations.server'
-import { logger } from '$lib/observability/logger'
+import { getMigrationStatus } from '$lib/db/migration-status.server'
 
 /**
  * Deploy health check (#47).
@@ -28,50 +26,19 @@ import { logger } from '$lib/observability/logger'
  * reaches this handler at all — `ensureDatabaseReady()` in hooks.server.ts rejects, and
  * every request, this one included, is a 500.)
  *
- * Deliberately unauthenticated (see PUBLIC_PATH_PREFIXES in hooks.server.ts) so it can be
- * polled by a uptime check that has no session. It exposes counts, statuses and a commit
- * SHA, never row contents, connection strings, database names or environment values.
+ * Deliberately unauthenticated (see PUBLIC_PATH_PREFIXES in src/lib/auth/gate.ts) so it can
+ * be polled by a uptime check that has no session — including before the instance has an
+ * owner, when every other path redirects to /setup. It exposes counts, statuses, a commit
+ * SHA and whether an owner exists (which /setup already reveals), never row contents,
+ * connection strings, database names or environment values.
+ *
+ * `ownerProvisioned` is reported but is not part of `healthy`: a fresh instance waiting for
+ * setup is up and working, and a deploy probe should not call it an outage.
  */
 
-const MIGRATIONS_SCHEMA = 'drizzle'
-const MIGRATIONS_TABLE = '__drizzle_migrations'
-
-/** Count the migration files the running image carries, from the journal it ships. */
-async function countBundledMigrations(): Promise<number | null> {
-	try {
-		const { readFile } = await import('node:fs/promises')
-		const { join } = await import('node:path')
-		const journalPath = join(getMigrationsFolder(), 'meta', '_journal.json')
-		const parsed = JSON.parse(await readFile(journalPath, 'utf-8')) as { entries?: unknown[] }
-		return Array.isArray(parsed.entries) ? parsed.entries.length : null
-	} catch (err) {
-		logger.warn('[health] could not read the migration journal', { err })
-		return null
-	}
-}
-
-async function countAppliedMigrations(): Promise<number | null> {
-	try {
-		const rows = await db.execute<{ n: number }>(
-			sql`select count(*)::int as n from ${sql.identifier(MIGRATIONS_SCHEMA)}.${sql.identifier(MIGRATIONS_TABLE)}`,
-		)
-		const first = (rows as unknown as Array<{ n: number }>)[0]
-		return typeof first?.n === 'number' ? first.n : null
-	} catch (err) {
-		logger.warn('[health] could not count applied migrations', { err })
-		return null
-	}
-}
-
 export const GET: RequestHandler = async () => {
-	const [bundledMigrations, appliedMigrations] = await Promise.all([
-		countBundledMigrations(),
-		countAppliedMigrations(),
-	])
-
-	const databaseReachable = appliedMigrations !== null
-	const migrationsInSync =
-		bundledMigrations !== null && appliedMigrations !== null && bundledMigrations === appliedMigrations
+	const { bundledMigrations, appliedMigrations, databaseReachable, migrationsInSync } = await getMigrationStatus()
+	const ownerProvisioned = databaseReachable ? await ownerExists().catch(() => false) : false
 
 	// Stamped into the image at build time by the publish workflow.
 	const commit = process.env.GIT_SHA ?? null
@@ -87,6 +54,7 @@ export const GET: RequestHandler = async () => {
 			migrationsInSync,
 			bundledMigrations,
 			appliedMigrations,
+			ownerProvisioned,
 			jobWorker,
 			commit,
 			checkedAt: new Date().toISOString(),
