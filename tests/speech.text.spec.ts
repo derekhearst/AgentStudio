@@ -7,6 +7,8 @@
  * never losing or reordering a word, with a short first piece so playback starts quickly.
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import {
 	DEFAULT_TTS_MODEL,
@@ -74,6 +76,18 @@ test.describe('speech/toSpeakableText — markdown becomes prose', () => {
 		expect(toSpeakableText('   \n\n  ')).toBe('')
 		expect(toSpeakableText('```\nonly code\n```')).toBe('Code block omitted.')
 	})
+
+	test('each emphasis ends at its own closing mark, and a mark with a space inside is not one', () => {
+		expect(toSpeakableText('**a** and **b**, *c* and *d*, _e_ and _f_, ~~g~~ and ~~h~~')).toBe('a and b, c and d, e and f, g and h')
+		expect(toSpeakableText('**two words** and __more here__')).toBe('two words and more here')
+		expect(toSpeakableText('a ** b ** c, x * y * z, p _ q _ r, ~~ s ~~')).toBe('a ** b ** c, x * y * z, p _ q _ r, ~~ s ~~')
+	})
+
+	test('the module has no regex lookbehind, which Safari before 16.4 cannot parse', () => {
+		// speech.ts is in the chat page's bundle: one unparseable regex there loses the whole page.
+		const source = readFileSync(join(process.cwd(), 'src/lib/speech/speech.ts'), 'utf8')
+		expect(source).not.toMatch(/\(\?<[=!]/)
+	})
 })
 
 test.describe('speech/splitForSpeech — chunks under the cap', () => {
@@ -98,6 +112,17 @@ test.describe('speech/splitForSpeech — chunks under the cap', () => {
 		const chunks = splitForSpeech(text, { maxChars: 50_000, firstChunkMaxChars: 50_000 })
 		expect(chunks.length).toBeGreaterThan(1)
 		for (const chunk of chunks) expect(chunk.length).toBeLessThanOrEqual(TTS_MAX_CHARACTERS)
+	})
+
+	test('a closing quote or bracket stays with the sentence it closes', () => {
+		expect(splitForSpeech('One. "Two." (Three!) Four…', { maxChars: 8, firstChunkMaxChars: 8 })).toEqual([
+			'One.',
+			'"Two."',
+			'(Three!)',
+			'Four…',
+		])
+		// A full stop inside a word is not a sentence end.
+		expect(splitForSpeech('a.b c', { maxChars: 8, firstChunkMaxChars: 8 })).toEqual(['a.b c'])
 	})
 
 	test('a sentence longer than the limit is cut at spaces, and one giant word mid-word', () => {

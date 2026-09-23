@@ -130,10 +130,13 @@ function speakInline(line: string): string {
 			// HTML tags, but not a comparison like `a < b`.
 			.replace(/<\/?[a-zA-Z][^>]*>/g, '')
 			// Emphasis and strikethrough. Underscores only at word edges, so snake_case survives.
-			.replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
-			.replace(/(^|[^\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])/g, '$1$2')
-			.replace(/(^|[^\w])_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, '$1$2')
-			.replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1')
+			// The marked text starts and ends with a non-space, spelled `\S|\S.*?\S` rather than
+			// with a lookbehind: this module is in the chat page's bundle, and Safari before 16.4
+			// cannot parse a lookbehind, which would take the whole page down with it.
+			.replace(/(\*\*|__)(\S|\S.*?\S)\1/g, '$2')
+			.replace(/(^|[^\w*])\*([^*\s]|[^*\s][^*\n]*?[^*\s])\*(?![\w*])/g, '$1$2')
+			.replace(/(^|[^\w])_([^_\s]|[^_\s][^_\n]*?[^_\s])_(?!\w)/g, '$1$2')
+			.replace(/~~(\S|\S.*?\S)~~/g, '$1')
 			// Backslash escapes, then the few entities a reply realistically contains.
 			.replace(/\\([\\`*_{}[\]()#+\-.!|>~])/g, '$1')
 			.replace(/&nbsp;/g, ' ')
@@ -231,6 +234,21 @@ export function toSpeakableText(markdown: string): string {
 	return paragraphs.join('\n\n')
 }
 
+/**
+ * A paragraph's sentences: cut at the space after a full stop, question or exclamation mark,
+ * or ellipsis, with any closing quote or bracket kept on the sentence it closes. A split on
+ * the captured ending rather than a lookbehind, for the reason given in `speakInline`.
+ */
+function sentencesOf(paragraph: string): string[] {
+	const parts = paragraph.split(/([.!?…]["'”’)\]]*)\s+/)
+	const sentences: string[] = []
+	for (let i = 0; i < parts.length; i += 2) {
+		const sentence = parts[i] + (parts[i + 1] ?? '')
+		if (sentence) sentences.push(sentence)
+	}
+	return sentences
+}
+
 /** Cut one over-long sentence at spaces, or mid-word when a single word is too long. */
 function splitLongSentence(sentence: string, limit: number): string[] {
 	const pieces: string[] = []
@@ -272,7 +290,7 @@ export function splitForSpeech(
 
 	const paragraphs = (text ?? '').split(/\n{2,}/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean)
 	for (const paragraph of paragraphs) {
-		const sentences = paragraph.split(/(?<=[.!?…]["'”’)\]]*)\s+/).filter(Boolean)
+		const sentences = sentencesOf(paragraph)
 		let separator = current ? '\n\n' : ''
 		for (const sentence of sentences) {
 			if (current && current.length + separator.length + sentence.length <= limit()) {
