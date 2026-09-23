@@ -203,6 +203,12 @@ tick, not on the automation. Manual runs are never retried: a person is standing
 can press the button again, and a manual failure does not count against the schedule's
 failure streak.
 
+**Turning an automation off stops its retries too.** A retry that was already waiting when
+the user disabled the automation — or deleted it — is skipped when its turn comes. It is not
+a failure: nothing ran, so no further retry is queued, the failure streak is untouched, and
+no review item or "Automation run failed" notification goes out. The same applies to a
+monitor's `run_automation` job for an automation that has since been switched off.
+
 Each scheduled slot gets exactly one `automation_run` job, however many dispatch ticks see it
 due while its retries play out. If the job queue itself gives up on that job before the
 retry policy could — the worker running it kept dying mid-run, or someone canceled it in

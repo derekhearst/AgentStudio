@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
+import { automations } from '$lib/automations/automation.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
@@ -140,6 +141,15 @@ async function firePush(monitor: MonitorRow, observation: MonitorObservation): P
 async function fireAutomation(monitor: MonitorRow, observation: MonitorObservation): Promise<MonitorFireResult> {
 	const automationId = monitor.actionConfig.automationId
 	if (!automationId) throw new Error('actionConfig.automationId is missing')
+	// Checked here, where a throw still reaches the review-item fallback. The job would only
+	// skip a missing or switched-off automation, and the observation would go nowhere.
+	const [automation] = await db
+		.select({ enabled: automations.enabled })
+		.from(automations)
+		.where(and(eq(automations.id, automationId), eq(automations.userId, monitor.userId)))
+		.limit(1)
+	if (!automation) throw new Error(`automation ${automationId} no longer exists`)
+	if (!automation.enabled) throw new Error(`automation ${automationId} is disabled — switch it back on to let this monitor run it`)
 	const { enqueueJob } = await import('$lib/jobs/jobs.server')
 	// Enqueued by job type rather than by importing the automations engine — the monitor
 	// domain stays decoupled from whatever that engine looks like, and the job queue already

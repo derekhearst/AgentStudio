@@ -5,7 +5,7 @@ import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
 import { automations } from '$lib/automations/automation.schema'
 import { logger } from '$lib/observability/logger'
-import { runAutomationById, checkAndRunAutomations } from './engine'
+import { AutomationUnavailableError, runAutomationById, checkAndRunAutomations } from './engine'
 import { recordTerminalAutomationFailure } from './automation-failure.server'
 import { pruneAutomationRuns, reapStalledAutomationRuns } from './automation-runs.server'
 import {
@@ -57,43 +57,64 @@ const AUTOMATION_RUN_PAYLOAD = z.object({
 
 let registered = false
 
+/**
+ * The `automation_run` handler body, exported so specs can drive one job end to end without
+ * a worker.
+ *
+ * An automation that is gone, or was switched off after this job was queued, is SKIPPED —
+ * not failed. That case is typically a retry that was already waiting when the user
+ * disabled the automation, or a monitor firing at one they turned off. Sending it through
+ * the failure policy would queue yet more attempts, bump the failure streak and push an
+ * "Automation run failed" notification about something the user deliberately stopped.
+ */
+export async function executeAutomationRunJob(job: { id: string; payload: unknown }): Promise<Record<string, unknown>> {
+	const parsed = AUTOMATION_RUN_PAYLOAD.safeParse(job.payload)
+	if (!parsed.success) {
+		throw new Error(`automation_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
+	}
+	const { automationId } = parsed.data
+	const attempt = parsed.data.attempt ?? 1
+	const trigger = parsed.data.trigger ?? 'schedule'
+
+	try {
+		const result = await runAutomationById(automationId, new Date(), {
+			trigger,
+			attempt,
+			jobId: job.id,
+		})
+		return {
+			automationId,
+			attempt,
+			trigger,
+			status: 'completed',
+			conversationId: result.conversationId,
+			nextRunAt: result.nextRunAt,
+		}
+	} catch (error) {
+		if (error instanceof AutomationUnavailableError) {
+			logger.info('[automations] run skipped — automation is no longer runnable', {
+				automationId,
+				attempt,
+				trigger,
+				reason: error.reason,
+			})
+			return { automationId, attempt, trigger, status: 'skipped', reason: error.reason }
+		}
+		const outcome = await handleAutomationRunFailure({
+			automationId,
+			attempt,
+			trigger,
+			jobId: job.id,
+			error,
+		})
+		return { automationId, attempt, trigger, status: 'failed', ...outcome }
+	}
+}
+
 export function registerAutomationJobHandlers(): void {
 	if (registered) return
 
-	registerJobHandler('automation_run', async ({ job }) => {
-		const parsed = AUTOMATION_RUN_PAYLOAD.safeParse(job.payload)
-		if (!parsed.success) {
-			throw new Error(`automation_run payload missing/invalid: ${parsed.error.issues[0]?.message ?? 'unknown'}`)
-		}
-		const { automationId } = parsed.data
-		const attempt = parsed.data.attempt ?? 1
-		const trigger = parsed.data.trigger ?? 'schedule'
-
-		try {
-			const result = await runAutomationById(automationId, new Date(), {
-				trigger,
-				attempt,
-				jobId: job.id,
-			})
-			return {
-				automationId,
-				attempt,
-				trigger,
-				status: 'completed',
-				conversationId: result.conversationId,
-				nextRunAt: result.nextRunAt,
-			}
-		} catch (error) {
-			const outcome = await handleAutomationRunFailure({
-				automationId,
-				attempt,
-				trigger,
-				jobId: job.id,
-				error,
-			})
-			return { automationId, attempt, trigger, status: 'failed', ...outcome }
-		}
-	})
+	registerJobHandler('automation_run', ({ job }) => executeAutomationRunJob(job))
 
 	// Dispatch tick — every 60s, look for due automations and enqueue per-automation jobs.
 	// The fixed key only collapses a tick onto one that is still queued or running (dedupe

@@ -58,10 +58,28 @@ export type AutomationModeResult = {
 }
 
 /**
+ * The automation a job points at is gone, or was switched off after the job was queued.
+ *
+ * Not a failure of the automation: nothing ran, and nothing will go better on a retry. The
+ * job handler reports it as skipped rather than feeding it to the retry policy, which would
+ * otherwise queue more attempts, bump the failure streak and notify the user that an
+ * automation they deliberately turned off "failed".
+ */
+export class AutomationUnavailableError extends Error {
+	constructor(
+		readonly automationId: string,
+		readonly reason: 'not_found' | 'disabled',
+	) {
+		super(reason === 'not_found' ? `Automation ${automationId} not found` : `Automation ${automationId} is disabled`)
+		this.name = 'AutomationUnavailableError'
+	}
+}
+
+/**
  * Wave 4 #17 phase 5 — public entry point for the automation_run job handler.
  * Looks up the automation by id, dispatches per-mode, then updates last_run_at /
- * next_run_at on the automation row. Throws if the automation is missing or disabled
- * (the job marks failed and won't retry past maxAttempts).
+ * next_run_at on the automation row. Throws `AutomationUnavailableError` if the automation
+ * is missing, or disabled and this trigger may not run a disabled one.
  *
  * #31 — every invocation also opens a row in the `automation_runs` ledger and closes it
  * with the outcome, so the /automations page can show whether past runs actually worked
@@ -79,10 +97,10 @@ export async function runAutomationById(
 
 	const [automation] = await db.select().from(automations).where(eq(automations.id, automationId)).limit(1)
 	if (!automation) {
-		throw new Error(`Automation ${automationId} not found`)
+		throw new AutomationUnavailableError(automationId, 'not_found')
 	}
 	if (!automation.enabled && !allowDisabled) {
-		throw new Error(`Automation ${automationId} is disabled`)
+		throw new AutomationUnavailableError(automationId, 'disabled')
 	}
 
 	// Wave 5 #21 phase 5 — budget pre-check. Skip the run + bump nextRunAt + open a review

@@ -52,7 +52,7 @@ Observable tools, all read-only: `web_fetch`, `web_search`, `search_files`, `fil
 | `start_conversation` | Opens a conversation seeded with the configured prompt plus what was observed, and runs the agent on it detached |
 | `review_item`        | Opens a `monitor_fired` item in the review inbox                                                                  |
 | `push`               | Writes an in-app notification row and sends a web push                                                            |
-| `run_automation`     | Enqueues an existing automation's `automation_run` job                                                            |
+| `run_automation`     | Enqueues an existing automation's `automation_run` job. The automation must still exist, belong to the monitor's owner and be switched on; if it is not, the action fails and falls back to a critical review item, so the observation is not lost |
 
 ## User flows
 
@@ -118,7 +118,7 @@ The `tool_result` path costs nothing beyond whatever the tool itself costs, whic
 | `observability/review`    | `monitor_fired` items on the firing edge and on a retirement without firing                          |
 | `notifications/`          | In-app rows plus web push for the `push` action                                                     |
 | `runtime/`                | The detached agent loop behind `start_conversation`                                                 |
-| `automations/`            | Only by job type — `run_automation` enqueues `automation_run` without importing the engine           |
+| `automations/`            | `run_automation` checks the automation row is still switched on, then enqueues `automation_run` by job type, without importing the engine |
 
 ## Business rules
 
