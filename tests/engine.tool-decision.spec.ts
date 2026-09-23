@@ -142,12 +142,21 @@ test.describe('what buildEngineOptions hands the SDK', () => {
 	/*
 	 * Read as source because `options.server.ts` imports `$env`, which the Playwright runtime
 	 * cannot resolve (the reason `./builtin-tools` exists). The behaviour behind each line is
-	 * pinned above; this pins that the builder uses it.
+	 * pinned above and in `engine.engine-env.spec.ts`; this pins that the builder uses it.
 	 */
 	const source = readFileSync(resolve('src/lib/engine/options.server.ts'), 'utf8')
 
 	test('never sets allowedTools — the SDK reads it as auto-approve', () => {
 		expect(source).not.toMatch(/^\s*(\.\.\.\(.*\?\s*\{\s*)?allowedTools\s*:/m)
 		expect(source).toMatch(/tools:\s*scopedBuiltins/)
+	})
+
+	test('always gives the CLI an allow-listed env, never process.env', () => {
+		expect(source).toMatch(/env:\s*cliEnv/)
+		expect(source).not.toMatch(/\.\.\.\s*\(?process\.env/)
+	})
+
+	test('refuses to run a shell command outside the sandbox', () => {
+		expect(source).toMatch(/allowUnsandboxedCommands:\s*false/)
 	})
 })

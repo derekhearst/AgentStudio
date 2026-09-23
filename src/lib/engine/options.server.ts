@@ -3,13 +3,16 @@
  *
  * Two backends, one engine:
  *
- *   Claude      → no env override. The SDK spawns the Claude Code CLI, which
+ *   Claude      → no auth override. The SDK spawns the Claude Code CLI, which
  *                 uses its own OAuth login, so these runs are on the
  *                 subscription and cost nothing per token.
  *
  *   Everything  → ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN pointed at a gateway
  *   else          that serves the Anthropic Messages API (LiteLLM et al). Same
  *                 agent loop, same tools, different model behind it.
+ *
+ * Either way the CLI gets an allow-listed environment, never the server's own — see
+ * `./engine-env`.
  *
  * The two are mutually exclusive per run: a gateway authenticates with its own
  * key, so a proxied run is not on the subscription. That's a per-conversation
@@ -19,6 +22,7 @@
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
 import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
+import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
 import { env } from '$env/dynamic/private'
@@ -136,12 +140,11 @@ function gatewayEnv(model: string): Record<string, string> | undefined {
 	const token = env.LLM_GATEWAY_TOKEN
 	if (!baseUrl || !token) return undefined
 
-	return {
-		...(process.env as Record<string, string>),
+	return buildEngineEnv(process.env, {
 		ANTHROPIC_BASE_URL: baseUrl,
 		ANTHROPIC_AUTH_TOKEN: token,
 		ANTHROPIC_MODEL: model,
-	}
+	})
 }
 
 export class GatewayNotConfiguredError extends Error {
@@ -198,6 +201,8 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 	const proxyEnv = claude ? undefined : gatewayEnv(input.model)
 
 	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
+	const cliEnv = proxyEnv ?? buildEngineEnv(process.env)
+	const cliAuthEnv = engineAuthEnvNames(cliEnv)
 	const scopedBuiltins = scopeBuiltinTools(input.toolScope)
 
 	const { thinking, effort } = resolveThinking(input.reasoningEffort)
@@ -248,7 +253,20 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * machine may not have it, and a hard failure there would block local work.
 		 */
 		...(sandboxAvailable()
-			? { sandbox: { enabled: true, autoAllowBashIfSandboxed: false } }
+			? {
+					sandbox: {
+						enabled: true,
+						autoAllowBashIfSandboxed: false,
+						// The SDK otherwise honours Bash's `dangerouslyDisableSandbox` flag and runs
+						// the command unconfined. `./workspace-guard` refuses the flag as well.
+						allowUnsandboxedCommands: false,
+						// The CLI needs its own login in its environment; a shell inside the
+						// sandbox does not, and `env` there would print it. `deny` unsets it there.
+						...(cliAuthEnv.length > 0
+							? { credentials: { envVars: cliAuthEnv.map((name) => ({ name, mode: 'deny' as const })) } }
+							: {}),
+					},
+				}
 			: {}),
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
@@ -268,6 +286,7 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * so a child transcript can appear either way.
 		 */
 		forwardSubagentText: true,
-		...(proxyEnv ? { env: proxyEnv } : {}),
+		// Always set: omitted, the SDK hands the CLI the server's whole environment.
+		env: cliEnv,
 	}
 }
