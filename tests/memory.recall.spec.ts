@@ -66,3 +66,87 @@ test.describe('memory/recall — exclusion rules apply to the query', () => {
 		expect(call.headers['x-openrouter-cache-ttl']).toBeUndefined()
 	})
 })
+
+/** wing → room → closet under `prefix`, returning the closet to hang drawers off. */
+async function makeCloset(userId: string) {
+	const sql = getSql()
+	const [wing] = await sql<{ id: string }[]>`
+		insert into memory_wings (user_id, name, slug) values (${userId}, ${`${prefix} w`}, ${`${prefix}-w`})
+		returning id
+	`
+	const [room] = await sql<{ id: string }[]>`
+		insert into memory_rooms (wing_id, label) values (${wing.id}, 'r') returning id
+	`
+	const [closet] = await sql<{ id: string }[]>`
+		insert into memory_closets (room_id, topic) values (${room.id}, 't') returning id
+	`
+	return closet.id
+}
+
+/** The query vector the stub hands recall: every component 1. */
+const QUERY_VECTOR = Array.from({ length: 1536 }, () => 1)
+
+test.describe('memory/recall — candidates in a shared index', () => {
+	test.setTimeout(120_000)
+
+	test("the user's drawers are found when the index neighbourhood is full of drawers recall must skip", async () => {
+		// The HNSW index covers everyone's drawers, and the recall filter (this user, not
+		// never-recall) is applied after the scan, which returned `hnsw.ef_search` = 40 rows. Here
+		// the 40 nearest are all never-recall — as another user's drawers would be — so the
+		// filter emptied the pool and recall came back with nothing.
+		stub = stubOpenRouter({ embeddings: () => [QUERY_VECTOR] })
+		const userId = await getActiveUserId()
+		const closetId = await makeCloset(userId)
+		const sql = getSql()
+		// 2,000 drawers pointing exactly at the query.
+		await sql`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, never_recall)
+			select ${closetId}, ${userId}, ${`${prefix} noise `} || g::text, 1, array_fill(1::real, array[1536])::vector, true
+			from generate_series(1, 2000) g
+		`
+		// Three recallable ones further out: half their components match the query.
+		const wanted = [`${prefix} wanted 1`, `${prefix} wanted 2`, `${prefix} wanted 3`]
+		for (const content of wanted) {
+			await sql`
+				insert into memory_drawers (closet_id, user_id, content, token_count, embedding)
+				values (
+					${closetId}, ${userId}, ${content}, 1,
+					(select array_agg(case when g <= 768 then 1::real else 0::real end order by g)
+					 from generate_series(1, 1536) g)::vector
+				)
+			`
+		}
+
+		const { recall } = await import('../src/lib/memory/retrieval.server')
+		const recalled = await recall(userId, 'zzqx', { topK: 100, candidatePoolSize: 50 })
+
+		const contents = recalled.map((drawer) => drawer.content)
+		for (const content of wanted) expect(contents, content).toContain(content)
+		expect(contents.some((content) => content.startsWith(`${prefix} noise`)), 'never-recall stays out').toBe(false)
+	})
+
+	test('a pinned drawer is considered however far it is from the query', async () => {
+		stub = stubOpenRouter({ embeddings: () => [QUERY_VECTOR] })
+		const userId = await getActiveUserId()
+		const closetId = await makeCloset(userId)
+		const sql = getSql()
+		await sql`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, never_recall)
+			select ${closetId}, ${userId}, ${`${prefix} noise `} || g::text, 1, array_fill(1::real, array[1536])::vector, true
+			from generate_series(1, 500) g
+		`
+		// Pointing away from the query: the farthest drawer there is.
+		const [pinned] = await sql<{ id: string }[]>`
+			insert into memory_drawers (closet_id, user_id, content, token_count, embedding, pinned)
+			values (${closetId}, ${userId}, ${`${prefix} pinned`}, 1, array_fill(-1::real, array[1536])::vector, true)
+			returning id
+		`
+
+		const { recall } = await import('../src/lib/memory/retrieval.server')
+		const recalled = await recall(userId, 'zzqx', { topK: 1_000, candidatePoolSize: 5 })
+
+		const found = recalled.find((drawer) => drawer.drawerId === pinned.id)
+		expect(found, 'pinned drawers are force-added to the pool').toBeDefined()
+		expect(found?.pinnedBoost).toBeGreaterThan(0)
+	})
+})

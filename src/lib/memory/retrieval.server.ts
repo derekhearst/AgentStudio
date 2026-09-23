@@ -12,11 +12,18 @@
  *   - drawers flagged `pinned` are force-added to the pool even when they fall outside
  *     the vector top-N, and receive a configurable additive boost.
  *
+ * The HNSW index on `memory_drawers.embedding` covers every user's drawers, and pgvector
+ * applies the WHERE clause (this user, recallable) *after* the index scan, which by default
+ * returns only `hnsw.ef_search` (40) rows. In a shared database those 40 were mostly other
+ * users' drawers, so a user with a small palace could get a handful of candidates or none.
+ * `nearestRecallable` lets the scan keep going until the pool is full, and falls back to an
+ * exact search over the user's own drawers when it still comes up short.
+ *
  * Returns ranked drawer rows joined back to room/closet/wing for context, each carrying
  * its component scores so a bad recall can be explained after the fact.
  */
 
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, sql, type SQL } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { memoryClosets, memoryDrawers, memoryRooms, memoryWings } from '$lib/memory/memory.schema'
@@ -79,6 +86,66 @@ function temporalScore(occurredAt: Date, queryDate: Date | undefined, decayDays:
 	return Math.exp(-deltaDays / Math.max(1, decayDays))
 }
 
+type Executor = typeof db | Parameters<Parameters<(typeof db)['transaction']>[0]>[0]
+
+/** pgvector's ceiling for `hnsw.ef_search`. */
+const MAX_EF_SEARCH = 1000
+
+let iterativeScanSupport: Promise<boolean> | null = null
+
+/**
+ * Whether the installed pgvector has iterative index scans (0.8.0+). Older versions reject the
+ * `hnsw.iterative_scan` setting outright, so it is only set when it exists. Asked once per
+ * process; a failed lookup is asked again next time.
+ */
+function supportsIterativeScan(): Promise<boolean> {
+	iterativeScanSupport ??= db
+		.execute<{ extversion: string }>(sql`select extversion from pg_extension where extname = 'vector'`)
+		.then((rows) => {
+			const [major = 0, minor = 0] = String(rows[0]?.extversion ?? '0.0')
+				.split('.')
+				.map(Number)
+			return major > 0 || minor >= 8
+		})
+		.catch(() => {
+			iterativeScanSupport = null
+			return false
+		})
+	return iterativeScanSupport
+}
+
+/**
+ * The `limit` recallable drawers nearest `vec`, by cosine distance.
+ *
+ * First through the HNSW index, told to keep scanning until `limit` rows pass the filter
+ * (`hnsw.iterative_scan`, pgvector 0.8+; `relaxed_order` is fine because recall re-scores and
+ * re-sorts everything) and to consider at least `limit` candidates (`hnsw.ef_search`). Both
+ * are set for the transaction only (`set_config(…, true)`, i.e. `SET LOCAL`), so they never
+ * outlive it on a pooled connection.
+ *
+ * If that still returns fewer than `limit` — pgvector older than 0.8, or a user whose drawers
+ * sit beyond the scan's tuple budget among everyone else's — the answer comes from an exact
+ * search over this user's drawers instead. Adding `+ 0` to the distance is what makes it
+ * exact: the index can only serve `ORDER BY embedding <=> …` as written, so the planner uses
+ * the user's b-tree and sorts. A user with fewer recallable drawers than `limit` takes this
+ * path every time, which for a palace that small is cheap.
+ */
+async function nearestRecallable<T>(
+	query: (orderBy: SQL, run: Executor) => Promise<T[]>,
+	vec: string,
+	limit: number,
+): Promise<T[]> {
+	const iterative = await supportsIterativeScan()
+	const efSearch = Math.min(MAX_EF_SEARCH, Math.max(40, limit))
+	const viaIndex = await db.transaction(async (tx) => {
+		await tx.execute(sql`select set_config('hnsw.ef_search', ${String(efSearch)}, true)`)
+		if (iterative) await tx.execute(sql`select set_config('hnsw.iterative_scan', 'relaxed_order', true)`)
+		return query(sql`${memoryDrawers.embedding} <=> ${vec}::vector`, tx)
+	})
+	if (viaIndex.length >= limit) return viaIndex
+	return query(sql`(${memoryDrawers.embedding} <=> ${vec}::vector) + 0`, db)
+}
+
 function buildTsQuery(query: string): string {
 	// Naive tokenizer: split on whitespace, drop short tokens, OR-join.
 	const tokens = query
@@ -129,30 +196,39 @@ export async function recall(userId: string, query: string, options: RecallOptio
 		sql`${memoryDrawers.embedding} IS NOT NULL`,
 	)
 
-	const rows = await db
-		.select(selection)
-		.from(memoryDrawers)
-		.innerJoin(memoryClosets, eq(memoryClosets.id, memoryDrawers.closetId))
-		.innerJoin(memoryRooms, eq(memoryRooms.id, memoryClosets.roomId))
-		.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
-		.where(recallable)
-		.orderBy(sql`${memoryDrawers.embedding} <=> ${vec}::vector`)
-		.limit(opts.candidatePoolSize)
+	const drawersWhere = (
+		where: SQL | undefined,
+		orderBy: SQL,
+		limit: number,
+		run: Executor = db,
+	) =>
+		run
+			.select(selection)
+			.from(memoryDrawers)
+			.innerJoin(memoryClosets, eq(memoryClosets.id, memoryDrawers.closetId))
+			.innerJoin(memoryRooms, eq(memoryRooms.id, memoryClosets.roomId))
+			.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
+			.where(where)
+			.orderBy(orderBy)
+			.limit(limit)
+
+	const rows = await nearestRecallable(
+		(orderBy, run) => drawersWhere(recallable, orderBy, opts.candidatePoolSize, run),
+		vec,
+		opts.candidatePoolSize,
+	)
 
 	// Pinned drawers are the user saying "always consider this". A boost alone would not
 	// deliver that, because a drawer outside the vector top-N never enters the pool at
-	// all — so fetch them explicitly and merge.
+	// all — so fetch them explicitly and merge. Exact (`+ 0`, see `nearestRecallable`): an
+	// index scan would only see pinned drawers among the nearest few of everyone's.
 	const pinnedRows =
 		opts.pinnedPoolSize > 0
-			? await db
-					.select(selection)
-					.from(memoryDrawers)
-					.innerJoin(memoryClosets, eq(memoryClosets.id, memoryDrawers.closetId))
-					.innerJoin(memoryRooms, eq(memoryRooms.id, memoryClosets.roomId))
-					.innerJoin(memoryWings, eq(memoryWings.id, memoryRooms.wingId))
-					.where(and(recallable, eq(memoryDrawers.pinned, true)))
-					.orderBy(sql`${memoryDrawers.embedding} <=> ${vec}::vector`)
-					.limit(opts.pinnedPoolSize)
+			? await drawersWhere(
+					and(recallable, eq(memoryDrawers.pinned, true)),
+					sql`(${memoryDrawers.embedding} <=> ${vec}::vector) + 0`,
+					opts.pinnedPoolSize,
+				)
 			: []
 
 	const seen = new Set(rows.map((row) => row.drawerId))
