@@ -5,10 +5,12 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  * Wave 4 #17 phase 5 finish — automation_run + automations_dispatch job migration contract.
  *
  * Schema-level proofs that:
- *   - automation_run jobs use dedupeKey `automation:<id>:<minute>` so back-to-back ticks
- *     within the same minute window collapse, but the next minute gets a fresh enqueue
- *   - automations_dispatch tick uses a fixed `automations:dispatch` dedupeKey so multiple
- *     scheduler ticks within the worker's claim window collapse
+ *   - automation_run jobs use dedupeKey `automation:<id>:<slot>`, so every tick that sees the
+ *     same slot due collapses onto one job (the enqueue side, with `dedupeScope: 'forever'`,
+ *     is pinned by tests/jobs.dedupe.spec.ts)
+ *   - automations_dispatch tick uses a fixed `automations:dispatch` dedupeKey, which collapses
+ *     scheduler ticks while one is still queued — and ONLY then: once it completes, the next
+ *     tick must get a job of its own
  *   - automation_run priority is 50 (background tier — same as memory_mine)
  *   - automations_dispatch priority is 30 (above maintenance_gc 10, below evaluation_run 75)
  *
@@ -95,7 +97,7 @@ test.describe('automations/job-migration — automation_run dedupe + priority co
 		}
 	})
 
-	test('automations_dispatch tick uses fixed dedupeKey to collapse scheduler over-firing', async () => {
+	test('automations_dispatch fixed dedupeKey collapses ticks only while one is still queued', async () => {
 		const prefix = uniquePrefix('auto-dispatch-fixed')
 		const sql = getSql()
 		try {
@@ -114,6 +116,22 @@ test.describe('automations/job-migration — automation_run dedupe + priority co
 				secondThrew = true
 			}
 			expect(secondThrew).toBe(true)
+
+			// The tick ran. The key it held must not block the next minute's tick — a plain
+			// unique over every row let the first completed dispatch swallow all later ones.
+			await sql`
+				update jobs set status = 'completed'::job_status, finished_at = now()
+				where type = 'automations_dispatch' and dedupe_key = ${dedupeKey}
+			`
+			await sql`
+				insert into jobs (type, queue, priority, dedupe_key, payload)
+				values ('automations_dispatch', 'maintenance', 30, ${dedupeKey}, ${sql.json({})})
+			`
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from jobs
+				where type = 'automations_dispatch' and dedupe_key = ${dedupeKey}
+			`
+			expect(count).toBe(2)
 		} finally {
 			await cleanupAutomationJobsPrefix(prefix)
 		}

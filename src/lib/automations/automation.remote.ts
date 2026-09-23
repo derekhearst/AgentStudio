@@ -1,6 +1,8 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { z } from 'zod'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
+import { withUserInputErrors } from '$lib/server/user-input-error'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -62,25 +64,27 @@ export const listAutomationsQuery = query(async () => {
 
 export const createAutomationCommand = command(createAutomationSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
-	return createAutomationRecord({
-		userId: user.id,
-		agentId: input.agentId ?? null,
-		description: input.description,
-		cronExpression: input.cronExpression,
-		timezone: input.timezone,
-		prompt: input.prompt,
-		enabled: input.enabled,
-		conversationMode: input.conversationMode,
-		mode: input.mode,
-		outputTarget: input.outputTarget,
-		repositoryId: input.repositoryId ?? null,
-	})
+	return withUserInputErrors(() =>
+		createAutomationRecord({
+			userId: user.id,
+			agentId: input.agentId ?? null,
+			description: input.description,
+			cronExpression: input.cronExpression,
+			timezone: input.timezone,
+			prompt: input.prompt,
+			enabled: input.enabled,
+			conversationMode: input.conversationMode,
+			mode: input.mode,
+			outputTarget: input.outputTarget,
+			repositoryId: input.repositoryId ?? null,
+		}),
+	)
 })
 
 export const updateAutomationCommand = command(updateAutomationSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const { id, ...patch } = input
-	return updateAutomationRecord(user.id, id, patch)
+	return withUserInputErrors(() => updateAutomationRecord(user.id, id, patch))
 })
 
 export const deleteAutomationCommand = command(automationIdSchema, async ({ id }) => {
@@ -96,7 +100,7 @@ export const deleteAutomationCommand = command(automationIdSchema, async ({ id }
 export const runAutomationNowCommand = command(automationIdSchema, async ({ id }) => {
 	const user = requireAuthenticatedRequestUser()
 	const queued = await runAutomationNow(user.id, id)
-	if (!queued) throw new Error('Automation not found')
+	if (!queued) error(404, 'Automation not found')
 	return queued
 })
 

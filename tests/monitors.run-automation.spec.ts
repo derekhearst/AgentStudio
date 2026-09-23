@@ -25,7 +25,7 @@ import { runAutomationById } from '../src/lib/automations/engine'
  * baseline — so the scheduler cannot fire one in the moment before cleanup.
  */
 
-const CONDITION = { kind: 'tool_result' as const, tool: 'git_status' as const, args: {}, compare: 'changed' as const }
+const CONDITION = { kind: 'tool_result' as const, tool: 'list_projects' as const, args: {}, compare: 'changed' as const }
 
 async function seedAutomation(userId: string, prefix: string): Promise<string> {
 	const sql = getSql()
@@ -141,12 +141,14 @@ test.describe('monitors/run_automation — the off switch holds', () => {
 			// Nothing was queued for it…
 			const jobs = await sql`select id from jobs where type = 'automation_run' and payload->>'automationId' = ${automationId}`
 			expect(jobs).toHaveLength(0)
-			// …and the owner hears about it, once for this firing.
-			const items = await sql<{ summary: string }[]>`
-				select summary from review_items where summary like ${`%${prefix}%`}
+			// …and the owner hears about it, once for this firing, so the observation is not lost.
+			expect(result.detail.fellBackTo).toBe('review_item')
+			const items = await sql<{ summary: string; severity: string }[]>`
+				select summary, severity::text as severity from review_items where summary like ${`%${prefix}%`}
 			`
 			expect(items).toHaveLength(1)
 			expect(items[0].summary).toContain('run_automation action failed')
+			expect(items[0].severity).toBe('critical')
 		} finally {
 			await sql`delete from review_items where summary like ${`%${prefix}%`}`
 			await cleanup(prefix)

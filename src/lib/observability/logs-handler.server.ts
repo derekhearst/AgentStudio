@@ -5,8 +5,8 @@ import { logger, registerDbSink, type LogEntry } from './logger'
 
 /**
  * Registers the daily `app_logs_purge` job + retention schedule, and turns on the logger's
- * DB sink. Called from db.server.ts after `ensureDatabaseReady` completes so the
- * `app_logs` table exists before the first flush.
+ * DB sink. Called from database bootstrap (db/bootstrap.server.ts) once migrations have
+ * run, so the `app_logs` table exists before the first flush.
  *
  * Retention default: 14 days. Override with `APP_LOGS_RETENTION_DAYS` if needed (e.g. on a
  * resource-constrained host where 14d is too noisy).
@@ -43,13 +43,14 @@ export function registerLogsJobHandlers(): void {
 		// the operator might want to inspect after restart.
 		initialDelayMs: 60 * 60 * 1000,
 		enqueue: () => {
-			// Daily bucket so re-fires within the same UTC day collapse on (type, dedupeKey).
+			// Daily bucket, `forever`: one purge per UTC day, including across restarts.
 			const dayBucket = Math.floor(Date.now() / DAY_MS)
 			return {
 				type: 'app_logs_purge',
 				queue: 'maintenance',
 				priority: 10,
 				dedupeKey: `app_logs_purge:${dayBucket}`,
+				dedupeScope: 'forever',
 				payload: {},
 			}
 		},

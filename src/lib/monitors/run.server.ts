@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { logger } from '$lib/observability/logger'
 import { monitors, type MonitorRow, type MonitorStatus } from './monitors.schema'
@@ -33,6 +33,11 @@ import {
  *   3. `maxChecks` — the spend cap, counted in checks actually performed
  *   4. `deadlineAt` — the wall-clock cap, at most 30 days, extended only on request
  *   5. the error budget — five consecutive failures and it stops asking
+ *
+ * A check can take seconds (a fetch, maybe a model call), and the monitor is not locked while
+ * it runs. So every write of a check's outcome is conditional on nothing having moved the
+ * monitor in the meantime — see `commitIfUnchanged`. A cancel or pause that lands mid-check
+ * wins: the check's result is discarded and its action never runs.
  */
 
 export type MonitorCheckResult = {
@@ -46,7 +51,19 @@ export type MonitorCheckResult = {
 	detail?: Record<string, unknown>
 }
 
-export async function runMonitorCheck(monitorId: string, now = new Date()): Promise<MonitorCheckResult> {
+/** Seams for specs. Production passes nothing and gets the real evaluator and actions. */
+export type MonitorCheckDeps = {
+	evaluate?: typeof evaluateMonitorCondition
+	dispatch?: typeof dispatchMonitorAction
+}
+
+export async function runMonitorCheck(
+	monitorId: string,
+	now = new Date(),
+	deps: MonitorCheckDeps = {},
+): Promise<MonitorCheckResult> {
+	const evaluate = deps.evaluate ?? evaluateMonitorCondition
+	const dispatch = deps.dispatch ?? dispatchMonitorAction
 	const monitor = await getMonitorById(monitorId)
 	if (!monitor) throw new Error(`Monitor ${monitorId} not found`)
 
@@ -57,27 +74,28 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 	// Deadline wins over everything, including a condition that is true right now. A monitor
 	// past its deadline is not a monitor.
 	if (new Date(monitor.deadlineAt).getTime() <= now.getTime()) {
-		await patchMonitor(monitorId, { status: 'expired', updatedAt: now })
+		if (!(await commitIfUnchanged(monitor, { status: 'expired', updatedAt: now }))) return superseded(monitorId)
 		return { monitorId, status: 'expired', outcome: 'expired' }
 	}
 
 	if (monitor.checkCount >= monitor.maxChecks) {
-		await patchMonitor(monitorId, { status: 'exhausted', updatedAt: now })
+		if (!(await commitIfUnchanged(monitor, { status: 'exhausted', updatedAt: now }))) return superseded(monitorId)
 		await openLifecycleReviewItem(monitor, 'exhausted', `used its ${monitor.maxChecks}-check budget without firing`)
 		return { monitorId, status: 'exhausted', outcome: 'exhausted', checkCount: monitor.checkCount }
 	}
 
-	const evaluation = await evaluateMonitorCondition(monitor, now)
+	const evaluation = await evaluate(monitor, now)
 
 	// ── blocked by a budget cap ──
 	if (evaluation.outcome === 'blocked') {
 		const nextCheckAt = computeNextCheckAt(now, monitor.intervalSeconds, 0)
-		await patchMonitor(monitorId, {
+		const committed = await commitIfUnchanged(monitor, {
 			lastCheckedAt: now,
 			nextCheckAt,
 			lastError: evaluation.message,
 			updatedAt: now,
 		})
+		if (!committed) return superseded(monitorId)
 		void openBudgetReviewItem(monitor, evaluation.blockedBy, evaluation.message)
 		void recordMonitorMetric('monitors.check.blocked', monitor)
 		return {
@@ -97,7 +115,7 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 		const budgetSpent = checkCount >= monitor.maxChecks
 		const status: MonitorStatus = giveUp ? 'failed' : budgetSpent ? 'exhausted' : 'active'
 		const nextCheckAt = computeNextCheckAt(now, monitor.intervalSeconds, consecutiveErrors)
-		await patchMonitor(monitorId, {
+		const committed = await commitIfUnchanged(monitor, {
 			status,
 			checkCount,
 			consecutiveErrors,
@@ -107,6 +125,9 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 			nextCheckAt,
 			updatedAt: now,
 		})
+		// Canceled or paused while the check ran: a failure must not overwrite that with
+		// `failed` or `exhausted`, nor open a review item about a monitor the user stopped.
+		if (!committed) return superseded(monitorId)
 		if (status !== 'active') {
 			await openLifecycleReviewItem(
 				monitor,
@@ -139,8 +160,10 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 
 	// State is persisted BEFORE the action runs, so a crash mid-dispatch can lose the action
 	// but can never double-fire: the latch and the fire counter are already committed, and a
-	// retried job sees an edge that has already been consumed.
-	await patchMonitor(monitorId, {
+	// retried job sees an edge that has already been consumed. The write is also the gate for
+	// the action: if the user canceled or paused the monitor while this check ran, or another
+	// check got here first, nothing is recorded and nothing fires.
+	const committed = await commitIfUnchanged(monitor, {
 		status,
 		checkCount,
 		fireCount,
@@ -153,6 +176,7 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 		...(fire ? { lastFiredAt: now } : {}),
 		updatedAt: now,
 	})
+	if (!committed) return superseded(monitorId)
 	void recordMonitorMetric(fire ? 'monitors.fired' : 'monitors.check.observed', monitor)
 
 	if (!fire) {
@@ -167,7 +191,7 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 		}
 	}
 
-	const fireResult = await dispatchMonitorAction({ ...monitor, fireCount, lastObservation: observation }, observation, now)
+	const fireResult = await dispatch({ ...monitor, fireCount, lastObservation: observation }, observation, now)
 	await patchMonitor(monitorId, { lastFireResult: { ...fireResult.detail, kind: fireResult.kind, ok: fireResult.ok }, updatedAt: new Date() })
 
 	return {
@@ -183,6 +207,36 @@ export async function runMonitorCheck(monitorId: string, now = new Date()): Prom
 
 async function patchMonitor(monitorId: string, patch: Partial<typeof monitors.$inferInsert>): Promise<void> {
 	await db.update(monitors).set(patch).where(eq(monitors.id, monitorId))
+}
+
+/**
+ * Write a check's outcome only if the monitor is exactly as this check found it: still
+ * `active`, and with the same `checkCount`. Returns false when anything moved it in between.
+ *
+ * The status half is what lets a cancel or pause win. The read happens before the check and
+ * the write after it, so an unconditional write would put a canceled monitor back to
+ * `active` (or `fired`) and still run its action. The `checkCount` half is optimistic
+ * concurrency: "Check now" does not go through the dispatcher's claim, so it can overlap a
+ * scheduled check, and without it both would commit and both could fire.
+ */
+async function commitIfUnchanged(monitor: MonitorRow, patch: Partial<typeof monitors.$inferInsert>): Promise<boolean> {
+	const [row] = await db
+		.update(monitors)
+		.set(patch)
+		.where(and(eq(monitors.id, monitor.id), eq(monitors.status, 'active'), eq(monitors.checkCount, monitor.checkCount)))
+		.returning({ id: monitors.id })
+	return row !== undefined
+}
+
+/** The result of a check whose outcome was discarded because the monitor changed under it. */
+async function superseded(monitorId: string): Promise<MonitorCheckResult> {
+	const current = await getMonitorById(monitorId)
+	return {
+		monitorId,
+		status: current?.status ?? 'canceled',
+		outcome: 'skipped',
+		detail: { reason: 'the monitor changed while it was being checked; this result was discarded' },
+	}
 }
 
 /** Best-effort metric. Never blocks or fails a check. */

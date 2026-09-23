@@ -192,8 +192,11 @@ export function maybeGenerateTitle(input: {
 /**
  * Enqueue the memory-mining job for a conversation that just finished, when
  * the user has auto-mining enabled. DedupeKey collapses concurrent finishes
- * for the same conversation into one job; failures are visible in
- * /settings/jobs rather than silently swallowed.
+ * for the same conversation onto the job still queued or mining for it — a job
+ * that is already mining goes round again for turns that arrived meanwhile
+ * before it lets go of the key (memory-handler.server.ts). After that, the next
+ * finish queues a fresh one, which mines only the turns that arrived since.
+ * Failures are visible in /settings/jobs rather than silently swallowed.
  */
 export function enqueueMemoryMineJob(input: {
 	settings: AppSettings
@@ -246,7 +249,9 @@ export function enqueueEvaluationJob(input: {
 				type: 'evaluation_run',
 				queue: 'default',
 				priority: 75, // higher than memory_mine (50), lower than user-initiated (100+)
+				// One evaluation per run, ever.
 				dedupeKey: `eval:${input.runId}`,
+				dedupeScope: 'forever',
 				payload: {
 					runId: input.runId,
 					userId: input.userId,

@@ -8,7 +8,8 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  * Schema-level proofs:
  *   - jobs row insert with all the cross-domain pointer columns
  *   - job_status enum rejects unknown values
- *   - (type, dedupeKey) unique enforces idempotency
+ *   - (type, dedupeKey) unique among active jobs enforces idempotency (tests/jobs.dedupe.spec.ts
+ *     covers the enqueue path on top of it)
  *   - claim path: status='pending' AND scheduled_at <= now → eligible
  *   - lease cascade trims on job delete
  *   - retry counter monotonicity
@@ -75,7 +76,7 @@ test.describe('jobs/schema — invariants', () => {
 		}
 	})
 
-	test('(type, dedupe_key) unique constraint rejects duplicate enqueue', async () => {
+	test('(type, dedupe_key) unique index rejects a duplicate active enqueue', async () => {
 		const prefix = uniquePrefix('jobs-dedupe')
 		const sql = getSql()
 		try {
@@ -94,6 +95,14 @@ test.describe('jobs/schema — invariants', () => {
 			// Different type with same dedupe_key is fine.
 			await sql`
 				insert into jobs (type, dedupe_key) values (${`${prefix}-eval`}, 'conv:abc')
+			`
+			// Once the first job has finished, the key is free for the next one.
+			await sql`
+				update jobs set status = 'completed'::job_status
+				where type = ${`${prefix}-mine`} and dedupe_key = 'conv:abc'
+			`
+			await sql`
+				insert into jobs (type, dedupe_key) values (${`${prefix}-mine`}, 'conv:abc')
 			`
 		} finally {
 			await cleanupJobsPrefix(prefix)
