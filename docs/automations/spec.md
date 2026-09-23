@@ -204,6 +204,13 @@ request must not be held open that long. Three guarantees:
 Double-clicking is harmless — a second press in the same minute, while the first manual run
 is still queued or running, collapses into it.
 
+### Duplicate
+
+**Duplicate** copies a card's settings into the creation form: description (with "(copy)"
+added), schedule and time zone, prompt, agent, conversation mode, execution mode and output
+target. Nothing is created until **Create automation** is pressed, so the copy can be
+adjusted first.
+
 ### Retries, backoff, and giving up
 
 A failed tick is retried on an explicit escalating schedule rather than the queue's generic

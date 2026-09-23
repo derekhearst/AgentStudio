@@ -35,6 +35,8 @@
 		prompt: string;
 		enabled: boolean;
 		conversationMode: 'new_each_run' | 'reuse';
+		mode: AutomationRow['mode'];
+		outputTarget: AutomationRow['outputTarget'];
 		selectedAgentId: string;
 	} | null>(null);
 
@@ -97,6 +99,8 @@
 			prompt: automation.prompt,
 			enabled: automation.enabled,
 			conversationMode: automation.conversationMode,
+			mode: automation.mode,
+			outputTarget: automation.outputTarget,
 			selectedAgentId: automation.agentId ?? 'orchestrator',
 		};
 		createMessage = 'Copied automation settings into the creation studio.';
