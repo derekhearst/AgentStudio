@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql as drizzleSql } from 'drizzle-orm'
+import { and, asc, desc, eq, notInArray, sql as drizzleSql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { enqueueJob } from '$lib/jobs/jobs.server'
 import type { JobRow } from '$lib/jobs/jobs.schema'
@@ -58,10 +58,7 @@ export type UpdateResearchInput = {
 	jobId?: string | null
 }
 
-export async function updateResearch(
-	researchId: string,
-	patch: UpdateResearchInput,
-): Promise<ResearchRow | null> {
+function toResearchUpdate(patch: UpdateResearchInput): Partial<typeof research.$inferInsert> {
 	const updates: Partial<typeof research.$inferInsert> = { updatedAt: new Date() }
 	if (patch.status !== undefined) updates.status = patch.status
 	if (patch.plan !== undefined) updates.plan = patch.plan
@@ -71,7 +68,36 @@ export async function updateResearch(
 	if (patch.finishedAt !== undefined) updates.finishedAt = patch.finishedAt
 	if (patch.error !== undefined) updates.error = patch.error
 	if (patch.jobId !== undefined) updates.jobId = patch.jobId
-	const [row] = await db.update(research).set(updates).where(eq(research.id, researchId)).returning()
+	return updates
+}
+
+export async function updateResearch(
+	researchId: string,
+	patch: UpdateResearchInput,
+): Promise<ResearchRow | null> {
+	const [row] = await db.update(research).set(toResearchUpdate(patch)).where(eq(research.id, researchId)).returning()
+	return row ?? null
+}
+
+/**
+ * Update a research row unless it has already ended. Returns null, having written nothing,
+ * when the row is in one of `ended` (by default every final status) or is gone.
+ *
+ * The runner writes the row at every phase, and the user's Cancel can land between its last
+ * look at the row and its next write. Written unconditionally, that next write turned the
+ * user's "canceled" back into "searching", or into "complete" with a report and a "Research
+ * complete" notification.
+ */
+export async function updateResearchUnlessEnded(
+	researchId: string,
+	patch: UpdateResearchInput,
+	ended: Iterable<ResearchStatus> = TERMINAL_RESEARCH_STATUSES,
+): Promise<ResearchRow | null> {
+	const [row] = await db
+		.update(research)
+		.set(toResearchUpdate(patch))
+		.where(and(eq(research.id, researchId), notInArray(research.status, [...ended])))
+		.returning()
 	return row ?? null
 }
 

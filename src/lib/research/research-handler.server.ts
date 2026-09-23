@@ -72,7 +72,8 @@ export function registerResearchJobHandlers(): void {
 
 async function fireCompletionNotification(researchId: string): Promise<void> {
 	const r = await getResearchById(researchId)
-	if (!r) return
+	// Read back, so a run the user canceled at the last moment is never announced as complete.
+	if (!r || r.status !== 'complete') return
 	const queryShort = r.query.length > 120 ? `${r.query.slice(0, 117)}…` : r.query
 	const payload = {
 		title: 'Research complete',

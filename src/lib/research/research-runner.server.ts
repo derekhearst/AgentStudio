@@ -9,7 +9,8 @@ import {
 	listSourcesForResearch,
 	markSourcesCited,
 	TERMINAL_RESEARCH_STATUSES,
-	updateResearch,
+	updateResearchUnlessEnded,
+	type UpdateResearchInput,
 } from './research.server'
 import { isJobCanceledError } from '$lib/jobs/worker.server'
 import { logger } from '$lib/observability/logger'
@@ -47,6 +48,10 @@ import {
  * Failure paths transition status='failed' + write the error to research.error so the UI can
  * surface what went wrong. The runner never throws — every failure path is caught, recorded,
  * and returned as the outcome; the job handler decides what the job's own status becomes.
+ *
+ * Every write to the row is made only while the row has not ended, so a Cancel that lands at
+ * any point — mid-synthesis included — is never overwritten by the runner's next write. A
+ * write that finds the row ended is treated as a cancel.
  *
  * A run that already ended — complete, failed or canceled — is never run again. The row is
  * returned as it stands. Re-running one meant a second pass on the first attempt's plan,
@@ -125,6 +130,12 @@ export async function runResearchLoop(
 			}
 		}
 	}
+	// Writes the row only while it is still running. A row that ended in the meantime was
+	// canceled by the user, and that stands.
+	const advance = async (patch: UpdateResearchInput) => {
+		const row = await updateResearchUnlessEnded(researchId, patch)
+		if (!row) throw new CanceledError(`research ${researchId} ended while running`)
+	}
 
 	try {
 		// ─────────── PHASE 1: PLAN ───────────
@@ -144,7 +155,7 @@ export async function runResearchLoop(
 			})
 		} else {
 			await checkCanceled()
-			await updateResearch(researchId, { status: 'planning' })
+			await advance({ status: 'planning' })
 			const planResult = await runPlanner(r, config)
 			totalCost += planResult.costUsd
 			await addResearchStep({
@@ -157,13 +168,13 @@ export async function runResearchLoop(
 			if (planResult.subQuestions.length === 0) {
 				throw new Error('planner returned no sub-questions')
 			}
-			await updateResearch(researchId, { plan: planResult.subQuestions })
+			await advance({ plan: planResult.subQuestions })
 			subQuestions = planResult.subQuestions
 		}
 
 		// ─────────── PHASE 2: SEARCH + FETCH (parallel fan-out) ───────────
 		await checkCanceled()
-		await updateResearch(researchId, { status: 'searching' })
+		await advance({ status: 'searching' })
 		await runSearchAndFetchPass(researchId, subQuestions, config, checkCanceled)
 
 		// ─────────── PHASE 2.5: ITERATIVE REFLECTION ───────────
@@ -177,7 +188,7 @@ export async function runResearchLoop(
 		// so the trace UI can show why the loop terminated.
 		for (let round = 1; round <= config.maxReflectionRounds; round++) {
 			await checkCanceled()
-			await updateResearch(researchId, { status: 'reflecting' })
+			await advance({ status: 'reflecting' })
 			const sourcesSoFar = await listSourcesForResearch(researchId)
 
 			// Source-cap check: bail if we've already hit the safety ceiling. Reflection adds
@@ -217,19 +228,22 @@ export async function runResearchLoop(
 			}
 
 			await checkCanceled()
-			await updateResearch(researchId, { status: 'searching' })
+			await advance({ status: 'searching' })
 			await runSearchAndFetchPass(researchId, reflection.gaps, config, checkCanceled)
 		}
 
 		// ─────────── PHASE 3: SYNTHESIZE ───────────
 		await checkCanceled()
-		await updateResearch(researchId, { status: 'synthesizing' })
+		await advance({ status: 'synthesizing' })
 		const sources = await listSourcesForResearch(researchId)
 		if (sources.length === 0) {
 			throw new Error('no sources fetched — cannot synthesize a report')
 		}
 		const synth = await runSynthesizer(r, subQuestions, sources, config)
 		totalCost += synth.costUsd
+		// Synthesis is the longest call of the run, and the likeliest moment for a Cancel. A
+		// report the user canceled is not saved, and they are not told it is complete.
+		await checkCanceled()
 		const citedIds = extractCitedSourceIds(synth.report, synth.citationMap)
 		await markSourcesCited(researchId, citedIds)
 		await addResearchStep({
@@ -241,7 +255,7 @@ export async function runResearchLoop(
 		})
 
 		// ─────────── COMPLETE ───────────
-		await updateResearch(researchId, {
+		await advance({
 			status: 'complete',
 			report: synth.report,
 			costUsd: totalCost,
@@ -260,36 +274,41 @@ export async function runResearchLoop(
 		// transition to status='canceled' (not 'failed') and don't record err.message
 		// as a research-row failure. The job handler also sees the throw and reports
 		// completion with the canceled outcome.
-		if (err instanceof CanceledError) {
-			await updateResearch(researchId, {
-				status: 'canceled',
+		if (!(err instanceof CanceledError)) {
+			const errorMsg = err instanceof Error ? err.message : String(err)
+			const failed = await updateResearchUnlessEnded(researchId, {
+				status: 'failed',
 				finishedAt: new Date(),
+				error: errorMsg,
 				costUsd: totalCost,
 			})
-			return {
-				researchId,
-				status: 'canceled',
-				report: null,
-				sourceCount: 0,
-				citedCount: 0,
-				costUsd: totalCost,
+			if (failed) {
+				return {
+					researchId,
+					status: 'failed',
+					report: null,
+					sourceCount: 0,
+					citedCount: 0,
+					costUsd: totalCost,
+					error: errorMsg,
+				}
 			}
+			// The row ended while this phase was failing: the user canceled it, and the
+			// cancel stands.
 		}
-		const errorMsg = err instanceof Error ? err.message : String(err)
-		await updateResearch(researchId, {
-			status: 'failed',
-			finishedAt: new Date(),
-			error: errorMsg,
-			costUsd: totalCost,
-		})
+		// Records what the run spent on the canceled row. A row another run finished is left be.
+		await updateResearchUnlessEnded(
+			researchId,
+			{ status: 'canceled', finishedAt: new Date(), costUsd: totalCost },
+			['complete', 'failed'],
+		)
 		return {
 			researchId,
-			status: 'failed',
+			status: 'canceled',
 			report: null,
 			sourceCount: 0,
 			citedCount: 0,
 			costUsd: totalCost,
-			error: errorMsg,
 		}
 	}
 }

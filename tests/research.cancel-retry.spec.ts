@@ -12,13 +12,19 @@ import { getActiveUserId, getSql, uniquePrefix } from './helpers'
  * And a failed run was retried: the queue's default three attempts re-ran it on a row still
  * carrying the first attempt's plan (then labelled "user approved"), sources and error.
  *
- * These specs drive the runner and the job handler directly. Every row starts at a point
- * where the runner stops before its first model call, so nothing here needs a model.
+ * A Cancel pressed while the report was being written was lost too: nothing looked at the row
+ * after the synthesizer answered, so the run saved its report over "canceled", marked itself
+ * complete and sent "Research complete".
+ *
+ * These specs drive the runner and the job handler directly. Most rows start at a point where
+ * the runner stops before its first model call; the synthesis specs answer the model calls
+ * with a stand-in for OpenRouter, so nothing here needs a model.
  */
 
 async function cleanup(prefix: string) {
 	const sql = getSql()
 	await sql`delete from jobs where type = 'research_run' and payload->>'researchId' in (select id::text from research where query like ${`${prefix}%`})`
+	await sql`delete from llm_usage where metadata->>'researchId' in (select id::text from research where query like ${`${prefix}%`})`
 	await sql`delete from research where query like ${`${prefix}%`}`
 }
 
@@ -139,6 +145,138 @@ test.describe('research/cancel — a cancel stays a cancel', () => {
 			await failJob(jobId, { error: { message: 'would have been retried' } })
 			expect((await readJob(jobId)).status).toBe('canceled')
 			expect((await readResearch(researchId)).status).toBe('canceled')
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+})
+
+/**
+ * Stands in for OpenRouter, so a run gets as far as synthesis without a model. Reflection
+ * finds no gaps; the synthesizer's call runs `duringSynthesis` before it answers. Every other
+ * request (web search, the price catalogue) is refused, which the runner treats as no results.
+ */
+async function withFakeOpenRouter<T>(duringSynthesis: () => Promise<void>, fn: () => Promise<T>): Promise<T> {
+	const { REFLECTION_SYSTEM, SYNTHESIZER_SYSTEM } = await import('../src/lib/research/research-prompts')
+	const realFetch = globalThis.fetch
+	const realKey = process.env.OPENROUTER_API_KEY
+	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const request = input instanceof Request ? input : new Request(input, init)
+		if (!request.url.endsWith('/chat/completions')) return new Response('not here', { status: 404 })
+		const body = JSON.parse(await request.text()) as { messages: { content: string }[] }
+		const system = body.messages[0]?.content
+		let content = '{"gaps": []}'
+		if (system === SYNTHESIZER_SYSTEM) {
+			await duringSynthesis()
+			content = '## Tides\n\nSpring tides follow the new and full moon [1].'
+		} else if (system !== REFLECTION_SYSTEM) {
+			return new Response('unexpected call', { status: 404 })
+		}
+		const result = {
+			id: 'gen-spec',
+			object: 'chat.completion',
+			created: 0,
+			model: 'anthropic/claude-sonnet-5',
+			system_fingerprint: null,
+			choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content } }],
+		}
+		return new Response(JSON.stringify(result), { status: 200, headers: { 'Content-Type': 'application/json' } })
+	}) as typeof fetch
+	process.env.OPENROUTER_API_KEY = realKey || 'sk-test-not-a-real-key'
+	try {
+		return await fn()
+	} finally {
+		globalThis.fetch = realFetch
+		if (realKey === undefined) delete process.env.OPENROUTER_API_KEY
+		else process.env.OPENROUTER_API_KEY = realKey
+	}
+}
+
+/** A run with its plan and one source in place, so the first model call it makes is reflection. */
+async function insertRunReadyToSynthesize(prefix: string) {
+	const sql = getSql()
+	const researchId = await insertResearch(prefix, 'searching', { plan: ['What causes spring tides?'] })
+	await sql`
+		insert into research_sources (research_id, url, title, extracted_text)
+		values (${researchId}, 'https://example.com/tides', 'Tides', 'Spring tides occur at new and full moon.')
+	`
+	return researchId
+}
+
+/** What cancelResearchCommand does to the row. */
+async function cancelRow(researchId: string) {
+	const sql = getSql()
+	await sql`update research set status = 'canceled'::research_status, finished_at = now() where id = ${researchId}`
+}
+
+test.describe('research/cancel — a cancel during synthesis stands', () => {
+	test('a Cancel that lands while the report is being written ends the run canceled, with no report', async () => {
+		const prefix = uniquePrefix('research-cancel-synth')
+		const sql = getSql()
+		try {
+			const researchId = await insertRunReadyToSynthesize(prefix)
+			const { runResearchLoop } = await import('../src/lib/research/research-runner.server')
+
+			const outcome = await withFakeOpenRouter(
+				() => cancelRow(researchId),
+				() => runResearchLoop(researchId),
+			)
+
+			expect(outcome.status).toBe('canceled')
+			expect(outcome.report).toBeNull()
+			const [row] = await sql<{ status: string; report: string | null }[]>`
+				select status::text as status, report from research where id = ${researchId}
+			`
+			expect(row.status).toBe('canceled')
+			expect(row.report, 'the canceled run keeps no report').toBeNull()
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from research_steps where research_id = ${researchId} and kind = 'synthesize'
+			`
+			expect(count, 'no synthesis step is recorded for a canceled run').toBe(0)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
+	test('the job handler ends that run canceled and sends no "Research complete"', async () => {
+		const prefix = uniquePrefix('research-cancel-synth-job')
+		const sql = getSql()
+		try {
+			const researchId = await insertRunReadyToSynthesize(prefix)
+			const jobId = await insertRunningJob(researchId)
+			const { runResearchJob } = await import('../src/lib/research/research-handler.server')
+			const { getJobById } = await import('../src/lib/jobs/jobs.server')
+			const job = await getJobById(jobId)
+
+			const result = await withFakeOpenRouter(
+				() => cancelRow(researchId),
+				() => runResearchJob({ job: job!, workerId: 'spec', checkCancellation: async () => undefined }),
+			)
+
+			expect(result.status).toBe('canceled')
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from notifications where url = ${`/research/${researchId}`}
+			`
+			expect(count).toBe(0)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
+	test('a write the runner makes after the row ended changes nothing', async () => {
+		const prefix = uniquePrefix('research-guarded-write')
+		try {
+			const canceledId = await insertResearch(prefix, 'canceled')
+			const runningId = await insertResearch(prefix, 'searching')
+			const { updateResearchUnlessEnded } = await import('../src/lib/research/research.server')
+
+			expect(await updateResearchUnlessEnded(canceledId, { status: 'synthesizing' })).toBeNull()
+			expect(await updateResearchUnlessEnded(canceledId, { status: 'complete', report: '# done' })).toBeNull()
+			expect((await readResearch(canceledId)).status).toBe('canceled')
+
+			expect((await updateResearchUnlessEnded(runningId, { status: 'synthesizing' }))?.status).toBe('synthesizing')
+			// The runner's own cancel write may land on a canceled row, never on a finished one.
+			expect(await updateResearchUnlessEnded(canceledId, { status: 'canceled' }, ['complete', 'failed'])).not.toBeNull()
 		} finally {
 			await cleanup(prefix)
 		}
