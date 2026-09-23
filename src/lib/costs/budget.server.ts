@@ -144,12 +144,23 @@ export type BudgetHeadroom = {
 }
 
 /**
+ * Whether `checkBudgetLimits` can ever apply a limit outside a single run: a global limit
+ * always, an agent limit to its agent. A project limit is skipped there (usage rows carry no
+ * project yet), and an agent limit with no agent matches nothing.
+ */
+function isStandingEnforcedLimit(limit: BudgetLimitRow): boolean {
+	if (limit.period === 'run') return false
+	return limit.scope === 'global' || (limit.scope === 'agent' && limit.scopeId !== null)
+}
+
+/**
  * #38 — how much of each enabled limit is spent right now, tightest first.
  *
- * Reads spend exactly the way enforcement does (`spendForLimit`), so the `/activity` strip
- * can never say "40% used" about a limit that is already blocking runs. Run-scoped and
- * per-run limits are left out: they have no standing period to report against. An empty
- * list means no limits are set.
+ * Only the limits enforcement actually applies (`isStandingEnforcedLimit`), with spend read
+ * exactly the way enforcement reads it (`spendForLimit`), so the `/activity` strip can never
+ * say "40% used" about a limit that is already blocking runs, nor warn about one that never
+ * blocks anything. Run-scoped and per-run limits are left out: they have no standing period
+ * to report against. An empty list means no enforced limits are set.
  */
 export async function listBudgetHeadroom(userId: string, now = new Date()): Promise<BudgetHeadroom[]> {
 	const rows = (await db
@@ -157,7 +168,7 @@ export async function listBudgetHeadroom(userId: string, now = new Date()): Prom
 		.from(budgetLimits)
 		.where(and(eq(budgetLimits.userId, userId), eq(budgetLimits.enabled, true)))) as BudgetLimitRow[]
 
-	const standing = rows.filter((limit) => limit.scope !== 'run' && limit.period !== 'run')
+	const standing = rows.filter(isStandingEnforcedLimit)
 	const headroom = await Promise.all(
 		standing.map(async (limit) => {
 			const spendUsd = await spendForLimit(limit, now)

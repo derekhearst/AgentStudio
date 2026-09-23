@@ -225,7 +225,25 @@ test.describe('costs/usage-digest live — aggregation', () => {
 				values (${userId}, 'global', 'run', '1000000', 'notify_only', true)
 				returning id
 			`
-			created.push(standing.id, disabled.id, perRun.id)
+			// Limits enforcement never applies. At $0.000001 each is "over" at the first cent of
+			// spend, so either would be the tightest tile, and a critical anomaly, if it counted.
+			const [project] = await sql<{ id: string }[]>`
+				insert into budget_limits (user_id, scope, scope_id, period, limit_usd, action, enabled)
+				values (${userId}, 'project', ${randomUUID()}, 'month', '0.000001', 'notify_only', true)
+				returning id
+			`
+			const [agentWithoutAgent] = await sql<{ id: string }[]>`
+				insert into budget_limits (user_id, scope, scope_id, period, limit_usd, action, enabled)
+				values (${userId}, 'agent', null, 'month', '0.000001', 'notify_only', true)
+				returning id
+			`
+			// An agent limit with its agent is enforced, and is headroom.
+			const [perAgent] = await sql<{ id: string }[]>`
+				insert into budget_limits (user_id, scope, scope_id, period, limit_usd, action, enabled)
+				values (${userId}, 'agent', ${randomUUID()}, 'month', '1000000', 'notify_only', true)
+				returning id
+			`
+			created.push(standing.id, disabled.id, perRun.id, project.id, agentWithoutAgent.id, perAgent.id)
 			await sql`
 				insert into llm_usage (source, model, tokens_in, tokens_out, cost, user_id)
 				values ('chat', ${`${prefix}-model`}, 1, 1, '0.01', ${userId})
@@ -236,8 +254,11 @@ test.describe('costs/usage-digest live — aggregation', () => {
 			const ids = headroom.map((limit) => limit.id)
 
 			expect(ids).toContain(standing.id)
+			expect(ids).toContain(perAgent.id)
 			expect(ids, 'a disabled limit is not headroom').not.toContain(disabled.id)
 			expect(ids, 'a per-run limit has no standing period').not.toContain(perRun.id)
+			expect(ids, 'nothing enforces a project limit yet').not.toContain(project.id)
+			expect(ids, 'an agent limit with no agent matches nothing').not.toContain(agentWithoutAgent.id)
 
 			const row = headroom.find((limit) => limit.id === standing.id)!
 			expect(row).toMatchObject({ scope: 'global', period: 'month', limitUsd: 1_000_000, action: 'notify_only' })

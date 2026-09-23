@@ -87,7 +87,7 @@ The thresholds are first guesses and are easy to change: they are named constant
 
 ### Budget headroom
 
-The Budget tile reads the enforced budget limits — the same limits that can block a run — and computes spend exactly the way enforcement does, so the tile can never say "40% used" about a limit that is already blocking. Per-run limits are left out because they have no standing period. There is no screen for creating budget limits yet, so most instances show **No limits set**. The daily and monthly figures under Settings → Budget are a separate, display-only setting and are not shown here.
+The Budget tile reads the enforced budget limits — the same limits that can block a run — and computes spend exactly the way enforcement does, so the tile can never say "40% used" about a limit that is already blocking. Only limits that are actually enforced are shown: global limits, and agent limits that name an agent. Per-run limits are left out because they have no standing period, and project limits (which nothing enforces yet) and agent limits with no agent are left out because they never block anything, so they cannot raise a "Budget near limit" warning either. There is no screen for creating budget limits yet, so most instances show **No limits set**. The daily and monthly figures under Settings → Budget are a separate, display-only setting and are not shown here.
 
 ### The weekly digest
 
