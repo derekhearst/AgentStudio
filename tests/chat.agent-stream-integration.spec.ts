@@ -108,9 +108,9 @@ test.describe('chat/agent-stream-integration — Research toolPolicy audit', () 
 		// `Write` is deliberately present, and this test used to deny it.
 		//
 		// READ_ONLY_TOOL_NAMES is one list shared by Research and Plan, and it includes
-		// Write with a stated reason: the planner writes its plan to a markdown file and
-		// hands off via request_plan_approval. Research inherits it because it shares the
-		// list, not because anyone decided Research should write files.
+		// Write on purpose (#67): the Research persona writes RESEARCH-PLAN.md, as Plan
+		// writes PLAN.md, and request_plan_approval reads the plan from that file. Taking
+		// Write away from Research would break its handoff.
 		//
 		// Asserted rather than dropped, so the grant stays visible: if the lists are ever
 		// split so Research is read-only in the strict sense, this line fails and says so.

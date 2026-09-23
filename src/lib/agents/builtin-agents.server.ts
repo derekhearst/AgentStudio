@@ -31,6 +31,11 @@ export const BUILTIN_AGENT_IDS: Record<BuiltinAgentKey, string> = {
  * Tools that read-only built-ins (Research, Plan) are allowed to call. Migrated from the old
  * `MODE_READ_ONLY_TOOLS` set in `mode-filter.ts`. Allow-list (not deny-list) so newly added
  * tools fail closed for these agents until explicitly audited.
+ *
+ * One list for both, and that includes `Write` for Research — decided in #67, not inherited
+ * by accident. Both personas write their plan to a markdown file (PLAN.md, RESEARCH-PLAN.md)
+ * and hand off with `request_plan_approval`, which reads that file from disk, so dropping
+ * `Write` from Research would break its only workflow. See docs/agents/spec.md.
  */
 export const READ_ONLY_TOOL_NAMES: readonly string[] = [
 	// Always-loaded essentials (Tool Search Tool `disclosure: 'always'` tier).
