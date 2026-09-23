@@ -6,6 +6,7 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { conversations } from '$lib/sessions/sessions.schema'
 import { chatRailPreview } from './rail-preview.schema'
 import { buildPreviewPayload, PreviewError, resolveConversationWorkspace } from './preview.server'
+import { readRailOpen, writeRailOpen } from './rail-open.server'
 import {
 	normalizePreviewUrl,
 	RAIL_TABS,
@@ -90,6 +91,21 @@ export const setRailPreviewState = command(railStateSchema, async (input) => {
 			set: { tab: input.tab, kind, target, updatedAt: new Date() },
 		})
 
+	return { ok: true }
+})
+
+/**
+ * #14 — the rail's expanded/collapsed state. Per viewer rather than per chat, so it takes
+ * no conversation: the caller only ever reads and writes their own preference.
+ */
+export const getRailOpen = query(async (): Promise<boolean> => {
+	const user = requireAuthenticatedRequestUser()
+	return readRailOpen(user.id)
+})
+
+export const setRailOpen = command(z.boolean(), async (open) => {
+	const user = requireAuthenticatedRequestUser()
+	await writeRailOpen(user.id, open)
 	return { ok: true }
 })
 

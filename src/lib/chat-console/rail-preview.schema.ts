@@ -10,6 +10,10 @@ import { conversations } from '$lib/sessions/sessions.schema'
  * turn into an unbounded conversation-keyed map). Reopening a chat restores the
  * tab and the file/URL that was being looked at.
  *
+ * Whether the rail is expanded or folded to its strip is the other way round: it is
+ * the viewer's preference across every chat, so it lives on that per-user row
+ * (`panel_layout.railOpen`, see `rail-open.server.ts`), not here.
+ *
  * `target` is deliberately loose text:
  *   - kind 'file' → a workspace path (relative to the conversation's sandbox
  *     workspace, or absolute inside the user's own sandbox tree). It is
@@ -29,7 +33,10 @@ export const chatRailPreview = pgTable(
 		userId: uuid('user_id')
 			.notNull()
 			.references(() => users.id, { onDelete: 'cascade' }),
-		/** Active rail tab: 'Preview' | 'Research' | 'Files' | 'Activity'. */
+		/**
+		 * Active rail tab: 'Preview' | 'Files'. Rows written before #14 may still say
+		 * 'Research' or 'Activity'; those read back as 'Preview'.
+		 */
 		tab: text('tab').notNull().default('Preview'),
 		/** 'none' | 'file' | 'url' */
 		kind: text('kind').notNull().default('none'),

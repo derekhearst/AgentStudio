@@ -1,26 +1,39 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import Icon from './Icon.svelte';
 	import PreviewPane from './PreviewPane.svelte';
 	import { consoleState } from './console-state.svelte';
-	import { hydratePreviewState, previewState, setRailTab } from './preview-state.svelte';
-	import { RAIL_TABS, type RailTab } from './preview-kinds';
-	import { listResearchForConversationQuery } from '$lib/research/research.remote';
+	import {
+		collapseRail,
+		expandRail,
+		hydratePreviewState,
+		hydrateRailOpen,
+		openFilePreview,
+		previewState,
+		setRailTab,
+	} from './preview-state.svelte';
+	import { RAIL_TABS } from './preview-kinds';
 
 	/*
-	 * #29 — Preview is a fourth tab rather than a replacement for Files.
+	 * #14 — two tabs, folded away until there is something to show.
 	 *
-	 * Files is a placeholder today, but it is a placeholder for source control,
-	 * which is being built out separately; folding preview into it would make one
-	 * tab mean two unrelated things ("what changed in the repo" vs "show me this
-	 * thing"). What Preview does take from Files is the default position: the rail
-	 * used to open on a tab that says "No research runs for this chat yet" most of
-	 * the time, and now opens on the one surface that is useful with nothing
-	 * running, because its empty state is an input you can act on.
+	 * The rail used to carry four tabs (Preview, Research, Files, Activity) and a stats
+	 * footer, and most of the time all of it was empty or repeated the thread. What is left
+	 * is the one job it does well — showing a file or a page beside the conversation — and
+	 * Files, which now lists what the agent actually changed in this chat. On the desktop
+	 * column it starts as a thin strip and expands when something opens a preview, when a
+	 * strip button is clicked, or when the viewer left it expanded last time.
+	 *
+	 * `variant="drawer"` is the phone's slide-in copy. The drawer is opened and closed by
+	 * hand, so it always shows the full rail and has no collapse control.
 	 */
-	const activeTab = $derived(previewState.tab);
+	let { variant = 'column' }: { variant?: 'column' | 'drawer' } = $props();
 
+	const activeTab = $derived(previewState.tab);
 	const conversationId = $derived(consoleState.conversationId);
+	const changedFiles = $derived(consoleState.changedFiles);
+	const collapsed = $derived(variant === 'column' && !previewState.open);
+	const hasPreview = $derived(previewState.selection.kind !== 'none' || previewState.proposed !== null);
 
 	// Restore what this chat was last looking at. `untrack` so the store writes
 	// hydration performs don't feed back into this effect.
@@ -29,255 +42,94 @@
 		untrack(() => void hydratePreviewState(id));
 	});
 
-	// Research runs for the current conversation, polled lazily through the remote query.
-	const researchQuery = $derived.by(() => {
-		if (!conversationId) return null;
-		try {
-			return listResearchForConversationQuery({ conversationId, limit: 5 });
-		} catch {
-			return null;
-		}
-	});
-
-	const research = $derived.by(() => {
-		const q = researchQuery;
-		if (!q) return [];
-		const value = q.current;
-		return Array.isArray(value) ? value : [];
-	});
-
-	// Activity rows derived from streaming blocks (tool calls only).
-	const activityRows = $derived.by(() => {
-		return consoleState.streamingBlocks
-			.filter((b) => b.kind === 'tool')
-			.map((b) => {
-				if (b.kind !== 'tool') return null;
-				const status =
-					b.status === 'pending' || b.status === 'approved'
-						? 'warn'
-						: b.status === 'executing'
-						? 'run'
-						: b.status === 'failed' || b.status === 'denied'
-						? 'err'
-						: 'ok';
-				return {
-					id: b.id,
-					name: b.name,
-					status,
-					executionMs: b.executionMs ?? null,
-				};
-			})
-			.filter((r): r is NonNullable<typeof r> => r !== null);
-	});
-
-	const turnAge = $derived.by(() => {
-		const start = consoleState.runStatus.startedAt;
-		if (!start) return null;
-		const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
-		const mm = Math.floor(sec / 60);
-		const ss = String(sec % 60).padStart(2, '0');
-		return `${mm}:${ss}`;
-	});
-
-	const ctxPct = $derived.by(() => {
-		const lc = consoleState.liveContext;
-		if (!lc || !lc.tokenEstimate || !lc.contextWindow || lc.contextWindow <= 0) return 0;
-		return Math.max(0, Math.min(100, (lc.tokenEstimate / lc.contextWindow) * 100));
-	});
-
-	const ctxLabel = $derived.by(() => {
-		const lc = consoleState.liveContext;
-		if (!lc || !lc.tokenEstimate) return '—';
-		const used = (lc.tokenEstimate / 1000).toFixed(1);
-		const total = lc.contextWindow ? `${(lc.contextWindow / 1000).toFixed(0)}K` : '?';
-		return `${used}K / ${total}`;
-	});
-
-	function formatTokens(n: number) {
-		if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-		if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-		return String(n);
-	}
-
-	function formatCost(n: number) {
-		if (n >= 1) return `$${n.toFixed(2)}`;
-		return `$${n.toFixed(4)}`;
-	}
-
-	function progressPct(r: { phase?: string | null; status?: string | null }) {
-		switch (r.status) {
-			case 'planning':
-				return 10;
-			case 'searching':
-				return 35;
-			case 'fetching':
-				return 55;
-			case 'reflecting':
-				return 75;
-			case 'synthesizing':
-				return 90;
-			case 'complete':
-				return 100;
-			default:
-				return 0;
-		}
-	}
-
-	function isRunningStatus(s: string | null | undefined) {
-		return s === 'planning' || s === 'searching' || s === 'fetching' || s === 'reflecting' || s === 'synthesizing';
-	}
+	onMount(() => void hydrateRailOpen());
 </script>
 
-<aside class="console-rail">
-	<div class="console-rail__tabs">
-		{#each RAIL_TABS as tab (tab)}
-			<button
-				type="button"
-				class="console-rail__tab {activeTab === tab ? 'active' : ''}"
-				onclick={() => setRailTab(tab as RailTab)}
-			>
-				{tab}
-				{#if tab === 'Research' && research.length > 0}
-					<span class="ct">{research.length}</span>
-				{:else if tab === 'Activity' && activityRows.length > 0}
-					<span class="ct">{activityRows.length}</span>
-				{/if}
-			</button>
-		{/each}
-	</div>
-
-	<div class="console-rail__body {activeTab === 'Preview' ? 'is-preview' : ''}">
-		{#if activeTab === 'Preview'}
-			<PreviewPane {conversationId} />
-		{:else if activeTab === 'Research'}
-			{#if research.length === 0}
-				<div class="console-rail__empty">No research runs for this chat yet.</div>
-			{:else}
-				{#each research as r (r.id)}
-					{@const running = isRunningStatus(r.status)}
-					{@const pct = progressPct(r)}
-					<div class="console-art {running ? 'is-progress' : ''}">
-						<div class="console-art__head">
-							<span class="console-art__type">RESEARCH</span>
-							{#if running}
-								<span class="console-art__status run">
-									<span class="pulse-dot" style="background:currentColor;width:5px;height:5px;border-radius:999px;display:inline-block;animation:console-pulse 1.6s ease-in-out infinite"></span>
-									{r.status}
-								</span>
-							{:else}
-								<span class="console-art__status">
-									<Icon name="check" size={11} /> {r.status}
-								</span>
-							{/if}
-						</div>
-						<div class="console-art__title">{r.query}</div>
-						{#if running}
-							<div class="console-art__progress">
-								<div class="console-art__bar"><div style="width:{pct}%;"></div></div>
-								<span class="console-art__pct">{pct}%</span>
-							</div>
+{#if collapsed}
+	<aside class="console-rail is-collapsed" aria-label="Chat rail">
+		<button type="button" class="console-rail__strip-btn" title="Expand rail" aria-label="Expand rail" onclick={expandRail}>
+			<Icon name="panel" size={15} />
+		</button>
+		<button
+			type="button"
+			class="console-rail__strip-btn"
+			title={hasPreview ? 'Preview — something is open' : 'Preview'}
+			aria-label="Show Preview"
+			onclick={() => setRailTab('Preview')}
+		>
+			<Icon name="search" size={15} />
+			{#if hasPreview}<span class="console-rail__strip-dot" aria-hidden="true"></span>{/if}
+		</button>
+		<button
+			type="button"
+			class="console-rail__strip-btn"
+			title={changedFiles.length > 0 ? `Files — ${changedFiles.length} changed in this chat` : 'Files'}
+			aria-label="Show Files"
+			onclick={() => setRailTab('Files')}
+		>
+			<Icon name="file" size={15} />
+			{#if changedFiles.length > 0}
+				<span class="console-rail__strip-ct" data-testid="rail-files-count">{changedFiles.length}</span>
+			{/if}
+		</button>
+	</aside>
+{:else}
+	<aside class="console-rail {variant === 'drawer' ? 'is-drawer' : ''}" aria-label="Chat rail">
+		<div class="console-rail__tabs">
+			<div class="console-rail__tablist" role="tablist" aria-label="Rail tabs">
+				{#each RAIL_TABS as tab (tab)}
+					<button
+						type="button"
+						role="tab"
+						aria-selected={activeTab === tab}
+						class="console-rail__tab {activeTab === tab ? 'active' : ''}"
+						onclick={() => setRailTab(tab)}
+					>
+						{tab}
+						{#if tab === 'Files' && changedFiles.length > 0}
+							<span class="ct">{changedFiles.length}</span>
 						{/if}
-					</div>
+					</button>
 				{/each}
+			</div>
+			{#if variant === 'column'}
+				<button type="button" class="console-rail__collapse" title="Collapse rail" aria-label="Collapse rail" onclick={collapseRail}>
+					<Icon name="panel" size={14} />
+				</button>
 			{/if}
-		{:else if activeTab === 'Files'}
-			<div class="console-rail__sec">
-				<div class="lbl">
-					<span>Branch</span>
-					<span class="meta">main · clean</span>
-				</div>
-			</div>
-			<div class="console-files__branch">
-				<div class="row">
-					<span class="b"><Icon name="branch" size={13} /> main</span>
-				</div>
-				<div class="sub">no source-control plumbing yet</div>
-				<div class="console-files__btns">
-					<button type="button" class="ghost" disabled><Icon name="branch" size={11} /> Switch</button>
-					<button type="button" class="ghost" disabled>Pull</button>
-				</div>
-			</div>
-			<div class="console-rail__empty">
-				Source control integration coming soon — file changes from agent edits will appear here.
-			</div>
-		{:else if activeTab === 'Activity'}
-			<div class="console-rail__sec">
-				<div class="lbl">
-					<span>Live · this turn</span>
-					{#if turnAge}<span class="meta" style="color:var(--color-primary);">{turnAge}</span>{/if}
-				</div>
-			</div>
-			{#if activityRows.length === 0}
-				<div class="console-rail__empty">No activity yet on this turn.</div>
+		</div>
+
+		<div class="console-rail__body {activeTab === 'Preview' ? 'is-preview' : ''}">
+			{#if activeTab === 'Preview'}
+				<PreviewPane {conversationId} />
 			{:else}
-				{#each activityRows as a (a.id)}
-					<div class="console-act {a.status}">
-						<div class="console-act__icon">
-							{#if a.status === 'run'}
-								<span class="spin"></span>
-							{:else if a.status === 'warn'}
-								<Icon name="alert" size={12} />
-							{:else if a.status === 'err'}
-								<Icon name="x" size={12} />
-							{:else}
-								<Icon name="check" size={12} />
-							{/if}
-						</div>
-						<div class="console-act__title">{a.name}</div>
-						<div class="console-act__t">{a.executionMs ? `${a.executionMs}ms` : ''}</div>
+				<div class="console-rail__sec">
+					<div class="lbl">
+						<span>Changed in this chat</span>
+						{#if changedFiles.length > 0}<span class="meta">{changedFiles.length} {changedFiles.length === 1 ? 'file' : 'files'}</span>{/if}
 					</div>
-				{/each}
-			{/if}
-
-			{#if consoleState.persistedToolCalls.length > 0}
-				<div class="console-rail__sec" style="margin-top:10px;">
-					<div class="lbl"><span>Earlier</span></div>
 				</div>
-				{#each consoleState.persistedToolCalls.slice(0, 8) as call, i (i)}
-					<div class="console-act {call.success === false ? 'err' : 'ok'}">
-						<div class="console-act__icon">
-							{#if call.success === false}
-								<Icon name="x" size={12} />
-							{:else}
-								<Icon name="check" size={12} />
-							{/if}
-						</div>
-						<div class="console-act__title">{call.name}</div>
-						<div class="console-act__t">{call.ageMin}m</div>
-					</div>
-				{/each}
+				{#if changedFiles.length === 0}
+					<div class="console-rail__empty">No files changed in this chat yet.</div>
+				{:else}
+					<ul class="console-files">
+						{#each changedFiles as file (file.path)}
+							<li>
+								<button type="button" class="console-files__row" title={`Preview ${file.path}`} onclick={() => openFilePreview(file.path)}>
+									<Icon name="file" size={12} />
+									<span class="console-files__path">
+										<span class="console-files__name">{file.name}</span>
+										{#if file.dir}<span class="console-files__dir">{file.dir}</span>{/if}
+									</span>
+									{#if file.changeType === 'create'}<span class="console-files__new">new</span>{/if}
+									{#if file.additions > 0}<span class="console-files__stat is-add">+{file.additions}</span>{/if}
+									{#if file.deletions > 0}<span class="console-files__stat is-del">−{file.deletions}</span>{/if}
+								</button>
+							</li>
+						{/each}
+					</ul>
+				{/if}
 			{/if}
-		{/if}
-	</div>
-
-	<div class="console-stats">
-		<div class="console-stats__ctx">
-			<div class="console-stats__ctx-row">
-				<span class="l">Context</span>
-				<span class="v">{Math.round(ctxPct)}% · <span style="color:color-mix(in oklab,var(--color-base-content) 50%,transparent);">{ctxLabel}</span></span>
-			</div>
-			<div class="console-meter">
-				<div class="fill" style="width:{ctxPct}%"></div>
-				<div class="reserved" style="left:{ctxPct}%;width:{Math.max(0, Math.min(30, 100 - ctxPct))}%"></div>
-			</div>
 		</div>
-		<div class="console-stats__row">
-			<div>
-				<span class="l">Tokens</span>
-				<span class="v lime">{formatTokens(consoleState.totalTokens)}</span>
-			</div>
-			<div>
-				<span class="l">Cost</span>
-				<!-- Claude runs go through the CLI subscription and have no per-token
-				     price, so a $0.0000 reading is noise rather than information. -->
-				<span class="v" title={consoleState.totalCostUsd > 0 ? 'Metered spend for this conversation' : 'Subscription run — billed by plan, not per token'}>
-					{consoleState.totalCostUsd > 0 ? formatCost(consoleState.totalCostUsd) : 'plan'}
-				</span>
-			</div>
-			<div>
-				<span class="l">Latency</span>
-				<span class="v">{consoleState.lastTtftMs ? `${consoleState.lastTtftMs}ms` : '—'}</span>
-			</div>
-		</div>
-	</div>
-</aside>
+	</aside>
+{/if}
