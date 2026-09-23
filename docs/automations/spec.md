@@ -181,6 +181,11 @@ when it started, how long it took, whether it was scheduled or a manual run, whi
 attempt it was, what it cost, and a link straight to the conversation or research run it
 produced. A failed run shows its error; a successful one shows an excerpt of its output.
 
+The status strip on each card — the last run's outcome, and how many runs failed in the
+past 24 hours — is worked out for that automation alone. A busy automation that runs every
+minute cannot push a quieter one's failure out of view, and the page header's "failing"
+count includes every automation whose last run failed.
+
 ### Run now
 
 Every card has a **Run now** button. It queues a manual `automation_run` job (priority above
