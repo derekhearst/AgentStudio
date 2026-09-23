@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -23,10 +24,11 @@ import {
  * it. So "a fresh install" is simulated two ways instead:
  *
  *   - the gate is a pure function of (path, owner exists, signed in), tested as a matrix;
- *   - provisioning runs against an empty stand-in: a TEMP `users` table created LIKE the
- *     real one (same unique indexes, the singleton included) inside a transaction that is
- *     always rolled back. Postgres searches the temp schema first, so the unqualified
- *     `users` the code queries is the stand-in, and the real row is never read or locked.
+ *   - provisioning runs against an empty stand-in: TEMP `users` and `auth_sessions` tables
+ *     created LIKE the real ones (same unique indexes, the singleton included) inside a
+ *     transaction that is always rolled back. Postgres searches the temp schema first, so the
+ *     unqualified tables the code queries are the stand-ins, and the real rows are never read,
+ *     locked or deleted.
  *
  * The live-server checks at the bottom cover the "owner exists" side end to end.
  */
@@ -83,6 +85,15 @@ test.describe('auth/gate — the rules', () => {
 		)
 	})
 
+	test('a session counts only while its account has a password', () => {
+		// Clearing the password reopens setup for recovery. A session opened with the old
+		// password must not stay signed in through that window, when the gate already treats the
+		// instance as ownerless and the remote gate would still let the session through.
+		const authServer = readFileSync(join(process.cwd(), 'src/lib/auth/auth.server.ts'), 'utf8')
+		const lookup = authServer.slice(authServer.indexOf('export async function getSessionUser'))
+		expect(lookup.slice(0, lookup.indexOf('\n}\n'))).toMatch(/isNotNull\(users\.passwordHash\)/)
+	})
+
 	test('the hook asks the gate, and the dev bypass attaches only to an owner with a password', () => {
 		const hook = readFileSync(join(process.cwd(), 'src/hooks.server.ts'), 'utf8')
 		expect(hook).toMatch(/await authGateRedirect\(event\)/)
@@ -98,6 +109,7 @@ test.describe('auth/setup-token', () => {
 		expect(setupTokenRequired({ devBuild: false })).toBe(true)
 		expect(setupTokenRequired({ devBuild: true })).toBe(false)
 	})
+
 
 	test('only the announced token opens setup, and only until setup completes', () => {
 		// The operator finds the token in the server log, so it must be printed — once per token.
@@ -152,6 +164,10 @@ test.describe('auth/provision — against an empty users table', () => {
 		try {
 			await drizzle(client).transaction(async (tx) => {
 				await tx.execute(dsql`create temp table users (like public.users including all) on commit drop`)
+				// LIKE copies no foreign keys, so sessions can be seeded for the stand-in owner.
+				await tx.execute(
+					dsql`create temp table auth_sessions (like public.auth_sessions including all) on commit drop`,
+				)
 				await fn(tx)
 				throw new RolledBack()
 			})
@@ -169,13 +185,27 @@ test.describe('auth/provision — against an empty users table', () => {
 		}>
 	}
 
-	test('the stand-in is really empty and really the temp table', async () => {
+	async function seedSession(db: TestTx, userId: string) {
+		await db.execute(
+			dsql`insert into auth_sessions (user_id, token_hash, expires_at) values (${userId}, ${randomUUID()}, now() + interval '1 day')`,
+		)
+	}
+
+	async function sessionsOf(db: TestTx, userId: string) {
+		const rows = (await db.execute(dsql`select id from auth_sessions where user_id = ${userId}`)) as unknown as unknown[]
+		return rows.length
+	}
+
+	test('the stand-in is really empty and really the temp tables', async () => {
 		await withFreshUsers(async (db) => {
 			expect(await ownerRows(db)).toHaveLength(0)
-			const [where] = (await db.execute(
-				dsql`select n.nspname like 'pg_temp%' as temp from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.oid = 'users'::regclass`,
-			)) as unknown as Array<{ temp: boolean }>
-			expect(where.temp).toBe(true)
+			const where = (await db.execute(
+				dsql`select c.relname, n.nspname like 'pg_temp%' as temp from pg_class c join pg_namespace n on n.oid = c.relnamespace where c.oid in ('users'::regclass, 'auth_sessions'::regclass)`,
+			)) as unknown as Array<{ relname: string; temp: boolean }>
+			expect(where).toHaveLength(2)
+			for (const table of where) expect(table.temp, table.relname).toBe(true)
+			const [sessions] = (await db.execute(dsql`select count(*)::int as n from auth_sessions`)) as unknown as Array<{ n: number }>
+			expect(sessions.n).toBe(0)
 		})
 	})
 
@@ -197,30 +227,72 @@ test.describe('auth/provision — against an empty users table', () => {
 		})
 	})
 
-	test('a row without a password is claimed in place, keeping its id', async () => {
-		await withFreshUsers(async (db) => {
-			// A half-finished setup, or an owner whose password was cleared to reopen setup.
-			const [row] = (await db.execute(
-				dsql`insert into users (name, username) values ('Old name', 'legacy_user') returning id`,
-			)) as unknown as Array<{ id: string }>
+	/** An owner whose password an operator cleared to reopen setup (or a half-finished setup). */
+	async function passwordlessOwner(db: TestTx) {
+		const [row] = (await db.execute(
+			dsql`insert into users (name, username) values ('Old name', 'legacy_user') returning id`,
+		)) as unknown as Array<{ id: string }>
+		return row.id
+	}
 
+	test('a row without a password is claimed in place, keeping its id and what was not given', async () => {
+		await withFreshUsers(async (db) => {
+			const id = await passwordlessOwner(db)
+
+			// /setup always sends a display name; the username field is optional.
 			const result = await provisionOwner(db, { name: 'New name', password: 'claimed-password' })
-			expect(result).toEqual({ userId: row.id, created: true, passwordSet: true })
+			expect(result).toEqual({ userId: id, created: true, passwordSet: true })
 			const [owner] = await ownerRows(db)
-			expect(owner).toMatchObject({ id: row.id, name: 'New name', username: 'owner' })
+			expect(owner).toMatchObject({ id, name: 'New name', username: 'legacy_user' })
 			expect(await verifyPassword('claimed-password', owner.password_hash!)).toBe(true)
 		})
 	})
 
-	test('overwrite resets only the password', async () => {
+	test('a claim with a username given takes it', async () => {
+		await withFreshUsers(async (db) => {
+			const id = await passwordlessOwner(db)
+			await provisionOwner(db, { name: 'New name', username: 'new_user', password: 'claimed-password' })
+			expect((await ownerRows(db))[0]).toMatchObject({ id, name: 'New name', username: 'new_user' })
+		})
+	})
+
+	test('claiming ends every session the account had, and only its own', async () => {
+		await withFreshUsers(async (db) => {
+			// The recovery case: the password leaked, the operator cleared it, and a session
+			// opened with it is still in the table.
+			const id = await passwordlessOwner(db)
+			const bystander = randomUUID()
+			await seedSession(db, id)
+			await seedSession(db, id)
+			await seedSession(db, bystander)
+
+			await provisionOwner(db, { name: 'New name', password: 'claimed-password' })
+			expect(await sessionsOf(db, id)).toBe(0)
+			expect(await sessionsOf(db, bystander)).toBe(1)
+		})
+	})
+
+	test('overwrite resets only the password, and signs everyone out', async () => {
 		await withFreshUsers(async (db) => {
 			const created = await provisionOwner(db, { name: 'Ada', username: 'ada', password: 'first-password' })
+			await seedSession(db, created.userId)
 			const reset = await provisionOwner(db, { name: 'Ignored', username: 'ignored', password: 'second-password' }, { overwrite: true })
 			expect(reset).toEqual({ userId: created.userId, created: false, passwordSet: true })
 			const [owner] = await ownerRows(db)
 			expect(owner).toMatchObject({ id: created.userId, name: 'Ada', username: 'ada' })
 			expect(await verifyPassword('second-password', owner.password_hash!)).toBe(true)
 			expect(await verifyPassword('first-password', owner.password_hash!)).toBe(false)
+			expect(await sessionsOf(db, created.userId)).toBe(0)
+		})
+	})
+
+	test('an owner who already has a password keeps their sessions when setup or boot is refused', async () => {
+		await withFreshUsers(async (db) => {
+			const created = await provisionOwner(db, { name: 'Ada', password: 'first-password' })
+			await seedSession(db, created.userId)
+			await provisionOwner(db, { name: 'Mallory', password: 'second-password' })
+			await provisionOwnerFromEnv(db, { AUTH_PASSWORD: 'from-the-environment' })
+			expect(await sessionsOf(db, created.userId)).toBe(1)
 		})
 	})
 
@@ -249,6 +321,20 @@ test.describe('auth/provision — against an empty users table', () => {
 			expect(await provisionOwnerFromEnv(db, nextBoot)).toEqual({ status: 'kept', userId: owner.id })
 			expect(nextBoot.AUTH_PASSWORD).toBeUndefined()
 			expect((await ownerRows(db))[0]).toEqual(owner)
+		})
+	})
+
+	test('boot: recovering through AUTH_PASSWORD keeps the owner’s name and username', async () => {
+		await withFreshUsers(async (db) => {
+			const id = await passwordlessOwner(db)
+			await seedSession(db, id)
+			// No AUTH_OWNER_NAME / AUTH_OWNER_USERNAME: recovery must not rename the owner to "Owner".
+			const env: Record<string, string | undefined> = { AUTH_PASSWORD: 'recovered-password' }
+			expect(await provisionOwnerFromEnv(db, env)).toEqual({ status: 'created', userId: id, username: 'legacy_user' })
+			const [owner] = await ownerRows(db)
+			expect(owner).toMatchObject({ id, name: 'Old name', username: 'legacy_user' })
+			expect(await verifyPassword('recovered-password', owner.password_hash!)).toBe(true)
+			expect(await sessionsOf(db, id)).toBe(0)
 		})
 	})
 

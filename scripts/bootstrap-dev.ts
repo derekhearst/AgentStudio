@@ -99,7 +99,11 @@ try {
 	const sandboxRoot = getSandboxRoot()
 	await mkdir(sandboxRoot, { recursive: true })
 
-	const passwordState = result.created ? 'set' : result.passwordSet ? 'reset' : 'kept (the owner already had one)'
+	const passwordState = result.created
+		? 'set'
+		: result.passwordSet
+			? 'reset (every existing session was signed out)'
+			: 'kept (the owner already had one)'
 	console.log(`[bootstrap] Owner:    ${owner?.username ?? '(unknown)'}`)
 	console.log(`[bootstrap] Password: ${passwordState}`)
 	console.log(`[bootstrap] Sandbox:  ${sandboxRoot}`)

@@ -1,5 +1,5 @@
-import { isNotNull, isNull } from 'drizzle-orm'
-import { users } from '$lib/auth/auth.schema'
+import { eq, isNotNull, isNull } from 'drizzle-orm'
+import { authSessions, users } from '$lib/auth/auth.schema'
 import { hashPassword } from '$lib/auth/password.server'
 import { DEFAULT_OWNER_NAME, DEFAULT_OWNER_USERNAME, MIN_PASSWORD_LENGTH, validateUsername } from '$lib/auth/username'
 import { getOwnerBootstrapConfig } from '$lib/server/config'
@@ -19,8 +19,8 @@ import type { db as appDb } from '$lib/db.server'
  * has finished loading, so this module must not import it.
  */
 
-/** Anything with drizzle's `select` / `insert` / `update` — the app's handle, a transaction, or the boot pipeline's. */
-export type ProvisionDb = Pick<typeof appDb, 'select' | 'insert' | 'update'>
+/** Anything with drizzle's `select` / `insert` / `update` / `delete` — the app's handle, a transaction, or the boot pipeline's. */
+export type ProvisionDb = Pick<typeof appDb, 'select' | 'insert' | 'update' | 'delete'>
 
 export type OwnerInput = {
 	name?: string
@@ -44,13 +44,19 @@ export type ProvisionResult = {
  * nothing at all at boot). With `overwrite: true` (`db:bootstrap --reset-password`) an
  * existing owner's password is replaced and nothing else about the account changes.
  *
+ * Whenever this sets a password on an account that already existed — a claim or an
+ * overwrite — it also ends every session that account had. Both are how a lost or leaked
+ * password is recovered, and a session opened with the old password must not outlive it.
+ * (Setup signs its visitor in afresh straight after.)
+ *
  * The write is two statements that each decide atomically, so two setup submissions at the
  * same moment cannot both win — the old code checked, then wrote, and both got a session:
  *
  *   1. Claim a row that exists but has no password (a half-finished setup, or an owner
  *      whose password an operator cleared to reopen setup). Keeping that row keeps its id,
- *      and so every conversation, run and setting that belongs to it. A concurrent claim
- *      waits on the row lock, re-reads it, finds a password, and matches nothing.
+ *      and so every conversation, run and setting that belongs to it — and its name and
+ *      username too, unless the caller gave new ones. A concurrent claim waits on the row
+ *      lock, re-reads it, finds a password, and matches nothing.
  *   2. Otherwise insert, ON CONFLICT DO NOTHING. The `users_singleton` unique index lets
  *      exactly one insert through; the loser inserts nothing. (No conflict target on
  *      purpose: inferring an expression index is fragile, and any conflict here means
@@ -73,20 +79,26 @@ export async function provisionOwner(
 	if (input.password.length < MIN_PASSWORD_LENGTH) {
 		throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
 	}
-	const name = input.name?.trim() || DEFAULT_OWNER_NAME
-	const username = validateUsername(input.username?.trim() || DEFAULT_OWNER_USERNAME)
+	// Only what the caller actually supplied. A new owner falls back to the defaults; a claimed
+	// row keeps its own name and username, so recovering through `AUTH_PASSWORD` with no
+	// `AUTH_OWNER_NAME` does not quietly rename the owner to "Owner".
+	const name = input.name?.trim() || undefined
+	const username = input.username?.trim() ? validateUsername(input.username.trim()) : undefined
 	const passwordHash = await hashPassword(input.password)
 
 	const [claimed] = await database
 		.update(users)
-		.set({ name, username, passwordHash })
+		.set({ passwordHash, ...(name ? { name } : {}), ...(username ? { username } : {}) })
 		.where(isNull(users.passwordHash))
 		.returning({ id: users.id })
-	if (claimed) return { userId: claimed.id, created: true, passwordSet: true }
+	if (claimed) {
+		await endSessionsOf(database, claimed.id)
+		return { userId: claimed.id, created: true, passwordSet: true }
+	}
 
 	const [inserted] = await database
 		.insert(users)
-		.values({ name, username, passwordHash })
+		.values({ name: name ?? DEFAULT_OWNER_NAME, username: username ?? DEFAULT_OWNER_USERNAME, passwordHash })
 		.onConflictDoNothing()
 		.returning({ id: users.id })
 	if (inserted) return { userId: inserted.id, created: true, passwordSet: true }
@@ -94,12 +106,19 @@ export async function provisionOwner(
 	if (overwrite) {
 		// The table holds one row, so no WHERE: this is "the owner's password".
 		const [reset] = await database.update(users).set({ passwordHash }).returning({ id: users.id })
-		if (reset) return { userId: reset.id, created: false, passwordSet: true }
+		if (reset) {
+			await endSessionsOf(database, reset.id)
+			return { userId: reset.id, created: false, passwordSet: true }
+		}
 	}
 
 	const existing = await findOwnerId(database)
 	if (!existing) throw new Error('Could not create the owner account')
 	return { userId: existing, created: false, passwordSet: false }
+}
+
+async function endSessionsOf(database: ProvisionDb, userId: string): Promise<void> {
+	await database.delete(authSessions).where(eq(authSessions.userId, userId))
 }
 
 async function findOwnerId(database: ProvisionDb): Promise<string | null> {
@@ -140,10 +159,16 @@ export async function provisionOwnerFromEnv(
 
 		const result = await provisionOwner(database, config, { overwrite: false })
 		if (!result.created) return { status: 'kept', userId: result.userId }
+		// Read back rather than assumed: a claimed row keeps its own username.
+		const [owner] = await database
+			.select({ username: users.username })
+			.from(users)
+			.where(eq(users.id, result.userId))
+			.limit(1)
 		return {
 			status: 'created',
 			userId: result.userId,
-			username: config.username?.trim() || DEFAULT_OWNER_USERNAME,
+			username: owner?.username ?? config.username?.trim() ?? DEFAULT_OWNER_USERNAME,
 		}
 	} finally {
 		delete env.AUTH_PASSWORD

@@ -17,7 +17,8 @@
 
 	const passwordsMatch = $derived(password === confirm);
 	const passwordTooShort = $derived(password.length > 0 && password.length < 8);
-	// Optional: blank means the default, `owner`. Nobody types it to sign in.
+	// Optional: blank means the default, `owner` — or, when setup reopens an existing account,
+	// the username it already has. Nobody types it to sign in.
 	const usernameValid = $derived(username.trim() === '' || /^[a-zA-Z0-9_-]{3,32}$/.test(username.trim()));
 	const canSubmit = $derived(
 		!loading &&
@@ -72,7 +73,7 @@
 							required
 						/>
 						<p class="text-xs opacity-70">
-							Printed in the server log when the server started without an owner. It proves you run this server.
+							Printed in the server log while this instance has no owner. It proves you run this server.
 						</p>
 					</fieldset>
 				{/if}

@@ -115,6 +115,15 @@ export async function clearSessionCookie(cookies: Cookies) {
 	})
 }
 
+/**
+ * The signed-in user for this request's cookie, or null.
+ *
+ * A session only counts while its account has a password. Clearing `password_hash` is how an
+ * operator reopens setup to recover a lost or leaked password; without this, a session opened
+ * with the old password stayed signed in for the whole recovery window — while the gate
+ * already treated the instance as having no owner — and could call every remote function.
+ * Setting the new password then deletes those sessions for good (provision.server.ts).
+ */
 export async function getSessionUser(cookies: Cookies): Promise<AuthenticatedUser | null> {
 	const token = cookies.get(SESSION_COOKIE)
 	if (!token) return null
@@ -130,7 +139,7 @@ export async function getSessionUser(cookies: Cookies): Promise<AuthenticatedUse
 		})
 		.from(authSessions)
 		.innerJoin(users, eq(users.id, authSessions.userId))
-		.where(and(eq(authSessions.tokenHash, tokenHash), gt(authSessions.expiresAt, now)))
+		.where(and(eq(authSessions.tokenHash, tokenHash), gt(authSessions.expiresAt, now), isNotNull(users.passwordHash)))
 		.limit(1)
 
 	if (!row) return null

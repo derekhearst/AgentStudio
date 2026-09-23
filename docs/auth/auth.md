@@ -54,8 +54,26 @@ Two setup submissions at the same moment cannot both succeed: exactly one create
 
 ### Recovering a lost password
 
-- **Development:** `bun run db:bootstrap --reset-password` sets the owner's password to `AUTH_PASSWORD` (or to `--password`). Nothing else about the account changes.
-- **Production:** clear the password in the database (`UPDATE users SET password_hash = NULL`). The owner and everything they own are kept. Then either restart with `AUTH_PASSWORD` set to the new password — the server fills it in at boot — or restart without it and complete `/setup` with the setup token from the log. Setup keeps the same account, so conversations, runs and settings survive.
+- **Development:** `bun run db:bootstrap --reset-password` sets the owner's password to `AUTH_PASSWORD` (or to `--password`). Every existing session is signed out; nothing else about the account changes.
+- **Production:** clear the password and end every session in the database:
+
+  ```sql
+  UPDATE users SET password_hash = NULL;
+  DELETE FROM auth_sessions;
+  ```
+
+  The owner and everything they own are kept. Then either restart with `AUTH_PASSWORD` set to the new password — the server fills it in at boot — or restart without it and complete `/setup` with the setup token from the log. Either way the same account is kept, so conversations, runs and settings survive.
+
+What recovery keeps and what it changes:
+
+| | Kept | Changed |
+| - | ---- | ------- |
+| Account id, conversations, runs, settings | Always | — |
+| Display name | When recovering through `AUTH_PASSWORD` without `AUTH_OWNER_NAME` | To what `/setup` was given (the form asks for one), or to `AUTH_OWNER_NAME` when set |
+| Username | Unless a new one is given | To the `/setup` "Username" field, or `AUTH_OWNER_USERNAME`, when set |
+| Sessions | Never | All signed out |
+
+Recovery signs everyone out even if the `DELETE` is skipped: a session stops counting the moment its account has no password, and setting the new password deletes the old sessions. This matters when the reason for the reset is a leaked password — a session opened with it must not outlive it.
 
 ### Signing in
 
@@ -120,6 +138,7 @@ These are not asked for at first run on purpose. The workspace is a mount chosen
 - On a production build `/setup` requires the setup token from the server log. The token is random, lives only in memory, changes on every restart, and stops working once setup completes.
 - Before an owner exists, only `/setup`, `/api/health` and the app's static files are reachable; everything else (including `/login`) redirects to `/setup`.
 - Sessions are stored as hashes, so a leaked database does not leak usable cookies.
+- A session counts only while its account has a password. Setting a password on an existing account — through `/setup`, `AUTH_PASSWORD` at boot, or `db:bootstrap --reset-password` — ends every session that account had.
 - The session cookie is `Secure` when the server runs with `NODE_ENV=production` (the Docker image does).
 - `AUTH_DEV_BYPASS=1` signs every request without a session in as the owner, for local development only — typically to let a viewer or agent that cannot type the password drive the app. It attaches only to an owner that has a password; on an instance without one it does nothing and the setup page applies. A production build (`bun run build`) ignores it completely, whatever `NODE_ENV` says; the test server forces it off.
 - Remote functions reachable without a session are limited to sign-in and setup. Adding another one makes it callable by anyone on the internet and needs an explicit reason in `src/lib/auth/remote-gate.server.ts`.

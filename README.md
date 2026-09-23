@@ -94,7 +94,7 @@ Database note:
 
 ```sh
 bun run db:bootstrap                    # create the database, the owner (from AUTH_PASSWORD) and the sandbox folder
-bun run db:bootstrap --reset-password   # forgot the dev password: set it to AUTH_PASSWORD again
+bun run db:bootstrap --reset-password   # forgot the dev password: set it to AUTH_PASSWORD again (signs every session out)
 bun run db:bootstrap --reset            # start over: drops the database first
 ```
 
@@ -226,7 +226,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - First run creates that account and nothing else. Two ways: set `AUTH_PASSWORD` and the server creates the owner when it starts (the Docker deployment does this), or open the app and fill in `/setup` (display name and password). Until an owner exists every page redirects to `/setup`; `/api/health` stays reachable and reports `ownerProvisioned`.
 - On a production build, `/setup` also asks for a **one-time setup token printed in the server log**, so the first visitor to a public URL cannot claim a fresh or reset instance. A development server does not ask.
 - Model credential, workspace, gateway and integrations are deploy-time environment settings, shown read-only under Settings → System.
-- Sessions are 30-day HTTP-only cookies. Everything except `/login`, `/setup`, `/demo`, `/api/health`, `/api/webhooks` (signature-checked) and `/api/cron` (session or `CRON_SECRET`) requires one.
+- Sessions are 30-day HTTP-only cookies, and setting a new password on an existing account ends all of them (see "Recovering a lost password" in the auth doc). Everything except `/login`, `/setup`, `/demo`, `/api/health`, `/api/webhooks` (signature-checked) and `/api/cron` (session or `CRON_SECRET`) requires one.
 - Remote functions are gated on the real request path: without a session only the sign-in and setup commands can run.
 - `AUTH_DEV_BYPASS=1` signs every visitor in as the owner on a development server only, and only once an owner with a password exists; production builds ignore it.
 - See [docs/auth/auth.md](docs/auth/auth.md) for the flows and rules.
