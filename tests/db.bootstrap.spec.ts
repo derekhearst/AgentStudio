@@ -36,46 +36,78 @@ function databaseUrl() {
 	return url
 }
 
+function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Hold the lock with `fn`, and resolve `locked` once `fn` has started, i.e. once the lock
+ * is really held. The lock client connects lazily on its first query, so a fixed head
+ * start could lose to a slow connect (eight workers connecting at once, or the LAN
+ * database) and let the "second" caller take the lock first.
+ */
+function holdLock(key: number, fn: () => Promise<void>) {
+	let signalLocked!: () => void
+	const locked = new Promise<void>((resolve) => {
+		signalLocked = resolve
+	})
+	const done = withBootstrapLock(
+		databaseUrl(),
+		async () => {
+			signalLocked()
+			await fn()
+		},
+		{ key, pollIntervalMs: 50 },
+	)
+	// Racing `done` surfaces a failure to take the lock instead of waiting forever on `locked`.
+	return { locked: Promise.race([locked, done]), done }
+}
+
 test.describe('db/bootstrap — migration lock', () => {
 	test('a second bootstrap waits for the first to finish instead of migrating alongside it', async () => {
 		const key = testLockKey()
 		const events: string[] = []
-		const hold = (name: string, ms: number) =>
-			withBootstrapLock(
-				databaseUrl(),
-				async () => {
-					events.push(`${name}:start`)
-					await new Promise((resolve) => setTimeout(resolve, ms))
-					events.push(`${name}:end`)
-				},
-				{ key, pollIntervalMs: 50 },
-			)
 
-		await Promise.all([
-			hold('first', 500),
-			new Promise((resolve) => setTimeout(resolve, 150)).then(() => hold('second', 10)),
-		])
+		const first = holdLock(key, async () => {
+			events.push('first:start')
+			await sleep(500)
+			events.push('first:end')
+		})
+		await first.locked
 
+		const second = withBootstrapLock(
+			databaseUrl(),
+			async () => {
+				events.push('second:start')
+				events.push('second:end')
+			},
+			{ key, pollIntervalMs: 50 },
+		)
+
+		await Promise.all([first.done, second])
 		expect(events).toEqual(['first:start', 'first:end', 'second:start', 'second:end'])
 	})
 
 	test('a waiter gives up with a clear error rather than hanging forever', async () => {
 		const key = testLockKey()
+		let settleWaiter!: () => void
+		const waiterSettled = new Promise<void>((resolve) => {
+			settleWaiter = resolve
+		})
+
+		// Hold the lock until the waiter has given up, however long its connect takes, so
+		// it can never find the lock free.
+		const holder = holdLock(key, () => waiterSettled)
+		await holder.locked
+
 		let waiterError = ''
-		await Promise.all([
-			withBootstrapLock(databaseUrl(), () => new Promise((resolve) => setTimeout(resolve, 800)), {
-				key,
-			}),
-			new Promise((resolve) => setTimeout(resolve, 150)).then(() =>
-				withBootstrapLock(databaseUrl(), async () => {}, {
-					key,
-					timeoutMs: 300,
-					pollIntervalMs: 50,
-				}).catch((err: Error) => {
-					waiterError = err.message
-				}),
-			),
-		])
+		await withBootstrapLock(databaseUrl(), async () => {}, { key, timeoutMs: 300, pollIntervalMs: 50 })
+			.catch((err: Error) => {
+				waiterError = err.message
+			})
+			.finally(settleWaiter)
+		await holder.done
+
 		expect(waiterError).toContain('waiting for another process to finish migrating')
 	})
 
