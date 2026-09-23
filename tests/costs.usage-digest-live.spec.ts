@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
+import { eq } from 'drizzle-orm'
 import {
 	acquireGlobalStateLock,
 	cleanupPrefixedRecords,
@@ -319,6 +321,48 @@ test.describe('costs/usage-digest live — the weekly digest automation', () => 
 			expect(messages[0].content).toMatch(/^## Usage digest: last 24 hours\n/)
 			// Written by code, not a model.
 			expect(messages[0].model).toBeNull()
+		} finally {
+			await cleanupLedger(prefix)
+		}
+	})
+
+	test('a digest that cannot be delivered fails the run instead of completing with nothing sent', async () => {
+		const prefix = uniquePrefix('usage-digest-undelivered')
+		const sql = getSql()
+		const userId = await getActiveUserId()
+
+		try {
+			const [inserted] = await sql<{ id: string }[]>`
+				insert into automations (user_id, description, cron_expression, prompt, mode, output_target)
+				values (${userId}, ${`${prefix} digest`}, '0 9 * * 1', '{{usage_digest}}', 'maintenance', 'review_inbox')
+				returning id
+			`
+			const { db } = await import('../src/lib/db.server')
+			const { automations } = await import('../src/lib/automations/automation.schema')
+			const [automation] = await db.select().from(automations).where(eq(automations.id, inserted.id))
+			const { runUsageDigest } = await import('../src/lib/automations/maintenance-mode.server')
+
+			// The insert throws: the error reaches the engine, which marks the run failed and
+			// hands it to the failure policy (retry, then a job_failure item).
+			await expect(
+				runUsageDigest(automation, 7, WINDOW_END, async () => {
+					throw new Error(`${prefix} review_items insert failed`)
+				}),
+			).rejects.toThrow(`${prefix} review_items insert failed`)
+
+			// `openReviewItem` swallows its own insert failure and returns null; that is a
+			// failed delivery too, not a completed run.
+			await expect(
+				runUsageDigest(automation, 7, WINDOW_END, async () => ({ target: 'review_inbox', reviewItemId: null })),
+			).rejects.toThrow('The usage digest was not delivered to review_inbox')
+
+			// Delivered: the run's result says where.
+			const itemId = randomUUID()
+			const delivered = await runUsageDigest(automation, 7, WINDOW_END, async () => ({
+				target: 'review_inbox',
+				reviewItemId: itemId,
+			}))
+			expect(delivered).toMatchObject({ routedTo: 'review_inbox', reviewItemId: itemId, costUsd: '0' })
 		} finally {
 			await cleanupLedger(prefix)
 		}

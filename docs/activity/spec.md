@@ -95,7 +95,7 @@ The same numbers and warnings can be sent every Monday at 9:00, as markdown, to 
 
 1. On `/activity`, under the tiles, choose **Review inbox** or **Chat** next to "Get this every Monday".
 2. This creates an ordinary maintenance automation called "Weekly usage digest", scheduled for Monday 09:00 in the browser's time zone. The strip then shows "Weekly digest on" with a link to manage it. If a digest already exists but is switched off, the buttons switch it back on (to the destination chosen); they never make a second one.
-3. Each Monday the automation runs like any other: it appears in the automation's run history, and a failure is retried and reported the usual way.
+3. Each Monday the automation runs like any other: it appears in the automation's run history, and a failure is retried and reported the usual way. A digest that could not be delivered (the inbox item or chat message could not be saved) counts as a failure, so it is retried rather than recorded as a success.
 4. To stop it, change the day, or delete it, use `/automations`.
 
 What it costs and what it does not do:

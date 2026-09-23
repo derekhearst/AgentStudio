@@ -150,7 +150,8 @@ A maintenance automation whose prompt is exactly `{{usage_digest}}` is the **wee
 
 - **No model call.** The digest is rendered by code, so the run costs $0 and cannot fail for lack of model credentials. Any other maintenance prompt still goes to the model as before; a prompt with text around the placeholder is treated as an ordinary prompt.
 - **Opt-in only.** Nothing creates the digest on deploy. The owner turns it on from `/activity`, which creates "Weekly usage digest" for Monday 09:00 in their browser's time zone (or switches an existing, disabled one back on). After that it is managed here like any automation.
-- **Nothing new underneath.** It uses the existing dispatch tick, run history, retries and failure reporting. A budget limit that blocks automations blocks the digest too.
+- **Nothing new underneath.** It uses the existing dispatch tick, run history, retries and failure reporting.
+- **A digest that is not delivered is a failed run.** If the review item or the chat message cannot be written, the run is marked failed, so it is retried and reported like any other failure. (For model-written maintenance output, a delivery failure is only logged, because running it again would pay for the model call again.)
 
 The card on `/automations` notes when a prompt is the digest. See [../activity/spec.md](../activity/spec.md#usage-strip-and-weekly-digest) for what the digest contains.
 

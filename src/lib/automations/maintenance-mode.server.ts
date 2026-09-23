@@ -70,17 +70,27 @@ export async function runMaintenanceModeAutomation(
 /**
  * #38 — the usage digest: the same numbers as the `/activity` strip, as markdown, routed
  * like any other maintenance output. No model is called, so the run costs nothing and
- * cannot fail on model credentials; a query failure still throws, so the failure policy
- * sees it.
+ * cannot fail on model credentials.
+ *
+ * Unlike the model path above, a routing failure fails the run. Delivery is the digest's
+ * only output, and re-running it is free, so the failure policy should retry and report it
+ * rather than the ledger recording a completed run that sent nothing. `deliver` is a
+ * parameter only so a spec can make delivery fail.
  */
-async function runUsageDigest(automation: typeof automations.$inferSelect, days: number, now: Date) {
+export async function runUsageDigest(
+	automation: typeof automations.$inferSelect,
+	days: number,
+	now: Date,
+	deliver: typeof routeMaintenanceOutput = routeMaintenanceOutput,
+) {
 	const digest = await computeUsageDigest({ userId: automation.userId, days, now })
 	const markdown = renderDigestMarkdown(digest)
 
-	const route = await routeMaintenanceOutput(automation, markdown, null, now).catch((err) => {
-		logger.warn('[automations] usage digest routing failed (non-fatal)', { err })
-		return { target: 'none' as const }
-	})
+	const route = await deliver(automation, markdown, null, now)
+	// `openReviewItem` logs and returns null instead of throwing when the insert fails.
+	if (route.target === 'none' || (route.target === 'review_inbox' && !route.reviewItemId)) {
+		throw new Error(`The usage digest was not delivered to ${automation.outputTarget}`)
+	}
 
 	return {
 		conversationId: route.target === 'chat_session' ? route.conversationId : null,
@@ -101,8 +111,9 @@ async function runUsageDigest(automation: typeof automations.$inferSelect, days:
  *   - `chat_session` (default): assistant message in the automation's conversation
  *   - `review_inbox`: `automation_summary` review item (deduped per-hour by automation id)
  *
- * Best-effort: failures are caught at the caller so a routing hiccup never invalidates the
- * already-completed maintenance work.
+ * Best-effort for the model path: failures are caught at the caller so a routing hiccup never
+ * invalidates the already-completed (and already-paid-for) maintenance work. The usage
+ * digest lets them fail the run instead; see `runUsageDigest`.
  */
 async function routeMaintenanceOutput(
 	automation: typeof automations.$inferSelect,
