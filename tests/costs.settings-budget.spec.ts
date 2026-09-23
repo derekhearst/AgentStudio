@@ -160,6 +160,69 @@ test.describe('costs/settings-budget — Settings limits are enforced', () => {
 		expect(limit.enabled).toBe(false)
 	})
 
+	test('a save that lands while the sync is naming a new row keeps the name', async () => {
+		// A save merged budget_config from an unlocked read and wrote the whole object back. A
+		// sync that created a row between that read and the write lost its id: the row stayed
+		// enabled at its old amount with nothing naming it, and the next sync made a second.
+		const sql = getSql()
+		const userId = await getActiveUserId()
+		const { db } = await import('../src/lib/db.server')
+		const { sql: drizzleSql } = await import('drizzle-orm')
+		const { updateSettings } = await import('../src/lib/settings/settings.server')
+		// A limit with no row yet, which is how every limit saved before the sync starts out.
+		await sql`
+			update app_settings set budget_config = ${sql.json({ dailyLimit: 5, monthlyLimit: null })}
+			where user_id = ${userId}
+		`
+
+		let dayId: string | undefined
+		let saving: Promise<unknown> | undefined
+		try {
+			await db.transaction(async (tx) => {
+				// Stand in for the sync mid-way: hold the settings row, create the day row, name it.
+				await tx.execute(drizzleSql`
+					select id from app_settings where user_id = ${userId} order by created_at asc limit 1 for update
+				`)
+				const [created] = await tx.execute(drizzleSql`
+					insert into budget_limits (user_id, scope, period, limit_usd, warn_usd, action, enabled)
+					values (${userId}, 'global', 'day', '5', '4', 'block', true)
+					returning id
+				`)
+				dayId = created.id as string
+				await tx.execute(drizzleSql`
+					update app_settings
+					set budget_config = budget_config || jsonb_build_object('limitIds', jsonb_build_object('day', ${dayId}::text))
+					where user_id = ${userId}
+				`)
+
+				// The user saves meanwhile. It has to wait for the row rather than merge a stale copy.
+				saving = updateSettings({ userId })
+				saving.catch(() => {})
+				await expect
+					.poll(async () => {
+						const [{ count }] = await sql<{ count: number }[]>`
+							select count(*)::int as count from pg_stat_activity
+							where datname = current_database() and wait_event_type = 'Lock' and query ilike '%app_settings%'
+						`
+						return count
+					})
+					.toBeGreaterThan(0)
+			})
+			await saving
+
+			expect((await settingsLimitIds(userId)).day).toBe(dayId)
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from budget_limits
+				where user_id = ${userId} and scope = 'global' and period = 'day' and action = 'block' and enabled
+				  and created_at >= ${startedAt}
+			`
+			expect(count, 'one row for the one limit').toBe(1)
+		} finally {
+			// afterEach removes the rows Settings names; this one may have lost its name.
+			if (dayId) await sql`delete from budget_limits where id = ${dayId}`
+		}
+	})
+
 	test('a limit saved before this existed is enforced from the next check', async () => {
 		const sql = getSql()
 		const userId = await getActiveUserId()
