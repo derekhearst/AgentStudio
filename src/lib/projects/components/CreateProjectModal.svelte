@@ -5,6 +5,7 @@
 		listGithubImportCandidatesQuery,
 		listProjectsQuery,
 	} from '$lib/projects/projects.remote'
+	import { fetchFresh } from '$lib/ui/fresh-query'
 
 	type ProjectRow = Awaited<ReturnType<typeof listProjectsQuery>>[number]
 	type GithubCandidate = Awaited<ReturnType<typeof listGithubImportCandidatesQuery>>['candidates'][number]
@@ -81,7 +82,9 @@
 		githubLoading = true
 		githubError = null
 		try {
-			const res = await listGithubImportCandidatesQuery()
+			// Fresh: the Refresh button calls this too, and a cached read handed back the list
+			// the modal already showed.
+			const res = await fetchFresh(listGithubImportCandidatesQuery())
 			githubCandidates = res.candidates
 			if (res.errorMessage) githubError = res.errorMessage
 		} catch (e) {

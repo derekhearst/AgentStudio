@@ -207,6 +207,49 @@ test.describe('Refresh buttons fetch again', () => {
 			await sql`delete from run_traces where run_id = ${runId}`
 		}
 	})
+
+	test('/projects: the GitHub repo list in New project asks the server again', async ({ page }) => {
+		const prefix = uniquePrefix('fresh-github')
+		const account = `e2e_${slugOf(prefix)}`
+		const sql = getSql()
+		const userId = await getActiveUserId()
+		// An active GitHub connection is what shows the modal's GitHub list. As the newest
+		// one it is also the one the first load picks, and its token cannot be decrypted, so
+		// that load marks it failed and answers "No active GitHub connection." without
+		// calling GitHub. Every later request is aborted in the browser.
+		await sql`
+			insert into repository_connections (user_id, provider, provider_account, encrypted_token, scopes, status)
+			values (${userId}, 'github'::source_control_provider, ${account}, 'v1:not-a-token', ${sql.array(['repo'])}, 'active'::source_control_connection_status)
+		`
+		// The list's contents come from GitHub, so what this can check is that Refresh goes
+		// to the server at all. It used to re-await the cached query and send nothing.
+		const candidates = /\/_app\/remote\/[^/]+\/listGithubImportCandidatesQuery(\?|$)/
+		let firstLoadDone = false
+		await page.route(candidates, (route) => (firstLoadDone ? route.abort() : route.continue()))
+		await authenticateContext(page.context())
+		try {
+			await page.goto('/projects')
+			await waitForHydration(page)
+			// The overview has loaded and counts GitHub as connected.
+			await expect(page.getByText(/^Connected as/)).toBeVisible({ timeout: 15_000 })
+			await page.getByRole('button', { name: '+ New project' }).click()
+
+			const firstLoad = page.waitForResponse(candidates)
+			await page.getByRole('button', { name: 'From GitHub', exact: true }).click()
+			await firstLoad
+			firstLoadDone = true
+			const refresh = page.getByRole('button', { name: 'Refresh', exact: true })
+			await expect(refresh).toBeEnabled({ timeout: 15_000 })
+
+			const again = page.waitForRequest(candidates, { timeout: 5_000 })
+			await refresh.click()
+			await again
+			// The aborted refresh reports its failure rather than the first load's answer.
+			await expect(page.getByText('Failed to fetch')).toBeVisible()
+		} finally {
+			await sql`delete from repository_connections where user_id = ${userId} and provider_account = ${account}`
+		}
+	})
 })
 
 test.describe('reloads after a mutation show the result', () => {
