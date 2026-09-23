@@ -3,7 +3,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listActivity } from '$lib/activity';
+	import { getUsageDigest } from '$lib/costs/usage-digest.remote';
+	import type { UsageDigest, UsageDigestWindowDays } from '$lib/costs/usage-digest';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
+	import UsageStrip from './_components/UsageStrip.svelte';
 
 	type ActivityRow = Awaited<ReturnType<typeof listActivity>>[number];
 	type EventType = ActivityRow['type'];
@@ -11,6 +14,13 @@
 	let events = $state<ActivityRow[]>([]);
 	let filterType = $state<EventType | ''>('');
 	let loading = $state(true);
+
+	// #38 — the usage strip's window. A week by default: long enough to be a pattern, short
+	// enough that the previous week is a fair comparison.
+	let days = $state<UsageDigestWindowDays>(7);
+	let digest = $state<UsageDigest | null>(null);
+	let digestLoading = $state(true);
+	let digestError = $state<string | null>(null);
 
 	const eventTypes: Array<{ value: EventType | ''; label: string }> = [
 		{ value: '', label: 'All' },
@@ -30,7 +40,35 @@
 
 	onMount(() => {
 		void refresh();
+		void loadDigest();
 	});
+
+	async function loadDigest(force = false) {
+		digestLoading = true;
+		digestError = null;
+		const requested = days;
+		try {
+			if (force) await getUsageDigest({ days: requested }).refresh();
+			const result = await getUsageDigest({ days: requested });
+			// A slower answer for a window the user has already left must not overwrite the new one.
+			if (requested === days) digest = result;
+		} catch {
+			if (requested === days) digestError = 'Usage numbers are unavailable right now.';
+		} finally {
+			if (requested === days) digestLoading = false;
+		}
+	}
+
+	async function changeWindow(next: UsageDigestWindowDays) {
+		if (next === days) return;
+		days = next;
+		await loadDigest();
+	}
+
+	function refreshAll() {
+		void refresh();
+		void loadDigest(true);
+	}
 
 	async function refresh() {
 		loading = true;
@@ -76,13 +114,15 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
-	<PageHeader title="Activity feed" subtitle="Chronological stream of all system activity">
+	<PageHeader title="Activity feed" subtitle="What the agents did, then every event as it happened">
 		{#snippet actions()}
-			<button class="btn btn-ghost btn-xs" type="button" onclick={refresh}>Refresh</button>
+			<button class="btn btn-ghost btn-xs" type="button" onclick={refreshAll}>Refresh</button>
 		{/snippet}
 	</PageHeader>
 
 	<div class="min-h-0 flex-1 overflow-y-auto px-3 py-3 tablet:px-4 desktop:px-4 desktop:py-4 space-y-4">
+		<UsageStrip {digest} {days} loading={digestLoading} error={digestError} onWindowChange={changeWindow} />
+
 		<div class="flex flex-wrap gap-1">
 			{#each eventTypes as et (et.value)}
 				<button
