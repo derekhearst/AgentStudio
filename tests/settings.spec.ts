@@ -1,10 +1,20 @@
 import { expect, test } from '@playwright/test'
-import { authenticateContext, cleanupPrefixedRecords, getSql, seedNotification, uniquePrefix } from './helpers'
+import {
+	acquireGlobalStateLock,
+	authenticateContext,
+	cleanupPrefixedRecords,
+	getSql,
+	seedNotification,
+	uniquePrefix,
+} from './helpers'
 
 test('saves, persists, resets, and updates notification feed from settings', async ({ page }) => {
 	const prefix = uniquePrefix('settings')
 	await cleanupPrefixedRecords(prefix)
 	await authenticateContext(page.context())
+	// Saving and resetting rewrite the one shared settings row, which notifications.prefs
+	// sets and restores under the same lock.
+	const release = await acquireGlobalStateLock('settings-state')
 
 	try {
 		await seedNotification(prefix, { title: `${prefix} Feed Notification`, body: `${prefix} feed body` })
@@ -62,6 +72,7 @@ test('saves, persists, resets, and updates notification feed from settings', asy
 		await expect(page.getByText('Settings reset to defaults.').filter({ visible: true }).first()).toBeVisible()
 		await expect(page.getByLabel('Task completed', { exact: true })).toBeChecked()
 	} finally {
+		await release()
 		await cleanupPrefixedRecords(prefix)
 	}
 })

@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { chatRuns, type PendingApprovalEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
+import { scheduleNeedsInputNotification } from './needs-input.server'
 
 export const APPROVAL_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -58,6 +59,12 @@ export async function enqueuePendingApproval(
 			logger.warn('[approvals] review item open failed (non-fatal)', { err })
 		}
 	})()
+	scheduleNeedsInputNotification({
+		runId,
+		token: entry.token,
+		kind: 'approval',
+		summary: `Waiting for approval to run ${entry.toolName}`,
+	})
 }
 
 /** Run states an approval answer can still land in. */

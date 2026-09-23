@@ -3,6 +3,7 @@ import { db } from '$lib/db.server'
 import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
+import { scheduleNeedsInputNotification } from './needs-input.server'
 
 export const QUESTION_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -61,6 +62,12 @@ export async function enqueuePendingQuestion(
 			logger.warn('[questions] review item open failed (non-fatal)', { err })
 		}
 	})()
+	scheduleNeedsInputNotification({
+		runId,
+		token: entry.token,
+		kind: 'question',
+		summary: entry.questions?.[0]?.question || 'The agent is waiting for your answer',
+	})
 }
 
 export async function recordQuestionAnswers(

@@ -242,7 +242,7 @@ async function raiseCheckFailure(input: {
 	}
 
 	try {
-		const { createNotificationRecord, sendPushToAll } = await import('$lib/notifications/notifications.server')
+		const { notifyUser } = await import('$lib/notifications/notify.server')
 		const payload = {
 			title: `CI failed on #${pr.providerPrNumber}`,
 			// `checkName` is workflow-authored rather than build output, so it is far less
@@ -255,9 +255,9 @@ async function raiseCheckFailure(input: {
 			// of stacking another one on the operator's lock screen.
 			tag: `pr-check-${pr.id}-${check.checkName}`,
 		}
+		// A red check on the agent's own PR is an agent error for Settings → Notifications.
 		if (repo.userId) {
-			await createNotificationRecord(payload, repo.userId)
-			await sendPushToAll(payload, repo.userId).catch(() => undefined)
+			await notifyUser({ userId: repo.userId, category: 'agentErrors', payload })
 		}
 	} catch (err) {
 		logger.warn('[pr-watch] notification failed (non-fatal)', { prId: pr.id, err })

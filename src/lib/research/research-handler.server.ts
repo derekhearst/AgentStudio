@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { registerJobHandler, type JobHandlerContext } from '$lib/jobs/worker.server'
 import { runResearchLoop } from './research-runner.server'
 import { getResearchById } from './research.server'
-import { createNotificationRecord, sendPushToAll } from '$lib/notifications/notifications.server'
+import { notifyUser } from '$lib/notifications/notify.server'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -80,18 +80,7 @@ async function fireCompletionNotification(researchId: string): Promise<void> {
 		url: `/research/${r.id}`,
 		tag: `research:${r.id}`,
 	}
-	// In-app record so the notifications UI can show it; user-scoped so other users
-	// don't see someone else's research.
-	await createNotificationRecord(payload, r.userId).catch((err) => {
-		logger.warn('[research_run] in-app notification record failed', { err })
-	})
-	// Web push to any subscribed devices. Silently no-ops when VAPID keys aren't configured
-	// (e.g. local dev) — the in-app row is still written.
-	if (r.userId) {
-		try {
-			await sendPushToAll(payload, r.userId)
-		} catch (err) {
-			logger.warn('[research_run] web push failed (non-fatal, possibly missing VAPID keys)', { err })
-		}
-	}
+	// In-app row plus web push, user-scoped so other users don't see someone else's research.
+	// "Task completed" in Settings → Notifications switches both off.
+	await notifyUser({ userId: r.userId, category: 'taskCompleted', payload })
 }
