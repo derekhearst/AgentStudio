@@ -16,7 +16,10 @@ import {
 } from '$lib/chat/agent-switch.server'
 import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
-import { listRecentConversations } from '$lib/chat/conversation-list.server'
+import { listArchivedConversations, listRecentConversations } from '$lib/chat/conversation-list.server'
+import { setConversationArchivedForUser, setConversationPinnedForUser } from '$lib/chat/conversation-lifecycle.server'
+import { scheduleMessageIndex, searchUserConversations } from '$lib/chat/message-search.server'
+import { SEARCH_QUERY_MAX_CHARS, SEARCH_QUERY_MIN_CHARS } from '$lib/chat/conversation-search'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
 import {
 	describePermissionMode,
@@ -159,7 +162,14 @@ export const editMessage = command(editMessageSchema, async (input) => {
 		return { success: false, error: 'Message not found or not editable' as const }
 	}
 
-	await db.update(messages).set({ content: input.content }).where(eq(messages.id, input.messageId))
+	const [edited] = await db
+		.update(messages)
+		.set({ content: input.content })
+		.where(eq(messages.id, input.messageId))
+		.returning()
+	// #18 — search finds the message by what it says now. The followers deleted below take
+	// their search rows with them (cascade).
+	scheduleMessageIndex(edited)
 
 	await db
 		.delete(messages)
@@ -413,4 +423,48 @@ export const listAgentsForPicker = query(async () => {
 		})
 		.from(agents)
 		.orderBy(builtinOrder, asc(agents.createdAt))
+})
+
+/**
+ * #18 — the archive: archived conversations, most recently archived first. Same row shape
+ * as `getConversations`, which leaves them out.
+ */
+export const getArchivedConversations = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return listArchivedConversations(user.id)
+})
+
+const setConversationPinnedSchema = z.object({ id: z.string().uuid(), pinned: z.boolean() })
+
+/** #18 — pin to the top of the sidebar, or unpin. Pinning an archived chat unarchives it. */
+export const setConversationPinned = command(setConversationPinnedSchema, async ({ id, pinned }) => {
+	const user = requireAuthenticatedRequestUser()
+	const state = await setConversationPinnedForUser(user.id, id, pinned)
+	return { success: true as const, ...state }
+})
+
+const setConversationArchivedSchema = z.object({ id: z.string().uuid(), archived: z.boolean() })
+
+/**
+ * #18 — archive (hide from the list, keep everything) or unarchive. The primary way to tidy
+ * the sidebar; `deleteConversation` is the irreversible one. Archiving unpins.
+ */
+export const setConversationArchived = command(setConversationArchivedSchema, async ({ id, archived }) => {
+	const user = requireAuthenticatedRequestUser()
+	const state = await setConversationArchivedForUser(user.id, id, archived)
+	return { success: true as const, ...state }
+})
+
+const searchConversationsSchema = z.object({
+	q: z.string().trim().min(SEARCH_QUERY_MIN_CHARS).max(SEARCH_QUERY_MAX_CHARS),
+	includeArchived: z.boolean().optional(),
+})
+
+/**
+ * #18 — search the caller's conversations: message text and tool calls (file paths,
+ * commands, links), plus titles. One hit per conversation with the best-matching snippet.
+ */
+export const searchConversations = query(searchConversationsSchema, async ({ q, includeArchived }) => {
+	const user = requireAuthenticatedRequestUser()
+	return searchUserConversations(user.id, q, { includeArchived: includeArchived === true })
 })
