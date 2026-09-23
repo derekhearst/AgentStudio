@@ -77,6 +77,8 @@ Observable tools, all read-only: `web_fetch`, `web_search`, `search_files`, `fil
 
 The error case deserves its own note: treating a failed fetch as "the value is now empty" would read as a change and fire the action during an outage. So an errored check never overwrites the baseline. After five consecutive errors the monitor retires as `failed` and opens a review item.
 
+**A cancel or pause during a check wins.** A check can take several seconds, and the monitor is not locked while it runs. If the user cancels or pauses the monitor in that window — or a second check of the same monitor (say, a "Check now" alongside the scheduled one) finishes first — the slower check's result is thrown away: nothing is recorded, nothing is counted against the budget, no review item opens and the action does not run.
+
 ### Firing
 
 Firing is **edge-triggered**. The action runs on the false→true transition only. A condition that stays true for a week produces one action, not one per check; when the condition goes false again the monitor re-arms.
