@@ -197,3 +197,61 @@ test.describe('jobs/reclaim — staleRunningJobVerdict', () => {
 		)
 	})
 })
+
+test.describe('jobs/reclaim — a late report from a worker that lost its job changes nothing', () => {
+	/**
+	 * Reclaiming makes the queue at-least-once: a worker whose heartbeats stalled past its lease
+	 * may still be running a job that the claim path has since retired, or that someone
+	 * canceled. Its report used to overwrite that — a retired job flipped to `completed`, a
+	 * canceled job whose handler threw went back to `retry_wait` and ran again.
+	 */
+	async function insertFinished(type: string, status: 'failed' | 'canceled') {
+		const sql = getSql()
+		const [row] = await sql<{ id: string }[]>`
+			insert into jobs (type, status, attempt_count, max_attempts, finished_at, error)
+			values (${type}, ${status}::job_status, 1, 3, now(), ${sql.json({ message: 'retired' })})
+			returning id
+		`
+		return row.id
+	}
+
+	test('completeJob, failJob and heartbeatJob leave a retired or canceled job as it is', async () => {
+		const prefix = uniquePrefix('reclaim-late-report')
+		const type = `${prefix}-t`
+		try {
+			const { completeJob, failJob, heartbeatJob } = await import('../src/lib/jobs/jobs.server')
+			for (const status of ['failed', 'canceled'] as const) {
+				const id = await insertFinished(type, status)
+
+				expect(await heartbeatJob(id, 60_000), 'the heartbeat tells the worker to stop').toBeNull()
+				expect(await completeJob(id, { late: true })).toBeNull()
+				expect(await failJob(id, { error: { message: 'late failure' } })).toBeNull()
+
+				const after = await readJob(id)
+				expect(after.status, `a ${status} job stays ${status}`).toBe(status)
+				expect(after.error?.message).toBe('retired')
+				expect(after.lease_expires_at, 'no lease revived on a finished job').toBeNull()
+			}
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+
+	test('a job still in flight takes the report as before', async () => {
+		const prefix = uniquePrefix('reclaim-in-flight-report')
+		const type = `${prefix}-t`
+		try {
+			const { completeJob, failJob, heartbeatJob } = await import('../src/lib/jobs/jobs.server')
+			const running = await insertJob(type, { status: 'running', attemptCount: 1, leaseLapsedMs: -60_000 })
+			expect(await heartbeatJob(running, 60_000)).not.toBeNull()
+			expect((await completeJob(running, { ok: true }))?.status).toBe('completed')
+
+			const failing = await insertJob(type, { status: 'running', attemptCount: 1, leaseLapsedMs: -60_000 })
+			expect((await failJob(failing, { error: { message: 'boom' } }))?.status, 'attempts left, so it retries').toBe(
+				'retry_wait',
+			)
+		} finally {
+			await cleanup(prefix)
+		}
+	})
+})

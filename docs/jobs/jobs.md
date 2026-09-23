@@ -57,7 +57,7 @@ Pressing Ctrl+C a second time exits immediately.
 
 ## Integrations
 
-- **PostgreSQL** holds the queue. Workers claim jobs with a row lock that skips rows another worker already holds, so any number of workers can share one database without two of them picking up the same job at once. A job can still run twice: if its worker stops heartbeating — usually because it died, but a database outage longer than the lease does the same — another worker takes the job over (see **When a worker dies mid-job**).
+- **PostgreSQL** holds the queue. Workers claim jobs with a row lock that skips rows another worker already holds, so any number of workers can share one database without two of them picking up the same job at once. A job can still run twice: if its worker stops heartbeating — usually because it died, but a database outage longer than the lease does the same — another worker takes the job over (see **When a worker dies mid-job**). When that happens, the first outcome recorded stands: a report from a worker that has lost its job, or about a job that was canceled or marked failed in the meantime, is ignored.
 - **Review inbox** — a job that fails for good opens a *Job failure* item; a job whose worker kept dying until it ran out of attempts opens a *Job stuck* item.
 - **Metrics** — every finished job records its duration and outcome for the health dashboard.
 

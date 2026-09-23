@@ -21,6 +21,8 @@ import { logger } from '$lib/observability/logger'
  *   - completeJob → status='completed', finishedAt set, result stored
  *   - failJob → if attemptCount < maxAttempts: status='retry_wait' + scheduledAt = now+backoff;
  *               else: status='failed', finishedAt set, error stored
+ *   - heartbeat, complete and fail only touch a job that is still leased/running, so a late
+ *     report from a worker that lost the job cannot undo a cancel or a retirement
  *   - cancelJob → status='canceled' (cooperative; worker checks at safe boundaries)
  */
 
@@ -430,9 +432,21 @@ export async function beginJob(jobId: string): Promise<JobRow | null> {
 }
 
 /**
+ * The statuses a job has while a worker holds it. A worker's heartbeat and its final report
+ * only apply to a job still in one of them.
+ *
+ * Reclaiming lapsed leases makes the queue at-least-once: a worker whose heartbeats stalled —
+ * a database outage longer than the lease — can still be running a job that another worker
+ * has since re-run, or that the claim path retired as failed. Without this guard its late
+ * report overwrote whatever happened meanwhile: a retired job flipped to `completed`, a
+ * canceled one to `completed`, or back into `retry_wait` to run again.
+ */
+const IN_FLIGHT_STATUSES = ['leased', 'running'] as const satisfies readonly JobStatus[]
+
+/**
  * Extend the active lease + update the lease row's heartbeatAt. Workers should call this every
- * (leaseTtlMs / 3) or so to keep the lease fresh. Returns null when the job no longer exists or
- * has been canceled (signals the worker to stop).
+ * (leaseTtlMs / 3) or so to keep the lease fresh. Returns null — telling the worker to stop —
+ * when the job is gone or no longer in flight: canceled, or retired by another worker.
  */
 export async function heartbeatJob(jobId: string, leaseTtlMs?: number): Promise<JobRow | null> {
 	const ttl = leaseTtlMs ?? DEFAULT_LEASE_TTL_MS
@@ -440,10 +454,9 @@ export async function heartbeatJob(jobId: string, leaseTtlMs?: number): Promise<
 	const [row] = await db
 		.update(jobs)
 		.set({ leaseExpiresAt: newExpiry, updatedAt: new Date() })
-		.where(eq(jobs.id, jobId))
+		.where(and(eq(jobs.id, jobId), inArray(jobs.status, [...IN_FLIGHT_STATUSES])))
 		.returning()
 	if (!row) return null
-	if (row.status === 'canceled') return null
 	// Update the most recent lease row's heartbeat. Best-effort — the cached lease_expires_at
 	// on jobs is the source of truth for the claim path.
 	await db.execute(drizzleSql`
@@ -457,6 +470,7 @@ export async function heartbeatJob(jobId: string, leaseTtlMs?: number): Promise<
 
 // ─────────── Terminal transitions ───────────
 
+/** Returns null, changing nothing, when the job is no longer in flight (see IN_FLIGHT_STATUSES). */
 export async function completeJob(jobId: string, result?: Record<string, unknown>): Promise<JobRow | null> {
 	const [row] = await db
 		.update(jobs)
@@ -467,7 +481,7 @@ export async function completeJob(jobId: string, result?: Record<string, unknown
 			leaseExpiresAt: null,
 			updatedAt: new Date(),
 		})
-		.where(eq(jobs.id, jobId))
+		.where(and(eq(jobs.id, jobId), inArray(jobs.status, [...IN_FLIGHT_STATUSES])))
 		.returning()
 
 	// Wave 5 #20 phase 4 — emit lifecycle metrics when a job finishes. Best-effort: any
@@ -487,11 +501,14 @@ export type FailJobOptions = {
 
 /**
  * Fail-and-maybe-retry. If `attemptCount < maxAttempts`, transitions to `retry_wait` with a
- * future `scheduledAt`. Otherwise transitions to terminal `failed`.
+ * future `scheduledAt`. Otherwise transitions to terminal `failed`. Returns null, changing
+ * nothing, when the job is no longer in flight (see IN_FLIGHT_STATUSES) — a canceled job whose
+ * handler then threw must not be queued to run again.
  */
 export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobRow | null> {
 	const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId)).limit(1)
 	if (!job) return null
+	const inFlight = and(eq(jobs.id, jobId), inArray(jobs.status, [...IN_FLIGHT_STATUSES]))
 
 	const policy = await getPolicyForType(job.type)
 	const backoffMs = opts.backoffMs ?? policy?.backoffMs ?? DEFAULT_BACKOFF_MS
@@ -506,7 +523,7 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 				error: opts.error,
 				updatedAt: new Date(),
 			})
-			.where(eq(jobs.id, jobId))
+			.where(inFlight)
 			.returning()
 		return row ?? null
 	}
@@ -520,7 +537,7 @@ export async function failJob(jobId: string, opts: FailJobOptions): Promise<JobR
 			leaseExpiresAt: null,
 			updatedAt: new Date(),
 		})
-		.where(eq(jobs.id, jobId))
+		.where(inFlight)
 		.returning()
 
 	// Wave 5 #20 — open a review item when a job exhausts retries and lands at terminal

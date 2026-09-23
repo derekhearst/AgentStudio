@@ -150,7 +150,15 @@ export function startJobWorker(opts: WorkerOptions = {}): Worker {
 					if (!fresh) throw new Error(`Job ${job.id} canceled or removed`)
 				},
 			})
-			await completeJob(job.id, normalizeResult(result))
+			const finished = await completeJob(job.id, normalizeResult(result))
+			if (!finished) {
+				// Canceled, or retired by another worker after this one's lease lapsed: whatever
+				// happened to the job meanwhile stands.
+				logger.info('[jobs/worker] job was no longer in flight when its handler finished; result not recorded', {
+					jobId: job.id,
+					type: job.type,
+				})
+			}
 		} catch (err) {
 			await failJob(job.id, {
 				error: { message: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined },
