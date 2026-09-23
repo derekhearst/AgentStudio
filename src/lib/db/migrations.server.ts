@@ -390,7 +390,8 @@ export function getKnownAppObjects(
 	}
 }
 
-export type SchemaObjectKind = 'table' | 'view' | 'enum' | 'function'
+/** `type` covers domains, range types and standalone composite types. */
+export type SchemaObjectKind = 'table' | 'view' | 'sequence' | 'enum' | 'type' | 'function'
 
 /** Something a reset would destroy: a user-created object in `public` or `drizzle`. */
 export type SchemaObject = {
@@ -401,30 +402,48 @@ export type SchemaObject = {
 
 /**
  * Everything `DROP SCHEMA public/drizzle CASCADE` would destroy that someone created:
- * tables, views, enums and functions. Extension members (pgvector, pgcrypto) are left
- * out because they are reinstalled straight after a reset, and so is drizzle's own
- * bookkeeping table, which a failed first migration leaves behind empty.
+ * tables, views, standalone sequences, enums, domains and other user-defined types, and
+ * functions. Anything listed that AgentStudio does not recognise blocks a reset. Left out:
+ * extension members (pgvector, pgcrypto), which are reinstalled straight after a reset;
+ * sequences behind a serial or identity column, which go with their table; and drizzle's
+ * own bookkeeping table, which a failed first migration leaves behind empty.
  */
 export async function listUnmanagedSchemaObjects(client: PgClient): Promise<SchemaObject[]> {
 	return client<SchemaObject[]>`
 		SELECT n.nspname AS "schema",
 			c.relname AS "name",
-			CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS "kind"
+			CASE
+				WHEN c.relkind IN ('v', 'm') THEN 'view'
+				WHEN c.relkind = 'S' THEN 'sequence'
+				ELSE 'table'
+			END AS "kind"
 		FROM pg_class c
 		INNER JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname IN ('public', ${MIGRATIONS_SCHEMA})
-			AND c.relkind IN ('r', 'p', 'f', 'v', 'm')
+			AND c.relkind IN ('r', 'p', 'f', 'v', 'm', 'S')
 			AND NOT (n.nspname = ${MIGRATIONS_SCHEMA} AND c.relname = ${MIGRATIONS_TABLE})
 			AND NOT EXISTS (
 				SELECT 1 FROM pg_depend d
 				WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e'
 			)
+			AND NOT (
+				c.relkind = 'S'
+				AND EXISTS (
+					SELECT 1 FROM pg_depend d
+					WHERE d.classid = 'pg_class'::regclass
+						AND d.objid = c.oid
+						AND d.refclassid = 'pg_class'::regclass
+						AND d.deptype IN ('a', 'i')
+				)
+			)
 		UNION ALL
-		SELECT n.nspname, t.typname, 'enum'
+		SELECT n.nspname, t.typname, CASE WHEN t.typtype = 'e' THEN 'enum' ELSE 'type' END
 		FROM pg_type t
 		INNER JOIN pg_namespace n ON n.oid = t.typnamespace
+		LEFT JOIN pg_class r ON r.oid = t.typrelid
 		WHERE n.nspname IN ('public', ${MIGRATIONS_SCHEMA})
-			AND t.typtype = 'e'
+			-- Composite types are only listed when standalone: every table has one too.
+			AND (t.typtype IN ('e', 'd', 'r') OR (t.typtype = 'c' AND r.relkind = 'c'))
 			AND NOT EXISTS (
 				SELECT 1 FROM pg_depend d
 				WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e'

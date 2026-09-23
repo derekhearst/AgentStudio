@@ -77,6 +77,10 @@ test.describe('db/bootstrap — legacy schema reconcile', () => {
 			enumType('invoice_status'),
 			{ schema: 'public', name: 'some_view', kind: 'view' } as SchemaObject,
 			{ schema: 'public', name: 'touch_updated_at', kind: 'function' } as SchemaObject,
+			{ schema: 'public', name: 'invoice_number_seq', kind: 'sequence' } as SchemaObject,
+			// A domain or composite type that happens to share an AgentStudio enum's name is
+			// still not that enum.
+			{ schema: 'public', name: 'message_role', kind: 'type' } as SchemaObject,
 			table('leftovers', 'drizzle'),
 		]) {
 			const result = plan([...coreTables(), stranger], { allowReset: true })

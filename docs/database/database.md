@@ -117,7 +117,7 @@ the same way in every environment, production included:
 | What the database holds | What happens |
 | --- | --- |
 | Nothing except Postgres extensions | A normal first start. The migrations build everything. |
-| Anything AgentStudio does not recognise: another application's tables, or any view, function or unfamiliar enum | Startup refuses and lists what it found. Nothing is changed. Give AgentStudio a database of its own. |
+| Anything AgentStudio does not recognise: another application's tables, or any view, function, standalone sequence, custom type or unfamiliar enum | Startup refuses and lists what it found. Nothing is changed. Give AgentStudio a database of its own. |
 | Only AgentStudio's tables and enums, including its core tables (`users`, `conversations`, `messages`, `agents`, `skills`) | Startup refuses and explains, unless `DB_ALLOW_LEGACY_SCHEMA_RESET=1` is set. With that setting it drops the `public` and `drizzle` schemas and rebuilds them, deleting every row. Set it for one start, then remove it. |
 
 "Recognised" means a table or enum name that appears in the Drizzle schema or in any migration
