@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import {
-	access,
+	lstat,
 	mkdir,
 	readdir,
 	readFile as fsRead,
@@ -9,12 +10,14 @@ import {
 	writeFile as fsWrite,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
+import { isPathWithin, resolveRealPath } from '$lib/workspace/containment.server'
 import { ensureWorkspaceDir, getWorkspace, safePath, shellExec } from './sandbox.server'
 
 /**
  * Filesystem primitives available to tools. Every entry point routes paths through
- * `safePath` (defined in sandbox.server.ts) so a tool can never escape its workspace.
+ * `safePath` (defined in sandbox.server.ts) so a tool can never escape its workspace,
+ * including through a symlink that sits inside it and points out.
  *
  * `fileSearch` shells out to `rg` — it would be circular if it lived in sandbox.server.ts
  * since it needs `shellExec` from there; that's the main reason this module was split off.
@@ -69,26 +72,83 @@ export async function fileDelete(path: string, recursive = false) {
 	await rm(fullPath, { recursive, force: true })
 }
 
+/** Real location of the directory entry itself: the parent resolved, the name kept. */
+function realEntryPath(path: string): string {
+	return join(resolveRealPath(dirname(path)), basename(path))
+}
+
+async function lstatOrNull(path: string) {
+	try {
+		return await lstat(path, { bigint: true })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+		throw error
+	}
+}
+
+/**
+ * Move or rename inside the workspace.
+ *
+ * With `overwrite`, whatever is at the target is replaced — but never destroyed before
+ * the move is known to succeed. The old target is renamed aside first and only deleted
+ * once the source has landed; if the move fails it is put back. Deleting first (as this
+ * used to) meant a missing source, a source inside the target, or any rename error left
+ * the target already gone.
+ *
+ * A symlink is moved as a link, not followed, which is also how `rename` treats it.
+ */
 export async function fileMove(fromPath: string, toPath: string, overwrite = false) {
 	await ensureWorkspaceDir()
 	const source = safePath(fromPath)
 	const target = safePath(toPath)
-	await mkdir(dirname(target), { recursive: true })
 
-	if (!overwrite) {
-		try {
-			await access(target)
-			throw new Error(`Target already exists: ${toPath}`)
-		} catch (error) {
-			if (error instanceof Error && error.message.startsWith('Target already exists:')) {
-				throw error
-			}
-		}
-	} else {
-		await rm(target, { recursive: true, force: true }).catch(() => {})
+	if (source === target) throw new Error(`Source and destination are the same path: ${fromPath}`)
+
+	const sourceInfo = await lstatOrNull(source)
+	if (!sourceInfo) throw new Error(`Source does not exist: ${fromPath}`)
+	const targetInfo = await lstatOrNull(target)
+
+	// The same entry under another spelling: a case-only rename on a case-insensitive disk
+	// (`readme.md` → `README.md`). Nothing is being replaced, so rename it in place.
+	const caseOnlyRename =
+		targetInfo !== null &&
+		targetInfo.ino !== 0n &&
+		targetInfo.dev === sourceInfo.dev &&
+		targetInfo.ino === sourceInfo.ino &&
+		source.toLowerCase() === target.toLowerCase()
+	if (caseOnlyRename) {
+		await fsRename(source, target)
+		return { fromPath, toPath }
 	}
 
-	await fsRename(source, target)
+	// Compare where the two entries really live, so a symlinked parent directory cannot
+	// hide that one contains the other.
+	const realSource = realEntryPath(source)
+	const realTarget = realEntryPath(target)
+	if (isPathWithin(realSource, realTarget)) {
+		throw new Error(`Cannot move ${fromPath} into itself (${toPath})`)
+	}
+	if (isPathWithin(realTarget, realSource)) {
+		throw new Error(`Cannot replace ${toPath} with something inside it (${fromPath})`)
+	}
+
+	if (targetInfo && !overwrite) throw new Error(`Target already exists: ${toPath}`)
+
+	await mkdir(dirname(target), { recursive: true })
+	if (!targetInfo) {
+		await fsRename(source, target)
+		return { fromPath, toPath }
+	}
+
+	const aside = join(dirname(target), `.${basename(target)}.replaced-${randomUUID().slice(0, 8)}`)
+	await fsRename(target, aside)
+	try {
+		await fsRename(source, target)
+	} catch (error) {
+		await fsRename(aside, target).catch(() => {})
+		throw error
+	}
+	await rm(aside, { recursive: true, force: true }).catch(() => {})
 	return { fromPath, toPath }
 }
 
@@ -120,7 +180,10 @@ export async function fileList(path?: string, opts: FileListOpts = {}) {
 			if (!includeHidden && (name === 'node_modules' || name === 'build')) continue
 
 			const full = join(current, name)
-			const s = await stat(full)
+			// lstat, not stat: a symlink is listed as itself and never walked into. Only
+			// the starting directory went through `safePath`; following a link found
+			// on the way down would list whatever it points at, inside the sandbox or not.
+			const s = await lstat(full)
 			const relPath = relative(getWorkspace(), full).replace(/\\/g, '/')
 
 			out.push({

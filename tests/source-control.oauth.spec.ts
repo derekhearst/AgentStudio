@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { authenticateContext } from './helpers'
 
 /**
  * Wave 5 #19 phase 2 — GitHub OAuth helper invariants.
@@ -107,5 +108,49 @@ test.describe('source-control/github-oauth — the return path stays on this sit
 		expect(oauthFailureLocation('https://evil.example/phish', 'access_denied')).toBe('/projects?error=access_denied')
 		// The reason is GitHub's `?error=` value, so it is encoded rather than trusted.
 		expect(oauthFailureLocation('/projects', 'a b&next=//evil')).toBe('/projects?error=a+b%26next%3D%2F%2Fevil')
+	})
+})
+
+/**
+ * The same rule, end to end: the helper above is only as good as the two routes that use it.
+ * `?return=` arrives on a GET anything can link to (a model reply could even load it as an
+ * image), and the cookie that carries it back is the browser's to change.
+ */
+test.describe('source-control/github-oauth — the connect and callback routes apply it', () => {
+	test('the callback does not redirect off-site even when the cookie says to', async ({ page }) => {
+		await authenticateContext(page.context())
+		const { GITHUB_OAUTH_RETURN_COOKIE } = await import('../src/lib/source-control/github-oauth')
+		const origin = new URL(test.info().project.use.baseURL ?? 'http://127.0.0.1:4173')
+		// Planted directly, standing in for a cookie set before this fix or by any other route.
+		await page.context().addCookies([
+			{
+				name: GITHUB_OAUTH_RETURN_COOKIE,
+				value: encodeURIComponent('https://attacker.example/SECRET'),
+				domain: origin.hostname,
+				path: '/source-control/github',
+				httpOnly: true,
+				sameSite: 'Lax',
+				secure: false,
+			},
+		])
+
+		// No code: the callback fails early, before any GitHub call, and redirects "back".
+		const response = await page.request.get('/source-control/github/callback', { maxRedirects: 0 })
+		expect(response.status()).toBe(302)
+		expect(response.headers()['location']).toBe('/projects?error=missing_code_or_state')
+	})
+
+	test('the connect route never stores an off-site return path', async ({ page }) => {
+		await authenticateContext(page.context())
+		const response = await page.request.get(
+			'/source-control/github/connect?return=https://attacker.example/SECRET',
+			{ maxRedirects: 0 },
+		)
+		// Without OAuth credentials the route stops before setting any cookie.
+		test.skip(response.status() === 503, 'GitHub OAuth is not configured on this host')
+		expect(response.status()).toBe(302)
+		const { GITHUB_OAUTH_RETURN_COOKIE } = await import('../src/lib/source-control/github-oauth')
+		const stored = (await page.context().cookies()).find((c) => c.name === GITHUB_OAUTH_RETURN_COOKIE)
+		expect(decodeURIComponent(stored?.value ?? '')).toBe('/projects')
 	})
 })

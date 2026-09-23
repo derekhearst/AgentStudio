@@ -84,6 +84,11 @@ These are the constraints that matter, and why:
   the conversation's latest run, in that order) and validates every path against
   `<sandbox>/<user id>`. A path that resolves outside it is refused. There is no way to
   ask the preview for an arbitrary file on the server.
+- **Symbolic links are followed before the check, not after.** A link inside the
+  workspace can point anywhere on the server (the agent's shell can make one, and an
+  imported repo can contain one). The preview judges where a path really leads, so a
+  link to `/`, to the server's environment file, or to another user's folder is refused
+  like any other outside path. Folder listings leave links out.
 - **A path is re-checked every time.** A stored selection is validated on read exactly like
   a freshly typed one, so an old or hand-edited row cannot widen access.
 - **Only images and PDFs are served as raw bytes.** HTML and SVG from the workspace are
@@ -96,8 +101,11 @@ These are the constraints that matter, and why:
 - **Framed pages are sandboxed.** Scripts and forms are allowed; a page on the app's own
   origin additionally loses `allow-same-origin` so it cannot script the app.
 - **Previewed markdown is sanitized.** Raw HTML in the file is escaped rather than
-  executed, and links and images that are not `http(s)` are dropped. A start-up self-check
-  proves the sanitizer is active; if it ever is not, markdown falls back to plain source.
+  executed, and links and images that are not `http(s)` are dropped. That includes text
+  that follows an inline `<code>`, `<kbd>` or `<pre>` tag, which the markdown library
+  would otherwise pass through untouched. A start-up self-check runs a set of hostile
+  samples through the renderer; if any gets through, markdown falls back to plain source.
+  The chat transcript uses the same rules (see the chat spec).
 
 ## Integrations
 

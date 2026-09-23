@@ -35,13 +35,32 @@
  *     answers are to gate it on human approval or refuse it. `bashPolicy: 'ask'` and
  *     'deny' express those. What this module will not do is pretend.
  *
- * Pure: no DB, no SvelteKit, no `node:fs`. `node:path` only, so it unit-tests without a
- * filesystem and cannot be defeated by a race between the check and the read. The one thing
- * a lexical check cannot see is a link that points out of the workspace;
- * `./workspace-realpath.server` covers that, and the engine asks both.
+ * ## Symlinks
+ *
+ * A lexical check alone is not containment. Sandboxed Bash can `ln -s / root` inside the
+ * workspace (it may write there), and an imported repo can commit such a link, after which
+ * `Read root/etc/passwd` is lexically inside the workspace while the SDK's file tools, which
+ * run outside the sandbox, open the host's file. So a path must also stay inside once
+ * symlinks are resolved on both sides (see `resolveRealPath`). That is the only filesystem
+ * access here, and it is injectable so the decision still unit-tests without a disk. It
+ * runs wherever the decision does, the `PreToolUse` hook included, so it is judged again
+ * just before the call runs. A link swapped between this check and the SDK's open can still
+ * win that race; nothing short of `openat2(RESOLVE_BENEATH)` in the SDK itself would close it.
+ *
+ * The guard judges the argument as the SDK may spell it when it opens the file, without
+ * relying on the SDK tidying it first. `a/link/../b` is resolved both as written (the
+ * kernel follows `link` before applying `..`) and normalised, and both must stay inside.
+ * A leading `~` is the SDK's home directory, not a folder in the workspace, so it is
+ * refused outright.
+ *
+ * Our own file tools (`move_file`, `delete_file`, …) are not resolved here: they open paths
+ * through `safePathWithin`, which applies the same real-path rule itself.
+ *
+ * No DB, no SvelteKit.
  */
 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { resolveRealPath as resolveRealPathOnDisk } from '$lib/workspace/containment.server'
 
 /** Built-in tools whose arguments name a path we can resolve and contain. */
 const PATH_ARGS: Record<string, readonly string[]> = {
@@ -54,6 +73,12 @@ const PATH_ARGS: Record<string, readonly string[]> = {
 	Grep: ['path'],
 	LS: ['path'],
 }
+
+/** `~`, `~/x`, `~user/x`: a home directory once the SDK expands it. */
+const HOME_PREFIX = /^~[A-Za-z0-9._-]*(?:[\\/]|$)/
+
+/** A `..` component, with either slash (a stricter reading than POSIX needs, never looser). */
+const PARENT_SEGMENT = /(?:^|[\\/])\.\.(?:[\\/]|$)/
 
 /** Tools that run a command rather than touch a named path. Not decidable from arguments. */
 const COMMAND_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
@@ -107,6 +132,12 @@ export type GuardInput = {
 	 * of what the agent is told on every turn, so changing them needs approval too.
 	 */
 	projectConfigLoaded?: boolean
+	/**
+	 * Resolves every symlink in a path as the OS would open it, `..` included (a missing
+	 * tail is kept as written). Defaults to the real filesystem; specs inject a fake. May
+	 * throw, which counts as "cannot prove it stays inside".
+	 */
+	resolveRealPath?: (path: string) => string
 }
 
 export type GuardDecision =
@@ -138,19 +169,6 @@ function pathArgumentsFor(toolName: string, toolInput: unknown, table = PATH_ARG
 		if (typeof value === 'string' && value.length > 0) found.push(value)
 	}
 	return found
-}
-
-/**
- * Every path a call names — the built-ins' arguments and our own file movers' — resolved
- * against the workspace the way the guard resolves them. For `./workspace-realpath.server`,
- * which checks where those paths really lead once links are followed.
- */
-export function filesystemPathsFor(toolName: string, toolInput: unknown, workspaceRoot: string): string[] {
-	const raw = new Set([
-		...pathArgumentsFor(toolName, toolInput),
-		...pathArgumentsFor(toolName, toolInput, CONFIG_WRITE_ARGS),
-	])
-	return [...raw].map((candidate) => (isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate)))
 }
 
 /**
@@ -204,12 +222,35 @@ export function guardWorkspaceAccess(input: GuardInput): GuardDecision {
 
 	const paths = pathArgumentsFor(toolName, toolInput)
 	const roots = [workspaceRoot, ...(input.additionalRoots ?? [])]
+	const realPath = input.resolveRealPath ?? resolveRealPathOnDisk
+	let realRoots: string[] | null = null
 	for (const candidate of paths) {
-		if (!roots.some((root) => isInside(root, absoluteFor(candidate)))) {
-			return {
-				verdict: 'deny',
-				reason: `Path is outside this run's workspace: ${candidate}`,
+		const outside = {
+			verdict: 'deny',
+			reason: `Path is outside this run's workspace: ${candidate}`,
+		} as const
+		// The SDK expands `~` to its home directory; `path.resolve` would call it a folder.
+		if (HOME_PREFIX.test(candidate)) return outside
+
+		const absolute = absoluteFor(candidate)
+		if (!roots.some((root) => isInside(root, absolute))) return outside
+
+		// Lexically fine; now the path the SDK will really open. `resolve` has already
+		// collapsed any `..`, which is not what the kernel does after a link, so a spelling
+		// with `..` is also resolved exactly as written.
+		const spellings = [absolute]
+		if (PARENT_SEGMENT.test(candidate)) {
+			spellings.push(isAbsolute(candidate) ? candidate : `${workspaceRoot}${sep}${candidate}`)
+		}
+		// Resolved lazily so a call with no path argument never touches the disk.
+		try {
+			realRoots ??= roots.map((root) => realPath(root))
+			for (const spelling of spellings) {
+				const real = realPath(spelling)
+				if (!realRoots.some((root) => isInside(root, real))) return outside
 			}
+		} catch {
+			return outside
 		}
 	}
 

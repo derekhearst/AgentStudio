@@ -18,7 +18,8 @@
  * softened to a question by containment either: plan mode still refuses an unconfinable
  * `Bash` rather than asking about it.
  *
- * Pure: no database, no SvelteKit, so the spec can drive it directly.
+ * No database, no SvelteKit, so the spec can drive it directly. The one thing it reads is the
+ * filesystem, through containment, which follows links to see where a path really leads.
  */
 
 import { guardWorkspaceAccess, type BashPolicy, type GuardDecision } from './workspace-guard'
