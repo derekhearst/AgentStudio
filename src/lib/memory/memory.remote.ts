@@ -273,7 +273,12 @@ const saveExclusionRuleSchema = z.object({
 	description: z.string().trim().max(240).optional(),
 	kind: z.enum(['regex', 'substring']),
 	pattern: z.string().trim().min(1).max(MAX_PATTERN_LENGTH),
-	enabled: z.boolean().default(true),
+	/**
+	 * A new rule starts enabled unless this says otherwise. An edit leaves the rule's switch
+	 * alone unless this is given — the editor has no switch, and always sending `true` turned
+	 * back on every disabled rule whose wording was touched.
+	 */
+	enabled: z.boolean().optional(),
 })
 
 export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, async (input) => {
@@ -289,7 +294,7 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 				description: input.description ?? null,
 				kind: input.kind,
 				pattern: input.pattern,
-				enabled: input.enabled,
+				...(input.enabled === undefined ? {} : { enabled: input.enabled }),
 				updatedAt: new Date(),
 			})
 			.where(and(eq(memoryExclusionRules.id, input.id), eq(memoryExclusionRules.userId, user.id)))
@@ -307,7 +312,7 @@ export const saveMemoryExclusionRuleCommand = command(saveExclusionRuleSchema, a
 				description: input.description ?? null,
 				kind: input.kind,
 				pattern: input.pattern,
-				enabled: input.enabled,
+				enabled: input.enabled ?? true,
 				builtin: false,
 			})
 			.returning({ id: memoryExclusionRules.id })

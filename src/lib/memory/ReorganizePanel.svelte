@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		analyzeMemoryReorganizationQuery,
 		applyMemoryReorganizationCommand,
@@ -19,15 +20,23 @@
 	let loading = $state(false);
 	let applying = $state(false);
 	let error = $state<string | null>(null);
+	// Whether this opening has asked for an analysis. Not reactive on purpose: the panel analyses
+	// once per opening. Keyed on "no plan and not loading" instead, a failed analysis — which
+	// leaves no plan — retried in a loop, and the error flickered without ever staying up.
+	let requested = false;
 
 	$effect(() => {
-		if (open && !plan && !loading) {
-			void load();
-		}
 		if (!open) {
+			requested = false;
+			plan = null;
 			result = null;
 			error = null;
+			return;
 		}
+		if (requested) return;
+		requested = true;
+		// Fresh each time it opens: the cached analysis may predate mining or an apply.
+		untrack(() => void load({ force: true }));
 	});
 
 	async function load(opts: { force?: boolean } = {}) {
@@ -55,6 +64,8 @@
 		error = null;
 		try {
 			result = (await applyMemoryReorganizationCommand()) as MemoryReorganizeResult;
+			// The analysis this came from is stale now; the next opening, or Re-analyze, fetches
+			// a fresh one rather than the cached copy that still lists these merges.
 			plan = null;
 			onApplied?.();
 		} catch (e) {
@@ -102,6 +113,12 @@
 		<div class="reorganize__body">
 			{#if error}
 				<div class="reorganize__error">{error}</div>
+				{#if !plan && !result && !loading}
+					<div class="reorganize__actions">
+						<button class="btn btn-sm btn-primary" onclick={refresh}>Try again</button>
+						<button class="btn btn-sm btn-ghost" onclick={close}>Close</button>
+					</div>
+				{/if}
 			{/if}
 
 			{#if result}

@@ -129,21 +129,35 @@
 		try {
 			const result = await mineAllPendingCommand();
 			mineResult = { conversationsScanned: result.conversationsScanned, enqueued: result.enqueued };
-			// Poll stats for ~30s so the chip updates as jobs complete.
-			let ticks = 0;
-			pollTimer = setInterval(async () => {
-				ticks += 1;
-				await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
-				stats = (await getMemoryStatsQuery()) as MemoryStats;
-				wings = (await listMemoryWingsQuery()) as MemoryWingRow[];
-				if (ticks >= 15 || stats.pendingMineJobs === 0) {
-					if (pollTimer) clearInterval(pollTimer);
-					pollTimer = null;
-				}
-			}, 2000);
+			startMinePolling();
 		} finally {
 			mining = false;
 		}
+	}
+
+	/**
+	 * Poll stats for ~30s so the chip updates as jobs complete. One poller at a time: the button
+	 * is enabled again as soon as the jobs are queued, and a second click used to overwrite the
+	 * handle of a poller still running — which then ran every 2s for the life of the tab.
+	 */
+	function startMinePolling() {
+		stopMinePolling();
+		let ticks = 0;
+		const timer = setInterval(async () => {
+			ticks += 1;
+			await Promise.all([getMemoryStatsQuery().refresh(), listMemoryWingsQuery().refresh()]);
+			// Stopped (or replaced) while that was in flight.
+			if (pollTimer !== timer) return;
+			stats = (await getMemoryStatsQuery()) as MemoryStats;
+			wings = (await listMemoryWingsQuery()) as MemoryWingRow[];
+			if (ticks >= 15 || stats.pendingMineJobs === 0) stopMinePolling();
+		}, 2000);
+		pollTimer = timer;
+	}
+
+	function stopMinePolling() {
+		if (pollTimer) clearInterval(pollTimer);
+		pollTimer = null;
 	}
 
 	function formatNum(n: number): string {
@@ -156,9 +170,7 @@
 
 	onMount(() => {
 		void loadAll();
-		return () => {
-			if (pollTimer) clearInterval(pollTimer);
-		};
+		return stopMinePolling;
 	});
 </script>
 

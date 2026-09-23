@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		listMemoryClosetsQuery,
 		listMemoryDrawersQuery,
@@ -26,22 +27,35 @@
 	let drawers = $state<MemoryDrawerRow[]>([]);
 	let selectedClosetId = $state<string | null>(null);
 	let loading = $state(false);
+	let loadError = $state<string | null>(null);
+	// The room whose closets were asked for. Not reactive on purpose: the effect below loads once
+	// per room when it is expanded, and must not re-run because a load finished. Keyed on
+	// "no closets yet" instead, a room with none (a failed mine used to leave them) reloaded
+	// for ever.
+	let requestedRoomId: string | null = null;
 
 	$effect(() => {
-		if (expanded && closets.length === 0 && !loading) {
-			void loadClosets();
-		}
+		if (!expanded) return;
+		const roomId = room.id;
+		if (requestedRoomId === roomId) return;
+		requestedRoomId = roomId;
+		untrack(() => void loadClosets(roomId));
 	});
 
-	async function loadClosets() {
+	async function loadClosets(roomId: string) {
 		loading = true;
+		loadError = null;
 		try {
-			const result = (await listMemoryClosetsQuery({ roomId: room.id })) as MemoryClosetRow[];
+			const result = (await listMemoryClosetsQuery({ roomId })) as MemoryClosetRow[];
 			closets = result;
 			if (result.length > 0 && !selectedClosetId) {
 				selectedClosetId = result[0].id;
 				await loadDrawers(result[0].id);
 			}
+		} catch (err) {
+			loadError = err instanceof Error ? err.message : 'Could not load closets.';
+			// Collapsing and expanding the room again asks once more.
+			requestedRoomId = null;
 		} finally {
 			loading = false;
 		}
@@ -87,6 +101,8 @@
 		<div class="room-block__body">
 			{#if loading && closets.length === 0}
 				<div class="room-block__skeleton">Loading closets…</div>
+			{:else if loadError && closets.length === 0}
+				<div class="room-block__empty">Could not load closets: {loadError}</div>
 			{:else if closets.length === 0}
 				<div class="room-block__empty">No closets in this room.</div>
 			{:else}

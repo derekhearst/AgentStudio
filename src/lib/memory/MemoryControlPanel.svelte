@@ -108,7 +108,7 @@
 				description: form.description.trim() || undefined,
 				kind: form.kind,
 				pattern: form.pattern.trim(),
-				enabled: true,
+				// No `enabled`: a new rule starts on, and an edit leaves the rule's switch as it is.
 			});
 			if (!result.ok) {
 				formError = result.error;
