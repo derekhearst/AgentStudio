@@ -24,7 +24,8 @@ import {
 
 const RAIL_LOCK = 'chat-rail-open-preference'
 
-/** The fold's save, as the page requests it: `/_app/remote/<hash>/setRailOpen`. */
+/** The rail's remote functions, as the page requests them: `/_app/remote/<hash>/<name>`. */
+const RAIL_OPEN_QUERY = /\/remote\/[^/?]+\/getRailOpen(?:[?#]|$)/
 const RAIL_OPEN_COMMAND = /\/remote\/[^/?]+\/setRailOpen(?:[?#]|$)/
 
 async function seedChatWithEdits(prefix: string, extra?: { runId?: string }) {
@@ -240,6 +241,50 @@ test.describe('chat rail — desktop column', () => {
 
 		await openChat(page, conversationId, prefix)
 		await expect(rail.getByRole('button', { name: 'Expand rail' })).toBeVisible()
+	})
+
+	test('an expanded rail comes back on the first render after a reload; the stored preference still wins', async ({
+		page,
+	}) => {
+		await openChat(page, conversationId, prefix)
+		const rail = columnRail(page)
+		await rail.getByRole('button', { name: 'Expand rail' }).click()
+		await expect(rail).not.toHaveClass(/is-collapsed/)
+		await waitForRailOpenPref(true)
+
+		// Another device folds it. This browser still remembers it expanded.
+		await setRailOpenPref(false)
+
+		// Hold the stored preference back, so what renders before it arrives can be checked.
+		let releaseQuery: () => void = () => {}
+		const held = new Promise<void>((resolve) => (releaseQuery = resolve))
+		let queried = 0
+		await page.route(RAIL_OPEN_QUERY, async (route) => {
+			queried++
+			await held
+			await route.continue()
+		})
+		try {
+			await openChat(page, conversationId, prefix)
+			await expect.poll(() => queried).toBeGreaterThan(0)
+			// No longer the strip first and a ~320px jump of the thread when the preference arrives.
+			await expect(rail).not.toHaveClass(/is-collapsed/)
+			expect((await rail.boundingBox())?.width ?? 0).toBeGreaterThan(200)
+		} finally {
+			releaseQuery()
+		}
+		// The database is the source of truth: once it answers, the rail folds.
+		await expect(rail).toHaveClass(/is-collapsed/)
+		await page.unroute(RAIL_OPEN_QUERY)
+
+		// This browser's copy follows it, so the next load starts folded before the query answers.
+		queried = 0
+		await page.route(RAIL_OPEN_QUERY, () => {
+			queried++ // never answered
+		})
+		await openChat(page, conversationId, prefix)
+		await expect.poll(() => queried).toBeGreaterThan(0)
+		await expect(rail).toHaveClass(/is-collapsed/)
 	})
 
 	test('a stored Research tab from before #14 reopens on Preview with its file', async ({ page }) => {

@@ -60,6 +60,11 @@ Whether the rail is expanded is **remembered for you, across all your chats and 
 It is saved with your workbench preferences, not with the chat, so opening a new chat keeps
 the rail the way you left it.
 
+Each browser also keeps its own copy of that choice, so when you reload a chat the rail
+appears the way you left it straight away, instead of starting as the strip and then
+jumping open a moment later. Your saved preference still has the last word: if you folded
+the rail on another device, it folds here too as soon as the preference loads.
+
 On a tablet, the rail button in the chat's header expands or folds the rail.
 
 ### On a phone
@@ -143,7 +148,7 @@ that file is already the one open.
 | What | Remembered for | Stored in |
 | --- | --- | --- |
 | The active tab and the open file or URL | Each conversation separately | `chat_rail_preview`, one row per conversation, owned by its user |
-| Expanded or folded | You, across every chat | `chat_workbench_preferences.panel_layout.railOpen` (absent means folded); only changes made on a desktop or tablet screen are saved |
+| Expanded or folded | You, across every chat | `chat_workbench_preferences.panel_layout.railOpen` (absent means folded), with a copy in the browser's local storage so a reload shows it at once; only changes made on a desktop or tablet screen are saved |
 | The rail's width | This browser | The browser's local storage |
 
 Closing a chat and coming back later puts the same file or page back in Preview. If the rail

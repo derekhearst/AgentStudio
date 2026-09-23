@@ -1,3 +1,4 @@
+import { browser } from '$app/environment';
 import { getRailOpen, getRailPreviewState, setRailOpen, setRailPreviewState } from './preview.remote';
 import { normalizePreviewUrl, type RailTab } from './preview-kinds';
 import { openRight } from './mobile-drawer-state.svelte';
@@ -16,6 +17,8 @@ import { openRight } from './mobile-drawer-state.svelte';
  * chat (`getRailOpen` / `setRailOpen`), and belongs to the column beside the
  * thread. The phone drawer is opened and closed by hand and always shows the
  * whole rail, so nothing done on a phone-width screen changes it (see `setOpen`).
+ * This browser keeps a copy of it too, read before the first render — see
+ * `RAIL_OPEN_MIRROR_KEY`.
  *
  * The `proposed` field is the security-relevant part. A URL that arrives from a
  * tool result is attacker-influenced data — a page the agent fetched can put
@@ -35,6 +38,38 @@ export type ProposedUrl = {
 	source: string;
 };
 
+/**
+ * #14 — this browser's copy of the viewer's fold.
+ *
+ * The stored preference only arrives after the page has mounted, so a viewer who left the
+ * rail expanded used to get the 40px strip first and then a ~320px jump of the thread on
+ * every full load. Reading this copy before the client's first render gives them the
+ * expanded rail straight away, the way the rail's width (`console:rail-w`) already works.
+ * The database row stays the source of truth: `hydrateRailOpen` overwrites both once it
+ * loads, so a change made on another device still wins.
+ *
+ * Declared above `previewState` on purpose — its initialiser reads it.
+ */
+const RAIL_OPEN_MIRROR_KEY = 'console:rail-open';
+
+function readRailOpenMirror(): boolean {
+	if (!browser) return false;
+	try {
+		return localStorage.getItem(RAIL_OPEN_MIRROR_KEY) === '1';
+	} catch {
+		return false; // storage blocked (private window, disabled site data): start folded
+	}
+}
+
+function writeRailOpenMirror(open: boolean) {
+	if (!browser) return;
+	try {
+		localStorage.setItem(RAIL_OPEN_MIRROR_KEY, open ? '1' : '0');
+	} catch {
+		/* the database copy still holds it */
+	}
+}
+
 export const previewState = $state({
 	tab: 'Preview' as RailTab,
 	selection: { kind: 'none' } as PreviewSelection,
@@ -44,7 +79,7 @@ export const previewState = $state({
 	/** Conversation the current state belongs to; null before the first hydrate. */
 	hydratedFor: null as string | null,
 	/** #14 — the desktop rail is expanded (true) or folded to its strip (false). */
-	open: false,
+	open: readRailOpenMirror(),
 });
 
 /**
@@ -137,9 +172,12 @@ export async function hydrateRailOpen() {
 	openLoaded = true;
 	try {
 		const stored = await getRailOpen();
-		if (!openTouched) previewState.open = stored;
+		if (!openTouched) {
+			previewState.open = stored;
+			writeRailOpenMirror(stored);
+		}
 	} catch {
-		openLoaded = false; // try again the next time the rail mounts; stay collapsed meanwhile
+		openLoaded = false; // try again the next time the rail mounts; keep this browser's copy meanwhile
 	}
 }
 
@@ -157,6 +195,7 @@ function setOpen(open: boolean) {
 	openTouched = true;
 	if (previewState.open === open) return;
 	previewState.open = open;
+	writeRailOpenMirror(open);
 	if (openSaveTimer) clearTimeout(openSaveTimer);
 	openSaveTimer = setTimeout(() => {
 		openSaveTimer = null;
