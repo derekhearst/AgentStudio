@@ -19,6 +19,8 @@ Agent detail pages allow editing the assigned model and system prompt.
 
 Settings persist default model, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
 
+Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
+
 Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved.
 
 ### Database Bootstrap
@@ -71,6 +73,7 @@ cp .env.example .env
 3. Update `.env` values for your services:
 
 - `DATABASE_URL`
+- `AUTH_PASSWORD` (creates the owner account the first time the server starts against an empty database; never overwrites an existing password. Optional `AUTH_OWNER_NAME` / `AUTH_OWNER_USERNAME` default to `Owner` / `owner`)
 - `OPENROUTER_API_KEY`
 - `SEARXNG_URL` and `SEARXNG_PASSWORD`
 - `SANDBOX_WORKSPACE` (base root for per-user workspaces; defaults to `/workspace/users`)
@@ -87,13 +90,23 @@ Database note:
 - A database with existing AgentStudio schema objects but no Drizzle migration history will be reset on startup before migrations are applied.
 - To force a clean rebuild of a development database, run `bun run db:reset` — drops the target database and reruns the same ensure-exists → migrate → seed bootstrap the server runs at boot.
 
-4. Run the app:
+4. Provision the instance (optional — the server does the same on first start when `AUTH_PASSWORD` is set):
+
+```sh
+bun run db:bootstrap                    # create the database, the owner (from AUTH_PASSWORD) and the sandbox folder
+bun run db:bootstrap --reset-password   # forgot the dev password: set it to AUTH_PASSWORD again
+bun run db:bootstrap --reset            # start over: drops the database first
+```
+
+It is idempotent, never prints the password, and refuses to run with `NODE_ENV=production`.
+
+5. Run the app:
 
 ```sh
 bun run dev
 ```
 
-5. Run checks/tests:
+6. Run checks/tests:
 
 ```sh
 bun run check
@@ -210,17 +223,19 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 ## Authentication
 
 - One owner account per instance, signed in with a password. There are no other users, roles, invitations or passkeys.
-- On first start there is no owner, and every page redirects to `/setup`, where the first visitor creates the owner. **Nothing else protects that page — complete setup before the instance is reachable from the internet.** There is no claim key.
+- First run creates that account and nothing else. Two ways: set `AUTH_PASSWORD` and the server creates the owner when it starts (the Docker deployment does this), or open the app and fill in `/setup` (display name and password). Until an owner exists every page redirects to `/setup`; `/api/health` stays reachable and reports `ownerProvisioned`.
+- On a production build, `/setup` also asks for a **one-time setup token printed in the server log**, so the first visitor to a public URL cannot claim a fresh or reset instance. A development server does not ask.
+- Model credential, workspace, gateway and integrations are deploy-time environment settings, shown read-only under Settings → System.
 - Sessions are 30-day HTTP-only cookies. Everything except `/login`, `/setup`, `/demo`, `/api/health`, `/api/webhooks` (signature-checked) and `/api/cron` (session or `CRON_SECRET`) requires one.
 - Remote functions are gated on the real request path: without a session only the sign-in and setup commands can run.
-- `AUTH_DEV_BYPASS=1` signs every visitor in as the owner on a development server only; production builds ignore it.
+- `AUTH_DEV_BYPASS=1` signs every visitor in as the owner on a development server only, and only once an owner with a password exists; production builds ignore it.
 - See [docs/auth/auth.md](docs/auth/auth.md) for the flows and rules.
 
 ## Route Map
 
 - `/` Redirects to chat
 - `/login` Sign in
-- `/setup` First-run owner account creation (only until an owner exists)
+- `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail
 - `/cost` Cost dashboard
@@ -228,4 +243,4 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/automations` Scheduled automation workflows
 - `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/spec.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
-- `/settings` App configuration
+- `/settings` App configuration, including the read-only System checklist
