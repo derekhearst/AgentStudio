@@ -13,6 +13,7 @@ import {
 } from '$lib/agents/identity-editor.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditAgentConfigUpdated } from '$lib/governance'
+import { requireRunnableModelChange } from '$lib/engine/gateway.server'
 
 const agentIdSchema = z.string().uuid()
 const HOOK_EVENT_NAMES = [
@@ -145,9 +146,12 @@ export const updateAgentCommand = command(updateAgentSchema, async (input) => {
 		.from(agents)
 		.where(eq(agents.id, input.agentId))
 		.limit(1)
+	// An agent's model seeds the conversations it starts, which the engine runs, so a model
+	// nothing here can run is refused rather than saved to fail later (#9).
+	const model = requireRunnableModelChange(input.model, before?.model)
 	const updated = await updateAgentRecord(input.agentId, {
 		systemPrompt: input.systemPrompt,
-		model: input.model,
+		model,
 		allowedTools: input.allowedTools,
 		hooks: input.hooks,
 		research: input.research,

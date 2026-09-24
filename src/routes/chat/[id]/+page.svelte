@@ -15,7 +15,8 @@
 	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
 
 	type AgentChoice = Awaited<ReturnType<typeof listAgentsForPicker>>[number];
-	import { getAvailableModels } from '$lib/llm';
+	import { getEngineModels } from '$lib/llm';
+	import { engineContextLimit } from '$lib/llm/engine-models';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import { buildChatPageCommands } from '$lib/chat/chat-page-commands';
@@ -145,7 +146,8 @@
 		systemPromptTokens: number | null;
 	};
 	let liveContextStats = $state<LiveContextStats | null>(null);
-	let availableModels = $derived(await getAvailableModels());
+	// The engine's list, not the catalogue: it is what the composer stores ids from (#9).
+	let engineModels = $derived((await getEngineModels()).models);
 	let appSettings = $derived(await getSettings());
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let consumedInitialPrompt = $state(false);
@@ -471,10 +473,7 @@
 		return null;
 	});
 
-	const activeContextLimit = $derived.by(() => {
-		const selected = availableModels.find((candidate) => candidate.id === model);
-		return selected?.contextLength && selected.contextLength > 0 ? selected.contextLength : 128000;
-	});
+	const activeContextLimit = $derived(engineContextLimit(engineModels, model));
 	const reservedResponsePct = $derived(appSettings?.contextConfig?.reservedResponsePct ?? 30);
 	const autoCompactThresholdPct = $derived(appSettings?.contextConfig?.autoCompactThresholdPct ?? 72);
 
@@ -933,6 +932,10 @@
 			}
 
 			if (!response.ok || !response.body) {
+				// A refused send (an unrunnable model, #9) saved nothing, so its bubble must not
+				// stay as if sent; Retry still carries the text. A message the server did save is
+				// back from `refreshAll` in `finally`.
+				pendingUserMessages = pendingUserMessages.filter((message) => message.id !== optimisticUserId);
 				const responseText = await response.text().catch(() => '');
 				throw new Error(
 					`Failed to open stream (status ${response.status})${responseText ? `: ${responseText}` : ''}`
@@ -1320,8 +1323,7 @@
 	}
 
 	function getContextLimitForModel(modelId: string) {
-		const selected = availableModels.find((candidate) => candidate.id === modelId);
-		return selected?.contextLength && selected.contextLength > 0 ? selected.contextLength : 128000;
+		return engineContextLimit(engineModels, modelId);
 	}
 
 	async function maybeCompactBeforeModelSwitch(nextModel: string) {

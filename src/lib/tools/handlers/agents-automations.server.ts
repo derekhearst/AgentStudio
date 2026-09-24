@@ -5,7 +5,8 @@
  */
 
 import { toolSchemas } from '../tool-schemas'
-import { listAgentRoster, setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
+import { getAgentModel, listAgentRoster, setAgentPaused, updateAgentRecord } from '$lib/agents/agents.server'
+import { runnableModelChange } from '$lib/engine/gateway.server'
 import {
 	createAutomationRecord,
 	deleteAutomationRecord,
@@ -30,20 +31,26 @@ export const agentAutomationHandlers: Record<string, ToolHandler> = {
 
 	update_agent: async (call, { startedAt }) => {
 		const input = toolSchemas.update_agent.parse(call.arguments)
+		const refuse = (error: string) => ({ success: false, tool: call.name, error, executionMs: Date.now() - startedAt })
+		const NOT_FOUND = 'Agent not found or no fields provided'
+		// #9 — held to the agent editor's rule. An agent's model seeds the conversations its
+		// monitors and automations start, so a model nothing here can run is refused rather
+		// than saved to fail on every send; one that can run is stored as the engine sends it.
+		let model = input.model
+		if (input.model !== undefined) {
+			const current = await getAgentModel(input.agentId)
+			if (current === undefined) return refuse(NOT_FOUND)
+			const change = runnableModelChange(input.model, current)
+			if (!change.ok) return refuse(change.message)
+			model = change.model
+		}
 		const updated = await updateAgentRecord(input.agentId, {
 			name: input.name,
 			role: input.role,
 			systemPrompt: input.systemPrompt,
-			model: input.model,
+			model,
 		})
-		if (!updated) {
-			return {
-				success: false,
-				tool: call.name,
-				error: 'Agent not found or no fields provided',
-				executionMs: Date.now() - startedAt,
-			}
-		}
+		if (!updated) return refuse(NOT_FOUND)
 		return {
 			success: true,
 			tool: call.name,
