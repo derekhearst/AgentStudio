@@ -6,7 +6,7 @@ Tools are the actions an agent can take during a conversation: search the web, r
 
 An agent in a chat has two kinds of tools:
 
-- **Claude's own tools**, which come with the Claude Agent SDK: reading, writing and editing files (`Read`, `Write`, `Edit`), finding files (`Glob`, `Grep`), running commands (`Bash`), and handing work to another agent (`Agent`).
+- **Claude's own tools**, which come with the Claude Agent SDK: reading, writing and editing files (`Read`, `Write`, `Edit`), finding files (`Glob`, `Grep`), running commands (`Bash`), handing work to another agent (`Agent`), and asking you a question (`AskUserQuestion`, shown as a question card — see [../chat/spec.md](../chat/spec.md#questions-from-the-agent)).
 - **AgentStudio's tools**, about 45 of them, which do things only this app can do: its web search, projects, source control, agents, automations, monitors, skills, and image and video generation.
 
 This page is about AgentStudio's tools. [`spec.md`](spec.md) describes an earlier design (capability groups and `enable_capability`) that is no longer how the app works, apart from its sections on web access safety and web tool limits, which are current.
@@ -34,7 +34,6 @@ The groups of AgentStudio tools:
 | Automations and monitors | `create_automation`, `list_automations`, `update_automation`, `delete_automation`, `create_monitor`, `list_monitors`, `cancel_monitor`, `extend_monitor` |
 | Skills | `list_skills`, `read_skill`, `read_skill_file`, `create_skill`, `update_skill`, `add_skill_file`, `update_skill_file`, `delete_skill`, `delete_skill_file` |
 | Media | `image_generate`, `video_generate` |
-| Conversation | `ask_user` |
 
 ## User flows
 
@@ -53,7 +52,7 @@ The groups of AgentStudio tools:
 3. Or turn on **Require approval for all tools**, which covers every tool, Claude's own included, and overrides the ticks.
 4. Press **Save**.
 
-The list shows exactly the AgentStudio tools a chat can call and an approval can pause. `ask_user` is not on it: it is the agent asking you a question, answered in its own card, so there is nothing to approve. The list used to be split into an "Always loaded" group, whose ticks could not be changed, and a "Searchable" group. Both described a way of loading tools that the chat engine never had, so the split is gone.
+The list shows exactly the AgentStudio tools a chat can call and an approval can pause. Questions from the agent are not on it: since #4 the agent asks with the Agent SDK's own AskUserQuestion rather than an AgentStudio tool, and a question is answered by you in its own card, so there is nothing to approve. AgentStudio's old `ask_user` tool is gone from the registry. The list used to be split into an "Always loaded" group, whose ticks could not be changed, and a "Searchable" group. Both described a way of loading tools that the chat engine never had, so the split is gone.
 
 ### Running code
 
@@ -61,6 +60,8 @@ There is no separate code tool. The agent writes a script into the workspace and
 
 - In production, `Bash` runs inside an operating-system sandbox (bubblewrap) that keeps it to the workspace, so it runs without asking.
 - Where the sandbox is not available, such as a developer's Windows or Mac machine, every `Bash` call asks for approval first.
+- A command can run in the background (`Bash` with `run_in_background`), for a dev server or a long build. Its output streams into its card while the turn runs, and the agent can stop it with `TaskStop`. Stopping is not treated as running a command, so it does not ask for approval on a machine without the sandbox; the conversation's permission mode still applies. Background commands end when the agent's reply does. See [Background commands](../chat/spec.md#background-commands).
+- Claude Code's older names still work in an agent's tool list: `KillShell` and `KillBash` mean `TaskStop`. `BashOutput` and `TaskOutput` no longer exist and are ignored.
 
 A script cannot call AgentStudio's tools. The agent calls those itself, several in one step if they do not depend on each other.
 
@@ -82,7 +83,7 @@ The conversation's permission mode (Plan only, Ask, Accept edits, Bypass) applie
 ## Integrations
 
 - **Claude Agent SDK.** AgentStudio's tools are handed to it as an in-process tool server, so the agent sees them next to Claude's own.
-- **MCP endpoint (`/api/mcp`).** Other programs can call AgentStudio's tools over the Model Context Protocol. It offers every AgentStudio tool except the ones that only work inside a chat: `ask_user` (there is no chat to ask in), the three mandatory-approval tools (there is nobody to press Allow) and `set_project_context` (there is no conversation to bind). They are not listed, and a request to run one is refused before anything happens.
+- **MCP endpoint (`/api/mcp`).** Other programs can call AgentStudio's tools over the Model Context Protocol. It offers every AgentStudio tool except the ones that only work inside a chat: the three mandatory-approval tools (there is nobody to press Allow) and `set_project_context` (there is no conversation to bind). They are not listed, and a request to run one is refused before anything happens.
 - **OpenRouter.** The old loop sends its tools to models through OpenRouter.
 - **GitHub.** The source-control tools use your connected GitHub account.
 - **SearXNG.** `web_search` goes to the self-hosted search engine.

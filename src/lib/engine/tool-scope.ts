@@ -32,7 +32,7 @@
  * Pure and dependency-free apart from the name lists, so a spec can import it.
  */
 
-import { BUILTIN_TOOL_SET, SUBAGENT_TOOL, canonicalToolName } from './builtin-tools'
+import { BUILTIN_TOOL_SET, REMOVED_BUILTIN_TOOLS, SUBAGENT_TOOL, canonicalToolName } from './builtin-tools'
 
 export type ToolScope = {
 	/** Every tool the run may call, by bare canonical name (our own MCP namespace stripped). */
@@ -65,6 +65,8 @@ export function resolveToolScope(
 	for (const raw of names) {
 		const name = canonicalToolName(String(raw ?? '').trim())
 		if (!name) continue
+		// `BashOutput` and friends: the CLI has nothing by that name to enable any more.
+		if (REMOVED_BUILTIN_TOOLS.has(name)) continue
 		if (isBuiltin(name)) {
 			if (!builtins.includes(name)) builtins.push(name)
 		} else {

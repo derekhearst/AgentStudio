@@ -13,6 +13,9 @@
  *   tool_progress { id, elapsedSeconds }
  *   notice        { kind, level, title, detail, persist }
  *   background_tasks { tasks: [{ id, type, description }] }
+ *   shell_output  { id, taskId, chunk, reset, truncated, from, to }   (live-only)
+ *   shell_output_checkpoint { same }   (persisted, at most every few seconds)
+ *   shell_task_done { id, taskId, status, exitCode, stdout, truncated }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
@@ -20,7 +23,8 @@
  *
  * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
  * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
- * always has.
+ * always has. `shell_output` / `shell_output_checkpoint` / `shell_task_done` follow a
+ * backgrounded `Bash` command against its call's id — see `./background-shells.server`.
  *
  * `details` is the SDK's typed tool output, distilled by
  * `./tool-result-details` for the built-ins whose result is worth rendering as something
@@ -44,6 +48,9 @@ import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
+import { createBackgroundShells } from './background-shells.server'
+import { ASK_USER_QUESTION_TOOL, answerAskUserQuestion, type AskUserHost } from './ask-user-question'
+import { askUserQuestionDetails } from './tool-result-details'
 import {
 	readTurnUsage,
 	resultErrorMessage,
@@ -51,6 +58,7 @@ import {
 	type SessionUsage,
 	type UsageCoverage,
 } from './run-result'
+import { nextTranscriptTail } from './turn-input'
 import type { EngineQueryHandle } from './run-registry.server'
 import { isDelegationTool } from './builtin-tools'
 import type { DelegationGate } from './delegation-gate'
@@ -98,10 +106,11 @@ export type CreateEngineQuery = (params: {
 }) => EngineQuerySource
 
 /**
- * Tools the host renders itself, so the engine must not emit tool frames for them.
- * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ * Tools the host renders itself, so the engine must not emit tool frames for them. The SDK's
+ * `AskUserQuestion` (#4) is answered in `canUseTool` by `askUser`, which mints its own
+ * `ask_user` frame and card.
  */
-const HOST_OWNED_TOOLS = new Set(['ask_user'])
+const HOST_OWNED_TOOLS = new Set([ASK_USER_QUESTION_TOOL])
 
 export type EngineRunInput = {
 	/**
@@ -129,6 +138,16 @@ export type EngineRunInput = {
 	 * recorded as the user's denial.
 	 */
 	approvalToken?: (toolUseId: string) => string
+	/**
+	 * Answers the SDK's `AskUserQuestion` (#4): shows the question and resolves with what the
+	 * user chose — in the chat, the question card and the /review inbox. See
+	 * `./ask-user-question` for how the answers go back to the SDK.
+	 *
+	 * Omit when nobody can answer: the question is then refused at once with a reason telling
+	 * the model to carry on without it, never left waiting. A subagent's question is refused
+	 * either way.
+	 */
+	askUser?: AskUserHost
 	/**
 	 * The agent's fixed tool surface (`./tool-scope`). A call outside it is refused before
 	 * anything else is considered. Omit for every tool.
@@ -222,6 +241,8 @@ export type EngineRunInput = {
 	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
 	 */
 	createQuery?: CreateEngineQuery
+	/** How often a background command's output file is read (`./background-shells.server`). Only a spec sets it. */
+	backgroundOutputPollMs?: number
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -261,6 +282,12 @@ export type EngineRunSummary = {
 	 * frames. The SDK calls these estimates, so treat them as such.
 	 */
 	reasoningTokens: number
+	/**
+	 * The uuid of the last main-thread chain entry this turn wrote to the transcript, or null
+	 * when there is none to cut after (see `./turn-input`). What a later edit or regenerate
+	 * of the NEXT message passes as `resumeSessionAt`.
+	 */
+	sdkTailUuid: string | null
 }
 
 /**
@@ -276,6 +303,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	let sessionId: string | null = null
 	let finalText = ''
 	let reasoningTokens = 0
+	/** The transcript's last main-thread entry so far — `EngineRunSummary.sdkTailUuid`. */
+	let tailUuid: string | null = null
 
 	/*
 	 * Blocks are accumulated alongside the frames. Consecutive deltas of the same
@@ -291,6 +320,20 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
 	const toolInputs = new Map<string, unknown>()
+	/** AskUserQuestion id → the answers the SDK was given, for a result with no attributable `tool_use_result`. */
+	const askedAnswers = new Map<string, Record<string, string>>()
+
+	/*
+	 * #35 — backgrounded `Bash` commands: live output into their cards while the turn runs,
+	 * and an honest ending when it stops. They end with the turn (see the module).
+	 */
+	const shells = createBackgroundShells({ emit, pollMs: input.backgroundOutputPollMs })
+	const endBackgroundShells = async () => {
+		const ended = await shells.endTurn()
+		if (!ended) return
+		blocks.push({ kind: 'notice', notice: ended })
+		await emit('notice', ended)
+	}
 
 	/*
 	 * The UI keys its blocks on the tool_use id, and the permission callbacks have to emit
@@ -508,9 +551,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const preToolUse: HookCallback = async (hookInput, toolUseId) => {
 		if (hookInput.hook_event_name !== 'PreToolUse') return {}
 		const name = bareToolName(hookInput.tool_name)
-		// The host owns ask_user end to end (see the assistant branch below).
-		if (HOST_OWNED_TOOLS.has(name)) return {}
-
+		// A host-owned tool is allowed here unless it is out of scope (`./tool-decision`).
 		const decision = decide(name, hookInput.tool_input)
 
 		/*
@@ -576,11 +617,22 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
 		// answer still needs this to refuse rather than hang.
-		canUseTool: async (toolName, toolInput, { signal, toolUseID }): Promise<PermissionResult> => {
+		canUseTool: async (toolName, toolInput, { signal, toolUseID, agentID }): Promise<PermissionResult> => {
 			const name = bareToolName(toolName)
-			// The host owns ask_user end to end (see the assistant branch below): it
-			// renders its own card, so no tool_call / tool_pending frame may go out.
-			if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
+			// The host answers AskUserQuestion itself (#4): it renders its own card, so no
+			// tool_call / tool_pending frame may go out, and the answers go back as the input.
+			if (HOST_OWNED_TOOLS.has(name)) {
+				const id = toolUseID || claimToolUseId(name, toolInput)
+				const asked = await answerAskUserQuestion({
+					toolUseId: id,
+					input: toolInput,
+					signal,
+					fromSubagent: Boolean(agentID) || childParents.has(id),
+					host: input.askUser,
+				})
+				if (asked.answers) askedAnswers.set(id, asked.answers)
+				return asked.permission
+			}
 
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
@@ -685,6 +737,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				sessionId = msg.session_id
 				input.onSessionId?.(sessionId)
 			}
+			tailUuid = nextTranscriptTail(tailUuid, msg)
 
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
@@ -722,6 +775,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					// itself; the transient ones are live-only. See `./sdk-notices`.
 					if (interpreted.notice.persist) blocks.push({ kind: 'notice', notice: interpreted.notice })
 					await emit('notice', interpreted.notice)
+					// A background task settled: close its command's card, if it has one.
+					if (interpreted.task) await shells.settle(interpreted.task)
 				} else if (interpreted.kind === 'background_tasks') {
 					// REPLACE semantics — the payload is the whole live set.
 					await emit('background_tasks', { tasks: interpreted.tasks })
@@ -846,11 +901,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					}
 					toolInputs.set(id, block.input ?? null)
 
-					if (name === 'ask_user') {
-						// The host's onAskUser owns this one: it mints the answer token,
-						// emits the `ask_user` frame and blocks until the user replies.
-						// Emitting a tool_call here would render it as an ordinary
-						// collapsed tool block alongside the card.
+					if (HOST_OWNED_TOOLS.has(name)) {
+						// The host's `askUser` owns this one: it mints the answer token, emits the
+						// `ask_user` frame and blocks until the user replies. Emitting a tool_call
+						// here would render it as an ordinary collapsed tool block beside the card.
+						// Announced all the same, so a scope refusal in the hook does not wait on it.
+						announcementFor(id).resolve()
 						continue
 					}
 
@@ -915,7 +971,9 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					// every other tool's result is the plain text join.
 					const text = toolResultText(block.content, toolName)
 					const toolArguments = toolInputs.get(id) ?? null
-					const details = toolResultDetails(toolName, structured, toolArguments)
+					const details =
+						toolResultDetails(toolName, structured, toolArguments) ??
+						(askedAnswers.has(id) ? askUserQuestionDetails(askedAnswers.get(id)) : null)
 
 					if (parentToolUseId) {
 						// The child's result belongs to the child's block. The ledger still counts it:
@@ -986,6 +1044,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						child.status = child.success ? 'completed' : 'failed'
 						await emit('subagent_done', { agentId: id, conversationId: null })
 					}
+					// A backgrounded command keeps filling this block while the turn runs (#35).
+					if (details?.kind === 'shell' && details.backgroundTaskId) {
+						await shells.track({ toolUseId: id, sessionId, resultText: text, details })
+					}
 					blocks.push({
 						kind: 'tool',
 						name: toolName,
@@ -1015,6 +1077,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'result') {
+				await endBackgroundShells()
 				const { usage, session, includesSubagents } = readTurnUsage(msg, {
 					resumed: Boolean(input.options.resume),
 					baseline: input.usageBaseline ?? null,
@@ -1040,12 +1103,14 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					blocks,
 					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
 					reasoningTokens,
+					sdkTailUuid: tailUuid,
 				}
 			}
 		}
 
 		// The iterator ended without a `result` message — treat as a completed run
 		// with no usage rather than inventing numbers.
+		await endBackgroundShells()
 		for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await closeChild(done)
 		return {
 			text: finalText,
@@ -1060,6 +1125,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			blocks,
 			ttftMs: null,
 			reasoningTokens,
+			sdkTailUuid: tailUuid,
 		}
 	} finally {
 		/*
@@ -1069,6 +1135,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		 * belt-and-braces against an exception path that skips it and leaves a child process
 		 * holding the workspace.
 		 */
+		await shells.stopAll()
 		try {
 			session.close?.()
 		} catch {

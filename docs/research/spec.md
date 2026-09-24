@@ -109,7 +109,7 @@ After the loop completes the agent synthesizes a final Markdown report:
 - Inline citations using `[N]` notation
 - Numbered source list at the end with URL, title, and date fetched
 
-The report is stored in `research.report` and surfaced as a chat message from the agent with the full Markdown rendered.
+The report is stored in `research.report` and shown, with the full Markdown rendered, on the run's page at `/research/{id}`. It is not posted into the chat as a message (an earlier version of this spec said it was; the runner has never done that). When the run is linked to a conversation, the run's page links back to it.
 
 ### 6. Source Deduplication
 
@@ -140,7 +140,7 @@ The group is `alwaysOn: false`. The research orchestrator skill enables it at th
 
 ### 9. Async Execution via Jobs
 
-Research runs are enqueued as a `research` job type in the `research` queue (medium priority). The job persists a `researchId` in its payload. A background worker picks it up, executes the full loop, and updates `research.status` throughout. The chat run associated with the research is kept open (status `running`) until the job completes, at which point the final report is appended as an assistant message and the run is closed.
+Research runs are enqueued as a `research` job type in the `research` queue (medium priority). The job persists a `researchId` in its payload. A background worker picks it up, executes the full loop, and updates `research.status` throughout. The run does not write into the conversation: when the job completes, the report stays on the research row, the user is notified, and the conversation it was linked to is reachable from the run's page.
 
 ### 10. Research Trigger
 

@@ -1,11 +1,13 @@
 /**
- * Reading the user's answers back out of an `ask_user` tool result (#81).
+ * Reading the user's answers back out of a question block's result (#81).
  *
- * The host hands the model its answers as plain text, one `Header: answer` per question
- * (`fulfilAskUser` in the chat stream). That text is also what the transcript records as the
- * call's result, live and after a reload. The cards only understood a JSON
- * `{ answers: { … } }` result, which nothing produces any more, so an answered question never
- * showed its answer. Both shapes are read here; JSON wins when it is there.
+ * The retired `ask_user` host handed the model its answers as plain text, one
+ * `Header: answer` per question, and that text is what those transcripts record as the call's
+ * result. The SDK's AskUserQuestion (#4) carries its answers on the block's `details`
+ * instead (`./tool-block-helpers`), but a card answered a moment ago still holds the JSON
+ * `{ answers }` the chat recorded, and old transcripts are full of the text form. The cards
+ * once understood only the JSON form, so an answered `ask_user` question never showed its
+ * answer. Both shapes are read here; JSON wins when it is there.
  *
  * No imports on purpose: the transcript helpers load this in the plain Playwright loader too.
  */

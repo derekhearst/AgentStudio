@@ -2,6 +2,8 @@
 	import { onMount } from 'svelte';
 	import ChatComposer from '$lib/chat/ChatComposer.svelte';
 	import type { AgentChoice } from '$lib/chat/AgentSelector.svelte';
+	import type { ComposerCommand } from '$lib/chat/composer-commands';
+	import type { MentionSearchResult } from '$lib/chat/mention-match';
 
 	type ChatAttachment = {
 		id: string;
@@ -29,6 +31,8 @@
 		onCancelGeneration,
 		estimatedRemaining = 128000,
 		size = 'default',
+		onMentionSearch,
+		commands = [],
 	} = $props<{
 		value?: string;
 		placeholder?: string;
@@ -48,6 +52,10 @@
 		estimatedRemaining?: number;
 		/** 'large' starts the composer tall — used on the new-chat page. */
 		size?: 'default' | 'large';
+		/** #22 — the conversation's `@` file search; see ChatComposer. */
+		onMentionSearch?: ((query: string) => Promise<MentionSearchResult>) | undefined;
+		/** #22 — the page's own `/` commands; see ChatComposer. */
+		commands?: ComposerCommand[];
 	}>();
 	let recording = $state(false);
 	let transcribing = $state(false);
@@ -321,6 +329,8 @@
 		onCancelGeneration={() => onCancelGeneration?.()}
 		onAddFiles={() => openFilePicker()}
 		onMicClick={() => toggleRecording()}
+		{onMentionSearch}
+		{commands}
 	/>
 </div>
 

@@ -1,5 +1,5 @@
 import { command, query } from '$app/server'
-import { and, asc, desc, eq, gt, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
@@ -16,8 +16,11 @@ import {
 } from '$lib/chat/agent-switch.server'
 import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { editUserMessage, truncateAfterMessage } from '$lib/chat/message-branch.server'
+import { previewMessageRewind } from '$lib/chat/rewind.server'
 import { listRecentConversations } from '$lib/chat/conversation-list.server'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
+import { deleteConversationForUser } from '$lib/chat/conversation-delete.server'
 import {
 	describePermissionMode,
 	PERMISSION_MODES,
@@ -38,15 +41,29 @@ const createConversationSchema = z.object({
 
 const conversationIdSchema = z.string().uuid()
 
+/**
+ * #24 — `restoreFiles` also restores the files the dropped turns changed, before any row
+ * changes; `acknowledgeUncommitted` is the user's explicit "overwrite them" for an imported
+ * repository with uncommitted changes in those files. See `./message-branch.server`.
+ */
+const branchOptions = {
+	restoreFiles: z.boolean().optional(),
+	acknowledgeUncommitted: z.boolean().optional(),
+}
+
 const editMessageSchema = z.object({
 	messageId: z.string().uuid(),
 	content: z.string().trim().min(1),
+	...branchOptions,
 })
 
 const deleteMessagesAfterSchema = z.object({
 	conversationId: z.string().uuid(),
 	messageId: z.string().uuid(),
+	...branchOptions,
 })
+
+const previewRewindSchema = z.object({ messageId: z.string().uuid() })
 
 const savePartialAssistantSchema = z.object({
 	conversationId: z.string().uuid(),
@@ -100,7 +117,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		findLiveChatRun(conversationId, user.id),
 	])
 
-	// Surface the first un-decided ask_user entry so a hard refresh during a paused question
+	// Surface the first un-decided question so a hard refresh during a paused question
 	// can resume — the stream path owns updates while connected; this is the resume seed.
 	const undecided = (activeRun?.pendingQuestions ?? []).find(
 		(entry): entry is PendingQuestionEntry => !!entry?.token && !entry.decidedAt,
@@ -139,70 +156,29 @@ export const createConversation = command(createConversationSchema, async (input
 
 export const deleteConversation = command(conversationIdSchema, async (conversationId) => {
 	const user = requireAuthenticatedRequestUser()
-	await db.delete(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+	// Stops a turn still running in it first, background commands included (#35).
+	await deleteConversationForUser(user.id, conversationId)
 	return { success: true }
 })
 
 export const editMessage = command(editMessageSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
-	const [target] = await db.select().from(messages).where(eq(messages.id, input.messageId)).limit(1)
-	if (!target || target.role !== 'user') {
-		return { success: false, error: 'Message not found or not editable' as const }
-	}
-
-	const [conversation] = await db
-		.select({ id: conversations.id })
-		.from(conversations)
-		.where(and(eq(conversations.id, target.conversationId), eq(conversations.userId, user.id)))
-		.limit(1)
-	if (!conversation) {
-		return { success: false, error: 'Message not found or not editable' as const }
-	}
-
-	await db.update(messages).set({ content: input.content }).where(eq(messages.id, input.messageId))
-
-	await db
-		.delete(messages)
-		.where(
-			and(
-				eq(messages.conversationId, target.conversationId),
-				or(
-					gt(messages.createdAt, target.createdAt),
-					and(eq(messages.createdAt, target.createdAt), ne(messages.id, target.id)),
-				),
-			),
-		)
-
-	return { success: true as const, conversationId: target.conversationId }
+	return editUserMessage({ ...input, userId: user.id })
 })
 
 export const deleteMessagesAfter = command(deleteMessagesAfterSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
-	const [conversation] = await db
-		.select({ id: conversations.id })
-		.from(conversations)
-		.where(and(eq(conversations.id, input.conversationId), eq(conversations.userId, user.id)))
-		.limit(1)
+	return truncateAfterMessage({ ...input, userId: user.id })
+})
 
-	if (!conversation) {
-		return { success: false, error: 'Message not found' as const }
-	}
-
-	const [pivot] = await db
-		.select()
-		.from(messages)
-		.where(and(eq(messages.id, input.messageId), eq(messages.conversationId, input.conversationId)))
-		.limit(1)
-
-	if (!pivot) {
-		return { success: false, error: 'Message not found' as const }
-	}
-
-	await db
-		.delete(messages)
-		.where(and(eq(messages.conversationId, input.conversationId), gt(messages.createdAt, pivot.createdAt)))
-
-	return { success: true as const }
+/**
+ * #24 — what "also restore files" would do for an edit or regenerate at `messageId`: the
+ * files, their line counts and which have uncommitted changes. Changes nothing. A command
+ * rather than a query: it starts a CLI process, and must never be cached or refreshed.
+ */
+export const previewRewind = command(previewRewindSchema, async ({ messageId }) => {
+	const user = requireAuthenticatedRequestUser()
+	return previewMessageRewind({ userId: user.id, messageId })
 })
 
 export const savePartialAssistant = command(savePartialAssistantSchema, async (input) => {

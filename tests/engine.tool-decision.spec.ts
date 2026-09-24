@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { READ_ONLY_TOOL_NAMES } from '../src/lib/agents/builtin-agents.server'
-import { SUBAGENT_TOOL } from '../src/lib/engine/builtin-tools'
+import { BUILTIN_SHELL_TOOLS, BUILTIN_TOOL_SET, SUBAGENT_TOOL } from '../src/lib/engine/builtin-tools'
 import { decideToolCall, type ToolDecisionContext } from '../src/lib/engine/tool-decision'
 import { isToolInScope, resolveToolScope, scopeBuiltinTools } from '../src/lib/engine/tool-scope'
 
@@ -71,6 +71,18 @@ test.describe('tool scope', () => {
 			expect(isToolInScope(scope, name), name).toBe(true)
 		}
 		expect(scope!.inHouse.size).toBe(0)
+	})
+
+	test('a list naming a tool the CLI removed keeps it out of the scope, and out of ours (#35)', () => {
+		// `BashOutput` is only the Bash tool's output type now, and `TaskOutput` is gone too.
+		// Neither is ours either, so neither may become `mcp__agentstudio__BashOutput`.
+		expect([...BUILTIN_SHELL_TOOLS]).toEqual(['Bash', 'TaskStop'])
+		const scope = resolveToolScope(['Bash', 'BashOutput', 'TaskOutput', 'KillShell'], { delegation: false })
+		expect(scopeBuiltinTools(scope)).toEqual(['Bash', 'TaskStop'])
+		expect(scope!.inHouse.size).toBe(0)
+		for (const name of ['BashOutput', 'TaskOutput', 'KillShell', 'KillBash']) {
+			expect(BUILTIN_TOOL_SET.has(name), name).toBe(true)
+		}
 	})
 
 	test("the read-only agents' scope actually leaves out the tools that change things", () => {

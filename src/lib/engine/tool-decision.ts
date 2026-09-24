@@ -25,6 +25,7 @@
 import { guardWorkspaceAccess, type BashPolicy, type GuardDecision } from './workspace-guard'
 import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { isToolInScope, type ToolScope } from './tool-scope'
+import { HOST_OWNED_TOOLS } from './builtin-tools'
 
 export type ToolDecisionContext = {
 	mode: ConversationPermissionMode
@@ -46,6 +47,11 @@ function outOfScopeReason(name: string): string {
 /** Decide one call. `bareName` has our own MCP namespace stripped; anyone else's is kept. */
 export function decideToolCall(ctx: ToolDecisionContext, bareName: string, toolInput: unknown): ToolGateDecision {
 	if (!isToolInScope(ctx.scope, bareName)) return { gate: 'deny', reason: outOfScopeReason(bareName) }
+
+	// A question to the user (#4) is answered by the user, in its own card: there is nothing
+	// for an approval setting or a mode to add, and plan mode is exactly when it is wanted.
+	// `canUseTool` hands it to the host before this answer is ever acted on.
+	if (HOST_OWNED_TOOLS.has(bareName)) return { gate: 'allow', reason: null }
 
 	const containment: GuardDecision = ctx.workspaceRoot
 		? guardWorkspaceAccess({

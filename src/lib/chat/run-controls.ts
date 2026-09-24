@@ -67,7 +67,7 @@ export function approvalAnswerProblem(ok: boolean, status: number, body: unknown
 }
 
 /**
- * What to tell the user when an `ask_user` answer was not recorded, or null when it was.
+ * What to tell the user when an answer to the agent's question was not recorded, or null when it was.
  *
  * `/ask-user` answers a token it cannot find with a 200 and `resolved: false`, and the page
  * read only the status: the modal closed as if the answer had been taken, and the answer

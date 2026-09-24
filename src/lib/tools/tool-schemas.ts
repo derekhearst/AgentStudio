@@ -189,27 +189,6 @@ export const toolSchemas = {
 		additionalDays: z.number().min(0).max(MONITOR_MAX_DEADLINE_DAYS).optional(),
 		additionalChecks: z.number().int().min(0).max(MONITOR_HARD_MAX_CHECKS).optional(),
 	}),
-	ask_user: z.object({
-		questions: z
-			.array(
-				z.object({
-					header: z.string().min(1),
-					question: z.string().min(1),
-					options: z
-						.array(
-							z.object({
-								label: z.string().min(1),
-								description: z.string().optional(),
-								recommended: z.boolean().optional(),
-							}),
-						)
-						.default([]),
-					allowFreeformInput: z.boolean().default(true),
-				}),
-			)
-			.min(1)
-			.max(8),
-	}),
 	list_skills: z.object({}),
 	read_skill: z.object({ name: z.string().min(1) }),
 	read_skill_file: z.object({ skillName: z.string().min(1), fileName: z.string().min(1) }),
@@ -311,8 +290,6 @@ export const toolDescriptions: Record<ToolName, string> = {
 	cancel_monitor: 'Cancel a monitor by id. Terminal — it stops being checked immediately and cannot be resumed; create a new one instead.',
 	extend_monitor:
 		'Push a monitor\'s deadline out and/or top up its check budget. Extension is deliberately explicit — monitors expire on purpose. `additionalDays` is measured from NOW and re-capped at 30 days, so repeated extensions cannot compound into an immortal monitor; `additionalChecks` is added to the existing budget and re-capped. A monitor that expired or exhausted its budget becomes active again if the extension leaves it with both time and budget. A canceled monitor cannot be extended.',
-	ask_user:
-		'Ask the user one or more focused clarifying questions with prefilled answer options. Each question should have ~3 prefilled options — prefer splitting a broad inquiry into multiple focused questions rather than providing many options in a single question. Use when you need explicit user input before proceeding.',
 	list_skills:
 		'List all available skills with their names, descriptions, and nested file names. Use this to discover what skills are available.',
 	read_skill:

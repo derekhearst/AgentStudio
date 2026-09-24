@@ -91,13 +91,15 @@ export const decideApprovalReviewItemCommand = command(decideApprovalSchema, asy
 
 const answerQuestionSchema = z.object({
 	itemId: z.string().uuid(),
-	// Keyed by question header, as the chat's answer card sends them.
+	// Keyed as the answer card sends them: by question text for the SDK's AskUserQuestion (#4),
+	// by header for a question the retired `ask_user` left open. A question is a sentence, so
+	// the key may be longer than a header ever was.
 	answers: z
-		.record(z.string().trim().min(1).max(200), z.string().trim().min(1).max(4000))
+		.record(z.string().trim().min(1).max(2000), z.string().trim().min(1).max(4000))
 		.refine((answers) => Object.keys(answers).length > 0, 'Answer at least one question'),
 })
 
-/** Answer, from /review, the questions a paused run asked with ask_user. */
+/** Answer, from /review, the questions a paused run asked (AskUserQuestion, #4). */
 export const answerQuestionReviewItemCommand = command(answerQuestionSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const { answerQuestionFromReview } = await import('$lib/runs/review-decisions.server')

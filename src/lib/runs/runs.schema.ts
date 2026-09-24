@@ -4,6 +4,7 @@ import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
 import type { SubagentDetails, ToolResultDetails } from '$lib/engine/tool-result-details'
 import type { RunNotice } from '$lib/engine/sdk-notices'
+import type { AskQuestion } from '$lib/engine/ask-user-question'
 import type { SubagentTranscriptEntry } from '$lib/engine/subagent-transcript'
 import type { SubagentSpend } from '$lib/engine/subagent-usage'
 
@@ -34,17 +35,15 @@ export type PendingApprovalEntry = {
 
 export type PendingQuestionEntry = {
 	token: string
-	questions: Array<{
-		header: string
-		question: string
-		options: Array<{
-			label: string
-			description?: string
-			recommended?: boolean
-		}>
-		allowFreeformInput: boolean
-	}>
+	/**
+	 * As `$lib/engine/ask-user-question` normalises them. An AskUserQuestion entry (#4) carries
+	 * `key` — the question text its answer is keyed by — plus `multiSelect` and per-option
+	 * `preview`; an entry left by the retired `ask_user` has neither and is keyed by header.
+	 * jsonb, so the wider shape needed no migration.
+	 */
+	questions: AskQuestion[]
 	requestedAt: string
+	/** Keyed by each question's `answerKey`. */
 	answers?: Record<string, string>
 	decidedAt?: string
 }

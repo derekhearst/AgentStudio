@@ -9,7 +9,8 @@ import type { ToolName } from '../tools/tool-schemas'
  * This used to be the registry's "always loaded" tier (web_search, ask_user, run_code,
  * search_tools), with the rest of the registry reachable only through `search_tools`. #69
  * retired `run_code`, #8 deleted `search_tools` and the tier with it, and these runs never
- * get `ask_user` because nobody is there to answer. That leaves `web_search`.
+ * got `ask_user` because nobody is there to answer — #4 then deleted it for the SDK's own
+ * question tool, which only the chat engine has. That leaves `web_search`.
  *
  * Kept exactly that narrow on purpose. These runs have no approval surface, and deciding
  * what else they may do belongs to moving them onto the engine, not to deleting two tools.

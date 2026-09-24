@@ -2,9 +2,6 @@
  * "Meta" tool handlers — tools that operate on the runtime/loop itself rather than
  * an external resource:
  *   - request_plan_approval: planner→implementer agent handoff (mandatory approval)
- *   - ask_user: only the chat-stream loop fulfills this; the dispatcher reaches it as a
- *     defensive fallback (e.g. someone executes the tool directly without going through
- *     the loop) — return a 'not directly executable' error.
  *   - run_subagent: stateless one-shot LLM call. The chat engine does not register it
  *     (delegation is the SDK's Task tool); the MCP endpoint still lists it.
  */
@@ -18,17 +15,6 @@ import { logger } from '$lib/observability/logger'
 import type { ToolHandler } from '../handler-types'
 
 export const metaHandlers: Record<string, ToolHandler> = {
-	ask_user: async (call, { startedAt }) => {
-		const input = toolSchemas.ask_user.parse(call.arguments)
-		return {
-			success: false,
-			tool: call.name,
-			input,
-			error: 'ask_user must be handled by chat streaming flow and cannot run directly.',
-			executionMs: Date.now() - startedAt,
-		}
-	},
-
 	request_plan_approval: async (call, { startedAt }) => {
 		const input = toolSchemas.request_plan_approval.parse(call.arguments)
 		// Mandatory-approval tool — by the time the executor runs, the user has approved

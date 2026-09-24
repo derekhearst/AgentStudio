@@ -96,14 +96,14 @@ Each chat turn writes one `llm_usage` row, and the same figures go on the assist
 
 - **Every model call counts.** The main agent's calls, the calls of any subagent it handed work to, and the calls the agent makes to compress a long conversation. Before 2026-09-23 only the main agent was counted, so a turn that delegated its heavy lifting looked almost free.
 - **Only this turn counts.** A conversation keeps one agent session across all its turns, and the agent reports usage as a running total for that whole session. The turn's figure is that running total minus the running total at the end of the previous turn, which is saved with the previous reply (`metadata.sessionUsage` on the assistant message). Before 2026-09-23 the running total itself was logged, so turn five recorded turns one to five again — and budget limits, which add these rows up, blocked users long before they had really spent the limit.
-- **Claude models** run on the Claude Code subscription: tokens are recorded and the cost is always zero. **Gateway models** record the agent's own cost estimate for the turn.
+- **Claude models** run on the Claude Code subscription: tokens are recorded and the cost is always zero. **Gateway models** are priced from OpenRouter's catalogue over the turn's own tokens — input and output at the model's prices, cached prompt tokens at its cache prices where the catalogue lists them. The agent's own estimate is not used when the catalogue has a price: for a model it has no price for, it guesses at a Claude rate. The row's metadata says `backend: gateway` and `costBasis`: `catalogue`, `cli-estimate` (no catalogue price, so the agent's estimate for the turn) or `unpriced` (neither; recorded at $0). See [../llm/llm.md](../llm/llm.md).
 
 Edge cases:
 
 | Situation | What is recorded |
 | --- | --- |
 | First turn of a conversation | The whole running total — it is all this turn |
-| No previous total to subtract (an older conversation's first turn after this change, or a session the agent forked) | Only the main agent's tokens; a gateway turn is priced from the model price table. Delegated work is undercounted once, rather than every earlier turn being counted again |
+| No previous total to subtract (an older conversation's first turn after this change, or a session the agent forked) | Only the main agent's tokens, priced from the catalogue on a gateway turn. Delegated work is undercounted once, rather than every earlier turn being counted again |
 | The running total went down (the session's history had no totals saved) | The reported figure, as this turn's own |
 | A turn that failed before its reply was saved | Nothing for that turn; its usage is included in the next turn's figure |
 

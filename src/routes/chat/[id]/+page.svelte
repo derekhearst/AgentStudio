@@ -15,16 +15,24 @@
 	import { savePartialAssistant, setConversationAgent, listAgentsForPicker } from '$lib/chat/chat.remote';
 
 	type AgentChoice = Awaited<ReturnType<typeof listAgentsForPicker>>[number];
-	import { getAvailableModels } from '$lib/llm';
+	import { getEngineModels } from '$lib/llm';
+	import { engineContextLimit } from '$lib/llm/engine-models';
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
+	import { buildChatPageCommands } from '$lib/chat/chat-page-commands';
+	import { searchWorkspaceFiles } from '$lib/chat-console/mentions.remote';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
-	import { consoleState } from '$lib/chat-console/console-state.svelte';
-	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { consoleState, resetConsoleState, setChangedFiles } from '$lib/chat-console/console-state.svelte';
+	import { changedFilesInThread } from '$lib/chat-console/changed-files';
+	import { openLeft } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { toggleRailFromHeader } from '$lib/chat-console/preview-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
 	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
+	import RewindPreviewDialog from '$lib/chat/RewindPreviewDialog.svelte';
+	import { chooseFileRestore, reportFileRestore } from '$lib/chat/rewind-dialog.svelte';
+	import { compactCommand, compactSwitchNotice } from '$lib/chat/compact-command';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -43,6 +51,7 @@
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
 		getAskUserAnswersFromTool,
+		isAskUserToolName,
 		type AskUserOption,
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
@@ -50,6 +59,8 @@
 		appendThinking,
 		applyAskUser,
 		applyAskUserAnswered,
+		askUserTokenFor,
+		settlePendingAskUser,
 		applyDeltaStart,
 		applySubagentDelta,
 		applySubagentDone,
@@ -62,6 +73,8 @@
 		applyToolPending,
 		applyToolProgress,
 		applyToolResult,
+		applyShellOutput,
+		applyShellTaskDone,
 		buildDisplayedMessages,
 		estimateTokens,
 		finalizeText,
@@ -141,7 +154,8 @@
 		systemPromptTokens: number | null;
 	};
 	let liveContextStats = $state<LiveContextStats | null>(null);
-	let availableModels = $derived(await getAvailableModels());
+	// The engine's list, not the catalogue: it is what the composer stores ids from (#9).
+	let engineModels = $derived((await getEngineModels()).models);
 	let appSettings = $derived(await getSettings());
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
 	let consumedInitialPrompt = $state(false);
@@ -171,6 +185,7 @@
 		| {
 				kind: 'askUser';
 				answers: Record<string, string>;
+				token: string;
 		  }
 		| {
 				kind: 'edit';
@@ -235,7 +250,7 @@
 				return;
 			}
 			if (intent.kind === 'askUser') {
-				await resolveAskUser(intent.answers);
+				await resolveAskUser(intent.answers, intent.token);
 				return;
 			}
 			if (intent.kind === 'regenerate') {
@@ -467,10 +482,7 @@
 		return null;
 	});
 
-	const activeContextLimit = $derived.by(() => {
-		const selected = availableModels.find((candidate) => candidate.id === model);
-		return selected?.contextLength && selected.contextLength > 0 ? selected.contextLength : 128000;
-	});
+	const activeContextLimit = $derived(engineContextLimit(engineModels, model));
 	const reservedResponsePct = $derived(appSettings?.contextConfig?.reservedResponsePct ?? 30);
 	const autoCompactThresholdPct = $derived(appSettings?.contextConfig?.autoCompactThresholdPct ?? 72);
 
@@ -749,9 +761,14 @@
 		);
 	}
 
-	async function resolveAskUser(answers: Record<string, string>) {
-		if (!pendingAskUser) return;
-		const { token } = pendingAskUser;
+	/**
+	 * #4 — `cardToken` is the answering card's own token: AskUserQuestion calls run
+	 * concurrently, so two cards can be open and `pendingAskUser` holds only the newest.
+	 * The modal and the composer answer that one.
+	 */
+	async function resolveAskUser(answers: Record<string, string>, cardToken?: string | null) {
+		const token = cardToken ?? pendingAskUser?.token;
+		if (!token) return;
 		try {
 			const response = await fetch(`/chat/${conversationId}/ask-user`, {
 				method: 'POST',
@@ -775,17 +792,22 @@
 			// Do not create optimistic user bubbles for ask_user to avoid ordering/race issues.
 			// The card itself shows the recorded answers (#81).
 			streamingBlocks = applyAskUserAnswered(streamingBlocks, token, answers);
-
-			pendingAskUser = null;
-			askUserModalOpen = false;
+			settleAskUser(token);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Failed to submit ask_user answers',
-				{ kind: 'askUser', answers },
+				{ kind: 'askUser', answers, token },
 				{ token, answerCount: Object.keys(answers).length, action: 'resolveAskUser' }
 			);
 			throw error;
 		}
+	}
+
+	/** A question card was answered or got its result: keep or hand over the pending question. */
+	function settleAskUser(settledToken: string | null) {
+		const next = settlePendingAskUser(streamingBlocks, pendingAskUser, settledToken);
+		if (!next || next.token !== pendingAskUser?.token) askUserModalOpen = false;
+		pendingAskUser = next;
 	}
 
 	function closeAskUserModal() {
@@ -929,6 +951,10 @@
 			}
 
 			if (!response.ok || !response.body) {
+				// A refused send (an unrunnable model, #9) saved nothing, so its bubble must not
+				// stay as if sent; Retry still carries the text. A message the server did save is
+				// back from `refreshAll` in `finally`.
+				pendingUserMessages = pendingUserMessages.filter((message) => message.id !== optimisticUserId);
 				const responseText = await response.text().catch(() => '');
 				throw new Error(
 					`Failed to open stream (status ${response.status})${responseText ? `: ${responseText}` : ''}`
@@ -1007,10 +1033,6 @@
 					}
 
 					if (eventName === 'tool_result') {
-						if (payload.name === 'ask_user') {
-							pendingAskUser = null;
-							askUserModalOpen = false;
-						}
 						const outcome = applyToolResult(streamingBlocks, payload as Parameters<typeof applyToolResult>[1]);
 						if (outcome.missing) {
 							logChatUi('warn', 'tool_result without matching tool block', {
@@ -1024,6 +1046,7 @@
 							});
 						}
 						streamingBlocks = outcome.blocks;
+						if (isAskUserToolName(payload.name)) settleAskUser(askUserTokenFor(streamingBlocks, payload.id));
 					}
 
 					if (eventName === 'tool_denied') {
@@ -1046,6 +1069,14 @@
 							id: payload.id,
 							elapsedSeconds: payload.elapsedSeconds ?? 0,
 						});
+					}
+
+					// #35 — a backgrounded command's live output, and how it ended.
+					if (eventName === 'shell_output' || eventName === 'shell_output_checkpoint') {
+						streamingBlocks = applyShellOutput(streamingBlocks, payload as Parameters<typeof applyShellOutput>[1]);
+					}
+					if (eventName === 'shell_task_done') {
+						streamingBlocks = applyShellTaskDone(streamingBlocks, payload as Parameters<typeof applyShellTaskDone>[1]);
 					}
 
 					if (eventName === 'todo_list') {
@@ -1135,6 +1166,10 @@
 					if (eventName === 'done') {
 						doneReceived = true;
 						waitingForFirstToken = false;
+						// The turn is over, and the CLI session that owned its background commands
+						// with it (#35). Clear the chips now rather than after the reload below.
+						backgroundTasks = [];
+						stoppingTasks = [];
 						if (payload.error) {
 							const message = String(payload.error);
 							setRecoverableError(
@@ -1155,7 +1190,7 @@
 							const fullText = getPartialText(streamingBlocks);
 							const completedToolCalls = getCompletedToolCalls(streamingBlocks);
 							const hasAskUserTool = completedToolCalls.some(
-								(call) => String(call.name ?? '') === 'ask_user'
+								(call) => isAskUserToolName(call.name)
 							);
 							if (!hasAskUserTool && (fullText.trim() || completedToolCalls.length > 0)) {
 								pendingAssistantDrafts = [
@@ -1253,15 +1288,21 @@
 		if (runId && !streaming) attachToRun(runId);
 	});
 
-	async function handleEdit(messageId: string, content: string) {
+	/** Resolves false when nothing was done — the user cancelled — so the editor stays open. */
+	async function handleEdit(messageId: string, content: string): Promise<boolean> {
+		if (streaming) return false;
+		// #24 — whether to restore the files the dropped replies changed. Null: cancelled.
+		const restore = await chooseFileRestore(messageId, 'edit');
+		if (!restore) return false;
 		try {
-			const result = await editMessage({ messageId, content });
+			const result = await editMessage({ messageId, content, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(result?.error ?? 'Unable to edit message', { kind: 'edit', messageId, content }, { action: 'handleEdit' });
-				return;
+				return true;
 			}
 
 			clearRecoverableError();
+			reportFileRestore(result);
 			// Editing creates a new branch point. Clear optimistic remnants so
 			// old assistant drafts cannot be re-shown after the server truncates history.
 			pendingAssistantDrafts = [];
@@ -1274,7 +1315,8 @@
 			stopThinkingInterpolation();
 
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			// The server answers the edited row itself; the content sent here is never the prompt.
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to edit message',
@@ -1282,14 +1324,17 @@
 				{ action: 'handleEdit', messageId }
 			);
 		}
+		return true;
 	}
 
 	async function handleRegenerate() {
 		if (!conversationId || streaming) return;
 		const pivotId = lastUserMessageId;
 		if (!pivotId) return;
+		const restore = await chooseFileRestore(pivotId, 'regenerate');
+		if (!restore) return;
 		try {
-			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId });
+			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(
 					result?.error ?? 'Unable to regenerate response',
@@ -1299,6 +1344,7 @@
 				return;
 			}
 			clearRecoverableError();
+			reportFileRestore(result);
 			pendingAssistantDrafts = [];
 			pendingMessageId = null;
 			streamingBlocks = [];
@@ -1307,7 +1353,7 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to regenerate response',
@@ -1318,8 +1364,7 @@
 	}
 
 	function getContextLimitForModel(modelId: string) {
-		const selected = availableModels.find((candidate) => candidate.id === modelId);
-		return selected?.contextLength && selected.contextLength > 0 ? selected.contextLength : 128000;
+		return engineContextLimit(engineModels, modelId);
 	}
 
 	async function maybeCompactBeforeModelSwitch(nextModel: string) {
@@ -1338,9 +1383,9 @@
 		const projectedPct = nextLimit > 0 ? (contextMetrics.used / nextLimit) * 100 : 0;
 
 		if (nextLimit < currentLimit && projectedPct >= autoCompactThresholdPct) {
-			const compactionPrompt = `Please compact this conversation for handoff to a model with a smaller context window. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary.`;
-			await streamMessage(compactionPrompt, false);
-			modelSwitchNotice = `Auto-compact ran on ${currentModel.split('/').at(-1)} before switching to ${nextModel.split('/').at(-1)}.`;
+			// The SDK's own `/compact`: it really replaces the session's history with a summary.
+			await streamMessage(compactCommand({ handoff: true }), false);
+			modelSwitchNotice = compactSwitchNotice({ failed: Boolean(streamError), from: currentModel, to: nextModel });
 			setTimeout(() => {
 				modelSwitchNotice = null;
 			}, 5000);
@@ -1349,103 +1394,34 @@
 		model = nextModel;
 	}
 
+	/** Finding 80 — the CLI's own `/compact`, which really shrinks the session (`$lib/chat/compact-command`). */
 	async function compactContext() {
 		if (!conversationId || streaming) return;
-		const compactionPrompt = `Please compact this conversation. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary so we can continue from a smaller context.`;
-		await streamMessage(compactionPrompt, false);
+		await streamMessage(compactCommand(), false);
 	}
 
-	// Console-redesign — surface streaming/context data to the right rail.
+	/*
+	 * #14 — what the right rail reads: this chat's id and the files its agent changed.
+	 *
+	 * `pageConversationId` is read once, not derived: the layout remounts this page per
+	 * conversation, and the next chat's page can mount before this one is torn down, so the
+	 * reset below names the chat it is leaving and leaves a newer one alone.
+	 */
+	const pageConversationId = page.params.id ?? '';
+	onDestroy(() => resetConsoleState(pageConversationId));
+
 	$effect(() => {
 		consoleState.conversationId = conversationId || null;
-		consoleState.conversationTitle = conversationData?.conversation.title ?? null;
 	});
 
 	$effect(() => {
-		consoleState.streamingBlocks = streamingBlocks.flatMap((b) => {
-			// Notices are run-level events, not activity — the rail lists what the agent did.
-			if (b.kind === 'notice') return [];
-			if (b.kind === 'tool') {
-				return {
-					kind: 'tool',
-					id: b.id,
-					name: b.name,
-					arguments: b.arguments,
-					status: b.status,
-					result: b.result,
-					executionMs: b.executionMs ?? null,
-				};
-			}
-			if (b.kind === 'thinking') {
-				return { kind: 'thinking', id: b.id, content: b.content };
-			}
-			if (b.kind === 'text') {
-				return { kind: 'text', id: b.id, content: b.content };
-			}
-			return {
-				kind: 'subagent',
-				id: b.id,
-				agentName: b.agentName,
-				task: b.task,
-				status: b.status,
-			};
-		});
-
-		const persisted = (conversationData?.messages ?? [])
-			.flatMap((m) => Array.isArray((m as { toolCalls?: unknown[] }).toolCalls) ? (m as { toolCalls: Array<{ name?: string; success?: boolean }> }).toolCalls : [])
-			.slice(-12)
-			.reverse()
-			.map((tc) => ({
-				name: typeof tc.name === 'string' ? tc.name : 'tool',
-				success: tc.success,
-				ageMin: 0,
-			}));
-		consoleState.persistedToolCalls = persisted;
+		setChangedFiles(
+			changedFilesInThread({ messages, liveBlocks: streamingBlocks, liveMessageId: pendingMessageId }),
+		);
 	});
 
-	// The rail shows the same figure as the header's meter (#78): the stream's own estimate is
-	// the system prompt alone, which read as a nearly empty context from the first turn on.
-	$effect(() => {
-		consoleState.liveContext = conversationData
-			? {
-					tokenEstimate: contextMetrics.used,
-					contextWindow: contextMetrics.total,
-					didCompact: liveContextStats?.didCompact ?? false,
-				}
-			: null;
-	});
-
-	$effect(() => {
-		const totalTokens = (stats ?? []).reduce((sum, s) => sum + (s.tokensIn ?? 0) + (s.tokensOut ?? 0), 0);
-		const totalCost = (stats ?? []).reduce((sum, s) => sum + Number.parseFloat(s.cost ?? '0'), 0);
-		consoleState.totalTokens = totalTokens;
-		consoleState.totalCostUsd = totalCost;
-		const ttftCandidate = (stats ?? []).filter((s) => typeof s.ttftMs === 'number').slice(-1)[0];
-		consoleState.lastTtftMs = ttftCandidate?.ttftMs ?? null;
-	});
-
-	/*
-	 * Deliberately not `$state`: this is read only by the effect below, which also writes
-	 * it. The previous version kept the run's start time on `consoleState.runStatus` and
-	 * read it back to decide whether to keep or reset it — so the effect depended on the
-	 * object it assigned, and since it assigns a fresh object every time it re-triggered
-	 * itself until Svelte gave up with `effect_update_depth_exceeded` and tore down
-	 * reactivity for the subtree. Any page that reached a chat hit it; /agents/new, which
-	 * redirects straight into one, raised it eighteen times on a single load.
-	 */
-	let runStartedAt: number | null = null;
-
-	$effect(() => {
-		const isStreaming = streaming || pendingMessageId !== null;
-		if (!isStreaming) runStartedAt = null;
-		else runStartedAt ??= Date.now();
-
-		consoleState.runStatus = {
-			state: isStreaming ? 'streaming' : 'idle',
-			startedAt: runStartedAt,
-			pendingApprovals: pendingAskUser ? 1 : 0,
-		};
-	});
+	/** The run on screen, for the "running" chip's link to its timeline (/runs/[id]). */
+	const liveRunId = $derived(liveContextStats?.runId ?? null);
 </script>
 
 <div class="flex min-h-0 min-w-0 w-full flex-1 gap-0 overflow-hidden">
@@ -1472,10 +1448,16 @@
 						}}
 					/>
 					{#if streaming}
-						<span class="console-chip is-run">
+						<!-- #14: tool activity lives on the run's own page now, one click from here. -->
+						<svelte:element
+							this={liveRunId ? 'a' : 'span'}
+							class="console-chip is-run"
+							href={liveRunId ? `/runs/${liveRunId}` : undefined}
+							title={liveRunId ? 'Open this run’s timeline' : undefined}
+						>
 							<span class="pulse-dot"></span>
 							running
-						</span>
+						</svelte:element>
 					{/if}
 					{#if pendingAskUser}
 						<span class="console-chip is-warn">awaiting your input</span>
@@ -1499,6 +1481,25 @@
 							</button>
 						</span>
 					{/each}
+				</div>
+				<!--
+					#14: the context ring and the metered cost, as in the mobile header. They sat in
+					the rail's footer, which is folded away by default now. Outside the chips row on
+					purpose: that row clips its overflow, which would cut off the ring's popover.
+				-->
+				<div class="console-topbar__actions items-center">
+					{#if conversationData.conversation.totalCost && Number.parseFloat(String(conversationData.conversation.totalCost)) > 0}
+						<span class="console-chip" title="Metered spend for this conversation">${Number.parseFloat(String(conversationData.conversation.totalCost)).toFixed(4)}</span>
+					{/if}
+					<ContextWindow
+						compact
+						used={contextMetrics.used}
+						total={contextMetrics.total}
+						breakdown={contextMetrics.breakdown}
+						modelUsage={contextMetrics.modelUsage}
+						reservedTargetPct={reservedResponsePct}
+						onCompact={compactContext}
+					/>
 				</div>
 			</div>
 
@@ -1528,7 +1529,7 @@
 					reservedTargetPct={reservedResponsePct}
 					onCompact={compactContext}
 				/>
-				<button type="button" onclick={openRight} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
+				<button type="button" onclick={toggleRailFromHeader} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
 					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<rect x="3" y="4" width="18" height="16" rx="2" />
 						<line x1="15" y1="4" x2="15" y2="20" />
@@ -1547,10 +1548,15 @@
 					}}
 				/>
 				{#if streaming}
-					<span class="console-chip is-run">
+					<svelte:element
+						this={liveRunId ? 'a' : 'span'}
+						class="console-chip is-run"
+						href={liveRunId ? `/runs/${liveRunId}` : undefined}
+						title={liveRunId ? 'Open this run’s timeline' : undefined}
+					>
 						<span class="pulse-dot" style="width:5px;height:5px;border-radius:999px;background:currentColor;display:inline-block;"></span>
 						running
-					</span>
+					</svelte:element>
 				{/if}
 				{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 					<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>
@@ -1607,6 +1613,7 @@
 						onEdit={handleEdit}
 						onRegenerate={handleRegenerate}
 						canRegenerate={!streaming && message.id === lastUserMessageId}
+						canEdit={!streaming}
 						modelChanged={shouldShowModelTag(displayedMessages, i)}
 					/>
 				{/each}
@@ -1628,7 +1635,7 @@
 				-->
 				{:else if streaming && !pendingMessageId}
 					{#each streamingBlocks as block (block.id)}
-						{#if block.kind === 'tool' && block.name === 'ask_user'}
+						{#if block.kind === 'tool' && isAskUserToolName(block.name)}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
 							{@const askAnswers = getAskUserAnswersFromTool(block)}
 							{@const askLive = block.status === 'pending' || block.status === 'approved' || block.status === 'executing'}
@@ -1637,7 +1644,7 @@
 									questions={askQuestions}
 									status={block.status}
 									answers={askAnswers}
-									onSubmit={resolveAskUser}
+									onSubmit={(answers) => resolveAskUser(answers, block.token)}
 								/>
 							{/if}
 						<!--
@@ -1654,7 +1661,7 @@
 							<TodoListCard details={block.details} />
 						{:else if block.kind === 'notice'}
 							<RunNoticeCard notice={block.notice} />
-						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
+						{:else if block.kind === 'tool' && !isAskUserToolName(block.name)}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}
@@ -1722,13 +1729,6 @@
 			/>
 		{/if}
 
-		<!-- Mobile quick chips above composer -->
-		<div class="console-quick">
-			<button type="button"><Icon name="plus" size={12} /> Attach</button>
-			<button type="button">@ Context</button>
-			<button type="button">/ Commands</button>
-		</div>
-
 		<div class="chat-composer-transition w-full">
 
 			<!--
@@ -1768,10 +1768,22 @@
 				onAgentChange={handleAgentChange}
 				onSubmit={(content, attachments) => handleComposerSubmit(content, attachments)}
 				estimatedRemaining={Math.max(0, contextMetrics.total - contextMetrics.used)}
+				onMentionSearch={(q) => searchWorkspaceFiles({ conversationId, q })}
+				commands={buildChatPageCommands({
+					conversationId,
+					streaming: () => streaming,
+					permissionMode: () => conversationData?.conversation.permissionMode,
+					onPermissionModeChange: (next) => {
+						if (conversationData) conversationData.conversation.permissionMode = next;
+					},
+					compact: compactContext,
+					research: handleResearchSubmit,
+				})}
 			/>
 		</div>
 	</section>
 
+	<RewindPreviewDialog />
 </div>
 
 

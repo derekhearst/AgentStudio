@@ -66,7 +66,7 @@ Time-series metrics storage. Rolled up from run events, job logs, and hook invoc
 | Item type                 | Severity | Triggered by                                                |
 | ------------------------- | -------- | ----------------------------------------------------------- |
 | `approval_request`        | critical | Tool call requires human approval                           |
-| `user_question`           | critical | `ask_user` tool call waiting for answer                     |
+| `user_question`           | critical | A question from the agent (AskUserQuestion) waiting for an answer — answerable from the inbox with the same card as the chat |
 | `evaluation_failure`      | warning  | Evaluator returned `fail` verdict                           |
 | `job_failure`             | warning  | Job exhausted all retry attempts                            |
 | `job_stuck`               | warning  | Job whose worker kept dying mid-run, out of attempts        |
