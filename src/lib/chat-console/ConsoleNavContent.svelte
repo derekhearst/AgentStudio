@@ -10,7 +10,7 @@
 	import { getCredits, refreshCredits } from '$lib/llm/credits.remote';
 	import Icon from './Icon.svelte';
 	import ConversationRowMenu from './ConversationRowMenu.svelte';
-	import { dayKey, dayLabel } from '$lib/util/relative-time';
+	import { groupConversations, listTime, type ConversationListView } from '$lib/chat/conversation-order';
 
 	const THEME_STORAGE_KEY = 'AgentStudio-theme';
 	let isDark = $state(true);
@@ -145,63 +145,12 @@
 		});
 	});
 
-	const sorted = $derived.by(() => {
-		const arr = [...filtered];
-		if (sortBy === 'Name') return arr.sort((a, b) => a.title.localeCompare(b.title));
-		if (sortBy === 'Project') {
-			return arr.sort((a, b) => {
-				const ap = a.category ?? 'Uncategorized';
-				const bp = b.category ?? 'Uncategorized';
-				return ap.localeCompare(bp);
-			});
-		}
-		return arr.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-	});
-
-	type Group = { key: string; label: string; items: Conversation[] };
-
-	/**
-	 * Pinned chats (#18) form their own group above the others whatever the grouping, and are
-	 * left out of the groups below. The archive has no pinned group: archiving unpins.
-	 */
-	const grouped = $derived.by((): Group[] => {
-		const pinned = showingArchive ? [] : sorted.filter((c) => c.pinnedAt);
-		const rest = pinned.length > 0 ? sorted.filter((c) => !c.pinnedAt) : sorted;
-		const groups = groupConversations(rest, pinned.length > 0).filter((group) => group.items.length > 0);
-		return pinned.length > 0 ? [{ key: 'pinned', label: 'Pinned', items: pinned }, ...groups] : groups;
-	});
-
 	/*
-	 * Keyed by the day or the category rather than the label: day labels drop the year, so
-	 * the same date a year apart used to produce two groups with one key.
+	 * #18 — the order is `$lib/chat/conversation-order`'s: pinned chats on top by when they were
+	 * pinned, the archive by when each chat was archived, everything else by last activity.
 	 */
-	function groupConversations(list: Conversation[], labelFlat: boolean): Group[] {
-		if (groupBy === 'None') return [{ key: 'group:flat', label: labelFlat ? 'Recent' : '', items: list }];
-		if (groupBy === 'Date') {
-			const m = new Map<string, { label: string; ts: number; items: Conversation[] }>();
-			for (const c of list) {
-				const key = dayKey(c.updatedAt);
-				const existing = m.get(key);
-				if (existing) existing.items.push(c);
-				else {
-					const ds = new Date(c.updatedAt);
-					ds.setHours(0, 0, 0, 0);
-					m.set(key, { label: dayLabel(c.updatedAt), ts: ds.getTime(), items: [c] });
-				}
-			}
-			return [...m.entries()]
-				.sort(([, a], [, b]) => b.ts - a.ts)
-				.map(([key, g]) => ({ key: `day:${key}`, label: g.label, items: g.items }));
-		}
-		const fieldKey: keyof Conversation = groupBy === 'Project' ? 'category' : groupBy === 'Status' ? 'category' : 'category';
-		const m = new Map<string, Conversation[]>();
-		for (const c of list) {
-			const key = (c[fieldKey] as string | null) ?? 'Uncategorized';
-			if (!m.has(key)) m.set(key, []);
-			m.get(key)!.push(c);
-		}
-		return [...m.entries()].map(([key, items]) => ({ key: `category:${key}`, label: key, items }));
-	}
+	const listView = $derived<ConversationListView>(showingArchive ? 'archive' : 'chats');
+	const grouped = $derived(groupConversations(filtered, { sortBy, groupBy, view: listView }));
 
 	/*
 	 * #18 — search in messages and tool calls, on the server. The filter above stays instant
@@ -403,7 +352,7 @@
 							{/if}
 						</span>
 						<span class="t">{conversation.title}</span>
-						<span class="s">· {relativeShort(conversation.updatedAt)}</span>
+						<span class="s">· {relativeShort(listTime(conversation, listView))}</span>
 					</a>
 					<ConversationRowMenu
 						{conversation}
@@ -416,7 +365,7 @@
 		{/each}
 		{#if conversations.length === 0 && messageHits.length === 0}
 			<div class="console-chatempty">{showingArchive ? 'Nothing archived.' : 'No conversations yet'}</div>
-		{:else if sorted.length === 0 && searchStatus === 'idle'}
+		{:else if filtered.length === 0 && searchStatus === 'idle'}
 			<!-- Once the server search runs, its own section says whether anything matched. -->
 			<div class="console-chatempty">No chats match.</div>
 		{/if}
