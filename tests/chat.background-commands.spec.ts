@@ -82,7 +82,7 @@ test.describe('deleting a conversation stops what it is running', () => {
 			})
 			try {
 				const { deleteConversationForUser } = await import('../src/lib/chat/conversation-delete.server')
-				expect(await deleteConversationForUser(userId, conv.id)).toEqual({ deleted: true, stoppedRun: true })
+				expect(await deleteConversationForUser(userId, conv.id)).toEqual({ deleted: true, stoppedRuns: 1 })
 				expect(interrupted).toBe(1)
 				// Stopped while the run could still be found by its conversation, then deleted.
 				expect(existedWhenInterrupted).toBe(true)
@@ -106,7 +106,7 @@ test.describe('deleting a conversation stops what it is running', () => {
 			const release = registerRunHandle(finishedId, fakeHandle(() => interrupted++))
 			try {
 				const { deleteConversationForUser } = await import('../src/lib/chat/conversation-delete.server')
-				expect(await deleteConversationForUser(userId, conv.id)).toEqual({ deleted: true, stoppedRun: false })
+				expect(await deleteConversationForUser(userId, conv.id)).toEqual({ deleted: true, stoppedRuns: 0 })
 				expect(interrupted).toBe(0)
 			} finally {
 				release()
@@ -126,7 +126,7 @@ test.describe('deleting a conversation stops what it is running', () => {
 			const release = registerRunHandle(runId, fakeHandle(() => interrupted++))
 			try {
 				const { deleteConversationForUser } = await import('../src/lib/chat/conversation-delete.server')
-				expect(await deleteConversationForUser(randomUUID(), conv.id)).toEqual({ deleted: false, stoppedRun: false })
+				expect(await deleteConversationForUser(randomUUID(), conv.id)).toEqual({ deleted: false, stoppedRuns: 0 })
 				expect(interrupted).toBe(0)
 				expect(await conversationExists(conv.id)).toBe(true)
 			} finally {

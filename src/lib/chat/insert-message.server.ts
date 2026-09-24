@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { getPostgresErrorCode } from '$lib/db/migrations.server'
 import { messages } from '$lib/sessions/sessions.schema'
+import { scheduleMessageIndex } from '$lib/chat/message-search.server'
 
 type Db = typeof db
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
@@ -26,6 +27,10 @@ const MAX_SEQUENCE_RETRIES = 5
  * savepoint the retry's `MAX(sequence)` lookup failed with 25P02 ("current transaction is
  * aborted") instead — the final assistant reply of a turn was lost whenever a Stop's
  * partial save or a detached run wrote to the conversation at the same moment.
+ *
+ * On the db handle the row is committed on return, so it is handed to conversation search
+ * (#18) in the background. Inside a caller's transaction it is not committed yet; that
+ * caller indexes it after its own commit, or the boot backfill does.
  */
 export async function insertMessageWithSequence(
 	values: InsertValues,
@@ -35,7 +40,7 @@ export async function insertMessageWithSequence(
 	while (true) {
 		attempt += 1
 		try {
-			return await executor.transaction(async (attemptTx) => {
+			const row = await executor.transaction(async (attemptTx) => {
 				const [{ next }] = await attemptTx
 					.select({ next: sql<number>`COALESCE(MAX(${messages.sequence}), 0) + 1` })
 					.from(messages)
@@ -48,6 +53,8 @@ export async function insertMessageWithSequence(
 
 				return row
 			})
+			if (executor === db) scheduleMessageIndex(row)
+			return row
 		} catch (err) {
 			// Postgres unique-violation = SQLSTATE 23505. Drizzle wraps the driver's error, so
 			// the code is read through `cause`. Retry with a fresh max+1 lookup; cap the

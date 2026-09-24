@@ -254,7 +254,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #32 | Multi-agent orchestration | **rebuild** — shipped | SDK `agents` + the `Agent` tool, children in the foreground and in parallel, gated by a PreToolUse hook rather than `canUseTool` |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** — shipped | the SDK's tool answered through `canUseTool`; HTML previews, multi-select, Other, timeout `never` |
-| #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
+| #18 | Conversation pin/archive/search/export | **as filed**, trimmed — shipped | all four are cheap; make archive the default action, not delete |
 | #22 | Slash commands and `@`-mentions | **split** — `@` shipped, `/` shipped over app actions | `@` lists the next turn's workspace; the `/` palette covers the app's own buttons, with SDK commands still to add |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** → **shipped** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs. Shipped as Preview + a real Files tab, collapsed by default; see below |
@@ -401,7 +401,8 @@ that nothing pretends otherwise any more:
   refuses the Read the CLI suggests), and to `tee` into the workspace instead.
 - **Delete.** Deleting a conversation interrupts its live run before the row goes. With no
   `perTaskStopAffordance` declared, the CLI's interrupt also kills its background tasks
-  (`sdk.d.ts`).
+  (`sdk.d.ts`). It shares one delete path with #18, which checks ownership first and waits
+  up to ten seconds for the stopped turn to wind down.
 
 Not done:
 - A command outliving its turn (option B: one `query()` per conversation, fed turn by turn,
@@ -683,6 +684,25 @@ All four parts are cheap and worth doing. Two opinions:
 
 Export to Markdown is ~50 lines and does not need a design.
 
+**Shipped.** Both opinions stand. `conversations.pinned_at` / `archived_at` (migration
+`0079`); archive is the one-click action on a sidebar row and first in its menu, delete is
+last and behind a confirmation that suggests archiving. A message the user sends unarchives;
+an automation posting into the chat does not. Search indexes tool blocks as argued above,
+in a `message_search` side table (a generated tsvector with a GIN index) so the chat page's
+message payload is untouched: each tool call contributes its name, paths, commands, short
+arguments and the links in its output, and every path is also spelled out as segments,
+because Postgres parses `src/lib/engine/options.server.ts` as one token and a search for
+`options` would otherwise miss it. Raw output and file bodies are not indexed. A boot
+backfill indexes history and rebuilds the index when the rules change. One correction to the
+opinion above: deleting a conversation does not take its cost ledger with it — the rows stay
+and lose their run link. Deleting stops the conversation's live turn first — and with it the
+background commands (#35) and delegated children (#32) that end with the turn — and waits up
+to ten seconds for it to wind down; one module does this for both issues. An edited message
+(#24's `editUserMessage`) is re-indexed by its new text, and a delegated child's own calls
+(#32's card transcript, which replaced the delegation's tool block) are indexed and exported
+like the parent's. Export is Markdown plus a complete
+JSON. Details in [docs/chat/chat.md](../chat/chat.md).
+
 ### #22 — composer
 
 Split it. `@`-mentions are unambiguous value and the issue's plan is fine.
@@ -846,7 +866,7 @@ Claude and a gateway model, and each non-Claude model's multi-step tool use. See
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
 6. **#17**, HTTP transport first.
-7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), ~~**#4**~~ (shipped), **#18**, ~~**#14**~~ (shipped).
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), ~~**#4**~~ (shipped), ~~**#18**~~ (shipped), ~~**#14**~~ (shipped).
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or

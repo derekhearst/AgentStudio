@@ -1,4 +1,5 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
@@ -18,9 +19,12 @@ import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { editUserMessage, truncateAfterMessage } from '$lib/chat/message-branch.server'
 import { previewMessageRewind } from '$lib/chat/rewind.server'
-import { listRecentConversations } from '$lib/chat/conversation-list.server'
-import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
+import { listArchivedConversations, listRecentConversations } from '$lib/chat/conversation-list.server'
+import { setConversationArchivedForUser, setConversationPinnedForUser } from '$lib/chat/conversation-lifecycle.server'
 import { deleteConversationForUser } from '$lib/chat/conversation-delete.server'
+import { searchUserConversations } from '$lib/chat/message-search.server'
+import { SEARCH_QUERY_MAX_CHARS, SEARCH_QUERY_MIN_CHARS } from '$lib/chat/conversation-search'
+import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
 import {
 	describePermissionMode,
 	PERMISSION_MODES,
@@ -154,15 +158,19 @@ export const createConversation = command(createConversationSchema, async (input
 	return created
 })
 
+/**
+ * #18, #35 — stops a turn still running in the conversation first, background commands and
+ * delegated agents included, and waits for it to wind down; see `deleteConversationForUser`.
+ */
 export const deleteConversation = command(conversationIdSchema, async (conversationId) => {
 	const user = requireAuthenticatedRequestUser()
-	// Stops a turn still running in it first, background commands included (#35).
 	await deleteConversationForUser(user.id, conversationId)
 	return { success: true }
 })
 
 export const editMessage = command(editMessageSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
+	// #18 — the edited message is re-indexed for search there, once its cut is committed.
 	return editUserMessage({ ...input, userId: user.id })
 })
 
@@ -389,4 +397,50 @@ export const listAgentsForPicker = query(async () => {
 		})
 		.from(agents)
 		.orderBy(builtinOrder, asc(agents.createdAt))
+})
+
+/**
+ * #18 — the archive: archived conversations, most recently archived first. Same row shape
+ * as `getConversations`, which leaves them out.
+ */
+export const getArchivedConversations = query(async () => {
+	const user = requireAuthenticatedRequestUser()
+	return listArchivedConversations(user.id)
+})
+
+const setConversationPinnedSchema = z.object({ id: z.string().uuid(), pinned: z.boolean() })
+
+/** #18 — pin to the top of the sidebar, or unpin. Pinning an archived chat unarchives it. */
+export const setConversationPinned = command(setConversationPinnedSchema, async ({ id, pinned }) => {
+	const user = requireAuthenticatedRequestUser()
+	const state = await setConversationPinnedForUser(user.id, id, pinned)
+	if (!state) error(404, 'Conversation not found')
+	return { success: true as const, ...state }
+})
+
+const setConversationArchivedSchema = z.object({ id: z.string().uuid(), archived: z.boolean() })
+
+/**
+ * #18 — archive (hide from the list, keep everything) or unarchive. The primary way to tidy
+ * the sidebar; `deleteConversation` is the irreversible one. Archiving unpins.
+ */
+export const setConversationArchived = command(setConversationArchivedSchema, async ({ id, archived }) => {
+	const user = requireAuthenticatedRequestUser()
+	const state = await setConversationArchivedForUser(user.id, id, archived)
+	if (!state) error(404, 'Conversation not found')
+	return { success: true as const, ...state }
+})
+
+const searchConversationsSchema = z.object({
+	q: z.string().trim().min(SEARCH_QUERY_MIN_CHARS).max(SEARCH_QUERY_MAX_CHARS),
+	includeArchived: z.boolean().optional(),
+})
+
+/**
+ * #18 — search the caller's conversations: message text and tool calls (file paths,
+ * commands, links), plus titles. One hit per conversation with the best-matching snippet.
+ */
+export const searchConversations = query(searchConversationsSchema, async ({ q, includeArchived }) => {
+	const user = requireAuthenticatedRequestUser()
+	return searchUserConversations(user.id, q, { includeArchived: includeArchived === true })
 })

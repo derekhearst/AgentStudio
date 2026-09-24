@@ -331,7 +331,7 @@ The agent can start a command in the background, such as a dev server, a watcher
 
 **Reloading or reconnecting mid-turn.** A page that is reloaded while the turn runs, or that reconnects after a dropped connection (a phone tab brought back to the front, a network blip), gets only what the server saved. So the server also saves the command's new output every five seconds or so while it keeps changing. A reloaded card catches up to what the command had printed a few seconds earlier, then keeps updating every few seconds instead of every second, and its **live** badge stays true. When the command ends, the card shows the final output that was saved with the reply. If some output never reached the page at all, the card says earlier output is missing rather than passing a fragment off as the whole thing.
 
-**Deleting a conversation stops it first.** If a turn is still running when a conversation is deleted, that turn is stopped, and every background command it started goes with it. Then the conversation is deleted. Before, the conversation disappeared but its turn and commands kept running, with nothing left in the app that could stop them.
+**Deleting a conversation stops it first.** If a turn is still running when a conversation is deleted, that turn is stopped, and every background command it started goes with it. The delete waits up to ten seconds for the stopped turn to save what it had done, then the conversation is deleted (see [chat.md](chat.md#delete-a-conversation)). Before, the conversation disappeared but its turn and commands kept running, with nothing left in the app that could stop them.
 
 Rules:
 

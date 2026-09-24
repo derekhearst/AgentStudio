@@ -15,6 +15,7 @@ import { and, eq, gt } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
+import { scheduleMessageIndex } from '$lib/chat/message-search.server'
 import { applyMessageRewind, isConversationRewinding, type RewindDeps } from './rewind.server'
 import { markCutPending } from './turn-plan.server'
 
@@ -107,10 +108,18 @@ export async function editUserMessage(
 	const prepared = await prepareBranch(input, target.conversationId, deps)
 	if ('error' in prepared) return prepared.error
 
-	await db.transaction(async (tx) => {
-		await tx.update(messages).set({ content: input.content, metadata: markCutPending() }).where(eq(messages.id, target.id))
+	const edited = await db.transaction(async (tx) => {
+		const [row] = await tx
+			.update(messages)
+			.set({ content: input.content, metadata: markCutPending() })
+			.where(eq(messages.id, target.id))
+			.returning()
 		await deleteAfter(tx, target.conversationId, target.sequence)
+		return row
 	})
+	// #18 — committed now, so search finds the message by what it says now. The rows the cut
+	// dropped took their search rows with them (cascade).
+	scheduleMessageIndex(edited)
 	return { success: true, conversationId: target.conversationId, ...prepared }
 }
 

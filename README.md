@@ -8,6 +8,8 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Conversations can be pinned to the top of the sidebar, archived (the everyday way to tidy the list: hidden, never deleted, restored from the Archived view or by replying), renamed, deleted behind a confirmation, and exported as a Markdown transcript or a complete JSON file. The sidebar's search box also searches the whole history on the server — message text and the work each turn did (file paths, commands, links a tool printed) — and shows highlighted extracts. See [docs/chat/chat.md](docs/chat/chat.md).
+
 Shell commands render as a small terminal: the command, its output in a fixed-width font with colour codes cleaned out, the last 20 lines first with a control to show the rest, a copy button, and a badge for how it ended (such as `exit 2`). A command the agent runs in the background (a dev server, a long build) streams its output into that card while the turn runs, shows as a header chip with a stop button, and ends when the reply does; the card and the agent both say so. Deleting a conversation stops its running turn and those commands first. See [docs/chat/spec.md](docs/chat/spec.md#command-output).
 
 Editing a message or regenerating a reply cuts the conversation back so the model sees only what was kept plus the message it is answering. In a project (or an agent with a persistent workspace) the agent's file changes are checkpointed every turn, and Edit and Regenerate offer to restore the files the dropped replies changed — showing the files and line counts first, and asking again before overwriting uncommitted changes in an imported repository. **Compact Conversation** runs the SDK's own `/compact`. See [docs/chat/chat.md](docs/chat/chat.md).
@@ -219,7 +221,7 @@ Notes:
 - Tools (what agents can call, approvals, code execution): `docs/tools/tools.md`
 - Chat plan: `docs/chat/plan.md`
 - Chat spec (composer shortcuts, attachments, safe rendering): `docs/chat/spec.md`
-- Chat: editing, regenerating, restoring files and compacting: `docs/chat/chat.md`
+- Chat (conversations: pin, archive, search, export; editing, regenerating, restoring files and compacting): `docs/chat/chat.md`
 - Models, the subscription and the optional gateway: `docs/llm/llm.md`
 - Memory spec: `docs/memory/spec.md`
 - Automations: `docs/automations/automations.md`
@@ -278,6 +280,7 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
 - `/chat/[id]` Chat detail, with the Preview + Files rail ([docs](docs/chat-console/chat-console.md))
+- `GET /chat/[id]/export?format=md|json` Download one conversation as a Markdown transcript or complete JSON ([docs](docs/chat/chat.md#export-a-conversation))
 - `/runs/[id]` One run's event timeline: every tool call, result and approval ([docs](docs/runs/spec.md))
 - `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
 - `/review` Cost, recent failures, logs and the review inbox
