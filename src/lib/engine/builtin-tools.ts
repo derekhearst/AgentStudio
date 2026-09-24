@@ -26,8 +26,13 @@ export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop
  * and write a `logToolUsage` row per call with an operator-tunable per-call cost. The SDK's
  * are billed server-side and invisible to the ledger, so letting both exist would silently
  * move spend off the books depending on which one the model happened to pick.
+ *
+ * `Workflow`: the CLI's scripted fan-out (`agent()`, `parallel()`, `pipeline()`). Its agents
+ * are not `Agent` calls, so none of them would meet the delegation gate — the concurrency
+ * cap, the per-child budget check, the child card and the child's ledger row (#32). One
+ * delegation channel, gated, rather than two with one of them open.
  */
-export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch'] as const
+export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Workflow'] as const
 
 /**
  * The CLI's current name for each built-in it has renamed, keyed by the old name.
@@ -58,6 +63,19 @@ export function canonicalToolName(name: string): string {
  * tool scope adds it to a run that was given agents, and the capability rules classify it.
  */
 export const SUBAGENT_TOOL = 'Agent'
+
+/**
+ * Every name a delegation can arrive under: the tool's current name and the alias the CLI
+ * still answers to. A call is handed to the hook as `Agent`, but a scripted stream, an older
+ * CLI or a transcript written before the rename says `Task`, and a check that knew only one
+ * spelling would wave the other through ungated (#32).
+ */
+export const DELEGATION_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL, 'Task'])
+
+/** Whether a (bare) tool name is the SDK's delegation tool, under either spelling. */
+export function isDelegationTool(name: string): boolean {
+	return DELEGATION_TOOL_NAMES.has(name)
+}
 
 /** Membership test so an allowlist can carry both surfaces without qualifying built-ins. */
 export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([

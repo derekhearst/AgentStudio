@@ -17,7 +17,7 @@ import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { builtinHandoffNote } from '$lib/agents/builtin-agents.server'
-import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
+import { DELEGATION_POLICY_LINES, SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
 import type { getSettings } from '$lib/settings'
@@ -246,6 +246,8 @@ const ORCHESTRATOR_TOOL_POLICY = [
 	"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
 	'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
 	'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
+	'',
+	...DELEGATION_POLICY_LINES,
 	'',
 	...SUBAGENT_RESULT_POLICY_LINES,
 ].join('\n')

@@ -43,6 +43,18 @@ export type EngineUsage = TokenCounts & { costUsd: number | null }
 /** A session's running totals as of one result: what the next turn subtracts. */
 export type SessionUsage = TokenCounts & { sessionId: string; costUsd: number }
 
+/**
+ * Whether a turn's usage already counts its delegated children (#32).
+ *
+ * A figure read from `modelUsage` covers every model call the query made, children
+ * included; a fallback to `usage` covers the main loop alone. The two halves can differ: the
+ * one producer with no `modelUsage` still reports `total_cost_usd`, which includes children,
+ * next to main-loop tokens that do not. A child's own ledger row is carved out of the parent's
+ * figure where the figure includes it, and added beside it where it does not — so nothing is
+ * counted twice and nothing is lost.
+ */
+export type UsageCoverage = { tokens: boolean; cost: boolean }
+
 const TOKEN_FIELDS = ['inputTokens', 'outputTokens', 'cacheCreationTokens', 'cacheReadTokens'] as const
 
 const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0)
@@ -110,13 +122,22 @@ function continues(later: SessionUsage, earlier: SessionUsage): boolean {
 export function readTurnUsage(
 	result: Record<string, unknown>,
 	context: { resumed: boolean; baseline: SessionUsage | null },
-): { usage: EngineUsage; session: SessionUsage | null } {
+): { usage: EngineUsage; session: SessionUsage | null; includesSubagents: UsageCoverage } {
 	const mainLoop = mainLoopTokens(result)
 	const session = sessionUsageFromResult(result)
+	/** Every model call of the turn, children included — the `modelUsage` paths. */
+	const whole: UsageCoverage = { tokens: true, cost: true }
+	/** The main loop's own counts, and a price left to the caller. */
+	const mainLoopOnly: UsageCoverage = { tokens: false, cost: false }
 
 	if (!session) {
 		const cost = typeof result.total_cost_usd === 'number' ? count(result.total_cost_usd) : 0
-		return { usage: { ...mainLoop, costUsd: context.resumed ? null : cost }, session: null }
+		return {
+			usage: { ...mainLoop, costUsd: context.resumed ? null : cost },
+			session: null,
+			// `total_cost_usd` covers the children; main-loop tokens do not.
+			includesSubagents: { tokens: false, cost: !context.resumed },
+		}
 	}
 
 	const totals: EngineUsage = {
@@ -129,7 +150,7 @@ export function readTurnUsage(
 	const baseline = context.baseline?.sessionId === session.sessionId ? context.baseline : null
 
 	if (baseline) {
-		if (!continues(session, baseline)) return { usage: totals, session }
+		if (!continues(session, baseline)) return { usage: totals, session, includesSubagents: whole }
 		return {
 			usage: {
 				inputTokens: session.inputTokens - baseline.inputTokens,
@@ -140,6 +161,7 @@ export function readTurnUsage(
 				costUsd: Math.max(0, session.costUsd - baseline.costUsd),
 			},
 			session,
+			includesSubagents: whole,
 		}
 	}
 
@@ -149,10 +171,10 @@ export function readTurnUsage(
 	 * logged, so the honest figure is the main loop's own — an undercount of any delegated
 	 * work this one time, rather than every earlier turn counted again.
 	 */
-	if (context.resumed) return { usage: { ...mainLoop, costUsd: null }, session }
+	if (context.resumed) return { usage: { ...mainLoop, costUsd: null }, session, includesSubagents: mainLoopOnly }
 
 	// A fresh session: its running total is this turn.
-	return { usage: totals, session }
+	return { usage: totals, session, includesSubagents: whole }
 }
 
 /** Parse a stored `sessionUsage`, or null when it is missing or not the right shape. */

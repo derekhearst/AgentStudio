@@ -284,6 +284,14 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * so a child transcript can appear either way.
 		 */
 		forwardSubagentText: true,
+		/*
+		 * `perTaskStopAffordance` is deliberately never set (#32). Declared, an interrupt would
+		 * spare running background agents and leave each to be stopped one at a time; absent,
+		 * the CLI "fails closed … an interrupt kills background tasks" (sdk.d.ts). Children run
+		 * in the foreground anyway (`./delegation-gate`), as tool calls inside the turn, so the
+		 * parent's Stop — `interrupt()`, then `close()` in the engine's `finally` — ends them
+		 * with it. Setting this would be the one way to break that.
+		 */
 		// Always set: omitted, the SDK hands the CLI the server's whole environment.
 		env: cliEnv,
 	}

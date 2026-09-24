@@ -38,6 +38,13 @@ export const MAX_STREAM_CHARS = 16_000
 /** Todo items kept. A list longer than this is a runaway, not a plan. */
 export const MAX_TODO_ITEMS = 100
 
+/**
+ * Characters of a child agent's final report kept on its card. The whole report went to the
+ * parent model already; this copy is for a person skimming the transcript, and the child's
+ * forwarded text usually carries the same words.
+ */
+export const MAX_REPORT_CHARS = 4_000
+
 /** One hunk of a unified diff, in the shape the SDK computes it. */
 export type DiffHunk = {
 	oldStart: number
@@ -108,18 +115,64 @@ export type TodoDetails = {
 	truncated: boolean
 }
 
-export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails
+/** Token counts in the ledger's own vocabulary, read off the SDK's `usage` object. */
+export type SubagentUsage = {
+	inputTokens: number
+	outputTokens: number
+	cacheCreationTokens: number
+	cacheReadTokens: number
+}
+
+/**
+ * A delegated child's result (#32) — the SDK's `AgentOutput` for the `Agent` / `Task` tool.
+ *
+ * `completed` is a foreground child that ran to the end, with its report and run totals.
+ * `async_launched` and `remote_launched` are the placeholders a background or remote child
+ * answers with immediately; the delegation gate forces foreground, so they should not occur,
+ * but they are recognised so the card can say what happened instead of claiming a result.
+ *
+ * `usage` and `totalTokens` are what the SDK reports, and it is worth being exact about what
+ * that is: the bundled CLI (2.1.278) fills both from the child's LAST model call — `usage` is
+ * that call's usage object and `totalTokens` its input, cache and output tokens added up,
+ * which is the child's context size at the end plus its final answer. They are not the sum
+ * of everything the child spent. The ledger treats them accordingly (`$lib/costs/subagent-ledger`).
+ */
+export type SubagentDetails = {
+	kind: 'subagent'
+	/** `Agent`, or `Task` from an older CLI. */
+	tool: string
+	status: 'completed' | 'async_launched' | 'remote_launched'
+	/** The SDK's id for the child — what its transcript file is named after. */
+	sdkAgentId: string | null
+	/** The agent key it ran as (`subagent_type`), as the SDK resolved it. */
+	agentType: string | null
+	/** The child's final report, capped at `MAX_REPORT_CHARS`. Empty for a launch placeholder. */
+	report: string
+	reportTruncated: boolean
+	totalTokens: number | null
+	totalToolUseCount: number | null
+	totalDurationMs: number | null
+	/** The child's final model call's usage — see the type note. Null when not reported. */
+	usage: SubagentUsage | null
+	/** The model the child ended on. */
+	resolvedModel: string | null
+}
+
+export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails | SubagentDetails
 
 /** Built-ins whose output this module knows how to distil. */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit'])
 const FILE_WRITE_TOOLS = new Set(['Write'])
 const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+/** Both spellings of the delegation tool; duplicated from `./builtin-tools` to stay import-free. */
+const SUBAGENT_TOOLS = new Set(['Agent', 'Task'])
 
 export function hasToolResultDetails(toolName: string): boolean {
 	return (
 		FILE_EDIT_TOOLS.has(toolName) ||
 		FILE_WRITE_TOOLS.has(toolName) ||
 		SHELL_TOOLS.has(toolName) ||
+		SUBAGENT_TOOLS.has(toolName) ||
 		toolName === 'TodoWrite'
 	)
 }
@@ -302,6 +355,54 @@ function todoDetails(
 	}
 }
 
+function readSubagentUsage(value: unknown): SubagentUsage | null {
+	const usage = asRecord(value)
+	if (!usage) return null
+	const input = num(usage.input_tokens)
+	const output = num(usage.output_tokens)
+	if (input === null && output === null) return null
+	return {
+		inputTokens: Math.max(0, input ?? 0),
+		outputTokens: Math.max(0, output ?? 0),
+		cacheCreationTokens: Math.max(0, num(usage.cache_creation_input_tokens) ?? 0),
+		cacheReadTokens: Math.max(0, num(usage.cache_read_input_tokens) ?? 0),
+	}
+}
+
+function subagentDetails(toolName: string, result: Record<string, unknown>): SubagentDetails | null {
+	const status = result.status
+	if (status !== 'completed' && status !== 'async_launched' && status !== 'remote_launched') return null
+
+	let report = ''
+	let reportTruncated = false
+	if (status === 'completed' && Array.isArray(result.content)) {
+		const text = result.content
+			.map((part) => {
+				const block = asRecord(part)
+				return block?.type === 'text' && typeof block.text === 'string' ? block.text : ''
+			})
+			.filter((part) => part.length > 0)
+			.join('\n\n')
+		reportTruncated = text.length > MAX_REPORT_CHARS
+		report = reportTruncated ? text.slice(0, MAX_REPORT_CHARS) : text
+	}
+
+	return {
+		kind: 'subagent',
+		tool: toolName,
+		status,
+		sdkAgentId: str(result.agentId) ?? str(result.taskId),
+		agentType: str(result.agentType),
+		report,
+		reportTruncated,
+		totalTokens: num(result.totalTokens),
+		totalToolUseCount: num(result.totalToolUseCount),
+		totalDurationMs: num(result.totalDurationMs),
+		usage: status === 'completed' ? readSubagentUsage(result.usage) : null,
+		resolvedModel: str(result.resolvedModel),
+	}
+}
+
 /**
  * Distil one tool call's structured output, or return null to fall back to the generic card.
  *
@@ -327,6 +428,9 @@ export function toolResultDetails(
 		}
 		if (toolName === 'TodoWrite') {
 			return todoDetails(result ?? {}, args)
+		}
+		if (SUBAGENT_TOOLS.has(toolName)) {
+			return result ? subagentDetails(toolName, result) : null
 		}
 	} catch {
 		// Never let a shape surprise kill the turn — the generic card is always a valid answer.
