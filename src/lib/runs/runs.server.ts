@@ -216,6 +216,8 @@ export async function stopChatRun(input: {
 	userId: string
 	conversationId: string
 	runId?: string | null
+	/** What the interrupt is logged as. The Stop button's, unless a caller says otherwise. */
+	reason?: string
 }): Promise<StopChatRunResult> {
 	const live = await db
 		.select({ id: chatRuns.id })
@@ -234,7 +236,7 @@ export async function stopChatRun(input: {
 
 	let stopped = false
 	for (const { id } of live) {
-		if (await interruptRun(id, 'Stopped by the user')) stopped = true
+		if (await interruptRun(id, input.reason ?? 'Stopped by the user')) stopped = true
 	}
 	return stopped ? { stopped: true } : { stopped: false, reason: 'not_reachable' }
 }

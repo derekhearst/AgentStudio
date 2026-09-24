@@ -73,6 +73,8 @@
 		applyToolPending,
 		applyToolProgress,
 		applyToolResult,
+		applyShellOutput,
+		applyShellTaskDone,
 		buildDisplayedMessages,
 		estimateTokens,
 		finalizeText,
@@ -1069,6 +1071,14 @@
 						});
 					}
 
+					// #35 — a backgrounded command's live output, and how it ended.
+					if (eventName === 'shell_output' || eventName === 'shell_output_checkpoint') {
+						streamingBlocks = applyShellOutput(streamingBlocks, payload as Parameters<typeof applyShellOutput>[1]);
+					}
+					if (eventName === 'shell_task_done') {
+						streamingBlocks = applyShellTaskDone(streamingBlocks, payload as Parameters<typeof applyShellTaskDone>[1]);
+					}
+
 					if (eventName === 'todo_list') {
 						// #21 — the agent rewrote its plan. Replace, never merge: `TodoWrite`
 						// sends the whole list every time, and a merge would resurrect an item
@@ -1154,6 +1164,10 @@
 					if (eventName === 'done') {
 						doneReceived = true;
 						waitingForFirstToken = false;
+						// The turn is over, and the CLI session that owned its background commands
+						// with it (#35). Clear the chips now rather than after the reload below.
+						backgroundTasks = [];
+						stoppingTasks = [];
 						if (payload.error) {
 							const message = String(payload.error);
 							setRecoverableError(

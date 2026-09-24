@@ -216,6 +216,65 @@ test.describe('background tasks', () => {
 
 		expect(result?.kind === 'notice' && result.notice.title.includes('worker restart')).toBe(true)
 	})
+
+	test('the task itself comes back beside the notice, so its call can be closed (#35)', () => {
+		const result = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b1',
+			tool_use_id: 'toolu_1',
+			status: 'completed',
+			summary: 'Background command "npm test" completed (exit code 0)',
+			output_file: '/tmp/claude/p/s/tasks/b1.output',
+		})
+		expect(result?.kind === 'notice' && result.notice.title).toBe('A background task finished')
+		expect(result?.kind === 'notice' && result.task).toEqual({
+			taskId: 'b1',
+			toolUseId: 'toolu_1',
+			status: 'completed',
+			outputFile: '/tmp/claude/p/s/tasks/b1.output',
+			exitCode: 0,
+		})
+
+		const failed = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b2',
+			status: 'failed',
+			summary: 'Background command "make" failed with exit code 2',
+			output_file: '',
+		})
+		expect(failed?.kind === 'notice' && failed.task).toEqual({
+			taskId: 'b2',
+			toolUseId: null,
+			status: 'failed',
+			outputFile: null,
+			exitCode: 2,
+		})
+	})
+
+	test('an exit code is only read where the CLI puts it, never out of the description', () => {
+		// The quoted description is the model's; only the CLI's closing words count.
+		const stopped = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b3',
+			status: 'stopped',
+			summary: 'Background command "echo (exit code 5)" was stopped',
+			output_file: '/x',
+		})
+		expect(stopped?.kind === 'notice' && stopped.task?.exitCode).toBeNull()
+
+		const noCode = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b4',
+			status: 'completed',
+			summary: 'Background command "npm run dev" completed',
+			output_file: '/x',
+		})
+		expect(noCode?.kind === 'notice' && noCode.task?.exitCode).toBeNull()
+	})
 })
 
 test.describe('rate limits and progress', () => {

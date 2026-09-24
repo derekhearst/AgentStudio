@@ -15,11 +15,24 @@ import { ASK_USER_QUESTION_TOOL } from './ask-user-question'
 export const BUILTIN_FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep'] as const
 
 /**
- * `TaskStop` is what the CLI calls `KillShell` now (see `LEGACY_TOOL_NAMES`). `BashOutput`
- * no longer exists in the bundled CLI at all — a background command's output is read with
- * `Read` — and stays listed only so an agent configured with it keeps validating.
+ * The shell surface as the bundled CLI names it (#35): `Bash` runs a command, in the
+ * foreground or with `run_in_background`, and `TaskStop` stops a background one.
+ *
+ * `BashOutput` is not a tool any more. In `sdk-tools.d.ts` it is only the *output type* of
+ * `Bash`; the CLI removed the polling tool (and `TaskOutput` after it — `sdk.d.ts` says to
+ * read a background task's output file instead). `KillShell` / `KillBash` are aliases the CLI
+ * resolves to `TaskStop` (`LEGACY_TOOL_NAMES`). Old names an agent may still be configured
+ * with are kept recognisable below, so they are not mistaken for our own MCP tools.
  */
-export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop'] as const
+export const BUILTIN_SHELL_TOOLS = ['Bash', 'TaskStop'] as const
+
+/**
+ * Built-ins the bundled CLI no longer has. Still recognised as built-ins, so a stored agent
+ * config that names one stays a bare name instead of becoming `mcp__agentstudio__BashOutput`,
+ * but never handed to the CLI as part of a tool scope (`./tool-scope`): there is nothing for
+ * it to enable.
+ */
+export const REMOVED_BUILTIN_TOOLS: ReadonlySet<string> = new Set(['BashOutput', 'TaskOutput'])
 
 /**
  * Built-ins we deliberately refuse, because an in-house tool does the same job *and* more.
@@ -74,6 +87,10 @@ export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
 	'NotebookEdit',
 	'TodoWrite',
 	ASK_USER_QUESTION_TOOL,
+	// Old spellings a stored config may still use — see `BUILTIN_SHELL_TOOLS`.
+	'KillShell',
+	'KillBash',
+	...REMOVED_BUILTIN_TOOLS,
 ])
 
 /**

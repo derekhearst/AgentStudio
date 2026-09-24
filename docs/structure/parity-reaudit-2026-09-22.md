@@ -245,9 +245,9 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | # | Title | Verdict | One line |
 | --- | --- | --- | --- |
 | #16 | Render diffs for file edits | **rebuild** | the diff is already in `tool_use_result`; no handler changes needed |
-| #26 | Shell output as a terminal | **rebuild** | same adapter; "stream it live" means background + poll, not a new transport |
+| #26 | Shell output as a terminal | **rebuild** — shipped | same adapter; the card is polished, and live output is #35's host-side tail of the task's output file (there is no `BashOutput` tool to poll) |
 | #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
-| #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
+| #35 | Background work in a turn | **rebuild** — shipped, turn-scoped | chips, notices, stop, live output in the card, honest end-of-turn, stop on delete; surviving between turns needs a conversation-long session (not built) |
 | #24 | Filesystem checkpoints | **rebuild** — shipped | `enableFileCheckpointing` + `rewindFiles()` through a short-lived control session; edit/regenerate now cut the SDK session too |
 | #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
@@ -287,6 +287,31 @@ two modes.
 I would also drop "ANSI colour rendering" from the scope. Monospace, preserved newlines,
 exit-code badge, copy button, collapse past ~20 lines; strip ANSI rather than render it, and
 revisit only if something actually emits colour worth keeping.
+
+**Correction (2026-09-23).** The paragraph above is wrong about the mechanism. In SDK 0.3.278
+`BashOutput` is only the *output type* of `Bash` (`sdk-tools.d.ts`); as a tool it is gone,
+and `sdk.d.ts` says the `TaskOutput` tool was removed too ("Read a background task's output
+file with the Read tool instead"). `KillShell` / `KillBash` are aliases the CLI resolves to
+`TaskStop`. There is nothing to poll. What the CLI does do is write a backgrounded command's
+output to `<temp>/<session id>/tasks/<task id>.output` and name that path in the call's
+result text ("Output is being written to: …") and in `task_notification.output_file`.
+
+**Shipped.** The card (17e2567 plus this pass): monospace with newlines kept, stdout and
+stderr apart, a copy button that copies everything. The polish this pass added:
+- `$lib/chat/terminal-text` strips every escape family rather than only simple CSI: OSC
+  hyperlinks and titles, `ESC(B`, `38:2:` truecolour, private modes. It also resolves
+  bare-`\r` progress-bar redraws to their last state.
+- A long output opens on its last 20 lines with Show all / Show last 20, instead of the
+  whole card starting closed. A failing command's error output used to hide behind a click.
+- An exit-code badge where the CLI reports one. A failed foreground `Bash` has no
+  `BashOutput` at all: the CLI throws, and `tool_use_result` is the string
+  `Error: Exit code N` plus the merged output. That is now distilled into the same card
+  instead of falling back to the generic one. A finished background command's code comes
+  from its `task_notification` summary. A successful foreground command reports no code, so
+  it shows no badge rather than a made-up `exit 0`.
+- `returnCodeInterpretation` (grep's "No matches found") is shown.
+
+Live output is #35's, below.
 
 ### #21 — todo
 
@@ -331,6 +356,60 @@ What is left is the first bullet: reading `backgroundTaskId` off `BashOutput` an
 *live* card rather than a finished one. `ShellDetails` already carries the id; what it needs
 is a card that keeps polling `BashOutput`, which is the same piece of work as #26's live
 output and should be done once, for both.
+
+**Shipped (2026-09-23), turn-scoped.** The "keeps polling `BashOutput`" plan could not work;
+see the #26 correction. The owner chose option A, "turn-scoped, made honest", over a
+conversation-long SDK session. The reason is how the engine runs a turn: it closes the CLI
+after every `result`, and a backgrounded `local_bash` does not hold the result back, so every
+background command dies with its turn. That was true before this work too. What changed is
+that nothing pretends otherwise any more:
+
+- **Tool names.** `BUILTIN_SHELL_TOOLS` is `['Bash', 'TaskStop']`. The old names stay
+  recognised, so a stored agent list that says `KillShell` keeps working and is not turned
+  into an MCP name. A scope drops `BashOutput` / `TaskOutput`. `TaskStop` is not held for
+  approval under `bashPolicy: 'ask'` (it never was a command tool); permission modes still
+  gate it like any other tool, and plan mode refuses it.
+- **Live output.** `$lib/engine/task-output.server` finds the output file in the CLI's
+  result text. It accepts the path only when all of these hold:
+  - it is absolute, has no `..`, and ends `<session id>/tasks/<task id>.output`, with both
+    ids the CLI's own (from `init` and the typed `backgroundTaskId`, never from text);
+  - it is the only such path the text names;
+  - on every read, the file is still a regular file with one link, and its real path
+    (through `$lib/workspace/containment`) keeps that shape. It is opened `O_NOFOLLOW |
+    O_NONBLOCK`, as the CLI opens it, so a named pipe put in its place fails the check at
+    once instead of blocking a threadpool thread on `open()`.
+
+  The file is read once a second on the host. `$lib/engine/background-shells.server` turns
+  each read into a live-only `shell_output` frame and grows the call's persisted block to
+  the same 16k tail. Because the resume replay only has persisted events, what arrived since
+  the last save also goes out as a persisted `shell_output_checkpoint`, at most every 5 s
+  and only when there is something new. A reloaded or reconnected page catches up from
+  those and keeps moving, a few seconds behind. `from` / `to` positions let a connected
+  page skip the checkpoint of what it already has.
+- **How it ended.** `task_notification` now keeps `task_id`, `tool_use_id`, `output_file`
+  and the summary's exit code. The command's card settles through a persisted
+  `shell_task_done` frame, which carries the final output, so a client that reconnected
+  mid-turn still gets it. A notification that arrives before its call's `tool_result` (the
+  CLI emits it the moment a task ends, and a command that exits at once can end before its
+  result is written) is held, and the card is created settled rather than running.
+- **The end of the turn.** A command still running when the turn ends gets one final read,
+  bounded at 2 s so a read that never returns cannot stop the engine closing the CLI or
+  sending `done`, and is marked `ended_with_turn`. One persisted notice lists the commands that were
+  stopped. The page clears the header chips on `done`.
+- **The model is told.** Both tool policies say a background command only runs until the
+  reply ends. They also say its output file is outside the workspace (the containment guard
+  refuses the Read the CLI suggests), and to `tee` into the workspace instead.
+- **Delete.** Deleting a conversation interrupts its live run before the row goes. With no
+  `perTaskStopAffordance` declared, the CLI's interrupt also kills its background tasks
+  (`sdk.d.ts`).
+
+Not done:
+- A command outliving its turn (option B: one `query()` per conversation, fed turn by turn,
+  with a reaper and a channel for turns the model starts on its own). It belongs with #24's
+  control session.
+- "Move to background" for a running foreground command (`Query.backgroundTasks`).
+- A live check on the Linux image that a backgrounded process really dies with
+  `session.close()`. The CLI spawns detached shells.
 
 ### #24 — checkpoints
 
@@ -640,8 +719,9 @@ gone: a research run's page links back to its chat, and a reply's stats popover 
 topbar. Fixed on the way: the phone drawer rendered empty (the mobile CSS hid every
 `.console-rail`), a hydration race showed the previous chat's preview after a quick switch,
 "Open file" on the already-open file did nothing from the Files tab, and the home page showed
-the last chat's rail. The background-task chips stay in the topbar until #35 defines what a
-task row shows. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
+the last chat's rail. The background-task chips stay in the topbar: #35 kept them there, with
+a stop control each, and shows a command's live output in its own card in the thread rather
+than in a rail panel. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
 
 ### #27 — TTS
 

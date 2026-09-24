@@ -70,9 +70,18 @@ export type FileEditDetails = {
 	truncated: boolean
 }
 
+/**
+ * Where a backgrounded command is in its life (#35).
+ *
+ * Background commands end with the turn that started them — the engine closes the CLI after
+ * each turn, and the CLI's own processes go with it — so a command that is still running when
+ * the reply ends is `ended_with_turn`, not `running` forever.
+ */
+export type BackgroundShellStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'ended_with_turn'
+
 export type ShellDetails = {
 	kind: 'shell'
-	/** Bash, BashOutput or KillShell. */
+	/** Always `Bash` now; kept as data because older persisted blocks name other tools. */
 	tool: string
 	command: string | null
 	/** The model's own one-line description of the command, when it supplied one. */
@@ -80,7 +89,7 @@ export type ShellDetails = {
 	stdout: string
 	stderr: string
 	interrupted: boolean
-	/** Present when the command was backgrounded; the handle `BashOutput` / `KillShell` take. */
+	/** Present when the command was backgrounded: the task id `TaskStop` and the stop chip take. */
 	backgroundTaskId: string | null
 	/** Set when the command hit its timeout and the CLI auto-backgrounded it. */
 	timedOutAfterMs: number | null
@@ -88,6 +97,20 @@ export type ShellDetails = {
 	persistedOutputPath: string | null
 	/** True when either stream was clipped to `MAX_STREAM_CHARS` (the tail is what was kept). */
 	truncated: boolean
+	/*
+	 * Everything below is optional so that blocks persisted before it existed still type-check
+	 * and render exactly as they did.
+	 */
+	/**
+	 * The exit code, when the CLI reported one. It does not for a command that succeeded in
+	 * the foreground — `BashOutput` has no such field — only for one that failed (its result
+	 * begins `Exit code N`) and for a background command's completion (`… (exit code N)`).
+	 */
+	exitCode?: number | null
+	/** The CLI's reading of a non-error exit code with a meaning, e.g. grep's 1: "No matches found". */
+	returnCodeInterpretation?: string | null
+	/** A backgrounded command's status, updated live while its turn runs. Absent in the foreground. */
+	background?: { status: BackgroundShellStatus } | null
 }
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed'
@@ -126,7 +149,11 @@ export const MAX_ANSWER_CHARS = 4_000
 /** Built-ins whose output this module knows how to distil. */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit'])
 const FILE_WRITE_TOOLS = new Set(['Write'])
-const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+/**
+ * Only `Bash`. `BashOutput` and `TaskOutput` were removed from the CLI, and `TaskStop` (the
+ * old `KillShell`) answers with `{ message, task_id, task_type }` — no streams to render.
+ */
+const SHELL_TOOLS = new Set(['Bash'])
 
 export function hasToolResultDetails(toolName: string): boolean {
 	return (
@@ -157,6 +184,58 @@ function clipTail(value: unknown): { text: string; truncated: boolean } {
 	if (typeof value !== 'string' || value.length === 0) return { text: '', truncated: false }
 	if (value.length <= MAX_STREAM_CHARS) return { text: value, truncated: false }
 	return { text: value.slice(value.length - MAX_STREAM_CHARS), truncated: true }
+}
+
+/**
+ * Add live output to a stream that is already capped, keeping the same tail `clipTail` keeps.
+ *
+ * Shared by the engine, which grows a background command's persisted block as its output
+ * file grows, and by the chat page, which grows the card from the `shell_output` frames — so
+ * the two cannot disagree about what the last 16k characters are.
+ */
+export function appendStreamTail(current: string, chunk: string): { text: string; truncated: boolean } {
+	return clipTail(`${current}${chunk}`)
+}
+
+/**
+ * A failed `Bash` call, as the CLI reports one.
+ *
+ * A non-zero exit makes the CLI throw, so there is no `BashOutput` object: `tool_use_result`
+ * is the string `Error: Exit code N` followed by the command's output, and the tool_result
+ * the model reads is the same text inside `<tool_use_error>`. The first line is the CLI's own
+ * and the only thing parsed; everything after it is shown as it came. Anything else — a
+ * denial, a pre-spawn error — is not a command's output and is left to the generic card.
+ */
+const FAILED_COMMAND = /^Exit code (-?\d+)[ \t]*(?:\r?\n|$)/
+
+function failedShellDetails(
+	toolName: string,
+	result: string,
+	args: Record<string, unknown> | null,
+): ShellDetails | null {
+	const body = result
+		.replace(/^Error: /, '')
+		.replace(/^<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/, '$1')
+	const match = FAILED_COMMAND.exec(body)
+	if (!match) return null
+	const exitCode = Number(match[1])
+	if (!Number.isSafeInteger(exitCode)) return null
+	// The CLI merges the streams before it throws, so this is one stream, not stderr.
+	const output = clipTail(body.slice(match[0].length))
+	return {
+		kind: 'shell',
+		tool: toolName,
+		command: str(args?.command),
+		description: str(args?.description),
+		stdout: output.text,
+		stderr: '',
+		interrupted: false,
+		backgroundTaskId: null,
+		timedOutAfterMs: null,
+		persistedOutputPath: null,
+		truncated: output.truncated,
+		exitCode,
+	}
 }
 
 function readHunks(value: unknown): DiffHunk[] {
@@ -274,6 +353,7 @@ function shellDetails(
 		timedOutAfterMs: num(result.timedOutAfterMs),
 		persistedOutputPath: str(result.persistedOutputPath) ?? str(result.rawOutputPath),
 		truncated: stdout.truncated || stderr.truncated,
+		returnCodeInterpretation: str(result.returnCodeInterpretation),
 	}
 }
 
@@ -360,6 +440,7 @@ export function toolResultDetails(
 			return result ? fileEditDetails(toolName, result, args) : null
 		}
 		if (SHELL_TOOLS.has(toolName)) {
+			if (typeof toolUseResult === 'string') return failedShellDetails(toolName, toolUseResult, args)
 			return result ? shellDetails(toolName, result, args) : null
 		}
 		if (toolName === 'TodoWrite') {

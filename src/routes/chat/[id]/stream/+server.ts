@@ -477,8 +477,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 * `notice` and `background_tasks` are NOT in this set on purpose: they are sparse,
 			 * and a client that reconnects mid-turn should still learn that the context was
 			 * compacted or that three commands are running in the background.
+			 *
+			 * `shell_output` (#35) is a background command's output, read once a second while it
+			 * runs — a row per tick would be the same flood. A reconnecting client catches up from
+			 * `shell_output_checkpoint` instead, the same output saved every few seconds, and from
+			 * `shell_task_done`, which carries the final output.
 			 */
-			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress'])
+			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress', 'shell_output'])
 
 			/** Closing a cancelled controller throws as well, and is just as harmless. */
 			const closeStream = (c: ReadableStreamDefaultController<Uint8Array>) => {
