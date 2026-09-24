@@ -67,8 +67,7 @@ import { runEngineStream } from '$lib/engine/stream.server'
 import { claimRun, registerRunHandle } from '$lib/engine/run-registry.server'
 import { turnInProgress } from '$lib/runs/live-chat-run.server'
 import { loadSubagentRoster } from '$lib/engine/agent-definitions.server'
-import { createChatDelegationGate } from '$lib/chat/stream-delegation.server'
-import { recordSubagentUsage } from '$lib/costs/subagent-ledger.server'
+import { createChatDelegation } from '$lib/chat/stream-delegation.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
@@ -536,6 +535,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
 
+				// #32 — the concurrency cap, the one-level rule and each child's budget check, and a
+				// ledger row for each child the moment it reports back.
+				const delegation = createChatDelegation({
+					userId: user.id,
+					conversationId: body.conversationId,
+					parentAgentId: conversation.agentId ?? null,
+					agentIdByKey: roster.agentIdByKey,
+					parentIsClaude: isClaudeModel(routedModel),
+					routedModel,
+					runId: run.id,
+				})
 				const summary = await runEngineStream(
 					{
 						prompt: preparedPrompt.content
@@ -543,14 +553,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							: preparedPrompt.text,
 						options: engineOptions,
 						emit,
-						// #32 — the concurrency cap, the one-level rule and each child's budget check.
-						delegation: createChatDelegationGate({
-							userId: user.id,
-							conversationId: body.conversationId,
-							parentAgentId: conversation.agentId ?? null,
-							agentIdByKey: roster.agentIdByKey,
-							parentIsClaude: isClaudeModel(routedModel),
-						}),
+						delegation: delegation.gate,
+						onSubagentDone: delegation.ledger.record,
 						/*
 						 * Every completed call gets a ledger row. Before this, only `web_search`
 						 * and the media generators wrote one, so the entire built-in filesystem
@@ -657,19 +661,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				}
 
 				const claudeRun = isClaudeModel(routedModel)
-				// #32 — each delegated child gets its own ledger row, carved out of the turn's usage
-				// rather than added to it, and its cost stamped on its card before the blocks persist.
-				const { parentUsage, childCostUsd } = await recordSubagentUsage({
+				// #32 — the children's rows are carved out of the turn's usage rather than added to
+				// it, and each child's cost is on its card before the blocks persist.
+				const { parentUsage, childCostUsd } = await delegation.ledger.settle({
 					blocks: summary.blocks,
 					usage: summary.usage,
 					coverage: summary.usageIncludesSubagents,
-					claudeRun,
-					routedModel,
-					conversationId: body.conversationId,
-					parentAgentId: conversation.agentId ?? null,
-					agentIdByKey: roster.agentIdByKey,
-					userId: user.id,
-					runId: run.id,
 				})
 
 				await persistRunBlocks(run.id, summary.blocks)

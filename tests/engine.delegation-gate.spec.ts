@@ -89,9 +89,11 @@ test.describe('one level deep', () => {
 	})
 
 	test('no subagent definition offers a way to delegate, or to fan out by script', () => {
-		for (const name of ['Agent', 'Task', 'Workflow']) expect(SUBAGENT_DISALLOWED_TOOLS).toContain(name)
-		// Workflow is off for the parent too: its agents would never meet this gate.
+		for (const name of ['Agent', 'Task', 'Workflow', 'SendMessage']) expect(SUBAGENT_DISALLOWED_TOOLS).toContain(name)
+		// Workflow is off for the parent too: its agents would never meet this gate. So is
+		// SendMessage, which can wake a finished child outside any `Agent` call.
 		expect(DISALLOWED_BUILTIN_TOOLS).toContain('Workflow')
+		expect(DISALLOWED_BUILTIN_TOOLS).toContain('SendMessage')
 	})
 
 	test('both spellings of the tool are the delegation tool', () => {
@@ -229,8 +231,11 @@ test.describe('what the rest of the app is told', () => {
 
 	test('the chat stream hands every turn a delegation gate and writes the children to the ledger', () => {
 		const route = readFileSync(resolve('src/routes/chat/[id]/stream/+server.ts'), 'utf8')
-		expect(route).toMatch(/delegation:\s*createChatDelegationGate\(/)
-		expect(route).toMatch(/await recordSubagentUsage\(/)
+		expect(route).toMatch(/const delegation = createChatDelegation\(/)
+		expect(route).toMatch(/delegation:\s*delegation\.gate,/)
+		// Each child is booked as its card closes, so the next child's budget check sees it.
+		expect(route).toMatch(/onSubagentDone:\s*delegation\.ledger\.record,/)
+		expect(route).toMatch(/await delegation\.ledger\.settle\(/)
 		// The parent's row is what is left once the children are carved out.
 		expect(route).toMatch(/tokensIn:\s*parentUsage\.inputTokens/)
 	})

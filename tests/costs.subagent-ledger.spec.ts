@@ -53,6 +53,16 @@ function child(id: string, agentName: string, d?: SubagentDetails, status: 'comp
 	} satisfies StreamBlock
 }
 
+/** What the engine added up over a child's model calls (`block.usage`). */
+const spend = {
+	inputTokens: 1_300,
+	outputTokens: 450,
+	cacheCreationTokens: 10,
+	cacheReadTokens: 9_000,
+	modelCalls: 7,
+	model: 'claude-haiku-4-5-20251001',
+}
+
 test.describe('a row per child', () => {
 	test('charged to the child agent, at the model it ended on, with its final call usage', () => {
 		const [row] = subagentLedgerRows([child('a1', 'reviewer', details())], context())
@@ -87,18 +97,51 @@ test.describe('a row per child', () => {
 		expect(row.agentId).toBe(PARENT_AGENT)
 	})
 
-	test('a child that reported nothing has no row: refused, failed, stopped, or still launching', () => {
+	test('a child that spent nothing anyone saw has no row: refused, or still launching', () => {
 		const rows = subagentLedgerRows(
 			[
 				child('a1', 'reviewer', undefined, 'failed'),
 				child('a2', 'reviewer', undefined, 'stopped'),
 				child('a3', 'reviewer', details({ status: 'async_launched', usage: null })),
 				child('a4', 'reviewer', details({ usage: null })),
+				{ ...child('a5', 'reviewer'), usage: { ...spend, inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 } },
 				{ kind: 'text', content: 'parent prose' },
 			],
 			context(),
 		)
 		expect(rows).toEqual([])
+	})
+})
+
+test.describe("a row carries everything the child's calls spent", () => {
+	test('the sum over its model calls, not the final call the SDK reports', () => {
+		const [row] = subagentLedgerRows([{ ...child('a1', 'reviewer', details()), usage: spend }], context())
+		expect(row).toMatchObject({ tokensIn: 1_300, tokensOut: 450, tokensCacheWrite: 10, tokensCacheRead: 9_000 })
+		expect(row.metadata).toMatchObject({ usageBasis: 'model_calls', modelCalls: 7, status: 'completed' })
+		// The SDK's resolved name still wins for the model column.
+		expect(row.model).toBe('claude-haiku-4-5')
+	})
+
+	test('a failed or stopped child is charged for what it spent before it ended', () => {
+		const rows = subagentLedgerRows(
+			[
+				{ ...child('a1', 'reviewer', undefined, 'stopped'), usage: spend },
+				{ ...child('a2', 'reviewer', undefined, 'failed'), usage: { ...spend, modelCalls: 2 } },
+			],
+			context(),
+		)
+		expect(rows.map((r) => [r.toolUseId, r.tokensIn, r.metadata.status])).toEqual([
+			['a1', 1_300, 'stopped'],
+			['a2', 1_300, 'failed'],
+		])
+		// With no typed result, the model is what its own calls said, on the Claude login.
+		expect(rows[0].model).toBe('claude-haiku-4-5-20251001')
+		// On the gateway those names are not the catalogue's, so the parent's model is priced.
+		const gateway = subagentLedgerRows(
+			[{ ...child('a1', 'reviewer', undefined, 'stopped'), usage: spend }],
+			context({ claudeRun: false, routedModel: 'openai/gpt-5' }),
+		)
+		expect(gateway[0].model).toBe('openai/gpt-5')
 	})
 })
 

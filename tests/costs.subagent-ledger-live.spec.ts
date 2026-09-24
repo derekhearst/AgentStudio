@@ -165,10 +165,91 @@ test("a child whose agent is over its budget is refused before it starts", async
 		})
 		const verdict = await gate.admit({ toolUseId: 'toolu_1', toolInput: { subagent_type: 'reviewer', prompt: 'p' } })
 		expect(verdict.admit).toBe(false)
+		// The same review item a blocked chat opens, for this conversation.
+		await expect
+			.poll(async () => {
+				const [{ count }] = await sql<{ count: number }[]>`
+					select count(*)::int as count from review_items
+					where type = 'policy_override_request' and payload->>'conversationId' = ${ids.conversationId}
+				`
+				return count
+			})
+			.toBe(1)
 		expect(!verdict.admit && verdict.reason).toMatch(/^Refused: Budget cap exceeded: .* limit/)
 		expect(gate.live()).toBe(0)
 	} finally {
 		await sql`delete from budget_alerts where user_id = ${ids.userId} and budget_limit_id in (select id from budget_limits where scope_id = ${ids.childId})`
+		// The block also opens a review item, fire-and-forget: wait for it, then take it away,
+		// so no run leaves a warning in the shared inbox (its summary carries no test prefix).
+		for (let attempt = 0; attempt < 25; attempt++) {
+			const [{ count }] = await sql<{ count: number }[]>`
+				select count(*)::int as count from review_items where payload->>'conversationId' = ${ids.conversationId}
+			`
+			if (count > 0) break
+			await new Promise((resolve) => setTimeout(resolve, 200))
+		}
+		await sql`delete from review_items where payload->>'conversationId' = ${ids.conversationId}`
+		await cleanup(prefix, ids)
+	}
+})
+
+test('a child is booked the moment it reports back, once, and the turn settles around it', async () => {
+	const prefix = uniquePrefix('subagent-ledger-now')
+	await cleanupPrefixedRecords(prefix)
+	const ids = await seed(prefix)
+	const sql = getSql()
+	try {
+		const { createChatDelegation } = await import('../src/lib/chat/stream-delegation.server')
+		const { ledger } = createChatDelegation({
+			userId: ids.userId,
+			conversationId: ids.conversationId,
+			parentAgentId: ids.parentId,
+			agentIdByKey: { reviewer: ids.childId },
+			parentIsClaude: true,
+			routedModel: 'claude-sonnet-4-5',
+			runId: ids.runId,
+		})
+		// Stopped partway, after seven model calls the engine added up.
+		const block: StreamBlock = {
+			kind: 'subagent',
+			agentId: 'toolu_child_1',
+			agentName: 'reviewer',
+			conversationId: null,
+			task: 'Review it',
+			content: 'half',
+			success: false,
+			status: 'stopped',
+			usage: {
+				inputTokens: 1_300,
+				outputTokens: 450,
+				cacheCreationTokens: 0,
+				cacheReadTokens: 9_000,
+				modelCalls: 7,
+				model: 'claude-haiku-4-5',
+			},
+		}
+		const rowsNow = async () =>
+			sql<{ source: string; tokens_in: number; agent_id: string; metadata: Record<string, unknown> }[]>`
+				select source, tokens_in, agent_id, metadata from llm_usage where run_id = ${ids.runId}
+			`
+
+		// Mid-turn: the row is in the ledger now, where the next child's budget check reads.
+		await ledger.record(block)
+		const [row] = await rowsNow()
+		expect(row).toMatchObject({ source: 'subagent', tokens_in: 1_300, agent_id: ids.childId })
+		expect(row.metadata).toMatchObject({ usageBasis: 'model_calls', modelCalls: 7, status: 'stopped' })
+		expect(block.kind === 'subagent' && block.costUsd).toBe(0)
+
+		// Booking it again, and settling the turn, writes nothing more.
+		await ledger.record(block)
+		const { parentUsage } = await ledger.settle({
+			blocks: [block],
+			usage: { inputTokens: 5_000, outputTokens: 900, cacheCreationTokens: 0, cacheReadTokens: 20_000, costUsd: 0 },
+			coverage: { tokens: true, cost: true },
+		})
+		expect(await rowsNow()).toHaveLength(1)
+		expect(parentUsage).toMatchObject({ inputTokens: 3_700, outputTokens: 450, cacheReadTokens: 11_000 })
+	} finally {
 		await cleanup(prefix, ids)
 	}
 })
