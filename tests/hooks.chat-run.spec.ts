@@ -192,7 +192,12 @@ test.describe('hooks/chat-run — the stream route uses it', () => {
 		// Inside `emit`, which every frame passes through — the engine's and the route's own.
 		const emitBody = /const emit = async \(event: string, payload: unknown\) => \{([\s\S]*?)\n\t\t\t\}/.exec(source)
 		expect(emitBody?.[1]).toContain('hooks.frame(event, payload)')
-		expect(source.indexOf('hooks.runStarted()')).toBeLessThan(source.indexOf('await runEngineStream('))
+		// The engine call sits inside `runWithResumeFallback` (#24), which may make it twice; the
+		// turn is opened once, before either attempt.
+		const engineCall = source.search(/runEngineStream\(/)
+		expect(engineCall).toBeGreaterThan(-1)
+		expect(source.indexOf('hooks.runStarted()')).toBeGreaterThan(-1)
+		expect(source.indexOf('hooks.runStarted()')).toBeLessThan(engineCall)
 		expect(source.match(/hooks\.runFinished\(/g)?.length).toBe(2)
 		// The agent the turn runs as, so the default Chat agent's bindings apply too.
 		expect(source).toMatch(/createChatRunHooks\(\{[\s\S]*?agentId: agent\.id/)

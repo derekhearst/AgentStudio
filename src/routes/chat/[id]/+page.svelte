@@ -30,6 +30,9 @@
 	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
 	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
+	import RewindPreviewDialog from '$lib/chat/RewindPreviewDialog.svelte';
+	import { chooseFileRestore, reportFileRestore } from '$lib/chat/rewind-dialog.svelte';
+	import { compactCommand, compactSwitchNotice } from '$lib/chat/compact-command';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -1258,15 +1261,21 @@
 		if (runId && !streaming) attachToRun(runId);
 	});
 
-	async function handleEdit(messageId: string, content: string) {
+	/** Resolves false when nothing was done — the user cancelled — so the editor stays open. */
+	async function handleEdit(messageId: string, content: string): Promise<boolean> {
+		if (streaming) return false;
+		// #24 — whether to restore the files the dropped replies changed. Null: cancelled.
+		const restore = await chooseFileRestore(messageId, 'edit');
+		if (!restore) return false;
 		try {
-			const result = await editMessage({ messageId, content });
+			const result = await editMessage({ messageId, content, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(result?.error ?? 'Unable to edit message', { kind: 'edit', messageId, content }, { action: 'handleEdit' });
-				return;
+				return true;
 			}
 
 			clearRecoverableError();
+			reportFileRestore(result);
 			// Editing creates a new branch point. Clear optimistic remnants so
 			// old assistant drafts cannot be re-shown after the server truncates history.
 			pendingAssistantDrafts = [];
@@ -1279,7 +1288,8 @@
 			stopThinkingInterpolation();
 
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			// The server answers the edited row itself; the content sent here is never the prompt.
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to edit message',
@@ -1287,14 +1297,17 @@
 				{ action: 'handleEdit', messageId }
 			);
 		}
+		return true;
 	}
 
 	async function handleRegenerate() {
 		if (!conversationId || streaming) return;
 		const pivotId = lastUserMessageId;
 		if (!pivotId) return;
+		const restore = await chooseFileRestore(pivotId, 'regenerate');
+		if (!restore) return;
 		try {
-			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId });
+			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(
 					result?.error ?? 'Unable to regenerate response',
@@ -1304,6 +1317,7 @@
 				return;
 			}
 			clearRecoverableError();
+			reportFileRestore(result);
 			pendingAssistantDrafts = [];
 			pendingMessageId = null;
 			streamingBlocks = [];
@@ -1312,7 +1326,7 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to regenerate response',
@@ -1342,9 +1356,9 @@
 		const projectedPct = nextLimit > 0 ? (contextMetrics.used / nextLimit) * 100 : 0;
 
 		if (nextLimit < currentLimit && projectedPct >= autoCompactThresholdPct) {
-			const compactionPrompt = `Please compact this conversation for handoff to a model with a smaller context window. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary.`;
-			await streamMessage(compactionPrompt, false);
-			modelSwitchNotice = `Auto-compact ran on ${currentModel.split('/').at(-1)} before switching to ${nextModel.split('/').at(-1)}.`;
+			// The SDK's own `/compact`: it really replaces the session's history with a summary.
+			await streamMessage(compactCommand({ handoff: true }), false);
+			modelSwitchNotice = compactSwitchNotice({ failed: Boolean(streamError), from: currentModel, to: nextModel });
 			setTimeout(() => {
 				modelSwitchNotice = null;
 			}, 5000);
@@ -1353,10 +1367,10 @@
 		model = nextModel;
 	}
 
+	/** Finding 80 — the CLI's own `/compact`, which really shrinks the session (`$lib/chat/compact-command`). */
 	async function compactContext() {
 		if (!conversationId || streaming) return;
-		const compactionPrompt = `Please compact this conversation. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary so we can continue from a smaller context.`;
-		await streamMessage(compactionPrompt, false);
+		await streamMessage(compactCommand(), false);
 	}
 
 	/*
@@ -1572,6 +1586,7 @@
 						onEdit={handleEdit}
 						onRegenerate={handleRegenerate}
 						canRegenerate={!streaming && message.id === lastUserMessageId}
+						canEdit={!streaming}
 						modelChanged={shouldShowModelTag(displayedMessages, i)}
 					/>
 				{/each}
@@ -1736,6 +1751,7 @@
 		</div>
 	</section>
 
+	<RewindPreviewDialog />
 </div>
 
 

@@ -16,6 +16,8 @@ import {
 import { sse } from './chat-stream-script'
 import { SUBSCRIPTION_MODEL_IDS } from '../src/lib/engine/model-backend'
 import { claudeDisplayName } from '../src/lib/llm/engine-models'
+// The Compact button's prompt (#24): the CLI's own `/compact`, not a request for a summary.
+import { compactCommand as sdkCompactPrompt } from '../src/lib/chat/compact-command'
 
 /**
  * #22 — `@` file mentions and the `/` command palette, driven through the chat page on both
@@ -375,7 +377,8 @@ test.describe('chat composer — / commands', () => {
 			await composer.press('Enter')
 
 			await expect.poll(() => sends.length, { timeout: 15_000 }).toBe(1)
-			expect(sends[0].content).toMatch(/^Please compact this conversation/)
+			// The button's handler sends the CLI's own `/compact` (#24), so the palette does too.
+			expect(sends[0].content).toBe(sdkCompactPrompt())
 			await expect(composer).toHaveValue('')
 		} finally {
 			await cleanup(prefix, seeded)

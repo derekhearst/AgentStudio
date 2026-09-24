@@ -145,7 +145,7 @@ Typing `/` as the very first character of the message opens the command palette.
 
 | Command | What it does | Available |
 | --- | --- | --- |
-| `/compact` | Asks the agent to summarise the conversation so far, to free up context. The same as Compact on the context meter | In a chat, when no reply is running |
+| `/compact` | Compacts the conversation to free up context: runs the Agent SDK's own `/compact`, which summarises the conversation and starts the session again from that summary (see [chat.md](chat.md#compacting-a-conversation)). The same as Compact on the context meter | In a chat, when no reply is running |
 | `/model <model>` | Switches the model for the next message. It lists the same models as the model picker: only models that can run here, with gateway models marked "Gateway · paid" (see [docs/llm/llm.md](../llm/llm.md)) | Everywhere |
 | `/agent <agent>` | Hands the conversation to another agent | Everywhere, when there are agents to pick |
 | `/research <question>` | Starts a deep research run on the question and opens its page | In a chat |
@@ -316,9 +316,13 @@ The context meter above the composer, and the context ring in the chat's header 
 | Messages | Estimated from the text of every message in the conversation |
 | Tool results | Estimated from the saved output of every tool call. Each reply's output is counted once, from its saved steps when it has them |
 
-Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page asks the agent to summarise the conversation first if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure.
+Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page compacts the conversation first (the SDK's own `/compact`) if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure. **Compact Conversation** runs the same command; see [chat.md](chat.md#compacting-a-conversation).
 
 A reply saved after Stop or an error keeps its tool output in two places. The meter counts it once, so a stopped turn with a large command output does not read as twice its size or set off that summary early.
+
+### Editing, regenerating and restoring files
+
+Editing one of your messages, or regenerating the last reply, cuts the SDK session back to the reply before that message and answers the message's own stored text, so the model never sees the replies you dropped. In a project, the same action can also restore the files those replies changed, after showing what it would restore. How it works, and what it cannot undo: [chat.md](chat.md).
 
 ### Mobile and compact layout
 
@@ -362,6 +366,8 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Messages keep their order when two writers add to a conversation at the same moment (a Stop saving what was written so far while the turn saves its final reply, or a background run). The one that loses the race takes the next position and is still saved.
 - A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
 - Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
+- After an edit or regenerate the model sees exactly the kept conversation plus the message being answered — never the dropped replies, and never a placeholder prompt.
+- Restoring files happens before any message changes, and a restore that fails leaves the conversation as it was. Uncommitted changes in an imported repository are never overwritten without an explicit confirmation.
 - A path offered by `@` is one the next turn can open as written: it is relative to the folder that turn starts in, and it never reaches through a symbolic link.
 - A palette command calls the same handler as the button it stands in for. The palette has no copy of its own of any action.
 

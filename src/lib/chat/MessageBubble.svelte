@@ -40,12 +40,16 @@
 		onEdit,
 		onRegenerate,
 		canRegenerate = false,
+		canEdit = true,
 		modelChanged = true,
 	} = $props<{
 		message: MessageRow;
-		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
+		/** Resolves `false` when nothing was done (the user cancelled), which keeps the editor open. */
+		onEdit?: ((messageId: string, content: string) => Promise<boolean | void> | boolean | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
 		canRegenerate?: boolean;
+		/** False while a reply is streaming: an edit would cut the conversation out from under it. */
+		canEdit?: boolean;
 		/**
 		 * Whether this message's model differs from the previous assistant message's.
 		 * The tag is noise when it repeats down a whole conversation; it earns its place
@@ -116,6 +120,9 @@
 		if (!editing) return;
 
 		const onPointerDown = (event: PointerEvent) => {
+			// While a save is pending the page may be asking about restoring files (#24); a click
+			// in that dialog is not a click away from the editor.
+			if (editingBusy) return;
 			const target = event.target;
 			if (editorRoot && target instanceof Node && !editorRoot.contains(target)) {
 				cancelEditing();
@@ -123,7 +130,7 @@
 		};
 
 		const onEscape = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
+			if (event.key === 'Escape' && !editingBusy) {
 				event.preventDefault();
 				cancelEditing();
 			}
@@ -154,8 +161,8 @@
 		if (!trimmed || editingBusy) return;
 		editingBusy = true;
 		try {
-			await onEdit?.(message.id, trimmed);
-			editing = false;
+			const done = await onEdit?.(message.id, trimmed);
+			if (done !== false) editing = false;
 		} finally {
 			editingBusy = false;
 		}
@@ -228,9 +235,11 @@
 					<p class="whitespace-pre-wrap">{message.content}</p>
 				</div>
 				<div class="console-msg__actions">
-					<button class="console-pill" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
-						<i class="mdi mdi-pencil-outline" aria-hidden="true"></i>
-					</button>
+					{#if canEdit}
+						<button class="console-pill" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
+							<i class="mdi mdi-pencil-outline" aria-hidden="true"></i>
+						</button>
+					{/if}
 					{#if canRegenerate}
 						<button class="console-pill" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
 							<i class="mdi mdi-refresh" aria-hidden="true"></i>

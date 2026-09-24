@@ -11,7 +11,8 @@ import {
  * #22 — the `/` commands only a conversation page can offer, wired to the handlers its own
  * buttons use. Kept out of the page so the page passes one prop.
  *
- * - `/compact` is the context meter's Compact button (a summarise-this-conversation turn).
+ * - `/compact` is the context meter's Compact button, which sends the CLI's own `/compact`
+ *   (`$lib/chat/compact-command`, #24): the SDK summarises and restarts the session from it.
  * - `/research <question>` is the page's Deep Research trigger.
  * - `/plan` flips the permission-mode chip between Plan only and Ask, through the same
  *   command the chip calls. It never switches to Bypass, which needs the chip's confirm.
