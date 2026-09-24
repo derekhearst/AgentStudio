@@ -15,6 +15,7 @@
 
 import { and, desc, eq, ilike, isNull, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
+import { getPostgresErrorCode } from '$lib/db/migrations.server'
 import { conversations, messageSearch } from '$lib/sessions/sessions.schema'
 import { logger } from '$lib/observability/logger'
 import { buildMessageSearchText, SEARCH_BUILDER_VERSION } from '$lib/chat/message-search-text'
@@ -88,13 +89,47 @@ export function scheduleMessageIndex(row: IndexableMessage | null | undefined): 
 	})
 }
 
+/** SQLSTATE for a foreign-key violation: here, a message (or its conversation) deleted meanwhile. */
+const FOREIGN_KEY_VIOLATION = '23503'
+
+/**
+ * `indexMessages` for rows read a moment ago, some of which may have been deleted since —
+ * a conversation deleted while the backfill was between its read and its write. One gone
+ * message fails the whole multi-row insert on its foreign key, so the batch is then retried
+ * a row at a time and the gone ones are skipped. Returns how many rows were written.
+ */
+export async function indexMessagesSkippingGone(rows: IndexableMessage[]): Promise<number> {
+	try {
+		await indexMessages(rows)
+		return rows.length
+	} catch (err) {
+		if (getPostgresErrorCode(err) !== FOREIGN_KEY_VIOLATION) throw err
+	}
+
+	let written = 0
+	for (const row of rows) {
+		try {
+			await indexMessage(row)
+			written += 1
+		} catch (err) {
+			if (getPostgresErrorCode(err) !== FOREIGN_KEY_VIOLATION) throw err
+		}
+	}
+	return written
+}
+
 /**
  * Index every message that has no search row, or one built by an older
  * `SEARCH_BUILDER_VERSION`. Walks `messages` by id in batches, so each batch starts where the
  * last one stopped and the whole pass is one read of the table. Safe to run while messages
- * are being written and in several processes at once: each write is an upsert.
+ * are being written or deleted, and in several processes at once: each write is an upsert,
+ * and a message deleted mid-batch is skipped.
+ *
+ * `conversationId` limits the pass to one conversation; the boot backfill passes none.
  */
-export async function backfillMessageSearch(options: { batchSize?: number; maxBatches?: number } = {}): Promise<{
+export async function backfillMessageSearch(
+	options: { batchSize?: number; maxBatches?: number; conversationId?: string } = {},
+): Promise<{
 	indexed: number
 }> {
 	const batchSize = Math.max(1, Math.min(options.batchSize ?? 200, 1000))
@@ -103,10 +138,12 @@ export async function backfillMessageSearch(options: { batchSize?: number; maxBa
 	let indexed = 0
 
 	for (let batch = 0; batch < maxBatches; batch += 1) {
-		const rows: BackfillRow[] = await db.execute<BackfillRow>(backfillBatchQuery(cursor, batchSize))
+		const rows: BackfillRow[] = await db.execute<BackfillRow>(
+			backfillBatchQuery(cursor, batchSize, options.conversationId),
+		)
 		if (rows.length === 0) break
 
-		await indexMessages(
+		indexed += await indexMessagesSkippingGone(
 			rows.map((row) => ({
 				id: row.id,
 				conversationId: row.conversation_id,
@@ -117,7 +154,6 @@ export async function backfillMessageSearch(options: { batchSize?: number; maxBa
 				toolCalls: row.tool_calls,
 			})),
 		)
-		indexed += rows.length
 		cursor = rows[rows.length - 1].id
 		if (rows.length < batchSize) break
 	}

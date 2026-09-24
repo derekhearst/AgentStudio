@@ -17,7 +17,7 @@ import { SNIPPET_START, SNIPPET_STOP } from '../src/lib/chat/conversation-search
  *   - archived chats are left out unless asked for; another user's are never returned
  *   - a search of only stop words still finds titles
  *   - the backfill indexes a message written behind the indexer's back, and rewrites a row
- *     built by an older version of the rules
+ *     built by an older version of the rules; a message deleted mid-batch is skipped, not fatal
  *   - deleting a message deletes its search row
  *
  * Each run makes up its own file name, so matches from other specs or real data cannot
@@ -233,7 +233,8 @@ test.describe('conversation search', () => {
 				returning id
 			`
 
-			await backfillMessageSearch({ batchSize: 50 })
+			// Scoped to this conversation: other specs insert and delete messages meanwhile.
+			await backfillMessageSearch({ batchSize: 50, conversationId })
 			const indexed = await searchRowFor(missed.id)
 			expect(indexed?.builder_version).toBe(SEARCH_BUILDER_VERSION)
 			expect(indexed?.body).toContain(`./${word}.sh --all`)
@@ -242,7 +243,7 @@ test.describe('conversation search', () => {
 
 			// A row built by an older version of the rules is rebuilt.
 			await sql`update message_search set builder_version = 0, body = 'stale' where message_id = ${missed.id}`
-			await backfillMessageSearch({ batchSize: 50 })
+			await backfillMessageSearch({ batchSize: 50, conversationId })
 			const rebuilt = await searchRowFor(missed.id)
 			expect(rebuilt?.builder_version).toBe(SEARCH_BUILDER_VERSION)
 			expect(rebuilt?.body).toContain(word)
@@ -250,6 +251,37 @@ test.describe('conversation search', () => {
 			// Deleting the message takes its search row with it.
 			await sql`delete from messages where id = ${missed.id}`
 			expect(await searchRowFor(missed.id)).toBeNull()
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('a message deleted between the backfill’s read and its write is skipped, not fatal', async () => {
+		const prefix = uniquePrefix('conv-search-gone')
+		const word = uniqueWord()
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		const { indexMessagesSkippingGone } = await import('../src/lib/chat/message-search.server')
+
+		try {
+			const conversationId = await seedConversation(`${prefix} gone`, userId)
+			const [kept] = await sql<{ id: string }[]>`
+				insert into messages (conversation_id, role, content, metadata, tool_calls, sequence)
+				values (${conversationId}, 'user', ${`still here ${word}`}, '{}'::jsonb, '[]'::jsonb, 1)
+				returning id
+			`
+			// Read by the backfill, then deleted before its write: the id no longer exists.
+			const gone = randomUUID()
+
+			// One gone row fails the whole multi-row insert on its foreign key; the batch is then
+			// written a row at a time and the gone one left out.
+			const written = await indexMessagesSkippingGone([
+				{ id: gone, conversationId, role: 'user', content: 'deleted meanwhile' },
+				{ id: kept.id, conversationId, role: 'user', content: `still here ${word}` },
+			])
+			expect(written).toBe(1)
+			expect((await searchRowFor(kept.id))?.body).toContain(word)
+			expect(await searchRowFor(gone)).toBeNull()
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

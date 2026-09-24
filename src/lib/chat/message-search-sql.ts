@@ -57,10 +57,16 @@ export type BackfillRow = {
 
 /**
  * The next `batchSize` messages after `cursor` (by id) that have no search row, or one built
- * by an older `SEARCH_BUILDER_VERSION`.
+ * by an older `SEARCH_BUILDER_VERSION`. Only one conversation's when `conversationId` is given.
  */
-export function backfillBatchQuery(cursor: string | null, batchSize: number): SQL {
-	const after: SQL = cursor ? sql`and m.id > ${cursor}::uuid` : sql``
+export function backfillBatchQuery(cursor: string | null, batchSize: number, conversationId?: string): SQL {
+	const scope: SQL = sql.join(
+		[
+			cursor ? sql`and m.id > ${cursor}::uuid` : sql``,
+			conversationId ? sql`and m.conversation_id = ${conversationId}::uuid` : sql``,
+		],
+		sql` `,
+	)
 	return sql`
 		select
 			m.id,
@@ -72,7 +78,7 @@ export function backfillBatchQuery(cursor: string | null, batchSize: number): SQ
 			${trimmedWorkItems(sql`m.tool_calls`)} as tool_calls
 		from ${messages} m
 		left join ${messageSearch} ms on ms.message_id = m.id
-		where (ms.message_id is null or ms.builder_version < ${SEARCH_BUILDER_VERSION}) ${after}
+		where (ms.message_id is null or ms.builder_version < ${SEARCH_BUILDER_VERSION}) ${scope}
 		order by m.id
 		limit ${batchSize}
 	`
