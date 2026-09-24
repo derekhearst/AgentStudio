@@ -197,7 +197,7 @@ test('the default model cannot be set to one nothing can run', async ({ page, ba
 	const userId = await getActiveUserId()
 	const sql = getSql()
 	const defaultModel = async () =>
-		(await sql<{ default_model: string }[]>`select default_model from app_settings where user_id = ${userId}`)[0]
+		(await sql<{ default_model: string }[]>`select default_model from app_settings where user_id = ${userId} order by created_at asc limit 1`)[0]
 			?.default_model ?? null
 
 	await page.goto('/settings')
