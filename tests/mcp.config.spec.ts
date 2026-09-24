@@ -53,6 +53,17 @@ test.describe('connector names', () => {
 		}
 	})
 
+	test('the two servers the CLI special-cases by exact name are reserved too', () => {
+		// `computer-use` is in its first-party and telemetry checks; `remote-devices` sits beside
+		// `ide` in its set of built-in servers, with a tool list of its own.
+		for (const name of ['computer-use', 'remote-devices']) {
+			expect(connectorNameProblem(name), name).toMatch(/reserved/)
+		}
+		// Exact names only: a longer name that merely starts the same way is an ordinary name.
+		expect(connectorNameProblem('computer-user-guide')).toBeNull()
+		expect(connectorNameProblem('remote-devices-inventory')).toBeNull()
+	})
+
 	test('the suggested name follows the label and passes the rule', () => {
 		expect(suggestConnectorName('GitHub Issues')).toBe('github-issues')
 		expect(suggestConnectorName('  My   Tracker!! ')).toBe('my-tracker')

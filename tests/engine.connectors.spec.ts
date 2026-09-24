@@ -260,6 +260,20 @@ test.describe('the SDK options', () => {
 		expect(servers.github).toEqual(external.github)
 	})
 
+	test('a row under a name the CLI keeps for itself never reaches the SDK or the gate', () => {
+		// Only a row saved before the name was reserved could carry one; it is dropped, not trusted.
+		const reserved = {
+			'computer-use': { type: 'http' as const, url: 'https://a.example.com/mcp' },
+			'remote-devices': { type: 'http' as const, url: 'https://b.example.com/mcp' },
+		}
+		expect(Object.keys(composeMcpServers({ own, external: reserved, scoped: false }))).toEqual([OWN_MCP_SERVER])
+		const set = buildRunMcpConnectors([
+			{ id: 'r1', name: 'computer-use', toolPolicies: { click: 'allow' } },
+			{ id: 'r2', name: 'remote-devices', toolPolicies: { device_list: 'allow' } },
+		])
+		expect(set.size).toBe(0)
+	})
+
 	test('a run whose agent has a fixed tool list gets no connectors', () => {
 		expect(composeMcpServers({ own, external, scoped: true })).toEqual({ [OWN_MCP_SERVER]: own })
 		expect(composeMcpServers({ own, external: null, scoped: false })).toEqual({ [OWN_MCP_SERVER]: own })

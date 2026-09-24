@@ -49,11 +49,21 @@ export const CONNECTOR_NAME_MAX_LENGTH = 32
 
 /**
  * Keys no connector may take: ours, and the ones the CLI uses for servers of its own
- * (`workspace`, `ide`, `memory`, `hearthbot`, and the `claude…` family), seen in the bundled
- * CLI. A connector under one of those would at best be shadowed and at worst be mistaken for
- * something it is not.
+ * (`workspace`, `ide`, `memory`, `hearthbot`, `computer-use`, `remote-devices`, and the
+ * `claude…` family), seen in the bundled CLI (0.3.278). `computer-use` and `remote-devices` are
+ * the two it special-cases by exact name: the first in its first-party and telemetry checks, the
+ * second beside `ide` in its set of built-in servers, with a tool list of its own. A connector
+ * under one of those would at best be shadowed and at worst be mistaken for something it is not.
  */
-export const RESERVED_CONNECTOR_NAMES: readonly string[] = [OWN_MCP_SERVER, 'workspace', 'ide', 'memory', 'hearthbot']
+export const RESERVED_CONNECTOR_NAMES: readonly string[] = [
+	OWN_MCP_SERVER,
+	'workspace',
+	'ide',
+	'memory',
+	'hearthbot',
+	'computer-use',
+	'remote-devices',
+]
 
 /** Why `name` cannot be a connector's key, or null when it can. */
 export function connectorNameProblem(name: string): string | null {
