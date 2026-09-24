@@ -79,31 +79,3 @@ export async function buildOrchestratorPrompt(): Promise<string> {
 	const identity = await loadOrchestratorIdentity()
 	return [identity, ORCHESTRATOR_DELEGATION_NOTE].join('\n\n')
 }
-
-/**
- * Simple heuristic: does this message likely need a multi-step plan?
- * Returns true if the orchestrator should consider planning.
- */
-export function looksComplex(userMessage: string): boolean {
-	const lower = userMessage.toLowerCase()
-	const complexSignals = [
-		'create a',
-		'build a',
-		'set up',
-		'analyze',
-		'research',
-		'compare',
-		'investigate',
-		'write a report',
-		'generate a',
-		'deploy',
-		'migrate',
-		'refactor',
-		'implement',
-		'design',
-		'plan',
-		'schedule',
-		'automate',
-	]
-	return complexSignals.some((signal) => lower.includes(signal)) || userMessage.length > 300
-}

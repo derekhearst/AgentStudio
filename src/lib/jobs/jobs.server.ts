@@ -23,7 +23,9 @@ import { logger } from '$lib/observability/logger'
  *               else: status='failed', finishedAt set, error stored
  *   - heartbeat, complete and fail only touch a job that is still leased/running, so a late
  *     report from a worker that lost the job cannot undo a cancel or a retirement
- *   - cancelJob → status='canceled' (cooperative; worker checks at safe boundaries)
+ *   - cancelJob → status='canceled' (cooperative; worker checks at safe boundaries). Canceled
+ *     is final: the handler of a job canceled mid-run still returns or throws afterwards, and
+ *     the in-flight guard above keeps that report from completing it or queuing a retry
  */
 
 // ─────────── Enqueue ───────────

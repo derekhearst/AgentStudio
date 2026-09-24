@@ -111,29 +111,25 @@ async function fireReviewItem(monitor: MonitorRow, observation: MonitorObservati
 // ─────────── push ───────────
 
 async function firePush(monitor: MonitorRow, observation: MonitorObservation): Promise<MonitorFireResult> {
-	const { createNotificationRecord, sendPushToAll } = await import('$lib/notifications/notifications.server')
+	const { notifyUser } = await import('$lib/notifications/notify.server')
 	const payload = {
 		title: monitor.actionConfig.title ?? `Monitor: ${monitor.name}`,
 		body: (monitor.actionConfig.body ?? observation.note ?? observation.value).slice(0, 400),
 		url: monitor.actionConfig.url ?? '/monitors',
 		tag: `monitor-${monitor.id}`,
 	}
-	// The in-app row is the durable half and always written first. Web push is best-effort:
-	// an unconfigured VAPID key throws, and that must not turn a real observation into a
-	// failed action.
-	const record = await createNotificationRecord(payload, monitor.userId)
-	let delivered = 0
-	let pushError: string | null = null
-	try {
-		const result = await sendPushToAll(payload, monitor.userId)
-		delivered = result.delivered
-	} catch (err) {
-		pushError = err instanceof Error ? err.message : String(err)
-	}
+	// No category: sending a push *is* this monitor's action, which the user chose when they
+	// set it up, so the Settings toggles do not mute it. The in-app row is the durable half;
+	// web push is best-effort, and an unconfigured VAPID key must not turn a real observation
+	// into a failed action.
+	const result = await notifyUser({ userId: monitor.userId, category: null, payload })
+	const notificationId = result.sent ? result.notificationId : null
+	const delivered = result.sent ? result.delivered : 0
+	const pushError = result.sent ? result.pushError : undefined
 	return {
 		kind: 'push',
-		ok: true,
-		detail: { notificationId: record?.id ?? null, delivered, ...(pushError ? { pushError } : {}) },
+		ok: notificationId !== null,
+		detail: { notificationId, delivered, ...(pushError ? { pushError } : {}) },
 	}
 }
 
@@ -281,8 +277,7 @@ async function fireConversation(
 				{ role: 'system', content: definition.systemPrompt },
 				{ role: 'user', content: seeded },
 			],
-			initialTools: definition.tools,
-			computeTools: async () => definition.tools,
+			tools: definition.tools,
 			// Bounded — nobody is here to course-correct a runaway.
 			maxRounds: 10,
 			approvalRequiredTools: new Set<string>(),
@@ -291,7 +286,6 @@ async function fireConversation(
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			projectId: conversation.projectId ?? null,
-			spawnSubagent: undefined,
 		})
 
 		const { logLlmUsage } = await import('$lib/costs/usage')

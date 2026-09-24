@@ -1,10 +1,13 @@
 import { registerJobHandler } from '$lib/jobs/worker.server'
 import { registerScheduledJob } from '$lib/jobs/scheduler.server'
 import { reapStuckRuns } from './runs.server'
+import { closeStalePromptReviewItems } from './prompt-review-items.server'
 import { logger } from '$lib/observability/logger'
 
 /**
- * Registers the `runs_reap` job + 5-min schedule. See `reapStuckRuns` for behavior.
+ * Registers the `runs_reap` job + 5-min schedule. See `reapStuckRuns` for behavior. The same
+ * tick closes review-inbox approval and question items whose run stopped waiting without
+ * closing them (see `closeStalePromptReviewItems`) — a reaped run is the usual case.
  */
 
 const REAP_INTERVAL_MS = 5 * 60 * 1000
@@ -20,7 +23,11 @@ export function registerRunsJobHandlers(): void {
 			if (summary.reapedCount > 0) {
 				logger.info(`[runs-reaper] reaped ${summary.reapedCount} stuck runs`, { reapedIds: summary.reapedIds })
 			}
-			return { reapedCount: summary.reapedCount, reapedAt: new Date().toISOString() }
+			const closedPrompts = await closeStalePromptReviewItems().catch((err) => {
+				logger.warn('[runs-reaper] closing stale prompt review items failed (non-fatal)', { err })
+				return 0
+			})
+			return { reapedCount: summary.reapedCount, closedPrompts, reapedAt: new Date().toISOString() }
 		} catch (err) {
 			logger.warn('[runs-reaper] reap failed (non-fatal)', { err })
 			return { reapedCount: 0, error: err instanceof Error ? err.message : String(err) }

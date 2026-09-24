@@ -2,9 +2,6 @@ import { command, query } from '$app/server'
 import { z } from 'zod'
 import { getOrCreateSettings, resetSettings, updateSettings } from '$lib/settings/settings.server'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
-import { getToolDefinitions } from '$lib/tools/tools.server'
-import { listSkillSummaries } from '$lib/skills/skills.server'
-import { estimateTokens, estimateToolDefinitionTokens } from '$lib/tools/tools'
 import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
 import { getSystemReadiness as readSystemReadiness } from '$lib/settings/readiness.server'
 import { SPEECH_MODEL_ID_PATTERN, SPEECH_VOICE_PATTERN } from '$lib/speech/speech'
@@ -39,7 +36,6 @@ const settingsUpdateSchema = z.object({
 	toolConfig: z
 		.object({
 			approvalRequiredTools: z.array(z.string()).optional(),
-			programmaticToolCallingEnabled: z.boolean().optional(),
 		})
 		.optional(),
 	memoryConfig: z
@@ -115,57 +111,4 @@ export const resetAppSettings = command(async () => {
 export const getSystemReadiness = query(async () => {
 	requireAuthenticatedRequestUser()
 	return readSystemReadiness()
-})
-
-export const getFullPromptPreview = query(async () => {
-	const user = requireAuthenticatedRequestUser()
-	const settings = await getOrCreateSettings(user.id)
-
-	// Skill summaries
-	const skillSummaries = await listSkillSummaries()
-	const skillList =
-		skillSummaries.length > 0
-			? skillSummaries
-					.map((s) => {
-						const fileNames = s.files.map((f: { name: string }) => f.name).join(', ')
-						return `- ${s.name}: ${s.description}${fileNames ? ` [files: ${fileNames}]` : ''}`
-					})
-					.join('\n')
-			: undefined
-
-	function buildScenario(label: string) {
-		const sections: string[] = []
-		if (settings.systemPrompt?.trim()) sections.push(settings.systemPrompt)
-		if (skillList) sections.push(`Available skills (use read_skill to load full content when relevant):\n${skillList}`)
-		const systemPrompt = sections.join('\n\n')
-
-		const tools = getToolDefinitions()
-		const toolsJson = JSON.stringify(tools, null, 2)
-
-		const rawParts: Array<{ label: string; content: string }> = []
-		rawParts.push({ label: 'System Message', content: systemPrompt })
-		rawParts.push({ label: `Tools (${tools.length})`, content: toolsJson })
-
-		const totalChars = systemPrompt.length + toolsJson.length
-		const estimatedTokens = estimateTokens(systemPrompt) + estimateToolDefinitionTokens(tools)
-
-		return {
-			label,
-			capabilities: [] as string[],
-			toolCount: tools.length,
-			estimatedTokens,
-			totalChars,
-			parts: rawParts,
-		}
-	}
-
-	return {
-		model: settings.defaultModel,
-		approvalRequiredTools:
-			(settings.toolConfig as { approvalRequiredTools?: string[] } | undefined)?.approvalRequiredTools ?? [],
-		scenarios: {
-			simple: buildScenario('Simple Query'),
-			complex: buildScenario('Complex Query'),
-		},
-	}
 })

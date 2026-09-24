@@ -70,7 +70,10 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			return json({ resolved: false })
 		}
 
-		const result = await recordQuestionAnswers(run.id, body.token, normalizedAnswers)
+		const result = await recordQuestionAnswers(run.id, body.token, normalizedAnswers, {
+			decidedBy: locals.user.id,
+			note: 'Answered in the chat',
+		})
 		if (!result.resolved) {
 			logger.warn('[chat/ask-user] ask_user already resolved or missing', {
 				conversationId: params.id,

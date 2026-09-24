@@ -39,7 +39,10 @@ export const POST: RequestHandler = async ({ request, params, locals }) => {
 			return json({ resolved: false })
 		}
 
-		const result = await recordApprovalDecision(runId, body.token, body.approved)
+		const result = await recordApprovalDecision(runId, body.token, body.approved, {
+			decidedBy: locals.user.id,
+			note: 'Answered in the chat',
+		})
 		if (!result.resolved) {
 			logger.warn('[chat/tool-approve] Approval already resolved or missing', {
 				conversationId: params.id,

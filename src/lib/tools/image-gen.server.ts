@@ -3,8 +3,8 @@
  *
  * Maps friendly model aliases (`flux`, `sdxl`, `dall-e`) to the actual
  * provider IDs and POSTs to OpenRouter's `/api/v1/images/generations` endpoint.
- * Cost tracking happens at the executeTool dispatch site — this module is just
- * the API call.
+ * This module is just the API call: the `image_generate` handler records the returned
+ * `cost` in the tool ledger (`logImageGenerationSpend`).
  */
 
 import { requireOpenRouterApiKey } from '$lib/server/config'

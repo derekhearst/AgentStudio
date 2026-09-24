@@ -1,40 +1,38 @@
 import { streamChat } from '$lib/llm/chat.server'
 import { setRunRound } from '$lib/runs/blocks.server'
 import { emitHook } from '$lib/hooks'
-import type {
-	LoopMessage,
-	RunChatLoopInput,
-	RunChatLoopResult,
-	ToolDefinition,
-} from './types'
+import type { LoopMessage, RunChatLoopInput, RunChatLoopResult } from './types'
 import { extractReasoningFragment, type ReasoningDetail } from './reasoning-extractor'
 import { closeRunTrace, markLastToolForCaching, openRunTrace } from './trace-helpers'
-import {
-	checkToolApproval,
-	handleAskUserCall,
-	handleNormalToolCall,
-	handleRunSubagentCall,
-} from './tool-handlers.server'
+import { dispatchToolCall, type DispatchContext } from './tool-handlers.server'
+import { offeredToolNames } from './offered-tools'
 
 /**
  * Wave 2 #10 phase 1 — extracted chat loop.
  *
- * Behaviorally identical to the for-round body that lived inside the chat-stream `+server.ts`
- * before extraction; every emit / updateRun / pushBlock / executeTool / approval-await /
- * ask-user-await call routes through the same modules as before.
- *
- * The loop is transport-agnostic — it talks to a `Session` (SSE-backed for chat streams,
- * detached for automations + sub-agents) and gets its inputs (model, tool surface, approval
- * set, sub-agent dispatch callback) as a self-contained `RunChatLoopInput`.
+ * The pre-engine loop: OpenRouter's streaming chat API, our registry tools, serial tool
+ * execution. Interactive chat moved to the Agent SDK engine (`$lib/engine`); what still runs
+ * here is unattended — automations with an agent attached, a monitor's start_conversation,
+ * CI fix runs — each on a detached session, with the short tool list in `./detached-tools`.
  *
  * The caller does:
- *   1. Build the system prompt + initial messages (slot assembly, compaction).
- *   2. Build the session (e.g. `createSseSession`).
+ *   1. Build the system prompt + initial messages (`buildAgentDefinition`).
+ *   2. Build the session (`createDetachedSession`).
  *   3. Call `runChatLoop`.
  *   4. Persist the resulting message + cost + activity rollups.
  */
 
 export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopResult> {
+	try {
+		return await runChatLoopRounds(input)
+	} catch (err) {
+		// The trace ends the way the run did; the caller still records the failure itself.
+		closeRunTrace(input.session.runId, 'failed')
+		throw err
+	}
+}
+
+async function runChatLoopRounds(input: RunChatLoopInput): Promise<RunChatLoopResult> {
 	const { session } = input
 	const startedAt = Date.now()
 
@@ -62,21 +60,24 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 	let firstTokenAt: number | null = null
 	let reasoningTokens: number | null = null
 	let finishedNaturally = false
-	let tools: ToolDefinition[] = input.initialTools
+	const toolsForRequest = markLastToolForCaching(input.tools)
+	const dispatchContext: DispatchContext = {
+		session,
+		userId: input.userId,
+		conversationId: input.conversationId,
+		agentId: input.agentId ?? null,
+		persistentKey: input.persistentKey,
+		worktree: input.worktree,
+		projectId: input.projectId,
+		offeredTools: offeredToolNames(input.tools),
+		approvalRequiredTools: input.approvalRequiredTools,
+		isOrchestrator: input.isOrchestrator,
+	}
 
 	for (let round = 0; round <= input.maxRounds; round++) {
 		await setRunRound(session.runId, round)
-		// Refresh the active tool surface so deferred loading (`search_tools` calls in the
-		// previous round) takes effect this round. Caller decides whether this is a no-op.
-		tools = await input.computeTools()
 
-		const toolsForRequest = markLastToolForCaching(tools)
-
-		const streamOptions: Parameters<typeof streamChat>[4] = {}
-		if (input.chatPlugins && input.chatPlugins.length > 0) streamOptions.plugins = input.chatPlugins
-		if (input.modalities && input.modalities.length > 0) streamOptions.modalities = input.modalities
-		if (input.audio) streamOptions.audio = input.audio
-		const stream = await streamChat(currentMessages, input.model, toolsForRequest, input.reasoningConfig, streamOptions)
+		const stream = await streamChat(currentMessages, input.model, toolsForRequest, input.reasoningConfig)
 
 		// Accumulated tool calls for THIS round (streamed piecewise).
 		const pendingToolCalls: Array<{ id: string; name: string; arguments: string }> = []
@@ -96,29 +97,8 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 							id?: string
 							function?: { name?: string; arguments?: string }
 						}>
-						audio?: {
-							id?: string
-							data?: string
-							transcript?: string
-							expires_at?: number
-						}
 				  }
 				| undefined
-
-			// Audio output streams as `delta.audio` chunks with base64 data + an inline transcript.
-			// Forward both to the SSE relay; the runtime accumulates the bytes as a side-effect of
-			// the consumer collecting the events. The text transcript also lands in `assistantContent`
-			// so the persisted message keeps a readable text body.
-			if (delta?.audio) {
-				if (typeof delta.audio.data === 'string' && delta.audio.data.length > 0) {
-					await session.emit('audio', { data: delta.audio.data, id: delta.audio.id })
-				}
-				if (typeof delta.audio.transcript === 'string' && delta.audio.transcript.length > 0) {
-					if (firstTokenAt === null) firstTokenAt = Date.now()
-					assistantContent += delta.audio.transcript
-					await session.emit('delta', { content: delta.audio.transcript })
-				}
-			}
 
 			const reasoningDelta = delta?.reasoning
 			const reasoningDetailDelta = delta?.reasoningDetails
@@ -198,60 +178,12 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 			break
 		}
 
-		// Execute each tool call serially.
+		// Execute each tool call serially. `dispatchToolCall` refuses a name this run did not
+		// offer before approval or execution: these runs pass no approval set, so the offered
+		// list is the only thing between the model and the rest of the registry.
 		const toolResults: Array<{ call_id: string; name: string; result: string }> = []
 		for (const tc of plannedToolCalls) {
-			// ── Approval gate (no-op when no approval required).
-			const approval = await checkToolApproval(session, tc, input.approvalRequiredTools)
-			if (approval.kind === 'denied') {
-				toolResults.push(approval.outcome.toolResult)
-				allToolCalls.push(approval.outcome.allToolCallsEntry)
-				continue
-			}
-
-			// ── ask_user (orchestrator-only). Self-contained: emits + pushes block inside.
-			if (tc.name === 'ask_user') {
-				const outcome = await handleAskUserCall(session, tc, input.isOrchestrator)
-				toolResults.push(outcome.toolResult)
-				allToolCalls.push(outcome.allToolCallsEntry)
-				continue
-			}
-
-			await session.updateRun({
-				state: 'running',
-				label: `Executing ${tc.name}`,
-				heartbeat: true,
-			})
-			await session.emit('tool_call', { id: tc.id, name: tc.name, arguments: tc.arguments })
-
-			// ── run_subagent (orchestrator-only — delegates via injected callback). Returns
-			// null when the args are malformed so the loop falls through to normal dispatch.
-			if (tc.name === 'run_subagent' && input.isOrchestrator && input.spawnSubagent) {
-				const subOutcome = await handleRunSubagentCall(session, tc, input.spawnSubagent)
-				if (subOutcome) {
-					toolResults.push(subOutcome.toolResult)
-					allToolCalls.push(subOutcome.allToolCallsEntry)
-					continue
-				}
-			}
-
-			// ── normal tool dispatch
-			const outcome = await handleNormalToolCall(
-				{
-					session,
-					userId: input.userId,
-					conversationId: input.conversationId,
-					agentId: input.agentId ?? null,
-					persistentKey: input.persistentKey,
-					worktree: input.worktree,
-					projectId: input.projectId,
-					approvalRequiredTools: input.approvalRequiredTools,
-					isOrchestrator: input.isOrchestrator,
-					loadSearchableTools: input.loadSearchableTools,
-					currentToolNames: () => tools.map((t) => t.function.name),
-				},
-				tc,
-			)
+			const outcome = await dispatchToolCall(dispatchContext, tc)
 			toolResults.push(outcome.toolResult)
 			allToolCalls.push(outcome.allToolCallsEntry)
 		}
@@ -278,15 +210,15 @@ export async function runChatLoop(input: RunChatLoopInput): Promise<RunChatLoopR
 		}
 	}
 
-	// streamBlocks accumulator lives on the session (SSE impl exposes .streamBlocks); the loop
+	// streamBlocks accumulator lives on the session (the detached one exposes .streamBlocks); the loop
 	// only mutates via session.pushBlock so it doesn't need to track them itself. Caller reads
 	// them off the session for the persisted message metadata.
 	const sessionWithBlocks = session as { streamBlocks?: import('$lib/runs/runs.schema').StreamBlock[] }
 	const streamBlocks = sessionWithBlocks.streamBlocks ?? []
 
 	// Wave 3 #13 phase 1 — `after_run` hook. Fail-isolated. Cost is null here because the
-	// runtime doesn't compute cost; the caller (chat stream / inline-subagent / automation /
-	// task-runner) does that AFTER the loop returns and feeds it into its own logLlmUsage.
+	// runtime doesn't compute cost; the caller (automation / monitor / CI fix run) does that
+	// AFTER the loop returns and feeds it into its own logLlmUsage.
 	void emitHook('after_run', {
 		runId: session.runId,
 		conversationId: input.conversationId,

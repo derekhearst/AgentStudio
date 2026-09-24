@@ -126,11 +126,19 @@ export async function mapWithConcurrency<T, R>(
  *   - paywall hint domains (nytimes/wsj/ft) → -1
  *
  * Ties are broken by original search rank (preserves SearXNG's relevance signal).
+ *
+ * `alreadyFetched` holds URLs this run already has as sources. They are skipped before
+ * picking, so a sub-question whose best hits were fetched by another one still gets its
+ * `limit` new pages instead of a second copy of the same ones.
  */
 export type SearchHit = { url: string; title?: string; snippet?: string; rank?: number }
 
-export function pickUrlsToFetch(hits: SearchHit[], limit = 3): SearchHit[] {
-	const scored = hits.map((hit, idx) => ({
+export function pickUrlsToFetch(
+	hits: SearchHit[],
+	limit = 3,
+	alreadyFetched: ReadonlySet<string> = new Set(),
+): SearchHit[] {
+	const scored = hits.filter((hit) => !alreadyFetched.has(hit.url)).map((hit, idx) => ({
 		hit,
 		score: scoreUrl(hit.url),
 		rank: hit.rank ?? idx,
