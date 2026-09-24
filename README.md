@@ -10,6 +10,8 @@ AgentStudio provides a streaming chat interface where the assistant can call too
 
 Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
 
+Beside each chat sits a right rail with two tabs: **Preview** (a workspace file or a web page) and **Files** (every file the agent changed in the chat, with +/- counts; click one to preview it). It stays folded to a thin strip until something opens a preview or you expand it, and remembers whether you left it open; on a phone it is a drawer. The context ring and metered cost sit in the chat's header, and each reply links to its run's full tool timeline. See [docs/chat-console/chat-console.md](docs/chat-console/chat-console.md).
+
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
 
 ### Agents
@@ -211,7 +213,7 @@ Notes:
 - Monitors: `docs/monitors/monitors.md`
 - Background jobs: `docs/jobs/jobs.md`
 - UI spec: `docs/ui/spec.md`
-- Chat console + right-rail preview: `docs/chat-console/chat-console.md`
+- Chat console and its right rail (Preview + Files): `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
 - Agents: `docs/agents/agents.md`
@@ -262,7 +264,8 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/login` Sign in
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
-- `/chat/[id]` Chat detail
+- `/chat/[id]` Chat detail, with the Preview + Files rail ([docs](docs/chat-console/chat-console.md))
+- `/runs/[id]` One run's event timeline: every tool call, result and approval ([docs](docs/runs/spec.md))
 - `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
 - `/review` Cost, recent failures, logs and the review inbox
 - `/agents` Agent management

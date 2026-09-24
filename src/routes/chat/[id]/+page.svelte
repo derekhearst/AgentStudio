@@ -19,8 +19,10 @@
 	import { getSettings } from '$lib/settings';
 	import ChatInput from '$lib/chat/ChatInput.svelte';
 	import ContextWindow from '$lib/chat/ContextWindow.svelte';
-	import { consoleState } from '$lib/chat-console/console-state.svelte';
-	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { consoleState, resetConsoleState, setChangedFiles } from '$lib/chat-console/console-state.svelte';
+	import { changedFilesInThread } from '$lib/chat-console/changed-files';
+	import { openLeft } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { toggleRailFromHeader } from '$lib/chat-console/preview-state.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
 	import type { TodoItem } from '$lib/engine/tool-result-details';
@@ -1353,97 +1355,28 @@
 		await streamMessage(compactionPrompt, false);
 	}
 
-	// Console-redesign — surface streaming/context data to the right rail.
+	/*
+	 * #14 — what the right rail reads: this chat's id and the files its agent changed.
+	 *
+	 * `pageConversationId` is read once, not derived: the layout remounts this page per
+	 * conversation, and the next chat's page can mount before this one is torn down, so the
+	 * reset below names the chat it is leaving and leaves a newer one alone.
+	 */
+	const pageConversationId = page.params.id ?? '';
+	onDestroy(() => resetConsoleState(pageConversationId));
+
 	$effect(() => {
 		consoleState.conversationId = conversationId || null;
-		consoleState.conversationTitle = conversationData?.conversation.title ?? null;
 	});
 
 	$effect(() => {
-		consoleState.streamingBlocks = streamingBlocks.flatMap((b) => {
-			// Notices are run-level events, not activity — the rail lists what the agent did.
-			if (b.kind === 'notice') return [];
-			if (b.kind === 'tool') {
-				return {
-					kind: 'tool',
-					id: b.id,
-					name: b.name,
-					arguments: b.arguments,
-					status: b.status,
-					result: b.result,
-					executionMs: b.executionMs ?? null,
-				};
-			}
-			if (b.kind === 'thinking') {
-				return { kind: 'thinking', id: b.id, content: b.content };
-			}
-			if (b.kind === 'text') {
-				return { kind: 'text', id: b.id, content: b.content };
-			}
-			return {
-				kind: 'subagent',
-				id: b.id,
-				agentName: b.agentName,
-				task: b.task,
-				status: b.status,
-			};
-		});
-
-		const persisted = (conversationData?.messages ?? [])
-			.flatMap((m) => Array.isArray((m as { toolCalls?: unknown[] }).toolCalls) ? (m as { toolCalls: Array<{ name?: string; success?: boolean }> }).toolCalls : [])
-			.slice(-12)
-			.reverse()
-			.map((tc) => ({
-				name: typeof tc.name === 'string' ? tc.name : 'tool',
-				success: tc.success,
-				ageMin: 0,
-			}));
-		consoleState.persistedToolCalls = persisted;
+		setChangedFiles(
+			changedFilesInThread({ messages, liveBlocks: streamingBlocks, liveMessageId: pendingMessageId }),
+		);
 	});
 
-	// The rail shows the same figure as the header's meter (#78): the stream's own estimate is
-	// the system prompt alone, which read as a nearly empty context from the first turn on.
-	$effect(() => {
-		consoleState.liveContext = conversationData
-			? {
-					tokenEstimate: contextMetrics.used,
-					contextWindow: contextMetrics.total,
-					didCompact: liveContextStats?.didCompact ?? false,
-				}
-			: null;
-	});
-
-	$effect(() => {
-		const totalTokens = (stats ?? []).reduce((sum, s) => sum + (s.tokensIn ?? 0) + (s.tokensOut ?? 0), 0);
-		const totalCost = (stats ?? []).reduce((sum, s) => sum + Number.parseFloat(s.cost ?? '0'), 0);
-		consoleState.totalTokens = totalTokens;
-		consoleState.totalCostUsd = totalCost;
-		const ttftCandidate = (stats ?? []).filter((s) => typeof s.ttftMs === 'number').slice(-1)[0];
-		consoleState.lastTtftMs = ttftCandidate?.ttftMs ?? null;
-	});
-
-	/*
-	 * Deliberately not `$state`: this is read only by the effect below, which also writes
-	 * it. The previous version kept the run's start time on `consoleState.runStatus` and
-	 * read it back to decide whether to keep or reset it — so the effect depended on the
-	 * object it assigned, and since it assigns a fresh object every time it re-triggered
-	 * itself until Svelte gave up with `effect_update_depth_exceeded` and tore down
-	 * reactivity for the subtree. Any page that reached a chat hit it; /agents/new, which
-	 * redirects straight into one, raised it eighteen times on a single load.
-	 */
-	let runStartedAt: number | null = null;
-
-	$effect(() => {
-		const isStreaming = streaming || pendingMessageId !== null;
-		if (!isStreaming) runStartedAt = null;
-		else runStartedAt ??= Date.now();
-
-		consoleState.runStatus = {
-			state: isStreaming ? 'streaming' : 'idle',
-			startedAt: runStartedAt,
-			pendingApprovals: pendingAskUser ? 1 : 0,
-		};
-	});
+	/** The run on screen, for the "running" chip's link to its timeline (/runs/[id]). */
+	const liveRunId = $derived(liveContextStats?.runId ?? null);
 </script>
 
 <div class="flex min-h-0 min-w-0 w-full flex-1 gap-0 overflow-hidden">
@@ -1470,10 +1403,16 @@
 						}}
 					/>
 					{#if streaming}
-						<span class="console-chip is-run">
+						<!-- #14: tool activity lives on the run's own page now, one click from here. -->
+						<svelte:element
+							this={liveRunId ? 'a' : 'span'}
+							class="console-chip is-run"
+							href={liveRunId ? `/runs/${liveRunId}` : undefined}
+							title={liveRunId ? 'Open this run’s timeline' : undefined}
+						>
 							<span class="pulse-dot"></span>
 							running
-						</span>
+						</svelte:element>
 					{/if}
 					{#if pendingAskUser}
 						<span class="console-chip is-warn">awaiting your input</span>
@@ -1497,6 +1436,25 @@
 							</button>
 						</span>
 					{/each}
+				</div>
+				<!--
+					#14: the context ring and the metered cost, as in the mobile header. They sat in
+					the rail's footer, which is folded away by default now. Outside the chips row on
+					purpose: that row clips its overflow, which would cut off the ring's popover.
+				-->
+				<div class="console-topbar__actions items-center">
+					{#if conversationData.conversation.totalCost && Number.parseFloat(String(conversationData.conversation.totalCost)) > 0}
+						<span class="console-chip" title="Metered spend for this conversation">${Number.parseFloat(String(conversationData.conversation.totalCost)).toFixed(4)}</span>
+					{/if}
+					<ContextWindow
+						compact
+						used={contextMetrics.used}
+						total={contextMetrics.total}
+						breakdown={contextMetrics.breakdown}
+						modelUsage={contextMetrics.modelUsage}
+						reservedTargetPct={reservedResponsePct}
+						onCompact={compactContext}
+					/>
 				</div>
 			</div>
 
@@ -1526,7 +1484,7 @@
 					reservedTargetPct={reservedResponsePct}
 					onCompact={compactContext}
 				/>
-				<button type="button" onclick={openRight} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
+				<button type="button" onclick={toggleRailFromHeader} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
 					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 						<rect x="3" y="4" width="18" height="16" rx="2" />
 						<line x1="15" y1="4" x2="15" y2="20" />
@@ -1545,10 +1503,15 @@
 					}}
 				/>
 				{#if streaming}
-					<span class="console-chip is-run">
+					<svelte:element
+						this={liveRunId ? 'a' : 'span'}
+						class="console-chip is-run"
+						href={liveRunId ? `/runs/${liveRunId}` : undefined}
+						title={liveRunId ? 'Open this run’s timeline' : undefined}
+					>
 						<span class="pulse-dot" style="width:5px;height:5px;border-radius:999px;background:currentColor;display:inline-block;"></span>
 						running
-					</span>
+					</svelte:element>
 				{/if}
 				{#if streamingBlocks.some((b) => b.kind === 'tool' && b.status === 'pending')}
 					<span class="console-chip is-warn">{streamingBlocks.filter((b) => b.kind === 'tool' && b.status === 'pending').length} pending</span>

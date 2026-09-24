@@ -178,17 +178,9 @@ The workbench shows a live run HUD with:
 
 ### Right panel
 
-The right panel is always visible and uses the same set of tabs in all modes. Tab content adapts to what is relevant for the current mode and active run. The panel is partially implemented; some tabs are functional, others are planned.
+The right rail has two tabs, the same for every agent: **Preview** (a file or web page) and **Files** (the files the agent changed in this chat, with +/- counts). It is folded to a thin strip until something opens a preview or the user expands it, and remembers per user whether it was left expanded. On a phone it is a drawer opened from the chat header. The mode-aware tab set this section used to describe (Run HUD, Memory, Task, PR) was never built, and #14 settled on the smaller rail instead. See [../chat-console/chat-console.md](../chat-console/chat-console.md) for the full behaviour.
 
-| Tab         | Agent mode                                                                                | Research mode                 | Plan mode                     | Chat mode              |
-| ----------- | ----------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------- | ---------------------- |
-| **Files**   | Changed files list, unified diff preview                                                  | Read-only file browser        | Read-only file browser        | Read-only file browser |
-| **Run HUD** | Agent, round, active tool, subagents, token+cost budget, pending approvals, blocked state | Progress events, source count | Plan graph, estimate summary  | —                      |
-| **Memory**  | Context window inspector, active memory refs                                              | Active memory refs            | Active memory refs            | Active memory refs     |
-| **Task**    | Linked task, sub-tasks, approval controls, evaluator status                               | Linked task                   | Linked task, success criteria | Linked task            |
-| **PR**      | Pull request status, diff summary, pending review items                                   | —                             | —                             | —                      |
-
-On mobile, the right panel collapses into a bottom sheet tab drawer.
+A run's tool calls and events are on its own page, `/runs/<id>`, linked from each reply's stats popover and from the **running** chip at the top of the chat.
 
 ### Inline approvals and answers
 
@@ -249,7 +241,7 @@ How the controls that exist today behave:
 
 ### Context meter
 
-The context meter above the composer, and the same figure in the right rail, estimate how much of the model's context window the conversation fills. It adds up:
+The context meter above the composer, and the context ring in the chat's header (on desktop as well as mobile, since #14 moved it out of the right rail), estimate how much of the model's context window the conversation fills. It adds up:
 
 | Part | Where the figure comes from |
 | --- | --- |
@@ -264,7 +256,7 @@ A reply saved after Stop or an error keeps its tool output in two places. The me
 
 ### Mobile and compact layout
 
-On mobile, the right panel collapses into a bottom sheet or tab drawer. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
+On mobile, the right rail is a drawer opened from the chat header. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
 
 ### Reading replies aloud
 
@@ -322,10 +314,10 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows [../ui/spec.md](../ui/spec.md) and defines the primary app-shell experience.
 
-- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and mode-aware right panel tabs.
+- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and the right rail (Preview + Files).
 - States and badges: running, blocked, needs-input, queued interjection, completed, failed, and pending approvals count.
 - Blocking actions: plan approvals, tool approvals, and ask_user responses must resolve through durable review items.
-- Mobile behavior: right panel collapses to bottom-sheet tabs; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
+- Mobile behavior: the right rail opens as a drawer from the chat header; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
 
 ## References
 

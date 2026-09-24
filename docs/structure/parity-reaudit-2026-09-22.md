@@ -257,7 +257,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
-| #14 | Rethink the right sidebar | **rebuild** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs |
+| #14 | Rethink the right sidebar | **rebuild** → **shipped** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs. Shipped as Preview + a real Files tab, collapsed by default; see below |
 | #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
 | #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
 | #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules) and the exports left without a caller (the tiktoken estimator and the `js-tiktoken` dependency, the settings prompt preview query, the agent tool-definition filter, the OpenRouter `plugins` option, the image lookups the images remote module left behind); the old loop stays while automations, monitors and CI fix runs call it |
@@ -537,6 +537,21 @@ would take it.
 
 The one thing to add rather than remove: the background-task list from #35 has to live
 somewhere, and the rail is the only surface with room.
+
+**Shipped** (owner's option A). The rail is Preview + Files. Files is no longer the
+"main · clean" placeholder: it lists every file the agent changed in the chat, folded from
+the `file_edit` details already on the thread's tool blocks (saved and live), with +/- counts
+and a "new" badge, and a click opens the file in Preview. No git is involved, so it works in
+sandbox workspaces that are not repositories. The rail starts as a 40px strip and expands when
+something opens a preview or on demand; expanded or folded is remembered per user on
+`chat_workbench_preferences.panel_layout.railOpen`, so no migration. Research and Activity are
+gone: a research run's page links back to its chat, and a reply's stats popover and the
+"running" chip link to `/runs/<id>`. The context ring and metered cost moved into the desktop
+topbar. Fixed on the way: the phone drawer rendered empty (the mobile CSS hid every
+`.console-rail`), a hydration race showed the previous chat's preview after a quick switch,
+"Open file" on the already-open file did nothing from the Files tab, and the home page showed
+the last chat's rail. The background-task chips stay in the topbar until #35 defines what a
+task row shows. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
 
 ### #27 — TTS
 
