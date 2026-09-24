@@ -248,7 +248,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #26 | Shell output as a terminal | **rebuild** | same adapter; "stream it live" means background + poll, not a new transport |
 | #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
 | #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
-| #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
+| #24 | Filesystem checkpoints | **rebuild** — shipped | `enableFileCheckpointing` + `rewindFiles()` through a short-lived control session; edit/regenerate now cut the SDK session too |
 | #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
@@ -348,6 +348,32 @@ have their own git history (we do not want a rewind that silently discards a com
 The remaining AgentStudio-side work is joining a `messages` row to the SDK user-message UUID
 so "rewind to this message" has something to pass in — which is worth doing anyway, because
 it is the same join `compact_boundary` and per-message context accounting want.
+
+**Shipped (2026-09-23).** Both open questions were answered by running the bundled CLI
+against a stand-in Messages API, and the answers are in [../chat/chat.md](../chat/chat.md#integrations):
+the sandbox layout is tracked (paths come back absolute), but only for the SDK's file tools —
+Bash and our own tools are not checkpointed; and a rewind never runs git, so it cannot drop a
+commit. Imported repos with uncommitted changes in the files being restored need an explicit
+overwrite, checked again on the server.
+
+- **The join**, with no migration: every prompt is sent as a streamed `SDKUserMessage` with a
+  uuid we mint, which the CLI keeps as the transcript uuid and keys its checkpoints by.
+  `messages.metadata.sdkTurn` on the user row holds it with the session id and the run's cwd;
+  `metadata.sdkTailUuid` on the reply holds the turn's last chain entry.
+- **The rewind** is option A from the triage: `query()` resuming the session in the run's cwd
+  with checkpointing on and an input that never yields, `rewindFiles(uuid, { dryRun: true })`
+  for the preview, the real call on confirm, then `close()` — no model call, and it works after
+  a restart, which finding 2's live handle would not have. Checkpointing is on only where the
+  workspace outlives the turn (a project, or an agent's persistent key).
+- **Worse than the issue said, and fixed with it:** edit and regenerate sent the literal prompt
+  "regenerate" into the unedited session. They now send the row's own text and resume with
+  `resumeSessionAt` at the previous reply's tail (same session id — `forkSession()` would lose
+  the file history), falling back to a fresh session primed with the kept history when the cut
+  is refused. "Compact Conversation" now runs the SDK's `/compact` instead of asking for a
+  summary the session then carried on top of everything.
+
+Left for later: a "restore files only" action on a message, and deleting a conversation's
+SDK transcript and file backups when the conversation is deleted.
 
 ### #23 — project instructions and knowledge
 
@@ -579,8 +605,9 @@ unless one of those is the actual goal.
    placement rather than data — the pinned todo list above the composer (#21), live output
    while a command runs (#26, which is the background path in #35). The ledger gap was
    closed off the same field (e0c6234; see the "Fixed" note under the ledger finding).
-2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
-   of #35, and real context accounting.
+2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks the rest
+   of #35, and real context accounting. (#24 turned out not to need it: a rewind opens its
+   own short-lived control session, which also survives a restart — see the #24 section.)
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool
    calls. **Done**: both fixed, and `search_tools` has since been deleted outright (#8).
 4. **#5, then #32 reshaped** — the orchestration keystone, which also deletes `$lib/runtime`

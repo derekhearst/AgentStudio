@@ -51,7 +51,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Tool approval | **behind** | per-tool settings + mandatory-approval list, checked for every call (subagents' included) ahead of the SDK's own allow rules; inline Allow/Deny cards, which never rendered on the engine path until 2026-09-22 (the frame carried no approval token) | per-session modes, path-scoped deny rules, per-model effort caps, auto-mode classifier |
 | Permission modes (plan / acceptEdits / bypass) | **absent** (#19) | hardcoded `default`; the Plan agent is a persona, not a mode | four modes, switchable mid-session |
 | Diff rendering | **far behind** (#16) | raw JSON in a tool card | inline diffs with per-hunk accept/reject |
-| Checkpoints and rewind | **far behind** (#24) | rewinds the transcript only; files stay written | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both |
+| Checkpoints and rewind | **behind** (#24 landed) | auto-checkpoint per turn in a project or persistent workspace; Edit and Regenerate cut the SDK session back to the kept history and offer to restore the files the dropped turns changed, with a dry-run preview and an explicit confirmation over uncommitted changes in an imported repo | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both — including a code-only restore we do not offer yet |
 | Todo list | **absent** (#21) | nothing consumes it | pinned, updated in place |
 | Terminal / command output | **far behind** (#26) | JSON-escaped blob in a card, nothing streams | streamed terminal output |
 | Git worktrees | **absent** | one working directory per project | worktree-per-agent with cleanup safety |
