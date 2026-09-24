@@ -141,6 +141,39 @@ test.describe('buildMessageSearchText — what is indexed', () => {
 		})
 		expect(subagent).toContain('Subagent Researcher: compare pgvector indexes HNSW wins')
 
+		// #32 — a delegation has no tool block of its own; the child's card carries its calls on
+		// `transcript`, and the files and commands they touched find the turn.
+		const delegated = buildMessageSearchText({
+			role: 'assistant',
+			content: '',
+			metadata: {
+				blocks: [
+					{
+						kind: 'subagent',
+						agentId: 't2',
+						agentName: 'Coder',
+						conversationId: null,
+						task: 'fix the stream route',
+						content: '',
+						success: true,
+						status: 'completed',
+						transcript: [
+							{ kind: 'tool', name: 'Read', label: 'src/lib/engine/options.server.ts', success: true },
+							{ kind: 'tool', name: 'Bash', label: 'bun run check', success: true },
+							{ kind: 'tool', name: 'Read', label: 'src/lib/engine/options.server.ts', success: true },
+						],
+						details: { kind: 'subagent', tool: 'Agent', status: 'completed', report: 'Patched the retry path.' },
+					},
+				],
+			},
+		})
+		expect(delegated).toContain('Subagent Coder: fix the stream route Patched the retry path.')
+		expect(delegated).toContain('Read src/lib/engine/options.server.ts')
+		expect(delegated).toContain('Bash bun run check')
+		expect(delegated).toContain('src lib engine options server ts')
+		// A call repeated with the same label is indexed once.
+		expect(delegated.split('Read src/lib/engine/options.server.ts').length - 1).toBe(1)
+
 		const withAttachment = buildMessageSearchText({
 			role: 'user',
 			content: 'See the screenshot',

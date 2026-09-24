@@ -141,6 +141,60 @@ test.describe('conversation export — the formatter', () => {
 		expect(md.split('Found it.').length - 1).toBe(1)
 	})
 
+	test("a delegated child's card lists its own calls, and a stopped child reads as stopped (#32)", () => {
+		const md = exportConversationMarkdown(
+			input([
+				message({
+					id: '00000000-0000-4000-8000-000000000002',
+					sequence: 2,
+					role: 'assistant',
+					content: '',
+					metadata: {
+						blocks: [
+							{
+								kind: 'subagent',
+								agentId: 'a1',
+								agentName: 'Coder',
+								conversationId: null,
+								task: 'fix the stream route',
+								content: '',
+								success: true,
+								status: 'completed',
+								transcript: [
+									{ kind: 'tool', name: 'Read', label: 'src/routes/chat/[id]/stream/+server.ts', success: true },
+									{ kind: 'tool', name: 'Bash', label: 'bun run check', success: false },
+								],
+								details: { kind: 'subagent', tool: 'Agent', status: 'completed', report: 'Patched the retry path.' },
+							},
+							{
+								kind: 'subagent',
+								agentId: 'a2',
+								agentName: 'Researcher',
+								conversationId: null,
+								task: 'read the docs',
+								content: 'Halfway through',
+								success: false,
+								status: 'stopped',
+								transcript: [],
+								error: 'Stopped before it finished.',
+							},
+						],
+					},
+				}),
+			]),
+		)
+
+		expect(md).toContain('> **Subagent · Coder** — fix the stream route')
+		expect(md).toContain('> - Read `src/routes/chat/[id]/stream/+server.ts`')
+		expect(md).toContain('> - Bash `bun run check` ✗')
+		// Nothing said on the way, so the report is the body.
+		expect(md).toContain('> Patched the retry path.')
+		// Stopped is not failed: no cross, and the reason is kept.
+		expect(md).toContain('> **Subagent · Researcher** (stopped) — read the docs')
+		expect(md).toContain('> _Stopped before it finished._')
+		expect(md).not.toContain('**Subagent · Researcher** ✗')
+	})
+
 	test('a fence is longer than any run of backticks inside it', () => {
 		const inner = 'before\n````\nnested fence\n````\nafter'
 		const fenced = codeFence(inner, 'text')

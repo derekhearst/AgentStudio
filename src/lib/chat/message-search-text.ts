@@ -33,8 +33,11 @@
 /**
  * Bump when what this builder emits changes. The boot backfill rewrites every indexed row
  * whose `builder_version` is older, so the whole history picks up the new rules.
+ *
+ * 2 — a delegated child's own tool calls (#32's card transcript), and its report when it
+ * said nothing on the way.
  */
-export const SEARCH_BUILDER_VERSION = 1
+export const SEARCH_BUILDER_VERSION = 2
 
 /** Hard cap on the built text. Far below Postgres's ~1MB tsvector limit. */
 export const SEARCH_TEXT_MAX_CHARS = 60_000
@@ -49,6 +52,8 @@ const ARGUMENT_MAX_CHARS = 2_000
 const LOOSE_ARGUMENT_MAX_CHARS = 300
 
 const SUBAGENT_MAX_CHARS = 2_000
+/** Distinct tool calls of a delegated child that are indexed (#32). */
+const SUBAGENT_MAX_TOOL_CALLS = 50
 const TODO_MAX_CHARS = 2_000
 
 /** A tool result is scanned for links only — its head and its tail, where `gh` prints the URL. */
@@ -219,11 +224,37 @@ function toolLine(item: Record<string, unknown>): string {
 	return [`${name}:`, text, ...extra].filter(Boolean).join(' ')
 }
 
+/**
+ * A delegated child: what it was asked, what it said (or, when it said nothing on the way,
+ * its final report), and the tools it called with what each touched.
+ *
+ * Since #32 the delegation has no `tool` block of its own — the child's card is its only
+ * record — and the child's calls are kept on the card's `transcript`, each with a one-line
+ * label (a path, a command, a pattern). Those labels are the child's work, and a turn that
+ * delegated an edit has to be found by the file the child edited just as if the parent had
+ * edited it.
+ */
 function subagentLine(item: Record<string, unknown>): string {
 	const name = typeof item.agentName === 'string' ? item.agentName : 'subagent'
 	const task = typeof item.task === 'string' ? clip(item.task, SUBAGENT_MAX_CHARS) : ''
-	const content = typeof item.content === 'string' ? clip(item.content, SUBAGENT_MAX_CHARS) : ''
-	return [`Subagent ${name}:`, task, content].filter(Boolean).join(' ')
+	const said = typeof item.content === 'string' && item.content.trim() ? item.content : ''
+	const report = asRecord(item.details)?.report
+	const content = clip(said || (typeof report === 'string' ? report : ''), SUBAGENT_MAX_CHARS)
+
+	const calls = new Set<string>()
+	for (const entry of asArray(item.transcript)) {
+		const call = asRecord(entry)
+		if (call?.kind !== 'tool' || typeof call.name !== 'string' || !call.name.trim()) continue
+		// A label past its cap ends in an ellipsis, which is not part of the path or command.
+		const label = typeof call.label === 'string' ? call.label.replace(/…$/, '').trim() : ''
+		calls.add(label ? `${call.name.trim()} ${label}` : call.name.trim())
+		if (calls.size >= SUBAGENT_MAX_TOOL_CALLS) break
+	}
+	const work = clip([...calls].join(' '), SUBAGENT_MAX_CHARS)
+	// Paths in the labels get their segments spelled out, as a parent's commands do.
+	const extra = pathTermsIn(work, 20)
+
+	return [`Subagent ${name}:`, task, content, work, ...extra].filter(Boolean).join(' ')
 }
 
 /** Tool calls and subagent spans, in order, from `metadata.blocks` (or the older `toolCalls`). */

@@ -697,7 +697,9 @@ opinion above: deleting a conversation does not take its cost ledger with it —
 and lose their run link. Deleting stops the conversation's live turn first — and with it the
 background commands (#35) and delegated children (#32) that end with the turn — and waits up
 to ten seconds for it to wind down; one module does this for both issues. An edited message
-(#24's `editUserMessage`) is re-indexed by its new text. Export is Markdown plus a complete
+(#24's `editUserMessage`) is re-indexed by its new text, and a delegated child's own calls
+(#32's card transcript, which replaced the delegation's tool block) are indexed and exported
+like the parent's. Export is Markdown plus a complete
 JSON. Details in [docs/chat/chat.md](../chat/chat.md).
 
 ### #22 — composer

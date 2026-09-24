@@ -126,7 +126,9 @@ What search finds:
   queries), and web links it printed — so "the run where it touched `options.server.ts`" or
   "the one where it opened that pull request" can be found even though neither was ever said
   in words;
-- what a subagent was asked to do and the start of its answer;
+- what a subagent was asked to do, the start of its answer (or its final report), and the
+  tools it called with the files and commands they touched — so work the agent delegated is
+  found the same way as work it did itself;
 - conversation titles.
 
 A file can be found by its full path (`src/lib/engine/options.server.ts`), by part of it
@@ -149,7 +151,7 @@ thinking, and system notes.
 
 | Format | What it is for | What it contains |
 | --- | --- | --- |
-| **Markdown** | Reading, pasting into notes or an issue, handing to another model | A header (dates, agent, model, tokens, cost), then each message in order. Edits appear as diffs, commands with their output, checklists as checklists, subagent work as quotes, the model's thinking folded away. Very long tool output is shortened, with a note pointing to the JSON export. |
+| **Markdown** | Reading, pasting into notes or an issue, handing to another model | A header (dates, agent, model, tokens, cost), then each message in order. Edits appear as diffs, commands with their output, checklists as checklists, subagent work as quotes (with the subagent's own tool calls, and whether it was stopped), the model's thinking folded away. Very long tool output is shortened, with a note pointing to the JSON export. |
 | **JSON** | Keeping a complete copy, or reading it with a program | Everything, unshortened: the conversation's details and every message with all of its blocks, tool arguments and results. The owner's account id is left out. |
 
 ### Editing a message

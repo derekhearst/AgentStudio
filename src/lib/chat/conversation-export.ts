@@ -218,6 +218,41 @@ function toolMarkdown(block: Record<string, unknown>): string {
 	return out.join('\n\n')
 }
 
+/**
+ * A delegated child's card, as a quote: who it was and what it was asked, the tools it called
+ * with what each touched, what it said (or its final report, when it said nothing on the way),
+ * and why it did not finish when it did not.
+ *
+ * Since #32 the card is the delegation's only record (there is no `tool` block beside it),
+ * its calls are on `transcript`, and a child the user stopped is `stopped` rather than
+ * failed. A card persisted before #32 has only `content` and `success`, and reads as before.
+ */
+function subagentMarkdown(block: Record<string, unknown>): string {
+	const stopped = block.status === 'stopped'
+	const failed = !stopped && (block.success === false || block.status === 'failed')
+	const status = stopped ? ' (stopped)' : failed ? ' ✗' : ''
+	const task = str(block.task).trim()
+	const head = `**Subagent · ${str(block.agentName) || 'subagent'}**${status}${task ? ` — ${task.replace(/\s*\n\s*/g, ' ')}` : ''}`
+
+	const calls = asArray(block.transcript)
+		.map((entry) => asRecord(entry))
+		.filter((call): call is Record<string, unknown> => call?.kind === 'tool' && str(call.name).trim() !== '')
+		.map((call) => {
+			const label = str(call.label).trim()
+			return `- ${str(call.name).trim()}${label ? ` ${inlineCode(label)}` : ''}${call.success === false ? ' ✗' : ''}`
+		})
+
+	const said = str(block.content).trim()
+	const body = said || str(asRecord(block.details)?.report).trim()
+	const error = stopped || failed ? str(block.error).trim() : ''
+
+	const parts = [head]
+	if (calls.length > 0) parts.push(calls.join('\n'))
+	if (body) parts.push(body)
+	if (error) parts.push(`_${error.replace(/\s*\n\s*/g, ' ')}_`)
+	return quote(parts.join('\n\n'))
+}
+
 function blockMarkdown(block: Record<string, unknown>): string {
 	switch (block.kind) {
 		case 'text':
@@ -226,13 +261,8 @@ function blockMarkdown(block: Record<string, unknown>): string {
 			const content = str(block.content).trim()
 			return content ? `<details><summary>Thinking</summary>\n\n${content}\n\n</details>` : ''
 		}
-		case 'subagent': {
-			const status = block.success === false || block.status === 'failed' ? ' ✗' : ''
-			const task = str(block.task).trim()
-			const body = str(block.content).trim()
-			const head = `**Subagent · ${str(block.agentName) || 'subagent'}**${status}${task ? ` — ${task.replace(/\s*\n\s*/g, ' ')}` : ''}`
-			return quote(body ? `${head}\n\n${body}` : head)
-		}
+		case 'subagent':
+			return subagentMarkdown(block)
 		case 'notice': {
 			const notice = asRecord(block.notice)
 			const title = str(notice?.title).trim()
