@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { appendFileSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -177,6 +178,33 @@ test.describe('tailing the output file', () => {
 		await finishTail.finish()
 		expect(finished.text()).toBe('after stop\n')
 		rmSync(root, { recursive: true, force: true })
+	})
+
+	test('a named pipe in place of the file is given up on at once, not waited on', async () => {
+		// Without O_NONBLOCK, opening a FIFO waits for a writer that never comes: the read never
+		// returns, and neither does `finish()` — nor the end of the turn that awaits it.
+		test.skip(process.platform === 'win32', 'named pipes are not files at a path on Windows')
+		const { root, file } = tasksDir()
+		execFileSync('mkfifo', [file])
+		const seen = collector()
+		const reasons: string[] = []
+		const tail = tailTaskOutput({
+			path: file,
+			anchor,
+			intervalMs: 15,
+			onChunk: seen.onChunk,
+			onGiveUp: (reason) => reasons.push(reason),
+		})
+		try {
+			await expect.poll(() => reasons, { timeout: 5_000 }).toEqual(['the output file is not a plain file'])
+			const started = Date.now()
+			await tail.finish()
+			expect(Date.now() - started).toBeLessThan(1_000)
+			expect(seen.chunks).toEqual([])
+		} finally {
+			await tail.stop()
+			rmSync(root, { recursive: true, force: true })
+		}
 	})
 
 	test('a hard link to some other file is not read', async () => {

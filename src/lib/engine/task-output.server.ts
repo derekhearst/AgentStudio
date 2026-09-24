@@ -27,9 +27,9 @@
  *   CLI's own, taken from the session and the typed `backgroundTaskId`, never from text;
  * - it is the only such path the result names (a second, different one means something is
  *   imitating the template, and neither is read);
- * - the file really is one: opened without following a final symlink, a regular file with a
- *   single link, whose real path — every link resolved, through `$lib/workspace/containment`
- *   — still has that same shape.
+ * - the file really is one: opened without following a final symlink and without waiting on
+ *   a named pipe, a regular file with a single link, whose real path — every link resolved,
+ *   through `$lib/workspace/containment` — still has that same shape.
  *
  * Every failure means "no live output", never an error: this runs beside the run loop, and a
  * card that stays quiet is always an acceptable answer. The CLI's layout is outside the typed
@@ -132,8 +132,18 @@ export type TaskOutputTail = {
 	stop(): Promise<void>
 }
 
-/** O_NOFOLLOW where the platform has it (not on Windows, which has no such flag). */
-const OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0)
+/**
+ * How the file is opened, the way the bundled CLI opens its own task output files.
+ *
+ * - `O_NOFOLLOW`: a final symlink fails the open instead of being followed.
+ * - `O_NONBLOCK`: a named pipe put where the file should be opens at once, and then fails the
+ *   `isFile()` check below. Without it, `open()` on a FIFO waits for a writer that may never
+ *   come — holding a libuv threadpool thread, and every read queued behind it, for good.
+ *   Regular files ignore the flag.
+ *
+ * Neither exists on Windows, which has no such files at a path like this one.
+ */
+const OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0)
 
 /** A UTF-8 continuation byte: a read that starts on one is in the middle of a character. */
 const isContinuationByte = (byte: number) => (byte & 0xc0) === 0x80
@@ -142,9 +152,9 @@ const isContinuationByte = (byte: number) => (byte & 0xc0) === 0x80
  * Read `path` from where the last read stopped, every `intervalMs`, until told to stop.
  *
  * A file that does not exist yet is waited for. A file that stops looking like this task's
- * output (a symlink, a hard link, a real path somewhere else) is given up on for good. Reads
- * never overlap, and `onChunk` is awaited, so the caller sees chunks strictly in order.
- * Never throws; `onGiveUp` says why a tail went quiet.
+ * output (a symlink, a hard link, a named pipe, a real path somewhere else) is given up on for
+ * good. Reads never overlap, and `onChunk` is awaited, so the caller sees chunks strictly in
+ * order. Never throws; `onGiveUp` says why a tail went quiet.
  */
 export function tailTaskOutput(input: {
 	path: string
