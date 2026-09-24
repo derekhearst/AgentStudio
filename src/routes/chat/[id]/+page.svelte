@@ -22,7 +22,7 @@
 	import { consoleState, resetConsoleState, setChangedFiles } from '$lib/chat-console/console-state.svelte';
 	import { changedFilesInThread } from '$lib/chat-console/changed-files';
 	import { openLeft } from '$lib/chat-console/mobile-drawer-state.svelte';
-	import { toggleRailFromHeader } from '$lib/chat-console/preview-state.svelte';
+	import RailHeaderButton from '$lib/chat-console/RailHeaderButton.svelte';
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
 	import type { TodoItem } from '$lib/engine/tool-result-details';
@@ -1476,6 +1476,12 @@
 						</span>
 					{/if}
 				</div>
+				{#if conversationData.conversation.totalCost && Number.parseFloat(String(conversationData.conversation.totalCost)) > 0}
+					<!-- #14: the cost at tablet widths, which get neither the desktop topbar nor the phone's chips row. -->
+					<span class="hidden shrink-0 tablet:inline-flex">
+						<span class="console-chip" title="Metered spend for this conversation">${Number.parseFloat(String(conversationData.conversation.totalCost)).toFixed(4)}</span>
+					</span>
+				{/if}
 				<ContextWindow
 					used={contextMetrics.used}
 					total={contextMetrics.total}
@@ -1484,12 +1490,7 @@
 					reservedTargetPct={reservedResponsePct}
 					onCompact={compactContext}
 				/>
-				<button type="button" onclick={toggleRailFromHeader} class="console-iconbtn" aria-label="Open chat rail" title="Open rail" style="width:32px;height:32px;border:1px solid var(--color-base-300);">
-					<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<rect x="3" y="4" width="18" height="16" rx="2" />
-						<line x1="15" y1="4" x2="15" y2="20" />
-					</svg>
-				</button>
+				<RailHeaderButton />
 			</div>
 
 			<!-- Mobile chips row: permission mode, running, pending, context, cost -->

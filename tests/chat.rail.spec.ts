@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { toolResultDetails } from '../src/lib/engine/tool-result-details'
 import {
 	acquireGlobalStateLock,
 	authenticateContext,
@@ -13,8 +14,10 @@ import {
  * #14 — the chat's right rail: Preview + Files, folded to a strip until it is needed.
  *
  * Seeds a conversation whose saved assistant reply carries `Edit` / `Write` blocks with
- * `file_edit` details — the shape the engine persists on `messages.metadata.blocks` — so
- * the Files tab has something real to list without a model round-trip.
+ * `file_edit` details, so the Files tab has something real to list without a model
+ * round-trip. The details are made by the engine's own `toolResultDetails` from the payload
+ * the Agent SDK returns for each tool — for the created file, no patch and no original — so
+ * they are exactly what `messages.metadata.blocks` holds in production.
  *
  * Whether the rail is expanded is a per-user preference (`chat_workbench_preferences.
  * panel_layout.railOpen`), shared by every test that signs in as the test user. So every
@@ -41,29 +44,50 @@ async function seedChatWithEdits(prefix: string, extra?: { runId?: string }) {
 		values (${conversation.id}, 'user', ${`${prefix} prompt`}, 'anthropic/claude-sonnet-4', '{}'::jsonb, '[]'::jsonb, 1)
 		returning id
 	`
-	const fileEdit = (path: string, additions: number, deletions: number, changeType: 'create' | 'update', tool: string) => ({
+	const toolBlock = (tool: string, path: string, sdkResult: Record<string, unknown>) => ({
 		kind: 'tool',
 		name: tool,
 		arguments: { file_path: path },
 		result: 'ok',
 		success: true,
 		executionMs: 0,
-		details: {
-			kind: 'file_edit',
-			tool,
-			path,
-			changeType,
-			hunks: [],
-			additions,
-			deletions,
-			unavailable: 'none',
-			truncated: false,
-		},
+		details: toolResultDetails(tool, sdkResult, { file_path: path }),
 	})
+	/** An `Edit` as the SDK answers one: a patch of `deletions` removed and `additions` added lines. */
+	const edit = (path: string, additions: number, deletions: number) =>
+		toolBlock('Edit', path, {
+			filePath: path,
+			oldString: 'old',
+			newString: 'new',
+			originalFile: 'old\n',
+			structuredPatch: [
+				{
+					oldStart: 1,
+					oldLines: deletions,
+					newStart: 1,
+					newLines: additions,
+					lines: [
+						...Array.from({ length: deletions }, (_, i) => `-old ${i}`),
+						...Array.from({ length: additions }, (_, i) => `+new ${i}`),
+					],
+				},
+			],
+			userModified: false,
+			replaceAll: false,
+		})
+	/** A `Write` that created a file, as the SDK answers one: no patch and no original. */
+	const create = (path: string, lineCount: number) =>
+		toolBlock('Write', path, {
+			type: 'create',
+			filePath: path,
+			content: Array.from({ length: lineCount }, (_, i) => `line ${i + 1}\n`).join(''),
+			structuredPatch: [],
+			originalFile: null,
+		})
 	const blocks = [
-		fileEdit('src/lib/rail-demo/widget.ts', 5, 2, 'update', 'Edit'),
-		fileEdit('notes/rail-plan.md', 12, 0, 'create', 'Write'),
-		fileEdit('src/lib/rail-demo/widget.ts', 3, 1, 'update', 'Edit'),
+		edit('src/lib/rail-demo/widget.ts', 5, 2),
+		create('notes/rail-plan.md', 12),
+		edit('src/lib/rail-demo/widget.ts', 3, 1),
 		{ kind: 'text', content: `${prefix} done` },
 	]
 	const metadata = { blocks, ...(extra?.runId ? { runId: extra.runId } : {}) }
@@ -108,11 +132,28 @@ async function holdRailOpenPref(): Promise<() => Promise<void>> {
 		return async () => {
 			try {
 				const userId = await getActiveUserId()
-				await getSql()`
-					update chat_workbench_preferences
-					set panel_layout = ${original.panelLayout === null ? null : getSql().json(original.panelLayout as never)}
-					where user_id = ${userId}
-				`
+				if (!original.exists) {
+					// The user had no preferences row, so this test made it. Take the key back out,
+					// and drop the row only if nothing else has been saved on it since.
+					await getSql()`
+						update chat_workbench_preferences
+						set panel_layout = panel_layout - 'railOpen'
+						where user_id = ${userId}
+					`
+					await getSql()`
+						delete from chat_workbench_preferences
+						where user_id = ${userId}
+							and default_agent_id is null
+							and show_right_panel = true
+							and coalesce(panel_layout, '{}'::jsonb) = '{}'::jsonb
+					`
+				} else {
+					await getSql()`
+						update chat_workbench_preferences
+						set panel_layout = ${original.panelLayout === null ? null : getSql().json(original.panelLayout as never)}
+						where user_id = ${userId}
+					`
+				}
 			} finally {
 				await release()
 			}
@@ -213,6 +254,12 @@ test.describe('chat rail — desktop column', () => {
 		// Like the diff card, a zero count is left out rather than shown as "−0".
 		await expect(plan.locator('.console-files__stat.is-add')).toHaveText('+12')
 		await expect(plan.locator('.console-files__stat.is-del')).toHaveCount(0)
+
+		// The thread's card for the new file shows what was written, not "No changes".
+		const card = page.locator('.console-diff').filter({ hasText: 'rail-plan.md' })
+		await expect(card.locator('.console-diff__verb')).toHaveText('Created')
+		await expect(card.locator('.console-diff__line.is-add')).toHaveCount(12)
+		await expect(card).not.toContainText('No changes')
 
 		await plan.click()
 		await expect(rail.getByRole('tab', { name: 'Preview' })).toHaveAttribute('aria-selected', 'true')
@@ -318,18 +365,62 @@ test.describe('chat rail — desktop column', () => {
 		await waitForRailOpenPref(false)
 	})
 
-	test('on a tablet-width window the header button expands and folds the column', async ({ page }) => {
+	test('on a tablet-width window the header button expands and folds the column, and says which', async ({ page }) => {
 		await page.setViewportSize({ width: 1024, height: 800 })
 		await openChat(page, conversationId, prefix)
 		const rail = columnRail(page)
 		await expect(rail).toHaveClass(/is-collapsed/)
 
-		const headerButton = page.getByRole('button', { name: 'Open chat rail' }).filter({ visible: true })
-		await headerButton.click()
+		// This width has neither the desktop topbar nor the phone's chips row, so the header
+		// carries the metered cost itself, once.
+		await expect(page.getByText('$0.0123').filter({ visible: true })).toHaveCount(1)
+
+		const expand = page.getByRole('button', { name: 'Expand chat rail' }).filter({ visible: true })
+		await expect(expand).toHaveAttribute('aria-expanded', 'false')
+		await expand.click()
 		await expect(rail).not.toHaveClass(/is-collapsed/)
 		await waitForRailOpenPref(true)
-		await headerButton.click()
+
+		// The same button, now named for what it will do next.
+		const collapse = page.getByRole('button', { name: 'Collapse chat rail' }).filter({ visible: true })
+		await expect(collapse).toHaveAttribute('aria-expanded', 'true')
+		await expect(collapse).toBeFocused()
+		await collapse.click()
 		await expect(rail).toHaveClass(/is-collapsed/)
+		await expect(expand).toHaveAttribute('aria-expanded', 'false')
+		await waitForRailOpenPref(false)
+	})
+
+	test('keyboard focus follows the rail as it expands and folds', async ({ page }) => {
+		await openChat(page, conversationId, prefix)
+		const rail = columnRail(page)
+		const expand = rail.getByRole('button', { name: 'Expand rail' })
+		const collapse = rail.getByRole('button', { name: 'Collapse rail' })
+
+		// Each of these buttons is replaced by the other when pressed; focus goes with it
+		// rather than dropping to the page.
+		await expand.focus()
+		await page.keyboard.press('Enter')
+		await expect(collapse).toBeFocused()
+		await page.keyboard.press('Enter')
+		await expect(expand).toBeFocused()
+
+		// A strip button lands on the tab it asked for.
+		await rail.getByRole('button', { name: 'Show Files' }).focus()
+		await page.keyboard.press('Enter')
+		await expect(rail.getByRole('tab', { name: /Files/ })).toBeFocused()
+
+		// Opening a file replaces the Files list with the preview: focus lands on its tab.
+		await rail.locator('.console-files__row').first().focus()
+		await page.keyboard.press('Enter')
+		await expect(rail.getByRole('tab', { name: 'Preview' })).toBeFocused()
+		await expect(rail.locator('.console-prev__bar')).toBeVisible()
+
+		// Closing the preview folds the rail: focus lands on the strip's expand button.
+		await rail.getByRole('button', { name: 'Close preview' }).focus()
+		await page.keyboard.press('Enter')
+		await expect(rail).toHaveClass(/is-collapsed/)
+		await expect(expand).toBeFocused()
 		await waitForRailOpenPref(false)
 	})
 
@@ -361,7 +452,12 @@ test.describe('chat rail — phone drawer', () => {
 			// The desktop column is hidden at this width.
 			await expect(columnRail(page)).toBeHidden()
 
-			await page.getByRole('button', { name: 'Open chat rail' }).filter({ visible: true }).click()
+			// The cost shows once, in the chips row under the header.
+			await expect(page.getByText('$0.0123').filter({ visible: true })).toHaveCount(1)
+
+			const railButton = page.getByRole('button', { name: 'Open chat rail' }).filter({ visible: true })
+			await expect(railButton).toHaveAttribute('aria-expanded', 'false')
+			await railButton.click()
 			const drawer = page.getByRole('dialog', { name: 'Chat rail drawer' })
 			// This drawer used to open empty: the rule hiding the column hid it too.
 			await expect(drawer.getByLabel('Open a file path or URL in the preview')).toBeVisible()

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import Icon from './Icon.svelte';
 	import PreviewPane from './PreviewPane.svelte';
 	import { consoleState } from './console-state.svelte';
@@ -12,7 +12,7 @@
 		previewState,
 		setRailTab,
 	} from './preview-state.svelte';
-	import { RAIL_TABS } from './preview-kinds';
+	import { RAIL_TABS, type RailTab } from './preview-kinds';
 
 	/*
 	 * #14 — two tabs, folded away until there is something to show.
@@ -44,11 +44,63 @@
 	});
 
 	onMount(() => void hydrateRailOpen());
+
+	/*
+	 * Folding and expanding swap the strip for the full rail, which removes the button that
+	 * was just pressed and would drop keyboard focus to the page. After each of the rail's
+	 * own controls, focus moves to the control that now stands where it was: expanding lands
+	 * on the tab that was asked for (or the collapse button), folding lands on the expand
+	 * button. The same goes for the Files list and the preview bar, which a click in them
+	 * removes. Nothing moves when focus is still somewhere, such as on a button that stayed.
+	 */
+	let expandButton = $state<HTMLButtonElement | null>(null);
+	let collapseButton = $state<HTMLButtonElement | null>(null);
+	const tabButtons = $state<Partial<Record<RailTab, HTMLButtonElement | null>>>({});
+
+	async function refocus(target: () => HTMLElement | null | undefined) {
+		await tick();
+		const active = document.activeElement;
+		if (active && active !== document.body) return;
+		target()?.focus();
+	}
+
+	function expandFromStrip() {
+		expandRail();
+		void refocus(() => collapseButton);
+	}
+
+	function showTabFromStrip(tab: RailTab) {
+		setRailTab(tab);
+		void refocus(() => tabButtons[tab] ?? collapseButton);
+	}
+
+	function collapseFromTabs() {
+		collapseRail();
+		void refocus(() => expandButton);
+	}
+
+	/** Opening a file from Files switches to Preview, which removes the Files list. */
+	function openFromFiles(path: string) {
+		openFilePreview(path);
+		void refocus(() => tabButtons.Preview);
+	}
+
+	/** Closing the preview removes its bar, and on the column folds the rail too. */
+	function afterPreviewClosed() {
+		void refocus(() => (collapsed ? expandButton : tabButtons.Preview));
+	}
 </script>
 
 {#if collapsed}
 	<aside class="console-rail is-collapsed" aria-label="Chat rail">
-		<button type="button" class="console-rail__strip-btn" title="Expand rail" aria-label="Expand rail" onclick={expandRail}>
+		<button
+			type="button"
+			class="console-rail__strip-btn"
+			title="Expand rail"
+			aria-label="Expand rail"
+			bind:this={expandButton}
+			onclick={expandFromStrip}
+		>
 			<Icon name="panel" size={15} />
 		</button>
 		<button
@@ -56,7 +108,7 @@
 			class="console-rail__strip-btn"
 			title={hasPreview ? 'Preview — something is open' : 'Preview'}
 			aria-label="Show Preview"
-			onclick={() => setRailTab('Preview')}
+			onclick={() => showTabFromStrip('Preview')}
 		>
 			<Icon name="search" size={15} />
 			{#if hasPreview}<span class="console-rail__strip-dot" aria-hidden="true"></span>{/if}
@@ -66,7 +118,7 @@
 			class="console-rail__strip-btn"
 			title={changedFiles.length > 0 ? `Files — ${changedFiles.length} changed in this chat` : 'Files'}
 			aria-label="Show Files"
-			onclick={() => setRailTab('Files')}
+			onclick={() => showTabFromStrip('Files')}
 		>
 			<Icon name="file" size={15} />
 			{#if changedFiles.length > 0}
@@ -84,6 +136,7 @@
 						role="tab"
 						aria-selected={activeTab === tab}
 						class="console-rail__tab {activeTab === tab ? 'active' : ''}"
+						bind:this={tabButtons[tab]}
 						onclick={() => setRailTab(tab)}
 					>
 						{tab}
@@ -94,7 +147,14 @@
 				{/each}
 			</div>
 			{#if variant === 'column'}
-				<button type="button" class="console-rail__collapse" title="Collapse rail" aria-label="Collapse rail" onclick={collapseRail}>
+				<button
+					type="button"
+					class="console-rail__collapse"
+					title="Collapse rail"
+					aria-label="Collapse rail"
+					bind:this={collapseButton}
+					onclick={collapseFromTabs}
+				>
 					<Icon name="panel" size={14} />
 				</button>
 			{/if}
@@ -102,7 +162,7 @@
 
 		<div class="console-rail__body {activeTab === 'Preview' ? 'is-preview' : ''}">
 			{#if activeTab === 'Preview'}
-				<PreviewPane {conversationId} />
+				<PreviewPane {conversationId} onClosed={afterPreviewClosed} />
 			{:else}
 				<div class="console-rail__sec">
 					<div class="lbl">
@@ -116,7 +176,7 @@
 					<ul class="console-files">
 						{#each changedFiles as file (file.path)}
 							<li>
-								<button type="button" class="console-files__row" title={`Preview ${file.path}`} onclick={() => openFilePreview(file.path)}>
+								<button type="button" class="console-files__row" title={`Preview ${file.path}`} onclick={() => openFromFiles(file.path)}>
 									<Icon name="file" size={12} />
 									<span class="console-files__path">
 										<span class="console-files__name">{file.name}</span>
