@@ -18,6 +18,7 @@ import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { listRecentConversations } from '$lib/chat/conversation-list.server'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
+import { deleteConversationForUser } from '$lib/chat/conversation-delete.server'
 import {
 	describePermissionMode,
 	PERMISSION_MODES,
@@ -139,7 +140,8 @@ export const createConversation = command(createConversationSchema, async (input
 
 export const deleteConversation = command(conversationIdSchema, async (conversationId) => {
 	const user = requireAuthenticatedRequestUser()
-	await db.delete(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+	// Stops a turn still running in it first, background commands included (#35).
+	await deleteConversationForUser(user.id, conversationId)
 	return { success: true }
 })
 
