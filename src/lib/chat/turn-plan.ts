@@ -8,16 +8,19 @@
  * "regenerate" into it. The model never saw the edited text, and the reply the user threw
  * away stayed in its context.
  *
- * Two keys on `messages.metadata` fix that, with no schema change:
+ * Three keys on `messages.metadata` fix that, with no schema change:
  *
- * | Row       | Key            | What it holds                                                   |
- * | --------- | -------------- | --------------------------------------------------------------- |
- * | user      | `sdkTurn`      | the uuid its prompt carried into the transcript, the session, the working directory the run used, and whether files were checkpointed |
- * | assistant | `sdkTailUuid`  | the last transcript entry its turn wrote                        |
+ * | Row       | Key             | What it holds                                                   |
+ * | --------- | --------------- | --------------------------------------------------------------- |
+ * | user      | `sdkTurn`       | the uuid its prompt carried into the transcript, the session, the working directory the run used, and whether files were checkpointed |
+ * | assistant | `sdkTailUuid`   | the last transcript entry its turn wrote                        |
+ * | user      | `sdkCutPending` | an edit or regenerate cut the rows back to this one, and no turn has cut the session to match yet |
  *
  * A regenerate of a user row resumes the session cut after the previous assistant row's
- * `sdkTailUuid` — exactly the kept history — and sends the row's own text. A rewind restores
- * files to the user row's `sdkTurn.uuid` (`./rewind.server`).
+ * `sdkTailUuid` — exactly the kept history — and sends the row's own text. So does the next
+ * ordinary message while a cut is pending: an edit whose reply never started (the request
+ * failed, the server restarted) must not leave the next message talking to the unedited
+ * session. A rewind restores files to the user row's `sdkTurn.uuid` (`./rewind.server`).
  *
  * Pure, so a spec can pin every branch without a database or a CLI.
  */
@@ -28,6 +31,12 @@ import type { TurnAttempt, TurnAttemptPlan } from '$lib/engine/turn-input'
 export const SDK_TURN_KEY = 'sdkTurn'
 /** `messages.metadata` key on an assistant row. */
 export const SDK_TAIL_KEY = 'sdkTailUuid'
+/**
+ * `messages.metadata` key on a user row: an edit or regenerate cut the rows back to it, and
+ * the SDK session still holds the turns it dropped. Set with the cut; cleared when a turn
+ * records its join, because by then that turn's session starts from the cut (or afresh).
+ */
+export const SDK_CUT_PENDING_KEY = 'sdkCutPending'
 
 /** Where one user row sits in the SDK transcript. */
 export type TurnJoin = {
@@ -51,6 +60,12 @@ export function readTurnJoin(metadata: unknown): TurnJoin | null {
 	const join = raw as Record<string, unknown>
 	if (!isNonEmptyString(join.uuid) || !isNonEmptyString(join.sessionId) || !isNonEmptyString(join.cwd)) return null
 	return { uuid: join.uuid, sessionId: join.sessionId, cwd: join.cwd, checkpointed: join.checkpointed === true }
+}
+
+/** Whether an edit or regenerate cut the rows back to this user row and the session has not followed yet. */
+export function hasPendingCut(metadata: unknown): boolean {
+	if (!metadata || typeof metadata !== 'object') return false
+	return (metadata as Record<string, unknown>)[SDK_CUT_PENDING_KEY] === true
 }
 
 /** The assistant row's transcript tail, or null. */
@@ -83,13 +98,8 @@ export type HistoryRow = { role: string; content: string }
 export const PREAMBLE_MAX_CHARS = 24_000
 const PREAMBLE_ROW_MAX_CHARS = 4_000
 
-/**
- * The kept history as text, for a fresh session that stands in for one we could not cut —
- * a conversation older than the join, or a cut the CLI refused. Most recent turns first to
- * survive the budget; tool calls are not in `messages.content`, so they are not here.
- * Null when there is nothing to keep.
- */
-export function buildHistoryPreamble(rows: HistoryRow[], maxChars = PREAMBLE_MAX_CHARS): string | null {
+/** The rows as "User: …" / "Assistant: …" turns, the most recent kept within `maxChars`. Null when there are none. */
+function formatTurns(rows: HistoryRow[], maxChars: number): string | null {
 	const turns = rows
 		.filter((row) => (row.role === 'user' || row.role === 'assistant') && row.content.trim().length > 0)
 		.map((row) => {
@@ -107,13 +117,68 @@ export function buildHistoryPreamble(rows: HistoryRow[], maxChars = PREAMBLE_MAX
 		used += turns[i].length
 	}
 	const omitted = kept.length < turns.length ? '(Earlier messages omitted.)\n\n' : ''
+	return `${omitted}${kept.join('\n\n')}`
+}
+
+/**
+ * The kept history as text, for a fresh session that stands in for one we could not cut —
+ * a conversation older than the join, or a cut the CLI refused. Most recent turns first to
+ * survive the budget; tool calls are not in `messages.content`, so they are not here.
+ * Null when there is nothing to keep.
+ */
+export function buildHistoryPreamble(rows: HistoryRow[], maxChars = PREAMBLE_MAX_CHARS): string | null {
+	const turns = formatTurns(rows, maxChars)
+	if (!turns) return null
 	return [
 		'[Earlier in this conversation — restored as text because the session could not be rewound to this point.]',
 		'',
-		`${omitted}${kept.join('\n\n')}`,
+		turns,
 		'',
 		'[End of the earlier conversation. The message to answer follows.]',
 	].join('\n')
+}
+
+/**
+ * The user rows after the last reply: sent, but never answered in the session a cut goes
+ * back to. Usually there are none. There are some when an edit's reply never started and the
+ * user wrote again, or when a turn failed before it saved a reply.
+ */
+export function unansweredTail(rows: HistoryRow[]): HistoryRow[] {
+	let lastReply = -1
+	for (let i = rows.length - 1; i >= 0; i--) {
+		if (rows[i].role === 'assistant') {
+			lastReply = i
+			break
+		}
+	}
+	return rows.slice(lastReply + 1).filter((row) => row.role === 'user')
+}
+
+/**
+ * The unanswered user rows as text, for a turn resumed at the last reply. The cut session
+ * holds everything up to that reply; these are what the page shows between it and the turn.
+ */
+export function buildUnansweredPreamble(rows: HistoryRow[], maxChars = PREAMBLE_MAX_CHARS): string | null {
+	const turns = formatTurns(
+		rows.filter((row) => row.role === 'user'),
+		maxChars,
+	)
+	if (!turns) return null
+	return [
+		'[Earlier messages in this conversation that did not get a reply:]',
+		'',
+		turns,
+		'',
+		'[End of the earlier messages. The message to answer follows.]',
+	].join('\n')
+}
+
+/**
+ * Whether a turn's text is a CLI slash command such as `/compact`. The CLI only reads a
+ * command from the very start of the prompt, so nothing may go in front of one.
+ */
+export function isSlashCommand(text: string): boolean {
+	return /^\/[A-Za-z]/.test(text.trimStart())
 }
 
 /** The previous assistant row, as far as the fork decision cares. */
@@ -123,24 +188,31 @@ export type ForkPoint = { sdkSessionId: string | null; sdkTailUuid: string | nul
  * How a turn starts its SDK session.
  *
  * - A new message resumes the session as it is.
- * - An edit or regenerate cuts the session after the previous assistant row's tail, when
- *   that row belongs to the current session and recorded one. The fallback, used only if
- *   the CLI refuses the cut, is a fresh session primed with the kept history.
+ * - A cut — an edit or regenerate, or the next message after an edit whose reply never
+ *   started — resumes the session cut after the previous assistant row's tail, when that row
+ *   belongs to the current session and recorded one. User rows between that reply and the
+ *   turn (`unanswered`) go in front of the text, since the cut session never saw them. The
+ *   fallback, used only if the CLI refuses the cut, is a fresh session primed with the kept
+ *   history.
  * - Otherwise — the first message, a conversation older than the join, a turn that ended
- *   in a compaction — the edit starts a fresh session with that preamble straight away.
+ *   in a compaction — the cut starts a fresh session with that preamble straight away.
  *
  * `forkSession` is deliberately never used: a forked session starts without the file
  * history (`forkSession()`'s own doc says so), and keeping the same session id is what lets
  * a later rewind still find every checkpoint.
  */
 export function resolveTurnResume(input: {
-	regenerate: boolean
+	/** The session must be cut back to the kept history first. */
+	cut: boolean
 	sdkSessionId: string | null
 	previousAssistant: ForkPoint | null
+	/** Every kept user and assistant row before the turn, oldest first. */
 	keptHistory: HistoryRow[]
+	/** The kept user rows after `previousAssistant` (`unansweredTail`). Empty for a slash command. */
+	unanswered?: HistoryRow[]
 	mintUuid: () => string
 }): TurnAttemptPlan {
-	if (!input.regenerate) {
+	if (!input.cut) {
 		return {
 			first: {
 				kind: 'continue',
@@ -165,7 +237,7 @@ export function resolveTurnResume(input: {
 				kind: 'fork',
 				resumeSessionId: input.sdkSessionId,
 				resumeSessionAt: point.sdkTailUuid,
-				preamble: null,
+				preamble: buildUnansweredPreamble(input.unanswered ?? []),
 				sdkUserUuid: input.mintUuid(),
 			},
 			fallback: fresh(),

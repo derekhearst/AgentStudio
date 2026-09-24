@@ -1,10 +1,11 @@
 /**
  * Edit and regenerate: cutting a conversation back to one of its user messages.
  *
- * Both change `messages` only; the next turn (a regenerate) cuts the SDK session to match
- * (`./turn-plan`). With `restoreFiles`, the files the dropped turns changed are restored
- * first (#24), and a restore that fails leaves the conversation exactly as it was — the
- * user can then choose to go on without it.
+ * Both change `messages` only, and mark the row they cut back to (`SDK_CUT_PENDING_KEY`).
+ * The next turn cuts the SDK session to match (`./turn-plan`) — the regenerate that follows,
+ * or, if that never starts, whatever message the user sends next. With `restoreFiles`, the
+ * files the dropped turns changed are restored first (#24), and a restore that fails leaves
+ * the conversation exactly as it was — the user can then choose to go on without it.
  *
  * Refused while a turn is running: the turn would save its reply under a message that no
  * longer says what it answered, and its session would be cut out from under it.
@@ -15,6 +16,7 @@ import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
 import { applyMessageRewind, isConversationRewinding, type RewindDeps } from './rewind.server'
+import { markCutPending } from './turn-plan.server'
 
 export type BranchInput = {
 	userId: string
@@ -87,9 +89,11 @@ async function prepareBranch(
 	return { filesRestored: rewind.filesRestored, skippedLinks: rewind.skippedLinks }
 }
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
 /** Every row after `sequence` — the turns the cut drops. Sequence, not time: two rows can share a millisecond. */
-async function deleteAfter(conversationId: string, sequence: number) {
-	await db.delete(messages).where(and(eq(messages.conversationId, conversationId), gt(messages.sequence, sequence)))
+async function deleteAfter(tx: Tx, conversationId: string, sequence: number) {
+	await tx.delete(messages).where(and(eq(messages.conversationId, conversationId), gt(messages.sequence, sequence)))
 }
 
 /** Replace a user message's text and drop everything after it. */
@@ -104,10 +108,8 @@ export async function editUserMessage(
 	if ('error' in prepared) return prepared.error
 
 	await db.transaction(async (tx) => {
-		await tx.update(messages).set({ content: input.content }).where(eq(messages.id, target.id))
-		await tx
-			.delete(messages)
-			.where(and(eq(messages.conversationId, target.conversationId), gt(messages.sequence, target.sequence)))
+		await tx.update(messages).set({ content: input.content, metadata: markCutPending() }).where(eq(messages.id, target.id))
+		await deleteAfter(tx, target.conversationId, target.sequence)
 	})
 	return { success: true, conversationId: target.conversationId, ...prepared }
 }
@@ -123,6 +125,9 @@ export async function truncateAfterMessage(
 	const prepared = await prepareBranch(input, target.conversationId, deps)
 	if ('error' in prepared) return prepared.error
 
-	await deleteAfter(target.conversationId, target.sequence)
+	await db.transaction(async (tx) => {
+		await tx.update(messages).set({ metadata: markCutPending() }).where(eq(messages.id, target.id))
+		await deleteAfter(tx, target.conversationId, target.sequence)
+	})
 	return { success: true, conversationId: target.conversationId, ...prepared }
 }

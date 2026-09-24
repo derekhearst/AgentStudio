@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { cleanupPrefixedRecords, getActiveUserId, getSql, uniquePrefix } from './helpers'
 import { planTurn, recordTurnJoin } from '../src/lib/chat/turn-plan.server'
-import { readTurnJoin } from '../src/lib/chat/turn-plan'
+import { hasPendingCut, readTurnJoin } from '../src/lib/chat/turn-plan'
 import { editUserMessage, truncateAfterMessage } from '../src/lib/chat/message-branch.server'
 import { applyMessageRewind, previewMessageRewind, type RewindDeps } from '../src/lib/chat/rewind.server'
 import { claimRun } from '../src/lib/engine/run-registry.server'
@@ -49,6 +49,18 @@ async function seedThread(prefix: string, rows: Row[], opts: { sdkSessionId?: st
 		ids.push(inserted.id)
 	}
 	return { userId, conversationId: conversation.id, ids }
+}
+
+/** A new user row at the end of the thread, as `resolveParentMessage` inserts one for a new message. */
+async function appendUserRow(conversationId: string, content: string) {
+	const sql = getSql()
+	const [row] = await sql<{ id: string }[]>`
+		insert into messages (conversation_id, role, content, metadata, tool_calls, attachments, sequence)
+		select ${conversationId}, 'user', ${content}, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, coalesce(max(sequence), 0) + 1
+		from messages where conversation_id = ${conversationId}
+		returning id
+	`
+	return row.id
 }
 
 async function rows(conversationId: string) {
@@ -227,6 +239,27 @@ test.describe('recordTurnJoin', () => {
 			await cleanupPrefixedRecords(prefix)
 		}
 	})
+
+	test('clears a pending cut on its row and the rows before it, in its own conversation only', async () => {
+		const prefix = uniquePrefix('regen-fork-join-clears')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const pending = { sdkCutPending: true, keep: 'me' }
+			const mine = await seedThread(prefix, [
+				{ role: 'user', content: 'edited', metadata: pending },
+				{ role: 'user', content: 'sent after it' },
+			])
+			const other = await seedThread(prefix, [{ role: 'user', content: 'elsewhere', metadata: pending }])
+			await recordTurnJoin(mine.ids[1], { uuid: randomUUID(), sessionId: SESSION, cwd: '/w', checkpointed: false })
+
+			const [edited] = await rows(mine.conversationId)
+			expect(hasPendingCut(edited.metadata)).toBe(false)
+			expect(edited.metadata.keep).toBe('me')
+			expect(hasPendingCut((await rows(other.conversationId))[0].metadata)).toBe(true)
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
 })
 
 test.describe('edit and regenerate, with and without restoring files', () => {
@@ -265,6 +298,73 @@ test.describe('edit and regenerate, with and without restoring files', () => {
 			const result = await editUserMessage({ userId, messageId: ids[2], content: 'change them differently' })
 			expect(result).toEqual({ success: true, conversationId, filesRestored: 0, skippedLinks: 0 })
 			expect((await rows(conversationId)).map((row) => row.content)).toEqual(['first', 'reply one', 'change them differently'])
+			// The session still holds the dropped turn until a turn cuts it back.
+			expect(hasPendingCut((await rows(conversationId))[2].metadata)).toBe(true)
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('an edit whose reply never started: the next new message still cuts the session back', async () => {
+		const prefix = uniquePrefix('regen-fork-edit-then-send')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const { userId, conversationId, ids } = await checkpointedThread(prefix)
+			// Edit U2 to U2'. The regenerate that should follow never reaches the server.
+			expect((await editUserMessage({ userId, messageId: ids[2], content: 'change them differently' })).success).toBe(true)
+
+			// The user ignores Retry and writes U3.
+			const u3 = await appendUserRow(conversationId, 'and add a test')
+			const planned = await planTurn({
+				conversationId,
+				regenerate: false,
+				sdkSessionId: SESSION,
+				pivotMessageId: u3,
+				body: { content: 'and add a test' },
+			})
+			expect(planned.ok).toBe(true)
+			if (!planned.ok) return
+			expect(planned.turn.text).toBe('and add a test')
+			// Cut after "reply one": the original U2 and the discarded "changed them" are gone.
+			expect(planned.turn.attempts.first).toMatchObject({ kind: 'fork', resumeSessionId: SESSION, resumeSessionAt: 'tail-1' })
+			// U2' was never answered in that session, so it goes in front of U3.
+			expect(planned.turn.attempts.first.preamble).toContain('User: change them differently')
+			expect(planned.turn.attempts.first.preamble).not.toContain('change the files')
+			expect(planned.turn.attempts.fallback?.preamble).toContain('User: change them differently')
+			expect(planned.turn.attempts.fallback?.preamble).not.toContain('changed them')
+
+			// Once the turn records its join, the cut is done: the next message resumes as it is.
+			await recordTurnJoin(u3, { uuid: randomUUID(), sessionId: SESSION, cwd: '/w', checkpointed: false })
+			expect((await rows(conversationId)).some((row) => hasPendingCut(row.metadata))).toBe(false)
+			const u4 = await appendUserRow(conversationId, 'thanks')
+			const next = await planTurn({ conversationId, regenerate: false, sdkSessionId: SESSION, pivotMessageId: u4, body: { content: 'thanks' } })
+			expect(next.ok && next.turn.attempts.first).toMatchObject({ kind: 'continue', resumeSessionId: SESSION, preamble: null })
+			expect(next.ok && next.turn.attempts.first).not.toHaveProperty('resumeSessionAt')
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('a regenerate marks its row too, and a slash command sent after it gets nothing in front', async () => {
+		const prefix = uniquePrefix('regen-fork-regen-then-compact')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const { userId, conversationId, ids } = await checkpointedThread(prefix)
+			expect((await truncateAfterMessage({ userId, conversationId, messageId: ids[2] })).success).toBe(true)
+			const after = await rows(conversationId)
+			expect(after.map((row) => row.content)).toEqual(['first', 'reply one', 'change the files'])
+			expect(hasPendingCut(after[2].metadata)).toBe(true)
+
+			// "Compact Conversation" before the regenerate ran: cut, but `/compact` must stay a command.
+			const compact = await appendUserRow(conversationId, '/compact Preserve everything.')
+			const planned = await planTurn({
+				conversationId,
+				regenerate: false,
+				sdkSessionId: SESSION,
+				pivotMessageId: compact,
+				body: { content: '/compact Preserve everything.' },
+			})
+			expect(planned.ok && planned.turn.attempts.first).toMatchObject({ kind: 'fork', resumeSessionAt: 'tail-1', preamble: null })
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}
