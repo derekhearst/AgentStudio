@@ -18,9 +18,10 @@
  * `idle` and `active` both available — lives in `$lib/agents/agent-status`, which the Pause
  * button, the automation gate and this filter all read.
  *
- * **`ask_user` is disallowed for every subagent.** The old loop refused it for
- * non-orchestrators — a child has no stream to ask down — and that rule has to survive the
- * port or a delegated agent will hang waiting for an answer nobody is being shown.
+ * **`AskUserQuestion` is disallowed for every subagent.** The old loop refused `ask_user` for
+ * non-orchestrators — a child has no stream to ask down — and that rule survived the port to
+ * the SDK's own question tool (#4). The engine refuses a child's question in `canUseTool` as
+ * well, for the SDK's built-in agents, which no definition here reaches.
  *
  * **The model is inherited unless the row asks for a Claude model.** A run against the
  * gateway sets `ANTHROPIC_MODEL` for the whole process, so a subagent naming a different
@@ -31,6 +32,8 @@
 
 import { isAgentPaused } from '$lib/agents/agent-status'
 import { BUILTIN_TOOL_SET } from './builtin-tools'
+import { ASK_USER_QUESTION_TOOL } from './ask-user-question'
+import { isSubscriptionModel, normalizeModelId } from './model-backend'
 import { OWN_MCP_SERVER } from './permission-mode'
 
 /** The subset of `AgentDefinition` this app populates. Mirrors the SDK type structurally. */
@@ -44,6 +47,8 @@ export type EngineAgentDefinition = {
 
 /** What the mapper needs from an `agents` row, named so callers cannot pass the wrong thing. */
 export type AgentRowForDefinition = {
+	/** The `agents` row id. Optional so a spec can build a definition from a bare row. */
+	id?: string
 	name: string
 	role: string
 	/** Already resolved — an identity skill may have overridden `systemPrompt`. */
@@ -72,9 +77,18 @@ export function qualifyAgentTools(allowedTools: readonly string[]): string[] {
 
 /** Tools no subagent may call, whatever its own allow-list says. */
 export const SUBAGENT_DISALLOWED_TOOLS: readonly string[] = [
-	// A child has no stream to ask down. The old loop refused this for non-orchestrators;
-	// without it a delegated agent hangs on a question nobody is shown.
-	'mcp__agentstudio__ask_user',
+	// A child has no stream to ask down. The old loop refused its `ask_user` for
+	// non-orchestrators; the SDK's question tool is refused the same way.
+	ASK_USER_QUESTION_TOOL,
+	// The tree is one level deep (#32). A child that could delegate would hold one of the
+	// parent's concurrency slots while waiting on slots of its own, and the parent could
+	// deadlock on its own grandchildren. The delegation gate refuses a nested call as well;
+	// this keeps the tool out of the child's list so it is never offered in the first place.
+	'Agent',
+	'Task',
+	'Workflow',
+	// Resumes a finished agent outside any `Agent` call — see `DISALLOWED_BUILTIN_TOOLS`.
+	'SendMessage',
 ]
 
 /**
@@ -91,13 +105,6 @@ export function agentKey(name: string): string {
 		.replace(/[^a-z0-9]+/g, '-')
 		.replace(/^-+|-+$/g, '')
 	return slug.length > 0 ? slug : 'agent'
-}
-
-/** True when a model id is one the Claude CLI serves directly, rather than via the gateway. */
-function isClaudeModelId(model: string): boolean {
-	const normalized = model.toLowerCase()
-	const bare = normalized.startsWith('anthropic/') ? normalized.slice('anthropic/'.length) : normalized
-	return ['claude-', 'opus', 'sonnet', 'haiku'].some((prefix) => bare.startsWith(prefix))
 }
 
 /**
@@ -126,8 +133,11 @@ export function agentDefinitionFrom(
 		disallowedTools: [...SUBAGENT_DISALLOWED_TOOLS],
 	}
 
-	if (row.model && isClaudeModelId(row.model) && options.parentIsClaude) {
-		definition.model = row.model.includes('/') ? row.model.split('/').slice(1).join('/') : row.model
+	// The same normalisation the parent's model gets, so `anthropic/claude-haiku-4.5` reaches
+	// the CLI as `claude-haiku-4-5` whichever of the two it was named in. A Claude id the CLI
+	// cannot run (a retired model) inherits instead of failing the delegation.
+	if (row.model && isSubscriptionModel(row.model) && options.parentIsClaude) {
+		definition.model = normalizeModelId(row.model)
 	} else {
 		definition.model = 'inherit'
 	}
@@ -151,12 +161,30 @@ export function buildAgentDefinitions(
 	rows: readonly AgentRowForDefinition[],
 	options: { parentIsClaude: boolean },
 ): Record<string, EngineAgentDefinition> {
-	const out: Record<string, EngineAgentDefinition> = {}
+	return buildAgentRoster(rows, options).definitions
+}
+
+/**
+ * The offered agents, plus which `agents` row each key names.
+ *
+ * The SDK only ever hands back the key (`subagent_type` on the `Agent` call), and two things
+ * need the row behind it (#32): the budget check a child must pass before it starts, which
+ * applies that agent's own limits, and the child's ledger row, which is attributed to it.
+ * Built in the same pass as the definitions so the two can never disagree about who won a
+ * key collision.
+ */
+export function buildAgentRoster(
+	rows: readonly AgentRowForDefinition[],
+	options: { parentIsClaude: boolean },
+): { definitions: Record<string, EngineAgentDefinition>; agentIdByKey: Record<string, string> } {
+	const definitions: Record<string, EngineAgentDefinition> = {}
+	const agentIdByKey: Record<string, string> = {}
 	for (const row of rows) {
 		const built = agentDefinitionFrom(row, options)
 		if (!built) continue
-		if (built.key in out) continue
-		out[built.key] = built.definition
+		if (built.key in definitions) continue
+		definitions[built.key] = built.definition
+		if (row.id) agentIdByKey[built.key] = row.id
 	}
-	return out
+	return { definitions, agentIdByKey }
 }

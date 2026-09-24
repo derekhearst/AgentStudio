@@ -7,6 +7,7 @@
 	import { onMount } from 'svelte';
 	import { handOffAttachments, type HandoffAttachment } from '$lib/chat/new-chat-handoff';
 	import { onConversationListChange } from '$lib/chat/conversation-list-sync';
+	import { sortConversations } from '$lib/chat/conversation-order';
 	import { createConversation, getConversations, listAgentsForPicker, getWorkbenchPreferences } from '$lib/chat/chat.remote';
 	import { getSettings } from '$lib/settings';
 	import { fetchFresh } from '$lib/ui/fresh-query';
@@ -44,6 +45,8 @@
 	 */
 	const conversationsQuery = browser ? getConversations() : null;
 	const recentChats = $derived<Conversation[]>(conversationsQuery?.current ?? []);
+	/** Last activity first. The server lists every pinned chat ahead of the rest (#18); "Recent" is not about pins. */
+	const recentByActivity = $derived(sortConversations(recentChats, 'Recency', 'chats'));
 	let agentChoices = $state<AgentChoice[]>([]);
 	let liveRuns = $state<Record<string, LiveRun>>({});
 
@@ -292,7 +295,7 @@
 			<div class="w-full space-y-2 text-left desktop:hidden">
 				<h2 class="text-xs font-semibold uppercase tracking-wide text-base-content/40">Recent chats</h2>
 				<div class="space-y-0.5">
-					{#each recentChats.slice(0, 5) as chat (chat.id)}
+					{#each recentByActivity.slice(0, 5) as chat (chat.id)}
 						{@const run = runForConversation(chat)}
 						<a
 							href={`/chat/${chat.id}`}

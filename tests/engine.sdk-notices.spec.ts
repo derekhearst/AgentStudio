@@ -216,6 +216,65 @@ test.describe('background tasks', () => {
 
 		expect(result?.kind === 'notice' && result.notice.title.includes('worker restart')).toBe(true)
 	})
+
+	test('the task itself comes back beside the notice, so its call can be closed (#35)', () => {
+		const result = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b1',
+			tool_use_id: 'toolu_1',
+			status: 'completed',
+			summary: 'Background command "npm test" completed (exit code 0)',
+			output_file: '/tmp/claude/p/s/tasks/b1.output',
+		})
+		expect(result?.kind === 'notice' && result.notice.title).toBe('A background task finished')
+		expect(result?.kind === 'notice' && result.task).toEqual({
+			taskId: 'b1',
+			toolUseId: 'toolu_1',
+			status: 'completed',
+			outputFile: '/tmp/claude/p/s/tasks/b1.output',
+			exitCode: 0,
+		})
+
+		const failed = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b2',
+			status: 'failed',
+			summary: 'Background command "make" failed with exit code 2',
+			output_file: '',
+		})
+		expect(failed?.kind === 'notice' && failed.task).toEqual({
+			taskId: 'b2',
+			toolUseId: null,
+			status: 'failed',
+			outputFile: null,
+			exitCode: 2,
+		})
+	})
+
+	test('an exit code is only read where the CLI puts it, never out of the description', () => {
+		// The quoted description is the model's; only the CLI's closing words count.
+		const stopped = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b3',
+			status: 'stopped',
+			summary: 'Background command "echo (exit code 5)" was stopped',
+			output_file: '/x',
+		})
+		expect(stopped?.kind === 'notice' && stopped.task?.exitCode).toBeNull()
+
+		const noCode = interpretSdkMessage({
+			type: 'system',
+			subtype: 'task_notification',
+			task_id: 'b4',
+			status: 'completed',
+			summary: 'Background command "npm run dev" completed',
+			output_file: '/x',
+		})
+		expect(noCode?.kind === 'notice' && noCode.task?.exitCode).toBeNull()
+	})
 })
 
 test.describe('rate limits and progress', () => {
@@ -257,5 +316,60 @@ test.describe('rate limits and progress', () => {
 
 	test('progress without an elapsed time is not progress', () => {
 		expect(interpretSdkMessage({ type: 'tool_progress', tool_use_id: 'toolu_1' })).toBeNull()
+	})
+})
+
+test.describe('connectors at the start of a turn (#17)', () => {
+	const init = (mcp_servers: unknown) => ({ type: 'system', subtype: 'init', tools: [], mcp_servers })
+
+	test('every server up, or still connecting, says nothing', () => {
+		expect(
+			interpretSdkMessage(
+				init([
+					{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+					{ name: 'github', status: 'connected', source: 'dynamic' },
+					// MCP startup does not block the turn, so a slow server is not a failure.
+					{ name: 'linear', status: 'pending', source: 'dynamic' },
+				]),
+			),
+		).toBeNull()
+		expect(interpretSdkMessage(init([]))).toBeNull()
+		expect(interpretSdkMessage({ type: 'system', subtype: 'init' })).toBeNull()
+	})
+
+	test('a connector that failed or needs a sign-in is named in one kept warning', () => {
+		const result = interpretSdkMessage(
+			init([
+				{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+				{ name: 'github', status: 'failed', source: 'dynamic' },
+				{ name: 'linear', status: 'needs-auth', source: 'dynamic' },
+			]),
+		)
+
+		expect(result?.kind).toBe('notice')
+		if (result?.kind !== 'notice') return
+		expect(result.notice.kind).toBe('mcp_unavailable')
+		expect(result.notice.level).toBe('warn')
+		expect(result.notice.persist).toBe(true)
+		expect(result.notice.title).toBe('2 connectors are unavailable this turn')
+		expect(result.notice.detail).toContain('github (could not connect)')
+		expect(result.notice.detail).toContain('linear (needs a sign-in)')
+	})
+
+	test('our own in-process server is never reported as a connector', () => {
+		expect(interpretSdkMessage(init([{ name: 'agentstudio', status: 'failed', source: 'sdk' }]))).toBeNull()
+	})
+
+	test('a server name is untrusted text: reduced to safe characters and clipped', () => {
+		const result = interpretSdkMessage(
+			init([{ name: `<img src=x onerror=alert(1)>${'a'.repeat(80)}`, status: 'failed', source: 'dynamic' }]),
+		)
+
+		expect(result?.kind === 'notice' && result.notice.title).toBe('A connector is unavailable this turn')
+		const detail = result?.kind === 'notice' ? (result.notice.detail ?? '') : ''
+		const shown = detail.split(' (')[0]
+		expect(shown).toMatch(/^[a-zA-Z0-9_-]+$/)
+		expect(shown.length).toBeLessThanOrEqual(40)
+		expect(detail).not.toContain('<')
 	})
 })

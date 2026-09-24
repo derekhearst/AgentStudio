@@ -27,6 +27,34 @@ Opening another chat from the sidebar gives that chat a fresh page. Nothing the 
 chat was doing (a reply streaming in, its tool cards, its Stop button, an error and its
 Retry) carries over. See "Switching conversations mid-turn" in the chat spec.
 
+### Pinned, archived, searched (#18)
+
+The rules behind these are in the [chat domain doc](../chat/chat.md); this is how the
+sidebar presents them.
+
+- **Pinned chats** sit in their own **Pinned** group above everything else, whichever way
+  the list is grouped (date, project, none), most recently pinned first. The rest of the
+  list is ordered by last activity.
+- **Each row has a "⋯" menu**: Archive, Pin to top / Unpin, Rename, Export as Markdown,
+  Export as JSON and, last and in red, Delete… (which asks first). On a computer the menu
+  button and a one-click **Archive** button appear when the pointer is over the row or a
+  row control has keyboard focus, covering the time label; on a touch screen or in the
+  phone's navigation drawer the "⋯" button is always shown and the row keeps room for it,
+  so the title never collapses. The menu opens inline under its row, so neither the
+  scrolling list nor the drawer can cut it off. Clicking anywhere else, or Escape, closes it.
+- **The Status filter** (in the menu under the search box) has three views: **All** (every
+  chat that is not archived), **Running** (chats with a turn in progress) and **Archived**.
+  The Archived view shows a bar with a **Back to chats** link, and "Loading…" until the
+  archive has arrived. It is ordered, grouped by day and labelled by when each chat was
+  archived rather than by its last activity. ("Archived" used to mean "not running", and
+  "Active" meant running; both were renamed when the real archive arrived.)
+- **The search box** filters the loaded list by title and latest reply as you type. After a
+  quarter-second pause it also searches the whole history on the server, and matches in
+  messages and tool calls appear under **In messages**: title, an *archived* badge where it
+  applies, when the matching message was written, and up to three lines of extract with the
+  matched words highlighted. The extract is always shown as text; the highlighting is added
+  by the page. Pinning, archiving, renaming or deleting a chat re-runs the search.
+
 ## The right rail
 
 The rail sits to the right of a conversation. It only appears on a chat: the home page
@@ -205,6 +233,13 @@ These are the constraints that matter, and why:
 - **The URL is always visible** above the frame, so it is never ambiguous what is loaded.
 - **Framed pages are sandboxed.** Scripts and forms are allowed; a page on the app's own
   origin additionally loses `allow-same-origin` so it cannot script the app.
+- **The composer's `@` file list follows the same rules.** It lists the workspace the chat's
+  next turn will run in (a bound project's folder, or an agent's persistent workspace; a chat
+  whose turns each start in a fresh folder has nothing to list), re-checks ownership on every
+  search, never follows or lists a symbolic link, skips `.git`, `node_modules` and build
+  output, and returns relative names only. It never runs `git` or any other program over the
+  workspace: the agent can write a repository's `.git/config`, and some of its settings make
+  git run a program on the server. See "Composer shortcuts" in the chat spec.
 - **Previewed markdown is sanitized.** Raw HTML in the file is escaped rather than
   executed, and links and images that are not `http(s)` are dropped. That includes text
   that follows an inline `<code>`, `<kbd>` or `<pre>` tag, which the markdown library
@@ -215,6 +250,7 @@ These are the constraints that matter, and why:
 ## Integrations
 
 - `src/lib/workspace/workspace.server.ts` — workspace resolution and path containment.
+- `src/lib/chat-console/workspace-files.server.ts` and `mentions.server.ts` — the `@` file list.
 - `src/lib/tools/sandbox.server.ts` — the same workspace the agent's file tools use.
 - `/api/preview/raw` — image and PDF bytes for the rail.
 - `src/lib/engine/tool-result-details.ts` — the `file_edit` details (path, change type,

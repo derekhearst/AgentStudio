@@ -1,4 +1,17 @@
-import { integer, jsonb, numeric, pgEnum, pgTable, real, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { sql, type SQL } from 'drizzle-orm'
+import {
+	customType,
+	index,
+	integer,
+	jsonb,
+	numeric,
+	pgEnum,
+	pgTable,
+	real,
+	text,
+	timestamp,
+	uuid,
+} from 'drizzle-orm/pg-core'
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import type { TodoItem } from '$lib/engine/tool-result-details'
@@ -68,6 +81,14 @@ export const conversations = pgTable('conversations', {
 	// #21 — the latest `TodoWrite` list for this conversation. Null until the agent writes
 	// one, and cleared when the user dismisses it. See `ConversationTodoList` above.
 	todoList: jsonb('todo_list').$type<ConversationTodoList | null>(),
+	// #18 — conversation lifecycle. Both are timestamps rather than booleans: set means "on",
+	// and the time is worth having — pinned chats list in the order they were pinned, and
+	// the archive shows when something was put away. Neither moves `updatedAt`, so pinning or
+	// archiving a chat never reorders it. Archiving clears the pin, pinning clears the
+	// archive, and a message the user sends brings an archived chat back (see
+	// `$lib/chat/conversation-lifecycle.server`).
+	pinnedAt: timestamp('pinned_at', { withTimezone: true }),
+	archivedAt: timestamp('archived_at', { withTimezone: true }),
 	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 	updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 })
@@ -101,3 +122,50 @@ export const messages = pgTable('messages', {
 	// unique index serializes racing writers.
 	sequence: integer('sequence').notNull(),
 })
+
+/**
+ * Postgres's full-text document type. Drizzle has no built-in for it; this is the
+ * documented `customType` pattern.
+ */
+const tsvector = customType<{ data: string }>({
+	dataType() {
+		return 'tsvector'
+	},
+})
+
+/**
+ * #18 — the search index behind "search across conversations".
+ *
+ * One row per message, holding the text worth finding it by (`body`) and the parsed
+ * document Postgres searches (`tsv`, generated from `body` and GIN-indexed). `body` is
+ * built by `buildMessageSearchText`: the message text, attachment names and — the part
+ * that makes it find *work* rather than prose — each tool call's name, file paths,
+ * commands and short arguments. Raw tool output and file contents are left out.
+ *
+ * A side table rather than columns on `messages` because the chat page loads messages with
+ * `select()`, which would ship the search text to the browser with every conversation; and
+ * because it can be rebuilt: a change to what is indexed bumps `SEARCH_BUILDER_VERSION`,
+ * and the boot backfill rewrites every row whose `builderVersion` is older.
+ *
+ * Written after the message is committed, best-effort: indexing never fails a message
+ * write, and anything missed is picked up by the backfill (`$lib/chat/message-search.server`).
+ */
+export const messageSearch = pgTable(
+	'message_search',
+	{
+		messageId: uuid('message_id')
+			.primaryKey()
+			.references(() => messages.id, { onDelete: 'cascade' }),
+		conversationId: uuid('conversation_id')
+			.notNull()
+			.references(() => conversations.id, { onDelete: 'cascade' }),
+		body: text('body').notNull(),
+		builderVersion: integer('builder_version').notNull(),
+		tsv: tsvector('tsv').generatedAlwaysAs((): SQL => sql`to_tsvector('english', ${messageSearch.body})`),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => [
+		index('message_search_tsv_idx').using('gin', table.tsv),
+		index('message_search_conversation_idx').on(table.conversationId),
+	],
+)

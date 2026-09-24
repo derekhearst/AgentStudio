@@ -72,7 +72,7 @@ Each limit is enforced as a budget limit (see [../cost/spec.md](../cost/spec.md)
 }
 ```
 
-The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own, except three that always ask: `push_branch`, `create_pull_request` and `request_plan_approval`. Those show ticked, marked "always asks", and cannot be unticked, and the **All** and **None** buttons leave them alone, because they ask for approval in every mode whatever is stored. `ask_user` is left off, because it is a question to you rather than an action, and no approval setting ever reaches it. The panel's old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
+The Tool Approval panel lists every AgentStudio tool a chat can call, and each one can be ticked on its own, except three that always ask: `push_branch`, `create_pull_request` and `request_plan_approval`. Those show ticked, marked "always asks", and cannot be unticked, and the **All** and **None** buttons leave them alone, because they ask for approval in every mode whatever is stored. Questions from the agent are not on the list: they are the SDK's own AskUserQuestion rather than an AgentStudio tool (#4), and a question to you is not an action, so no approval setting ever reaches it. The panel's old "Always loaded" and "Searchable" groups and its "Programmatic tool calling" switch are gone, because none of them did anything in a chat (#8, #69). A stored row may still carry `programmaticToolCallingEnabled`; nothing reads it, and the next save drops it. See [../tools/tools.md](../tools/tools.md).
 
 **`memoryConfig`**
 
@@ -99,11 +99,12 @@ The Tool Approval panel lists every AgentStudio tool a chat can call, and each o
 
 The `/settings` route provides a UI for all editable settings grouped by category:
 
-- **Models** — default model, transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
+- **Models** — default model (only models the chat engine can run here are offered, and saving any other is refused — see [../llm/llm.md](../llm/llm.md)), transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%
 - **Tools** — approval-required list: one tickable entry per tool (the three always-ask tools locked on), plus a switch that requires approval for every tool
+- **Connectors** (`/settings/connectors`) — remote MCP servers chats can use: add, test, switch off, remove, and Allow / Ask / Block per tool. See [../mcp/mcp.md](../mcp/mcp.md).
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
 - **Job queue** (`/settings/jobs`) and **Hook invocations** (`/settings/hooks`) — admin views of background work. **Refresh** fetches the latest rows from the server, and if they cannot be loaded the page shows the reason instead of a spinner.

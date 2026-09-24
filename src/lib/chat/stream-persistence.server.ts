@@ -16,6 +16,8 @@ import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { conversations, messages } from '$lib/sessions/sessions.schema'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
+import { unarchiveOnUserMessage } from '$lib/chat/conversation-lifecycle.server'
+import { scheduleMessageIndex } from '$lib/chat/message-search.server'
 import { generateTitle } from '$lib/chat/chat.server'
 import { logger } from '$lib/observability/logger'
 import type { getSettings } from '$lib/settings'
@@ -44,6 +46,8 @@ export async function resolveParentMessage(input: {
 			toolCalls: [],
 			attachments: input.body.attachments ?? [],
 		})
+		// #18 — writing in an archived chat brings it back to the list.
+		await unarchiveOnUserMessage(input.conversationId)
 		return { ok: true, parentMessageId: createdUser.id }
 	}
 
@@ -87,7 +91,7 @@ export type AssistantPersistInput = {
  * means a crash between them can't leave the row + totals desynced.
  */
 export async function persistAssistantMessage(input: AssistantPersistInput) {
-	return db.transaction(async (tx) => {
+	const persisted = await db.transaction(async (tx) => {
 		const [existingPartial] = await tx
 			.select({ id: messages.id })
 			.from(messages)
@@ -155,6 +159,9 @@ export async function persistAssistantMessage(input: AssistantPersistInput) {
 
 		return written
 	})
+	// #18 — committed now, so conversation search can index it (in the background).
+	scheduleMessageIndex(persisted)
+	return persisted
 }
 
 /**

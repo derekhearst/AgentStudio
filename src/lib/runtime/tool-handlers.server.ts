@@ -5,7 +5,8 @@
  * inline branches (`ask_user`, `run_subagent`, normal tool dispatch) plus an approval check,
  * all repetitive emit/pushBlock/result-shaping. Each branch is a coherent unit (build result →
  * emit → push block → return record for state arrays); `dispatchToolCall` chains them. The
- * `run_subagent` branch went with the in-house subagents (#5, #8).
+ * `run_subagent` branch went with the in-house subagents (#5, #8), and the `ask_user` branch
+ * with the tool itself (#4) — this loop's callers are unattended and never offered it.
  *
  * Each handler returns a `ToolHandlerOutcome` — the record to append to `toolResults` (LLM
  * messages) and `allToolCalls` (cost / activity rollups). The loop layer pushes those into the
@@ -15,16 +16,9 @@
  * exactly as they did in the inline code. Behavior is identical — this is a pure refactor.
  */
 
-import { trimToolResult } from '$lib/chat/chat'
 import { trimToolResultWithOffload } from '$lib/tools/output-offload.server'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
-import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
-import {
-	executeTool,
-	toolSchemas,
-	type ToolCallWithContext,
-	type ToolName,
-} from '$lib/tools/tools.server'
+import { executeTool, type ToolCallWithContext, type ToolName } from '$lib/tools/tools.server'
 import { emitHook } from '$lib/hooks'
 import { logger } from '$lib/observability/logger'
 import { NOT_OFFERED_REASON, notOfferedMessage } from './offered-tools'
@@ -51,13 +45,12 @@ export type DispatchContext = NormalToolContext & {
 	/** The tool names this run offered the model (`offeredToolNames(input.tools)`). */
 	offeredTools: ReadonlySet<string>
 	approvalRequiredTools: ReadonlySet<string>
-	isOrchestrator: boolean
 }
 
 /**
- * Run one planned call through every gate, in order: the offered list, approval, then
- * `ask_user` or the registry. A name the run did not offer is refused before anything else,
- * so it never reaches an approval card or `executeTool` (see `./offered-tools`).
+ * Run one planned call through every gate, in order: the offered list, approval, then the
+ * registry. A name the run did not offer is refused before anything else, so it never reaches
+ * an approval card or `executeTool` (see `./offered-tools`).
  */
 export async function dispatchToolCall(ctx: DispatchContext, tc: PlannedToolCall): Promise<ToolHandlerOutcome> {
 	const { session } = ctx
@@ -66,9 +59,6 @@ export async function dispatchToolCall(ctx: DispatchContext, tc: PlannedToolCall
 	// ── Approval gate (no-op when no approval required).
 	const approval = await checkToolApproval(session, tc, ctx.approvalRequiredTools)
 	if (approval.kind === 'denied') return approval.outcome
-
-	// ── ask_user (orchestrator-only). Self-contained: emits + pushes block inside.
-	if (tc.name === 'ask_user') return handleAskUserCall(session, tc, ctx.isOrchestrator)
 
 	await session.updateRun({
 		state: 'running',
@@ -166,125 +156,6 @@ export async function checkToolApproval(
 				result: { denied: true },
 				executionMs: 0,
 			},
-		},
-	}
-}
-
-/** Handle an `ask_user` tool call. Routes through pendingQuestions + awaits answers. */
-export async function handleAskUserCall(
-	session: Session,
-	tc: PlannedToolCall,
-	isOrchestrator: boolean,
-): Promise<ToolHandlerOutcome> {
-	if (!isOrchestrator) {
-		const resultStr = trimToolResult(
-			tc.name,
-			JSON.stringify({
-				error:
-					'Agents cannot ask users directly. Return this question to the orchestrator to gather user input, then resume the agent with those answers.',
-			}),
-		)
-		await session.emit('tool_result', {
-			id: tc.id,
-			name: tc.name,
-			success: false,
-			executionMs: 0,
-			result: resultStr,
-		})
-		await session.pushBlock({
-			kind: 'tool',
-			name: tc.name,
-			arguments: tc.parsedArgs,
-			result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-			success: false,
-			executionMs: 0,
-		})
-		return {
-			toolResult: { call_id: tc.id, name: tc.name, result: resultStr },
-			allToolCallsEntry: {
-				name: tc.name,
-				arguments: tc.parsedArgs,
-				result: { denied: true, reason: 'ask_user is restricted to orchestrator conversations' },
-				executionMs: 0,
-			},
-		}
-	}
-
-	let askInput: ReturnType<typeof toolSchemas.ask_user.parse>
-	try {
-		askInput = toolSchemas.ask_user.parse(tc.parsedArgs)
-	} catch {
-		const errorMessage = 'ask_user received invalid arguments.'
-		const resultStr = trimToolResult(tc.name, JSON.stringify({ error: errorMessage }))
-		await session.emit('tool_result', {
-			id: tc.id,
-			name: tc.name,
-			success: false,
-			executionMs: 0,
-			result: resultStr,
-		})
-		return {
-			toolResult: { call_id: tc.id, name: tc.name, result: resultStr },
-			allToolCallsEntry: {
-				name: tc.name,
-				arguments: tc.parsedArgs,
-				result: { error: errorMessage },
-				executionMs: 0,
-			},
-		}
-	}
-
-	const questionToken = crypto.randomUUID()
-	await enqueuePendingQuestion(
-		session.runId,
-		{
-			token: questionToken,
-			questions: askInput.questions,
-			requestedAt: new Date().toISOString(),
-		},
-		{ state: 'waiting_user_input', label: 'Waiting for user input' },
-	)
-	await session.emit('ask_user', {
-		token: questionToken,
-		id: tc.id,
-		name: tc.name,
-		questions: askInput.questions,
-	})
-	const answers = await awaitQuestionAnswers(session.runId, questionToken)
-	await session.updateRun({
-		state: 'running',
-		label: 'User input received',
-		heartbeat: true,
-	})
-
-	const questionResult = {
-		questions: askInput.questions,
-		answers,
-		timedOut: answers === null,
-	}
-	const resultStr = trimToolResult(tc.name, JSON.stringify(questionResult))
-	await session.emit('tool_result', {
-		id: tc.id,
-		name: tc.name,
-		success: answers !== null,
-		executionMs: 0,
-		result: resultStr,
-	})
-	await session.pushBlock({
-		kind: 'tool',
-		name: tc.name,
-		arguments: tc.parsedArgs,
-		result: questionResult,
-		success: answers !== null,
-		executionMs: 0,
-	})
-	return {
-		toolResult: { call_id: tc.id, name: tc.name, result: resultStr },
-		allToolCallsEntry: {
-			name: tc.name,
-			arguments: tc.parsedArgs,
-			result: questionResult,
-			executionMs: 0,
 		},
 	}
 }

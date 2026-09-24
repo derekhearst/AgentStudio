@@ -24,6 +24,7 @@
  */
 
 import type { ToolResultDetails } from '../engine/tool-result-details'
+import { OWN_MCP_SERVER, parseToolNamespace } from '../engine/permission-mode'
 
 /**
  * Tools that already write their own `call`-unit row, and so must not get a second one.
@@ -43,7 +44,18 @@ export type ToolCallLedgerEntry = {
 	unitType: 'call'
 	units: 1
 	cost: 0
+	/**
+	 * `mcp:<connector>` for a connector's tool (#17), so usage can be grouped by the connector
+	 * that served it. Absent for our own tools and the SDK's built-ins.
+	 */
+	provider?: string
 	metadata: Record<string, unknown>
+}
+
+/** `mcp:<server>` for a tool served by a connector, null for ours and the built-ins. */
+export function connectorProvider(toolName: string): string | null {
+	const { server } = parseToolNamespace(toolName)
+	return server && server !== OWN_MCP_SERVER ? `mcp:${server}` : null
 }
 
 function clip(value: string): string {
@@ -81,11 +93,13 @@ export function toolCallLedgerEntry(input: {
 	if (SELF_LOGGED_CALL_TOOLS.has(input.name)) return null
 
 	const label = ledgerLabel(input.details)
+	const provider = connectorProvider(input.name)
 	return {
 		toolName: input.name,
 		unitType: 'call',
 		units: 1,
 		cost: 0,
+		...(provider ? { provider } : {}),
 		metadata: {
 			success: input.success,
 			...(label ? { label } : {}),

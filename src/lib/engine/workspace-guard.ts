@@ -80,8 +80,14 @@ const HOME_PREFIX = /^~[A-Za-z0-9._-]*(?:[\\/]|$)/
 /** A `..` component, with either slash (a stricter reading than POSIX needs, never looser). */
 const PARENT_SEGMENT = /(?:^|[\\/])\.\.(?:[\\/]|$)/
 
-/** Tools that run a command rather than touch a named path. Not decidable from arguments. */
-const COMMAND_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+/**
+ * Tools that run a command rather than touch a named path. Not decidable from arguments.
+ *
+ * Only `Bash`. `TaskStop` (the CLI's name for `KillShell`) names no path and can only stop a
+ * task this session started, so it is not held for approval under `bashPolicy: 'ask'`;
+ * `BashOutput` no longer exists as a tool (see `./builtin-tools`).
+ */
+const COMMAND_TOOLS = new Set(['Bash'])
 
 /**
  * Tools that can create, change or remove a file, and the arguments that name it.

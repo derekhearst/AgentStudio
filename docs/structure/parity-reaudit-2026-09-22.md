@@ -245,21 +245,21 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | # | Title | Verdict | One line |
 | --- | --- | --- | --- |
 | #16 | Render diffs for file edits | **rebuild** | the diff is already in `tool_use_result`; no handler changes needed |
-| #26 | Shell output as a terminal | **rebuild** | same adapter; "stream it live" means background + poll, not a new transport |
+| #26 | Shell output as a terminal | **rebuild** — shipped | same adapter; the card is polished, and live output is #35's host-side tail of the task's output file (there is no `BashOutput` tool to poll) |
 | #21 | Render the todo list | **rebuild** — shipped | same adapter; pinned above the composer, kept on the conversation |
-| #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
-| #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
+| #35 | Background work in a turn | **rebuild** — shipped, turn-scoped | chips, notices, stop, live output in the card, honest end-of-turn, stop on delete; surviving between turns needs a conversation-long session (not built) |
+| #24 | Filesystem checkpoints | **rebuild** — shipped | `enableFileCheckpointing` + `rewindFiles()` through a short-lived control session; edit/regenerate now cut the SDK session too |
 | #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
-| #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
-| #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
+| #17 | Connect external MCP servers | **as filed** — shipped (v1) | remote HTTP/SSE servers with per-tool Allow / Ask / Block, keyed on the connector's row; stdio and OAuth left for their own decisions |
+| #32 | Multi-agent orchestration | **rebuild** — shipped | SDK `agents` + the `Agent` tool, children in the foreground and in parallel, gated by a PreToolUse hook rather than `canUseTool` |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
-| #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
-| #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
-| #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
+| #4 | Native AskUserQuestion | **as filed** — shipped | the SDK's tool answered through `canUseTool`; HTML previews, multi-select, Other, timeout `never` |
+| #18 | Conversation pin/archive/search/export | **as filed**, trimmed — shipped | all four are cheap; make archive the default action, not delete |
+| #22 | Slash commands and `@`-mentions | **split** — `@` shipped, `/` shipped over app actions | `@` lists the next turn's workspace; the `/` palette covers the app's own buttons, with SDK commands still to add |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
 | #14 | Rethink the right sidebar | **rebuild** → **shipped** | #29 already fixed the "blank by default" complaint; what is left is deleting two tabs. Shipped as Preview + a real Files tab, collapsed by default; see below |
 | #27 | Wire up or delete the TTS endpoint | **delete** → **finished** | confirmed dead: no UI reference, and the setting the issue mentions does not exist. The owner chose to finish it; see below |
-| #9 | Gateway for non-Claude models | **as filed**, deprioritize | costs money and degrades tool fidelity to replace something that is currently free |
+| #9 | Gateway for non-Claude models | **as filed**, deprioritize → **shipped, off by default** | costs money and degrades tool fidelity to replace something that is currently free. The picker defect was live either way; see below |
 | #8 | Delete dead engine code | **as filed** — mostly done | stream-prep helpers, in-house compaction, `search_tools` and `run_code` (#69) deleted, and with them the modules nothing imported (the `$lib/tools` barrel, `chat/runs.server`, the tools and images remote modules) and the exports left without a caller (the tiktoken estimator and the `js-tiktoken` dependency, the settings prompt preview query, the agent tool-definition filter, the OpenRouter `plugins` option, the image lookups the images remote module left behind); the old loop stays while automations, monitors and CI fix runs call it |
 
 ### #16 — diffs
@@ -287,6 +287,31 @@ two modes.
 I would also drop "ANSI colour rendering" from the scope. Monospace, preserved newlines,
 exit-code badge, copy button, collapse past ~20 lines; strip ANSI rather than render it, and
 revisit only if something actually emits colour worth keeping.
+
+**Correction (2026-09-23).** The paragraph above is wrong about the mechanism. In SDK 0.3.278
+`BashOutput` is only the *output type* of `Bash` (`sdk-tools.d.ts`); as a tool it is gone,
+and `sdk.d.ts` says the `TaskOutput` tool was removed too ("Read a background task's output
+file with the Read tool instead"). `KillShell` / `KillBash` are aliases the CLI resolves to
+`TaskStop`. There is nothing to poll. What the CLI does do is write a backgrounded command's
+output to `<temp>/<session id>/tasks/<task id>.output` and name that path in the call's
+result text ("Output is being written to: …") and in `task_notification.output_file`.
+
+**Shipped.** The card (17e2567 plus this pass): monospace with newlines kept, stdout and
+stderr apart, a copy button that copies everything. The polish this pass added:
+- `$lib/chat/terminal-text` strips every escape family rather than only simple CSI: OSC
+  hyperlinks and titles, `ESC(B`, `38:2:` truecolour, private modes. It also resolves
+  bare-`\r` progress-bar redraws to their last state.
+- A long output opens on its last 20 lines with Show all / Show last 20, instead of the
+  whole card starting closed. A failing command's error output used to hide behind a click.
+- An exit-code badge where the CLI reports one. A failed foreground `Bash` has no
+  `BashOutput` at all: the CLI throws, and `tool_use_result` is the string
+  `Error: Exit code N` plus the merged output. That is now distilled into the same card
+  instead of falling back to the generic one. A finished background command's code comes
+  from its `task_notification` summary. A successful foreground command reports no code, so
+  it shows no badge rather than a made-up `exit 0`.
+- `returnCodeInterpretation` (grep's "No matches found") is shown.
+
+Live output is #35's, below.
 
 ### #21 — todo
 
@@ -332,6 +357,61 @@ What is left is the first bullet: reading `backgroundTaskId` off `BashOutput` an
 is a card that keeps polling `BashOutput`, which is the same piece of work as #26's live
 output and should be done once, for both.
 
+**Shipped (2026-09-23), turn-scoped.** The "keeps polling `BashOutput`" plan could not work;
+see the #26 correction. The owner chose option A, "turn-scoped, made honest", over a
+conversation-long SDK session. The reason is how the engine runs a turn: it closes the CLI
+after every `result`, and a backgrounded `local_bash` does not hold the result back, so every
+background command dies with its turn. That was true before this work too. What changed is
+that nothing pretends otherwise any more:
+
+- **Tool names.** `BUILTIN_SHELL_TOOLS` is `['Bash', 'TaskStop']`. The old names stay
+  recognised, so a stored agent list that says `KillShell` keeps working and is not turned
+  into an MCP name. A scope drops `BashOutput` / `TaskOutput`. `TaskStop` is not held for
+  approval under `bashPolicy: 'ask'` (it never was a command tool); permission modes still
+  gate it like any other tool, and plan mode refuses it.
+- **Live output.** `$lib/engine/task-output.server` finds the output file in the CLI's
+  result text. It accepts the path only when all of these hold:
+  - it is absolute, has no `..`, and ends `<session id>/tasks/<task id>.output`, with both
+    ids the CLI's own (from `init` and the typed `backgroundTaskId`, never from text);
+  - it is the only such path the text names;
+  - on every read, the file is still a regular file with one link, and its real path
+    (through `$lib/workspace/containment`) keeps that shape. It is opened `O_NOFOLLOW |
+    O_NONBLOCK`, as the CLI opens it, so a named pipe put in its place fails the check at
+    once instead of blocking a threadpool thread on `open()`.
+
+  The file is read once a second on the host. `$lib/engine/background-shells.server` turns
+  each read into a live-only `shell_output` frame and grows the call's persisted block to
+  the same 16k tail. Because the resume replay only has persisted events, what arrived since
+  the last save also goes out as a persisted `shell_output_checkpoint`, at most every 5 s
+  and only when there is something new. A reloaded or reconnected page catches up from
+  those and keeps moving, a few seconds behind. `from` / `to` positions let a connected
+  page skip the checkpoint of what it already has.
+- **How it ended.** `task_notification` now keeps `task_id`, `tool_use_id`, `output_file`
+  and the summary's exit code. The command's card settles through a persisted
+  `shell_task_done` frame, which carries the final output, so a client that reconnected
+  mid-turn still gets it. A notification that arrives before its call's `tool_result` (the
+  CLI emits it the moment a task ends, and a command that exits at once can end before its
+  result is written) is held, and the card is created settled rather than running.
+- **The end of the turn.** A command still running when the turn ends gets one final read,
+  bounded at 2 s so a read that never returns cannot stop the engine closing the CLI or
+  sending `done`, and is marked `ended_with_turn`. One persisted notice lists the commands that were
+  stopped. The page clears the header chips on `done`.
+- **The model is told.** Both tool policies say a background command only runs until the
+  reply ends. They also say its output file is outside the workspace (the containment guard
+  refuses the Read the CLI suggests), and to `tee` into the workspace instead.
+- **Delete.** Deleting a conversation interrupts its live run before the row goes. With no
+  `perTaskStopAffordance` declared, the CLI's interrupt also kills its background tasks
+  (`sdk.d.ts`). It shares one delete path with #18, which checks ownership first and waits
+  up to ten seconds for the stopped turn to wind down.
+
+Not done:
+- A command outliving its turn (option B: one `query()` per conversation, fed turn by turn,
+  with a reaper and a channel for turns the model starts on its own). It belongs with #24's
+  control session.
+- "Move to background" for a running foreground command (`Query.backgroundTasks`).
+- A live check on the Linux image that a backgrounded process really dies with
+  `session.close()`. The CLI spawns detached shells.
+
 ### #24 — checkpoints
 
 Close the hand-rolled plan. `enableFileCheckpointing` plus `query.rewindFiles(userMessageId,
@@ -348,6 +428,41 @@ have their own git history (we do not want a rewind that silently discards a com
 The remaining AgentStudio-side work is joining a `messages` row to the SDK user-message UUID
 so "rewind to this message" has something to pass in — which is worth doing anyway, because
 it is the same join `compact_boundary` and per-message context accounting want.
+
+**Shipped (2026-09-23).** Both open questions were answered by running the bundled CLI
+against a stand-in Messages API, and the answers are in [../chat/chat.md](../chat/chat.md#integrations):
+the sandbox layout is tracked (paths come back absolute), but only for the SDK's file tools —
+Bash and our own tools are not checkpointed; and a rewind never runs git, so it cannot drop a
+commit. Imported repos with uncommitted changes in the files being restored need an explicit
+overwrite, checked again on the server.
+
+- **The join**, with no migration: every prompt is sent as a streamed `SDKUserMessage` with a
+  uuid we mint, which the CLI keeps as the transcript uuid and keys its checkpoints by.
+  `messages.metadata.sdkTurn` on the user row holds it with the session id and the run's cwd;
+  `metadata.sdkTailUuid` on the reply holds the turn's last chain entry.
+- **The rewind** is option A from the triage: `query()` resuming the session in the run's cwd
+  with checkpointing on and an input that never yields, `rewindFiles(uuid, { dryRun: true })`
+  for the preview, the real call on confirm, then `close()` — no model call, and it works after
+  a restart, which finding 2's live handle would not have. Checkpointing is on only where the
+  workspace outlives the turn (a project, or an agent's persistent key).
+- **Worse than the issue said, and fixed with it:** edit and regenerate sent the literal prompt
+  "regenerate" into the unedited session. They now send the row's own text and resume with
+  `resumeSessionAt` at the previous reply's tail (same session id — `forkSession()` would lose
+  the file history), falling back to a fresh session primed with the kept history when the cut
+  is refused. "Compact Conversation" now runs the SDK's `/compact` instead of asking for a
+  summary the session then carried on top of everything.
+- **A cut that has to survive a failed request.** An edit or regenerate marks the row it cut
+  back to (`metadata.sdkCutPending`). If the reply never starts, the next turn of any kind
+  (Retry, or just a new message) still resumes at the previous reply's tail. Any unanswered
+  user rows in between go in front of the new message as text. The mark is cleared when a
+  turn records its join.
+- **Partial restores are reported.** A real `rewindFiles` can leave files alone because a link
+  is in the way (`RewindFilesResult.skippedLinks`; the dry run never reports these). The edit
+  or regenerate result carries the count, and the page shows how many listed files were not
+  put back.
+
+Left for later: a "restore files only" action on a message, and deleting a conversation's
+SDK transcript and file backups when the conversation is deleted.
 
 ### #23 — project instructions and knowledge
 
@@ -422,6 +537,40 @@ assume the registry: `resolveToolGate`, the approval set, `logToolUsage`, and
 which config scope a server came from, which is the right thing to key trust on — never the
 name or the prefix, both of which a server chooses for itself.
 
+**Shipped (v1, 2026-09-23): options A and B of the triage** — HTTP/SSE servers with per-tool
+policy. See [docs/mcp/mcp.md](../mcp/mcp.md) and [spec.md](../mcp/spec.md).
+
+- `mcp_servers` (migration `0080`) holds one row per connector: a validated, immutable name
+  (the `mcp__<name>__` prefix, `agentstudio` and the CLI's own server names reserved), label,
+  transport, URL, the bearer token and header values encrypted as one document with
+  `APP_ENCRYPTION_KEY`, per-tool policies, the last test's tool list and outcome, enabled.
+- Settings → Connectors (`/settings/connectors`) adds, edits, tests, switches and removes
+  them and sets each tool to Allow, Ask or Block. The Test button is its own MCP client
+  (`@modelcontextprotocol/sdk`), because the `Query` handle lives for one turn; every request
+  it makes goes through a new guarded fetch (egress spelling check, per-socket address check,
+  no redirects, capped body). `MCP_ALLOWED_PRIVATE_HOSTS` is the operator's exemption for
+  servers on their own network.
+- At run start the enabled rows are merged into `mcpServers` for interactive chat runs whose
+  agent has no fixed tool list, after the URL is re-checked and the host resolved under the
+  egress rule. `strictMcpConfig: true` on every run, so nothing else loads — not a repo's
+  `.mcp.json`, not plugins, not the account's claude.ai connectors. Blocked tools go into
+  `disallowedTools`, and the CLI's generic MCP resource readers are disallowed.
+- Trust is keyed on the row: a call is refused unless its `<server>` is one of the run's
+  connectors *and* the SDK's provenance agrees (`source: 'dynamic'`, same key). Our own
+  server name from any source but `sdk` is refused. With no provenance, Allow asks.
+- The gate: Block refuses in every mode; Allow runs in Ask and Accept-edits unless "Require
+  approval for all tools" is on; Plan refuses every connector tool; Bypass runs the rest.
+- A connector `failed` or `needs-auth` becomes one `mcp_unavailable` notice: from
+  `system/init`, or, since remote servers are normally still `pending` there (MCP start-up does
+  not block the turn), from `mcpServerStatus()` asked again while the turn runs. Tool cards read
+  "Create Issue in progress · github"; ledger rows carry `provider: 'mcp:<name>'`.
+
+Left open: stdio servers (they would run outside the shell sandbox with the CLI's login, and
+the image has no node/python), OAuth-only servers (the SDK exposes no OAuth control to hosts),
+per-agent assignment, live status on the settings page, and inline approval cards for a
+subagent's connector calls. Credentials reach the CLI as `--mcp-config` argv; that is safe only
+while the agent's shell keeps its own PID namespace (bubblewrap) — see mcp.md.
+
 ### #32 / #5 — orchestration
 
 The issue is right that #5 comes first, and right to scope out a workflow scripting language.
@@ -469,6 +618,51 @@ a wrapper. Two things the work decided that the plan above did not anticipate:
 Steps 3–5 (the concurrency cap, per-child budget, tree rendering from `tool_use_result`,
 `stopTask` cancellation) are still open and belong with #32.
 
+**Shipped (#32), 2026-09-23.** Steps 3–5 are done, but three claims in the plan above turned
+out wrong once the installed SDK (0.3.278, bundled CLI 2.1.278) was read, and the build
+follows what it actually does:
+
+- **The tool is `Agent`, not `Task`.** `Task` is the alias older CLIs used. Everything that
+  recognises a delegation accepts both names.
+- **`canUseTool` is not where a cap can live.** The `Agent` tool answers its own permission
+  check with "allow" in the modes we run, so `canUseTool` never sees a delegation. The cap
+  lives in the engine's PreToolUse hook, which fires for every call and whose answer is
+  binding (`src/lib/engine/delegation-gate.ts`). The hook refuses a fifth live child with a
+  "wait, then delegate the rest" message, refuses a child's own delegation, runs the child
+  through the chat budget gate scoped to its own agent, and rewrites the call to run in the
+  foreground with `isolation` stripped (and `model` too on a gateway parent). The CLI applies
+  an `updatedInput` carried without a decision as a plain input change (checked in the
+  bundled CLI).
+- **Backgrounded children were the wrong default, and `isolation: 'worktree'` is not free.**
+  In our one-shot query a background child is held back and killed at the CLI's print-mode
+  ceiling and reports only a token total. A foreground child runs in parallel with its
+  siblings, blocks its own call, and returns a typed `AgentOutput`. The worktree option would
+  branch the run's checkout into a copy nothing merges back or cleans up, so it is stripped;
+  the "git worktrees" row stays **absent**.
+
+Cancellation needed no `stopTask`: a foreground child runs on the parent turn's own abort
+controller (bundled CLI), so Stop's `interrupt()` ends every child with the turn, and
+`perTaskStopAffordance` is never declared. Each child is a collapsed card in the reply
+(`SubagentBlockCard`) with status, tokens, cost and duration, expanding to its own
+transcript built from the `subagent_*` frames. Each child that spent anything gets one
+`subagent` `llm_usage` row (parent `runId`, the child's own `agentId`), carved out of the
+parent's row because `modelUsage` already includes children. The row's tokens are added up
+over the child's own model calls as they stream past, because the SDK's per-child `usage` is
+the child's last model call only. The row is written the moment the child's card closes, so
+the budget check for the next child sees the children of the same turn that already
+finished. No migration.
+
+Review follow-ups, same day: Stop's children read `stopped`, not `failed` (the CLI answers a
+child cut short with an error result of its own before the turn ends); a child that a
+trusted project's agent definition sends to the background (`background: true` wins over the
+call's `run_in_background: false` in the CLI) keeps its concurrency slot until its
+`task_notification`, so the cap holds; and `SendMessage`, which can resume a finished agent
+outside any `Agent` call, is switched off.
+
+Left for later: child run rows (option C in the triage), a per-child stop control, and
+worktree isolation. See [../agents/spec.md](../agents/spec.md) and
+[../cost/spec.md](../cost/spec.md).
+
 ### #4 — AskUserQuestion
 
 Confirmed against the SDK: `toolConfig.askUserQuestion.previewFormat` and
@@ -476,6 +670,40 @@ Confirmed against the SDK: `toolConfig.askUserQuestion.previewFormat` and
 timeout: `never` is the right default for a self-hosted single-user box where the operator
 may be asleep — an auto-continue that picks an option unattended is exactly the failure this
 app's `/review` inbox exists to avoid.
+
+**Shipped (#4).** The in-house `ask_user` is gone — schema, handler, the old loop's branch and
+the engine's special cases — and the SDK's own AskUserQuestion is on for every chat run:
+`toolConfig.askUserQuestion.previewFormat: 'html'` and `settings.askUserQuestionTimeout:
+'never'` (a Settings field, not an Option). What the installed SDK (0.3.278, CLI 2.1.278) was
+read for rather than assumed:
+
+- the tool's own permission check always asks, so every call reaches `canUseTool`; the host
+  answers by allowing with `updatedInput.answers` (question text → answer, multi-select
+  comma-separated), which the CLI's `call()` reads back and echoes as
+  `tool_use_result.answers`;
+- the CLI only enables the tool in SDK mode when a permission prompt tool is set, which
+  `canUseTool` always provides (`--permission-prompt-tool stdio`);
+- in `html` mode the CLI rejects previews that are whole documents or carry
+  `<script>`/`<style>` — validation of the model, not a promise, so the card still renders
+  each preview in an `<iframe sandbox="">` whose document forbids every load.
+
+The engine hands the call to the run's `askUser` host, which records it on
+`chat_runs.pending_questions` (opening the /review item and the needs-input push, as before)
+and emits the `ask_user` frame under the SDK's tool_use id. The card was rebuilt around a
+header chip, option cards with the recommended badge, the preview pane, multi-select and an
+automatic "Other", and the same card answers from /review. Unattended runs: a subagent's
+question is refused in `canUseTool` (and the tool is in every subagent's `disallowedTools`);
+automations, monitors and CI-fix runs never had it and the old loop's offered-list gate
+refuses it; a chat question nobody answers is released after five minutes, or at once on
+Stop. The question is exempt from approval settings and permission modes (plan mode is when
+it is most wanted) but not from an agent's tool scope; `READ_ONLY_TOOL_NAMES` carries
+`AskUserQuestion` in place of `ask_user`, which the #67 decision should check.
+
+Review follow-ups: the bundled CLI marks AskUserQuestion `isConcurrencySafe`, so one assistant
+message can open several cards at once. Each inline card now answers under its own token (the
+page's single `pendingAskUser` is only what the composer and the modal answer, and it passes to
+the newest card still open when its own is settled). "Other" is chosen by typing in it or
+clicking it, no longer by focus, so a keyboard user can pick an option and Tab to Submit.
 
 ### #18 — conversation lifecycle
 
@@ -490,6 +718,25 @@ All four parts are cheap and worth doing. Two opinions:
 
 Export to Markdown is ~50 lines and does not need a design.
 
+**Shipped.** Both opinions stand. `conversations.pinned_at` / `archived_at` (migration
+`0079`); archive is the one-click action on a sidebar row and first in its menu, delete is
+last and behind a confirmation that suggests archiving. A message the user sends unarchives;
+an automation posting into the chat does not. Search indexes tool blocks as argued above,
+in a `message_search` side table (a generated tsvector with a GIN index) so the chat page's
+message payload is untouched: each tool call contributes its name, paths, commands, short
+arguments and the links in its output, and every path is also spelled out as segments,
+because Postgres parses `src/lib/engine/options.server.ts` as one token and a search for
+`options` would otherwise miss it. Raw output and file bodies are not indexed. A boot
+backfill indexes history and rebuilds the index when the rules change. One correction to the
+opinion above: deleting a conversation does not take its cost ledger with it — the rows stay
+and lose their run link. Deleting stops the conversation's live turn first — and with it the
+background commands (#35) and delegated children (#32) that end with the turn — and waits up
+to ten seconds for it to wind down; one module does this for both issues. An edited message
+(#24's `editUserMessage`) is re-indexed by its new text, and a delegated child's own calls
+(#32's card transcript, which replaced the delegation's tool block) are indexed and exported
+like the parent's. Export is Markdown plus a complete
+JSON. Details in [docs/chat/chat.md](../chat/chat.md).
+
 ### #22 — composer
 
 Split it. `@`-mentions are unambiguous value and the issue's plan is fine.
@@ -499,6 +746,27 @@ all of which are already buttons in the composer — is re-skinning. Once `setti
 lands (#23), `query.supportedCommands()` returns the real command list, including the repo's
 own `.claude/commands/` and every skill, pushed live on change via `commands_changed`. A
 palette over *that* is worth having; a palette over three buttons is not.
+
+**Status (2026-09-23).** The owner chose to ship both halves now, the `/` half as a palette
+over the app's existing actions (option B of the triage).
+
+- `@` lists files and folders in the folder the chat's next turn starts in: the bound
+  project's checkout, or an agent's persistent workspace. A chat whose every turn gets a fresh
+  `runs/<id>` directory (or a fresh worktree) has nothing to list, and the menu says so rather
+  than offering paths the next turn will not find. The walk never follows a symlink, skips
+  `.git`, `node_modules` and build output, is capped by entries, depth and time, and never
+  shells out to `git` or `rg`. The path is inserted as inline code, not as `@path`.
+- `/` offers `/compact`, `/model`, `/agent`, `/research`, `/plan`, `/effort`, `/attach` and
+  `/voice`, each calling the handler its button calls. Commands are plain data with a
+  `source`, so the SDK list (`supportedCommands()`, cached from `init` / `commands_changed`)
+  can be merged in later without changing the palette. With #9, `/model` lists the same
+  runnable engine models as the model pill, and `/effort` is switched off on a gateway model,
+  as the reasoning pill is.
+- `/compact` already reaches the SDK's real compaction: it calls Compact Conversation, which
+  #24 switched to sending the CLI's own `/compact` (see the #24 section).
+- Still open for the SDK half: caching the command list on the conversation (control
+  requests only work mid-turn), and handling `local_command_output` and `conversation_reset`
+  in the stream loop.
 
 ### #38 — usage digest
 
@@ -550,8 +818,9 @@ gone: a research run's page links back to its chat, and a reply's stats popover 
 topbar. Fixed on the way: the phone drawer rendered empty (the mobile CSS hid every
 `.console-rail`), a hydration race showed the previous chat's preview after a quick switch,
 "Open file" on the already-open file did nothing from the Files tab, and the home page showed
-the last chat's rail. The background-task chips stay in the topbar until #35 defines what a
-task row shows. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
+the last chat's rail. The background-task chips stay in the topbar: #35 kept them there, with
+a stop control each, and shows a command's live output in its own card in the thread rather
+than in a rail panel. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
 
 ### #27 — TTS
 
@@ -582,6 +851,34 @@ case for it is local/offline models or a specific cheap model for a specific job
 monitor `model_question` checks are the obvious candidate), not general use. I would close it
 unless one of those is the actual goal.
 
+**Corrections, 2026-09-23.** Three points above were wrong:
+
+- The monitor `model_question` check does not use the engine or the gateway. It calls
+  OpenRouter directly (`chat()` in `$lib/llm/chat.server`) with any OpenRouter model, so the
+  "cheap model for a cheap job" case was already covered and was never a reason for #9.
+- LiteLLM is not needed. OpenRouter serves Anthropic's Messages API at
+  `https://openrouter.ai/api` (the OpenRouter key as `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`
+  explicitly empty), and the app already holds an OpenRouter key and prices from its catalogue.
+  That removes the extra container and the LiteLLM 1.82.7/1.82.8 supply-chain exposure;
+  LiteLLM is only needed for local models.
+- The picker was not empty waiting for discovery — it was over-populated. The composer, the
+  default model and the agent editor listed OpenRouter's whole catalogue, and every non-Claude
+  row failed on the first message with no gateway configured.
+
+**What shipped.** The engine pickers list only runnable models, labelled Subscription or
+Gateway · paid. The Claude rows are a fixed list taken from the bundled CLI's model table, less
+the retired models, not OpenRouter's catalogue, which still carries retired Claude models and
+slugs that are no Anthropic id (`anthropic/claude-sonnet-4`); gateway rows the catalogue lists
+without tool support are left out. Dotted Anthropic ids are stored in the CLI's spelling; a send, a default-model
+save or an agent-model save naming an unrunnable model is refused before anything is written.
+The gateway works through OpenRouter's endpoint and stays off unless `LLM_GATEWAY_URL` and
+`LLM_GATEWAY_TOKEN` are set: its environment carries only the `ANTHROPIC_*` it needs, pins
+every model class to the chosen model, and drops the subscription login; a gateway turn runs
+with thinking off and is priced per turn from the OpenRouter catalogue rather than the SDK's
+guess at a Claude rate. Not verified against a live gateway: switching one conversation between
+Claude and a gateway model, and each non-Claude model's multi-step tool use. See
+[`docs/llm/llm.md`](../llm/llm.md).
+
 ---
 
 ## Suggested order
@@ -594,15 +891,16 @@ unless one of those is the actual goal.
    placement rather than data — the pinned todo list above the composer (#21), live output
    while a command runs (#26, which is the background path in #35). The ledger gap was
    closed off the same field (e0c6234; see the "Fixed" note under the ledger finding).
-2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks #24, the rest
-   of #35, and real context accounting.
+2. **The handle** (finding 2) — keep `Query` alive per conversation. Unblocks the rest
+   of #35, and real context accounting. (#24 turned out not to need it: a rewind opens its
+   own short-lived control session, which also survives a restart — see the #24 section.)
 3. **The two defects** — delete `search_tools` and its prompt text; account built-in tool
    calls. **Done**: both fixed, and `search_tools` has since been deleted outright (#8).
 4. **#5, then #32 reshaped** — the orchestration keystone, which also deletes `$lib/runtime`
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
-6. **#17**, HTTP transport first.
-7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
+6. **#17**, HTTP transport first. **Done** (v1): HTTP/SSE with per-tool policy.
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), ~~**#4**~~ (shipped), ~~**#18**~~ (shipped), ~~**#14**~~ (shipped).
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or

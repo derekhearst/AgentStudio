@@ -1583,6 +1583,154 @@ a.console-crumbs__seg:hover {
 	box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-primary) 30%, transparent);
 }
 
+/* ── Composer suggestions (#22): `@` files and the `/` palette ──
+ * Anchored to .console-composer and opened above it (below it when the composer sits near
+ * the top of the screen). Rows are two lines — name, then folder or description — so a long
+ * path or description truncates instead of squeezing the name to nothing on a phone. */
+.console-composer { position: relative; }
+
+.console-suggest {
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: calc(100% + 6px);
+	z-index: 30;
+	display: flex;
+	flex-direction: column;
+	max-height: min(300px, 45vh);
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	border-radius: 8px;
+	box-shadow: 0 10px 30px -12px color-mix(in oklab, var(--color-base-content) 35%, transparent);
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 12px;
+	/* The new-chat page centres its column; a list reads from the left. */
+	text-align: left;
+	overflow: hidden;
+}
+
+.console-suggest.is-below { bottom: auto; top: calc(100% + 6px); }
+
+.console-suggest__head {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--color-base-300);
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	font-size: 10.5px;
+	letter-spacing: 0.02em;
+	white-space: nowrap;
+}
+/* The title is a flex child: it needs its own ellipsis, or a long one on a phone runs off the
+   edge and pushes the loading dots out of view. */
+.console-suggest__head > span:first-child {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.console-suggest__head > .loading { flex: 0 0 auto; }
+
+.console-suggest__list {
+	margin: 0;
+	padding: 4px;
+	list-style: none;
+	overflow-y: auto;
+	min-height: 0;
+}
+
+.console-suggest__item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	min-height: 34px;
+	padding: 5px 8px;
+	border-radius: 5px;
+	cursor: pointer;
+	color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
+}
+
+.console-suggest__item[aria-selected='true'] {
+	background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+	color: var(--color-base-content);
+}
+
+.console-suggest__item[aria-disabled='true'] { opacity: 0.55; cursor: not-allowed; }
+
+.console-suggest__icon {
+	flex: 0 0 auto;
+	display: inline-flex;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+.console-suggest__text {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.console-suggest__label,
+.console-suggest__detail {
+	display: block;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.console-suggest__detail {
+	font-size: 10.5px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.console-suggest__hint { color: color-mix(in oklab, var(--color-base-content) 40%, transparent); }
+
+.console-suggest mark {
+	background: transparent;
+	color: var(--color-primary);
+	font-weight: 600;
+}
+
+.console-suggest__badge {
+	flex: 0 0 auto;
+	padding: 1px 6px;
+	border-radius: 999px;
+	border: 1px solid var(--color-base-300);
+	font-size: 10px;
+	color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+}
+
+.console-suggest__empty,
+.console-suggest__foot {
+	flex: 0 0 auto;
+	margin: 0;
+	padding: 8px 10px;
+	font-size: 11px;
+	line-height: 1.5;
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+}
+
+.console-suggest__foot { border-top: 1px solid var(--color-base-300); padding: 5px 10px; font-size: 10.5px; }
+
+.console-composer__notice {
+	margin: 0 0 4px;
+	padding: 2px 4px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11px;
+	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.console-composer__notice.is-error { color: var(--color-error); }
+
+/* The phone's quick row sits inside the composer's form, under the form's own top border. */
+.console-composer-wrap > .console-quick { border-top: 0; }
+.console-quick button:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .console-composer__ta {
 	width: 100%;
 	border: 0;
@@ -2145,11 +2293,33 @@ a.console-crumbs__seg:hover {
 	border-radius: 999px;
 	border: 1px solid var(--color-base-300);
 	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+	white-space: nowrap;
 }
 
 .console-term__badge.is-bg { border-color: var(--color-warning); color: var(--color-warning); }
 .console-term__badge.is-warn { border-color: var(--color-warning); color: var(--color-warning); }
 .console-term__badge.is-err { border-color: var(--color-error); color: var(--color-error); }
+.console-term__badge.is-ok { border-color: var(--color-success); color: var(--color-success); }
+.console-term__badge.is-live {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border-color: var(--color-info);
+	color: var(--color-info);
+}
+
+/* A live background command (#35): same pulse as the header's background-task chips. */
+.console-term__pulse {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: currentColor;
+	animation: console-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.console-term__pulse { animation: none; }
+}
 
 .console-term__body {
 	border: 1px solid var(--color-base-300);
@@ -2437,3 +2607,246 @@ a.console-crumbs__seg:hover {
 
 .console-bgtask__stop:hover:not(:disabled) { opacity: 0.95; }
 .console-bgtask__stop:disabled { opacity: 0.2; cursor: default; }
+
+/* ── #18 Conversation lifecycle: row actions, pinned group, archive, search ─────
+   Each sidebar chat row is wrapped in .console-chatitem so its actions can sit beside
+   the link rather than inside it. On a pointer device the actions appear on hover or
+   focus and cover the time label; on a touch screen or a phone-width drawer the "⋯"
+   button is always there and the row makes room for it. The menu opens inline under
+   the row, so the scrolling list and the drawer never clip it. */
+
+/* One grid cell holds both the row and its actions, so the actions stay centred on the
+   row whether or not the menu below it is open. */
+.console-chatitem {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+}
+
+.console-chatitem > .console-chatrow { grid-area: 1 / 1; }
+.console-chatitem > .console-rowmenu { grid-area: 2 / 1; }
+
+.console-rowactions {
+	grid-area: 1 / 1;
+	justify-self: end;
+	align-self: center;
+	z-index: 1;
+	margin-right: 4px;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding-left: 6px;
+	border-radius: 4px;
+	background: var(--color-base-200);
+	opacity: 0;
+	/* Hidden means untouchable too: a tap on the time label must not archive the chat. */
+	pointer-events: none;
+	transition: opacity 100ms ease-out;
+}
+
+.console-chatitem:hover .console-rowactions,
+.console-chatitem:focus-within .console-rowactions,
+.console-rowactions.is-open {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.console-rowactions__btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 20px;
+	padding: 0;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 60%, transparent);
+	cursor: pointer;
+}
+
+.console-rowactions__btn:hover:not(:disabled),
+.console-rowactions__btn[aria-expanded='true'] {
+	background: var(--color-base-300);
+	color: var(--color-base-content);
+}
+
+.console-rowactions__btn:disabled { opacity: 0.4; cursor: default; }
+
+@media (hover: none), (max-width: 47.99rem) {
+	.console-chatitem .console-chatrow { padding-right: 36px; }
+	.console-rowactions {
+		opacity: 1;
+		pointer-events: auto;
+		background: transparent;
+	}
+	/* One-tap archive is a hover convenience; on touch it lives in the menu. */
+	.console-rowactions__quick { display: none; }
+	.console-rowactions__btn { width: 30px; height: 26px; }
+}
+
+.console-rowmenu {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin: 2px 6px 6px 14px;
+	padding: 4px;
+	background: var(--color-base-200);
+	border: 1px solid var(--color-base-300);
+	border-radius: 6px;
+	box-shadow: 0 6px 18px oklch(0% 0 0 / 0.25);
+	font-family: Consolas, 'Cascadia Code', monospace;
+}
+
+.console-rowmenu__item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	padding: 6px 8px;
+	border: 0;
+	border-radius: 4px;
+	background: transparent;
+	color: var(--color-base-content);
+	font: inherit;
+	font-size: 11.5px;
+	text-align: left;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.console-rowmenu__item:hover:not(:disabled),
+.console-rowmenu__item:focus-visible {
+	background: var(--color-base-300);
+	outline: none;
+}
+
+.console-rowmenu__item.is-primary { color: var(--color-primary); font-weight: 600; }
+.console-rowmenu__item.is-danger { color: var(--color-error); }
+.console-rowmenu__item:disabled { opacity: 0.5; cursor: default; }
+.console-rowmenu__sep { height: 1px; margin: 3px 2px; background: var(--color-base-300); }
+
+.console-rowmenu__rename {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 4px;
+}
+
+.console-rowmenu__rename input {
+	width: 100%;
+	min-width: 0;
+	padding: 5px 7px;
+	border: 1px solid var(--color-base-300);
+	border-radius: 4px;
+	background: var(--color-base-100);
+	color: var(--color-base-content);
+	font: inherit;
+	font-size: 12px;
+}
+
+.console-rowmenu__renamebtns { display: flex; justify-content: flex-end; gap: 4px; }
+.console-rowmenu__renamebtns .console-rowmenu__item { width: auto; }
+
+.console-rowmenu__error {
+	margin: 4px 6px 2px;
+	font-size: 11px;
+	color: var(--color-error);
+}
+
+.console-chatgroup.is-pinned { color: color-mix(in oklab, var(--color-primary) 80%, transparent); }
+
+.console-archivebar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin: 2px 6px 4px;
+	padding: 5px 8px;
+	border: 1px dashed var(--color-base-300);
+	border-radius: 5px;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 11px;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+.console-archivebar button {
+	padding: 2px 4px;
+	border: 0;
+	background: none;
+	color: var(--color-primary);
+	font: inherit;
+	cursor: pointer;
+}
+
+.console-searchhits {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	margin-top: 4px;
+	border-top: 1px dashed var(--color-base-300);
+}
+
+.console-searchhit {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin: 0 2px;
+	padding: 5px 8px;
+	border-radius: 4px;
+	color: var(--color-base-content);
+	text-decoration: none;
+	font-family: Consolas, 'Cascadia Code', monospace;
+	font-size: 12px;
+}
+
+.console-searchhit:hover,
+.console-searchhit.active { background: var(--color-base-200); }
+
+.console-searchhit__head {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.console-searchhit__head .t {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-weight: 500;
+}
+
+.console-searchhit__head .s {
+	font-size: 10.5px;
+	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+}
+
+.console-searchhit__badge {
+	padding: 0 4px;
+	border-radius: 3px;
+	background: var(--color-base-300);
+	font-size: 9.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+}
+
+.console-searchhit__snippet {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+	font-size: 11px;
+	line-height: 1.4;
+	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+}
+
+.console-searchhit__snippet mark {
+	padding: 0 1px;
+	border-radius: 2px;
+	background: color-mix(in oklab, var(--color-primary) 28%, transparent);
+	color: var(--color-base-content);
+}

@@ -182,13 +182,13 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 
 	// 3. Read-only. Before the write rules so `file_read` is not caught by /^file_/.
 	{
-		match: /^(file_read|file_info|list_directory|search_files|web_search|web_fetch|pdf_read|browser_screenshot|git_status|git_log|git_diff|ask_user)$/i,
+		match: /^(file_read|file_info|list_directory|search_files|web_search|web_fetch|pdf_read|browser_screenshot|git_status|git_log|git_diff)$/i,
 		capabilities: ['read'],
 	},
 	{
-		match: /^(read|glob|grep|websearch|webfetch|notebookread|todoread)$/i,
+		match: /^(read|glob|grep|websearch|webfetch|notebookread|todoread|askuserquestion)$/i,
 		capabilities: ['read'],
-		note: '#15 built-ins.',
+		note: '#15 built-ins, and AskUserQuestion (#4), which only asks.',
 	},
 	{
 		match: /^(list|get|read|search|describe|show|inspect|count|fetch)_/i,
@@ -308,6 +308,18 @@ export type ToolGateDecision = {
 	reason: string | null
 }
 
+/**
+ * What the operator chose for one tool of a connector (#17): run it, ask each time, or never.
+ * Set per tool on Settings → Connectors and stored on the connector's own row.
+ */
+export const EXTERNAL_TOOL_POLICIES = ['allow', 'ask', 'block'] as const
+
+export type ExternalToolPolicy = (typeof EXTERNAL_TOOL_POLICIES)[number]
+
+export function isExternalToolPolicy(value: unknown): value is ExternalToolPolicy {
+	return typeof value === 'string' && (EXTERNAL_TOOL_POLICIES as readonly string[]).includes(value)
+}
+
 export type ToolGateInput = {
 	mode: ConversationPermissionMode
 	toolName: string
@@ -317,13 +329,26 @@ export type ToolGateInput = {
 	 * with this rather than replacing it.
 	 */
 	settingsRequiresApproval: boolean
+	/**
+	 * For an external tool only: the policy its connector's row sets for it, as resolved by
+	 * `./mcp-connectors` — which is where the call's provenance is checked against the row.
+	 * Omitted means `ask`, the posture every external tool had before policies existed.
+	 * Ignored for any tool that is not external.
+	 */
+	externalPolicy?: ExternalToolPolicy
 }
 
 const MANDATORY_REASON =
 	'This tool always requires operator approval, in every permission mode — its blast radius reaches outside AgentStudio.'
 
 const EXTERNAL_REASON =
-	'This tool comes from an MCP server you connected, not from AgentStudio. Nothing here can tell what it does from its name, so it asks every time.'
+	'This tool comes from an MCP server you connected, not from AgentStudio. Nothing here can tell what it does from its name, so it asks every time unless you allow it on Settings → Connectors.'
+
+const EXTERNAL_BLOCKED_REASON =
+	'This tool is blocked in its connector settings (Settings → Connectors), so it is refused in every permission mode.'
+
+const EXTERNAL_ALL_TOOLS_REASON =
+	'"Require approval for all tools" is on in Settings → Tool Approval, so this connector tool asks even though its connector allows it.'
 
 /**
  * The single decision point. Every caller — `canUseTool`, the pending-block predicate, the
@@ -357,9 +382,31 @@ export function resolveToolGate(input: ToolGateInput): ToolGateDecision {
 	 *
 	 * Written as an exclusion list rather than an inclusion list on purpose: a mode added
 	 * later lands on `ask` rather than inheriting the settings gate's `allow`.
+	 *
+	 * The connector's per-tool policy (#17) adjusts this, and only in two directions:
+	 *
+	 *   block   refused in every mode, bypass included. The operator said never.
+	 *   allow   runs without asking — but only in `default` and `acceptEdits`, the two modes
+	 *           that would otherwise ask. Plan mode still refuses it (an allowed tool can
+	 *           still write), and a mode added later still lands on `ask`.
+	 *
+	 * The per-tool *settings* never loosen anything here: their list enumerates our registry,
+	 * and the connector's own page is where its tools are decided. They can only tighten: for
+	 * an external name `settingsRequiresApproval` is true only under "Require approval for all
+	 * tools" (the `'*'` wildcard — nobody can tick a connector's tool on that list), and "every
+	 * tool call pauses" includes a connector tool its connector allows.
 	 */
-	if (capabilities.has('external') && input.mode !== 'plan' && input.mode !== 'bypassPermissions') {
-		return { gate: 'ask', reason: EXTERNAL_REASON }
+	if (capabilities.has('external')) {
+		const policy = input.externalPolicy ?? 'ask'
+		if (policy === 'block') return { gate: 'deny', reason: EXTERNAL_BLOCKED_REASON }
+		if (input.mode !== 'plan' && input.mode !== 'bypassPermissions') {
+			if (policy === 'allow' && (input.mode === 'default' || input.mode === 'acceptEdits')) {
+				return input.settingsRequiresApproval
+					? { gate: 'ask', reason: EXTERNAL_ALL_TOOLS_REASON }
+					: { gate: 'allow', reason: null }
+			}
+			return { gate: 'ask', reason: EXTERNAL_REASON }
+		}
 	}
 
 	const settingsGate: ToolGateDecision = input.settingsRequiresApproval

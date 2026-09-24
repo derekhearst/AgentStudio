@@ -55,7 +55,7 @@ Notification preferences are stored in `appSettings.notificationPrefs` and contr
 | Key             | Switch in Settings | What it sends today |
 | --------------- | ------------------ | ------------------- |
 | `taskCompleted` | Task completed     | A research run finished its report |
-| `needsInput`    | Needs input        | A chat run has been waiting for a tool approval or an answer to an `ask_user` question for a minute. Not straight away: someone watching the chat answers in seconds. The run gives up after five minutes, so this leaves about four to answer. The notification links to the chat |
+| `needsInput`    | Needs input        | A chat run has been waiting for a tool approval or an answer to one of the agent's questions for a minute. Not straight away: someone watching the chat answers in seconds. The run gives up after five minutes, so this leaves about four to answer. The notification links to the chat |
 | `agentErrors`   | Agent errors       | An automation run failed for good, or a check failed on a pull request an agent opened |
 
 Two kinds of notification are sent whatever these switches say, because the user set each one up on purpose and turns it off where they set it up:
@@ -87,7 +87,7 @@ All notifications are persisted to the `notifications` table regardless of wheth
 - Mark individual or all as read
 - Notifications older than 90 days are soft-hidden (not deleted)
 
-The inbox is the fallback for users without push subscriptions. For approvals and `ask_user` blocks, the chat session UI is the primary surface — the notification is a secondary signal for users who are not actively watching the chat.
+The inbox is the fallback for users without push subscriptions. For approvals and the agent's questions, the chat session UI is the primary surface — the notification is a secondary signal for users who are not actively watching the chat.
 
 ## Web Push Setup
 

@@ -94,8 +94,63 @@ test.describe('hooks/chat-run — what a chat turn reports', () => {
 			toolResult('task1', 'reviewed'),
 			RESULT,
 		])
+		// The delegation is the parent's call (#32). It has no tool frames of its own now — its
+		// card stands in — so it is reported off the card, as the SDK's `Agent` tool.
 		const tools = fired.filter((f) => f.event === 'before_tool' || f.event === 'after_tool')
-		expect(tools.map((f) => f.payload.toolName)).toEqual(['Task', 'Task'])
+		expect(tools.map((f) => f.payload.toolName)).toEqual(['Agent', 'Agent'])
+		expect(tools[0].payload).toMatchObject({ args: { subagent_type: 'reviewer', description: 'Review' } })
+	})
+
+	test("a delegation reports the child's report as its result, and a refusal as a failure (#32)", async () => {
+		const fired = await turn([
+			toolUse('a1', 'Agent', { subagent_type: 'reviewer', description: 'Review' }),
+			{
+				type: 'user',
+				parent_tool_use_id: null,
+				tool_use_result: {
+					status: 'completed',
+					agentId: 'sdk-1',
+					content: [{ type: 'text', text: 'All good.' }],
+					totalTokens: 10,
+					totalToolUseCount: 0,
+					totalDurationMs: 5,
+					usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+				},
+				message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'All good.' }] },
+			},
+			toolUse('a2', 'Agent', { subagent_type: 'writer', description: 'Draft' }),
+			toolResult('a2', 'Refused: 4 delegated agents are already running.', { isError: true }),
+			RESULT,
+		])
+		const after = fired.filter((f) => f.event === 'after_tool')
+		expect(after.map((f) => [f.payload.toolName, f.payload.success])).toEqual([
+			['Agent', true],
+			['Agent', false],
+		])
+		expect(after[0].payload.result).toBe('All good.')
+		expect(String(after[1].payload.result)).toContain('Refused')
+	})
+
+	test('a delegation awaiting approval is reported once approved, and not at all when denied (#32)', () => {
+		const { fired, hooks } = recorder()
+		// The order the engine sends: the approval card, then the child's card.
+		hooks.frame('tool_pending', { id: 'a1', name: 'Agent', arguments: '{"subagent_type":"reviewer"}', token: 'run-1:a1' })
+		hooks.frame('subagent_start', { agentId: 'a1', agentName: 'reviewer', conversationId: null, task: 'Review' })
+		hooks.frame('tool_call', { id: 'a1', name: 'Agent', arguments: '{"subagent_type":"reviewer"}' })
+		hooks.frame('subagent_done', { agentId: 'a1', conversationId: null, success: true, details: { report: 'ok' } })
+		hooks.frame('tool_result', { id: 'a1', success: true, result: 'ok' })
+
+		hooks.frame('tool_pending', { id: 'a2', name: 'Agent', arguments: '{}', token: 'run-1:a2' })
+		hooks.frame('subagent_start', { agentId: 'a2', agentName: 'writer', conversationId: null, task: 'Draft' })
+		hooks.frame('tool_denied', { id: 'a2' })
+		hooks.frame('subagent_done', { agentId: 'a2', conversationId: null, success: false, error: 'denied' })
+
+		expect(fired.map((f) => [f.event, (f.payload as { toolName?: string }).toolName])).toEqual([
+			['on_approval_required', 'Agent'],
+			['before_tool', 'Agent'],
+			['after_tool', 'Agent'],
+			['on_approval_required', 'Agent'],
+		])
 	})
 
 	test('a failed turn reports after_run as failed and on_run_failed, once', () => {
@@ -192,7 +247,12 @@ test.describe('hooks/chat-run — the stream route uses it', () => {
 		// Inside `emit`, which every frame passes through — the engine's and the route's own.
 		const emitBody = /const emit = async \(event: string, payload: unknown\) => \{([\s\S]*?)\n\t\t\t\}/.exec(source)
 		expect(emitBody?.[1]).toContain('hooks.frame(event, payload)')
-		expect(source.indexOf('hooks.runStarted()')).toBeLessThan(source.indexOf('await runEngineStream('))
+		// The engine call sits inside `runWithResumeFallback` (#24), which may make it twice; the
+		// turn is opened once, before either attempt.
+		const engineCall = source.search(/runEngineStream\(/)
+		expect(engineCall).toBeGreaterThan(-1)
+		expect(source.indexOf('hooks.runStarted()')).toBeGreaterThan(-1)
+		expect(source.indexOf('hooks.runStarted()')).toBeLessThan(engineCall)
 		expect(source.match(/hooks\.runFinished\(/g)?.length).toBe(2)
 		// The agent the turn runs as, so the default Chat agent's bindings apply too.
 		expect(source).toMatch(/createChatRunHooks\(\{[\s\S]*?agentId: agent\.id/)

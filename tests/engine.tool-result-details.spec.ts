@@ -4,6 +4,7 @@ import {
 	MAX_DIFF_LINES,
 	MAX_STREAM_CHARS,
 	MAX_TODO_ITEMS,
+	appendStreamTail,
 	hasToolResultDetails,
 	toolResultDetails,
 } from '../src/lib/engine/tool-result-details'
@@ -260,6 +261,59 @@ test.describe('shell', () => {
 	test('a payload carrying none of the known fields is declined', () => {
 		// Something else wearing the name is not a shell result.
 		expect(toolResultDetails('Bash', { somethingElse: true })).toBeNull()
+	})
+
+	test('a failed command is still a terminal, with the exit code the CLI reported (#26)', () => {
+		// A non-zero exit makes the CLI throw: there is no BashOutput, only its error text —
+		// `Exit code N` on the first line, then the command's merged output.
+		const details = toolResultDetails(
+			'Bash',
+			'Error: Exit code 2\nnpm ERR! Missing script: "tset"\n',
+			{ command: 'npm run tset', description: 'Run the tests' },
+		)
+		expect(details?.kind).toBe('shell')
+		if (details?.kind !== 'shell') return
+		expect(details.exitCode).toBe(2)
+		expect(details.command).toBe('npm run tset')
+		expect(details.stdout).toBe('npm ERR! Missing script: "tset"\n')
+		expect(details.stderr).toBe('')
+
+		// The same text inside the model-facing wrapper reads the same way.
+		const wrapped = toolResultDetails('Bash', '<tool_use_error>Exit code 1\nboom</tool_use_error>', {})
+		expect(wrapped?.kind === 'shell' && wrapped.exitCode).toBe(1)
+		expect(wrapped?.kind === 'shell' && wrapped.stdout).toBe('boom')
+	})
+
+	test('an error that is not a command exiting stays on the generic card', () => {
+		expect(toolResultDetails('Bash', 'Error: Path is outside this run\'s workspace: /etc', {})).toBeNull()
+		// "Exit code" later in the text is the command talking, not the CLI.
+		expect(toolResultDetails('Bash', 'Error: something\nExit code 3', {})).toBeNull()
+	})
+
+	test("the CLI's reading of a special exit code is kept", () => {
+		const details = toolResultDetails('Bash', {
+			stdout: '',
+			stderr: '',
+			interrupted: false,
+			returnCodeInterpretation: 'No matches found',
+		})
+		expect(details?.kind === 'shell' && details.returnCodeInterpretation).toBe('No matches found')
+	})
+
+	test('live output grows the same tail the result keeps', () => {
+		expect(appendStreamTail('ab', 'cd')).toEqual({ text: 'abcd', truncated: false })
+		const grown = appendStreamTail('x'.repeat(MAX_STREAM_CHARS), 'END')
+		expect(grown.truncated).toBe(true)
+		expect(grown.text).toHaveLength(MAX_STREAM_CHARS)
+		expect(grown.text.endsWith('END')).toBe(true)
+	})
+
+	test('only Bash is a terminal: the removed polling tools and TaskStop are not (#35)', () => {
+		const streams = { stdout: 'x', stderr: '', interrupted: false }
+		expect(toolResultDetails('BashOutput', streams)).toBeNull()
+		expect(toolResultDetails('KillShell', streams)).toBeNull()
+		// TaskStop's own output has no streams to show.
+		expect(toolResultDetails('TaskStop', { message: 'Stopped', task_id: 'b1', task_type: 'local_bash' })).toBeNull()
 	})
 })
 

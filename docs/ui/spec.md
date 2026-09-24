@@ -141,7 +141,7 @@ Sources:
 - Only a page's first load replaces its content with a spinner. A reload after a change, or from **Refresh**, keeps the current list on screen until the new one arrives, so the reader keeps their place and any panel they had open.
 - On a dashboard made of several sections, each section's error is reported on its own. A section that loads again successfully clears its own error without touching the others.
 - After any change the user makes on a page (create, save, toggle, delete, resolve) and whenever they press **Refresh**, the page reloads its data from the server rather than reusing an earlier answer the browser kept. Otherwise the change is saved but the screen still shows the old state, which reads as the change being lost.
-- Blocking action failures (approval submit, ask_user submit, queue send) must show explicit retry paths.
+- Blocking action failures (approval submit, question answer submit, queue send) must show explicit retry paths.
 - Long-running run disruptions should preserve user intent and offer resume/recover options.
 
 ## Visual System
@@ -211,7 +211,7 @@ Generic boilerplate is not sufficient. Each domain must provide domain-specific 
 | ---------------- | ----------------------------------------------------------------------------- |
 | Primary surface  | e.g. left rail list item / chat inline card / right workbench tab             |
 | Status badges    | e.g. running (green pulse) / blocked (orange) / done (ghost)                  |
-| Blocking actions | e.g. ask_user card — resolved via ActionCard (ask_user type)                  |
+| Blocking actions | e.g. the agent's question card (`AskUserCard`, #4) and tool approval cards     |
 | Mobile behavior  | e.g. surface appears in bottom-sheet tab; blocking card sticky above composer |
 ```
 
@@ -242,9 +242,9 @@ The following components implement the canonical desktop and mobile shells. Doma
 
 ### Action cards
 
-All blocking agent actions (ask_user, tool approval, confirmation) render via `src/lib/ui/ActionCard.svelte`. Domains invoke ActionCard with one of three `type` props:
+The design called for all blocking agent actions to render through one `src/lib/ui/ActionCard.svelte`, with one of these `type` props. That component was never built; each action has its own card today. The agent's questions use `src/lib/chat/AskUserCard.svelte`, shared by the chat, the modal a reloaded page opens and the /review inbox: a header chip, option cards, sandboxed HTML previews, multi-select and a free-text "Other" (see [../chat/spec.md](../chat/spec.md#questions-from-the-agent)).
 
-- `ask_user` — question with options and optional freeform input
+- `ask_user` — question with options and optional freeform input (now `AskUserCard`)
 - `tool_approval` — tool name + args preview with Allow / Deny buttons
 - `confirmation` — plain message with configurable confirm/cancel labels
 
