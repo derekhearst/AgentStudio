@@ -74,21 +74,22 @@
 		}
 	}
 
-	async function refreshLists() {
+	/** The archive is refetched only when this chat is in it, or is going into it: nothing else moves it. */
+	async function refreshLists(archiveToo: boolean) {
 		await Promise.all([
 			getConversations().refresh().catch(() => {}),
-			getArchivedConversations().refresh().catch(() => {}),
+			archiveToo ? getArchivedConversations().refresh().catch(() => {}) : null,
 		]);
 		onChanged?.();
 	}
 
-	async function run(action: () => Promise<unknown>, fallback: string): Promise<boolean> {
+	async function run(action: () => Promise<unknown>, fallback: string, touchesArchive = archived): Promise<boolean> {
 		if (busy) return false;
 		busy = true;
 		errorMessage = null;
 		try {
 			await action();
-			await refreshLists();
+			await refreshLists(touchesArchive);
 			return true;
 		} catch (err) {
 			errorMessage = remoteErrorMessage(err, fallback);
@@ -103,6 +104,7 @@
 		const done = await run(
 			() => setConversationArchived({ id: conversation.id, archived: !archived }),
 			archived ? 'Could not unarchive this chat.' : 'Could not archive this chat.',
+			true,
 		);
 		if (done) close();
 	}

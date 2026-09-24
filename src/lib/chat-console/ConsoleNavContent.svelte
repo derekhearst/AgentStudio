@@ -100,6 +100,8 @@
 	const conversations = $derived<Conversation[]>(
 		(showingArchive ? archivedQuery?.current : conversationsQuery?.current) ?? [],
 	);
+	/** Fetched when opened: until it arrives the archive is loading, not empty. */
+	const archiveLoading = $derived(archivedQuery !== null && !archivedQuery.ready && !archivedQuery.error);
 
 	onMount(() => {
 		if (!browser) return;
@@ -363,7 +365,9 @@
 				</div>
 			{/each}
 		{/each}
-		{#if conversations.length === 0 && messageHits.length === 0}
+		{#if archiveLoading}
+			<div class="console-chatempty">Loading…</div>
+		{:else if conversations.length === 0 && messageHits.length === 0}
 			<div class="console-chatempty">{showingArchive ? 'Nothing archived.' : 'No conversations yet'}</div>
 		{:else if filtered.length === 0 && searchStatus === 'idle'}
 			<!-- Once the server search runs, its own section says whether anything matched. -->
