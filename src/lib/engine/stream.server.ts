@@ -41,6 +41,7 @@ import { resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import type { ConversationPermissionMode } from './permission-mode'
 import { decideToolCall, type ToolDecisionContext } from './tool-decision'
 import type { ToolScope } from './tool-scope'
+import type { McpProvenance, RunMcpConnectors } from './mcp-connectors'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
@@ -112,6 +113,12 @@ export type EngineRunInput = {
 	 * anything else is considered. Omit for every tool.
 	 */
 	toolScope?: ToolScope | null
+	/**
+	 * #17 — the operator's connectors loaded for this run, with each one's per-tool policy
+	 * (`./mcp-connectors`). A call to any other external server is refused. Omit to keep the
+	 * posture from before connectors: every external tool asks.
+	 */
+	mcpConnectors?: RunMcpConnectors | null
 	/**
 	 * Whether the per-tool *settings* alone require human approval — i.e. the tool is in
 	 * `settings.toolConfig.approvalRequiredTools` (or the `'*'` wildcard), unioned with
@@ -367,8 +374,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		scope: input.toolScope ?? null,
 		// Read off what the SDK is actually told, so it cannot drift from `settingSources`.
 		projectConfigLoaded: (input.options.settingSources ?? []).includes('project'),
+		connectors: input.mcpConnectors ?? null,
 	}
-	const decide = (name: string, args: unknown) => decideToolCall(decisionContext, name, args)
+	// `provenance` is the SDK's report of the call's MCP server; the frame decision below has none yet.
+	const decide = (name: string, args: unknown, provenance?: McpProvenance | null) =>
+		decideToolCall(decisionContext, name, args, provenance)
 	// Tools whose `tool_call` frame has already gone out, so the approval path
 	// doesn't emit a second one.
 	const callEmitted = new Set<string>()
@@ -442,7 +452,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		// The host owns ask_user end to end (see the assistant branch below).
 		if (HOST_OWNED_TOOLS.has(name)) return {}
 
-		const decision = decide(name, hookInput.tool_input)
+		const decision = decide(name, hookInput.tool_input, hookInput.mcp_server ?? null)
 		if (decision.gate === 'allow') return {}
 
 		if (decision.gate === 'deny') {
@@ -476,7 +486,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
 		// answer still needs this to refuse rather than hang.
-		canUseTool: async (toolName, toolInput, { signal, toolUseID }): Promise<PermissionResult> => {
+		canUseTool: async (toolName, toolInput, { signal, toolUseID, mcpServer }): Promise<PermissionResult> => {
 			const name = bareToolName(toolName)
 			// The host owns ask_user end to end (see the assistant branch below): it
 			// renders its own card, so no tool_call / tool_pending frame may go out.
@@ -485,7 +495,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
 
-			const gate = decide(name, toolInput)
+			const gate = decide(name, toolInput, mcpServer ?? null)
 
 			/** Moves the UI's pending block to "executing" using the same id. */
 			const allow = async (): Promise<PermissionResult> => {

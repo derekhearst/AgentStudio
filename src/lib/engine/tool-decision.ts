@@ -23,8 +23,9 @@
  */
 
 import { guardWorkspaceAccess, type BashPolicy, type GuardDecision } from './workspace-guard'
-import { resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
+import { OWN_MCP_SERVER, resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { isToolInScope, type ToolScope } from './tool-scope'
+import { connectorCallVerdict, type McpProvenance, type RunMcpConnectors } from './mcp-connectors'
 
 export type ToolDecisionContext = {
 	mode: ConversationPermissionMode
@@ -37,15 +38,44 @@ export type ToolDecisionContext = {
 	scope?: ToolScope | null
 	/** Whether the project's committed `.claude/` configuration is loaded for this run. */
 	projectConfigLoaded?: boolean
+	/**
+	 * The connectors this run was given (#17, `./mcp-connectors`) — an empty map when it was
+	 * given none. With a map, a call to any other external server is refused and a call to one
+	 * of these follows its row's per-tool policy. Omitted keeps the posture from before
+	 * connectors existed: every external tool asks.
+	 */
+	connectors?: RunMcpConnectors | null
 }
 
 function outOfScopeReason(name: string): string {
 	return `${name} is not available to this agent. Its tool list is fixed; use one of the tools you were given.`
 }
 
-/** Decide one call. `bareName` has our own MCP namespace stripped; anyone else's is kept. */
-export function decideToolCall(ctx: ToolDecisionContext, bareName: string, toolInput: unknown): ToolGateDecision {
+/**
+ * Decide one call. `bareName` has our own MCP namespace stripped; anyone else's is kept.
+ *
+ * `provenance` is the SDK's report of which MCP server the call belongs to (`canUseTool`'s
+ * `mcpServer`, the hook's `mcp_server`): null when the SDK reported none, undefined when
+ * nothing has been reported yet — see `connectorCallVerdict`.
+ */
+export function decideToolCall(
+	ctx: ToolDecisionContext,
+	bareName: string,
+	toolInput: unknown,
+	provenance?: McpProvenance | null,
+): ToolGateDecision {
 	if (!isToolInScope(ctx.scope, bareName)) return { gate: 'deny', reason: outOfScopeReason(bareName) }
+
+	// Our own server is the one in-process server we register, so the SDK reports it as `sdk`.
+	// Our name from anywhere else is a configured server wearing it (#17).
+	if (provenance && provenance.name === OWN_MCP_SERVER && provenance.source !== 'sdk') {
+		return {
+			gate: 'deny',
+			reason: "This call names AgentStudio's own tool server but came from a different one, so it is refused.",
+		}
+	}
+	const connector = ctx.connectors ? connectorCallVerdict(ctx.connectors, bareName, provenance) : null
+	if (connector?.kind === 'refused') return { gate: 'deny', reason: connector.reason }
 
 	const containment: GuardDecision = ctx.workspaceRoot
 		? guardWorkspaceAccess({
@@ -61,6 +91,7 @@ export function decideToolCall(ctx: ToolDecisionContext, bareName: string, toolI
 		mode: ctx.mode,
 		toolName: bareName,
 		settingsRequiresApproval: ctx.settingsRequiresApproval(bareName),
+		...(connector?.kind === 'policy' ? { externalPolicy: connector.policy } : {}),
 	})
 
 	if (containment.verdict === 'deny') return { gate: 'deny', reason: containment.reason }

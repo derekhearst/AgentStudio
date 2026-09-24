@@ -33,6 +33,8 @@ export type RunNoticeKind =
 	| 'rate_limit'
 	| 'worker_shutdown'
 	| 'task_finished'
+	/** A connector (#17) the run was given is not usable this turn. */
+	| 'mcp_unavailable'
 
 export type RunNoticeLevel = 'info' | 'warn' | 'error'
 
@@ -132,8 +134,49 @@ function backgroundTasks(value: unknown): BackgroundTask[] {
 	return tasks
 }
 
+/** Statuses in `system/init`'s `mcp_servers` that mean a server's tools are not there. */
+const UNAVAILABLE_MCP_STATUS: Record<string, string> = {
+	failed: 'could not connect',
+	'needs-auth': 'needs a sign-in',
+}
+
+/**
+ * The connectors that `system/init` reports as unusable, or null when they all came up.
+ *
+ * Only servers that are not our own in-process one (`source: 'sdk'`) count — those are the
+ * operator's connectors (#17). `pending` is not a failure: MCP startup does not block the turn,
+ * so a slow server is still connecting when init is sent. Server names are the configuration's
+ * keys, which the SDK calls untrusted text; they are reduced to their safe characters and
+ * clipped before they reach a notice.
+ */
+function mcpUnavailableNotice(msg: Record<string, unknown>): SdkInterpretation | null {
+	if (!Array.isArray(msg.mcp_servers)) return null
+	const down: string[] = []
+	for (const entry of msg.mcp_servers) {
+		const server = asRecord(entry)
+		const name = str(server?.name)
+		const status = str(server?.status)
+		if (!name || !status || server?.source === 'sdk') continue
+		const why = UNAVAILABLE_MCP_STATUS[status]
+		if (!why) continue
+		down.push(`${name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)} (${why})`)
+	}
+	if (down.length === 0) return null
+	const shown = down.slice(0, 5).join(', ') + (down.length > 5 ? `, and ${down.length - 5} more` : '')
+	return notice(
+		'mcp_unavailable',
+		'warn',
+		down.length === 1 ? 'A connector is unavailable this turn' : `${down.length} connectors are unavailable this turn`,
+		`${shown}. Their tools are missing from this turn; test the connection on Settings → Connectors.`,
+		true,
+	)
+}
+
 function systemNotice(subtype: string, msg: Record<string, unknown>): SdkInterpretation | null {
 	switch (subtype) {
+		case 'init':
+			return mcpUnavailableNotice(msg)
+
 		case 'compact_boundary':
 			return notice('compacted', 'info', compactionTitle(asRecord(msg.compact_metadata)), null, true)
 
