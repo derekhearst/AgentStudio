@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
+	MAX_CREATED_FILE_CHARS,
 	MAX_DIFF_LINES,
 	MAX_STREAM_CHARS,
 	MAX_TODO_ITEMS,
@@ -23,6 +24,8 @@ import {
  *     than throwing — this runs inside the stream loop, where an exception kills the turn
  *   - the difference between "nothing changed" and "we could not produce a diff", which
  *     the card renders as two different sentences
+ *   - a created file, which the SDK reports with no patch at all, is neither: it is its
+ *     own contents, added, inside the same caps
  */
 
 /** A `structuredPatch` hunk in the SDK's shape. */
@@ -79,6 +82,89 @@ test.describe('file edits', () => {
 		expect(details?.kind === 'file_edit' && details.path).toBe('/w/new.md')
 		// A create with no previous contents is not a missing diff.
 		expect(details?.kind === 'file_edit' && details.unavailable).toBe('none')
+	})
+
+	test('a new file, as the SDK reports it, is its contents added — not "nothing changed"', () => {
+		// What the bundled CLI returns for a Write that creates a file: no patch (there is no
+		// "before" to diff) and no original. This used to read as `no_change`, which hid every
+		// created file from the rail's Files tab and labelled its card "No changes".
+		const details = toolResultDetails('Write', {
+			type: 'create',
+			filePath: '/w/new.ts',
+			content: 'a\nb\r\nc\n',
+			structuredPatch: [],
+			originalFile: null,
+		})
+
+		expect(details?.kind).toBe('file_edit')
+		if (details?.kind !== 'file_edit') return
+		expect(details.changeType).toBe('create')
+		expect(details.unavailable).toBe('none')
+		expect(details.additions).toBe(3)
+		expect(details.deletions).toBe(0)
+		expect(details.truncated).toBe(false)
+		// Numbered from line 1 of the new file; a Windows line ending is not part of the text.
+		expect(details.hunks).toEqual([{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 3, lines: ['+a', '+b', '+c'] }])
+	})
+
+	test('a new file prefers git’s counts, and an empty one is still a change', () => {
+		const counted = toolResultDetails('Write', {
+			type: 'create',
+			filePath: '/w/new.ts',
+			content: 'a\n',
+			structuredPatch: [],
+			originalFile: null,
+			gitDiff: { filename: 'new.ts', status: 'added', additions: 7, deletions: 0, changes: 7, patch: '' },
+		})
+		expect(counted?.kind === 'file_edit' && counted.additions).toBe(7)
+
+		const empty = toolResultDetails('Write', {
+			type: 'create',
+			filePath: '/w/empty.ts',
+			content: '',
+			structuredPatch: [],
+			originalFile: null,
+		})
+		expect(empty?.kind).toBe('file_edit')
+		if (empty?.kind !== 'file_edit') return
+		expect(empty.unavailable).toBe('none')
+		expect(empty.hunks).toEqual([])
+		expect(empty.additions).toBe(0)
+	})
+
+	test('a large new file keeps its first lines, counts all of them, and is flagged', () => {
+		const lines = Array.from({ length: MAX_DIFF_LINES + 25 }, (_, i) => `line ${i}`)
+		const details = toolResultDetails('Write', {
+			type: 'create',
+			filePath: '/w/big.ts',
+			content: `${lines.join('\n')}\n`,
+			structuredPatch: [],
+			originalFile: null,
+		})
+
+		expect(details?.kind).toBe('file_edit')
+		if (details?.kind !== 'file_edit') return
+		expect(details.additions).toBe(MAX_DIFF_LINES + 25)
+		expect(details.truncated).toBe(true)
+		expect(details.hunks[0].lines).toHaveLength(MAX_DIFF_LINES)
+		expect(details.hunks[0].lines[0]).toBe('+line 0')
+	})
+
+	test('a new file of one enormous line is cut to the character budget', () => {
+		const details = toolResultDetails('Write', {
+			type: 'create',
+			filePath: '/w/bundle.min.js',
+			content: 'x'.repeat(MAX_CREATED_FILE_CHARS * 3),
+			structuredPatch: [],
+			originalFile: null,
+		})
+
+		expect(details?.kind).toBe('file_edit')
+		if (details?.kind !== 'file_edit') return
+		expect(details.additions).toBe(1)
+		expect(details.truncated).toBe(true)
+		// The kept text plus the `+` marker; the rest of the file never reaches the database.
+		expect(details.hunks[0].lines[0]).toHaveLength(MAX_CREATED_FILE_CHARS + 1)
 	})
 
 	test('an empty patch means "nothing changed" when the original is in hand', () => {

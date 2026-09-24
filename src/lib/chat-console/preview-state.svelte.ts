@@ -164,6 +164,12 @@ export async function hydratePreviewState(conversationId: string | null) {
 let openLoaded = false;
 /** Set once anything changes `open`; a stored value arriving later must not undo it. */
 let openTouched = false;
+/**
+ * What the database holds, as far as this page knows: null until it has been read or
+ * written. While it is unknown, `open` may be this browser's copy rather than the stored
+ * value, so a choice that matches it must still be saved.
+ */
+let savedOpen: boolean | null = null;
 let openSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Load the viewer's remembered fold once per page load. Later chats reuse it from memory. */
@@ -172,6 +178,7 @@ export async function hydrateRailOpen() {
 	openLoaded = true;
 	try {
 		const stored = await getRailOpen();
+		savedOpen ??= stored; // a save that landed first knows better
 		if (!openTouched) {
 			previewState.open = stored;
 			writeRailOpenMirror(stored);
@@ -193,15 +200,20 @@ export async function hydrateRailOpen() {
 function setOpen(open: boolean) {
 	if (isDrawerViewport()) return;
 	openTouched = true;
-	if (previewState.open === open) return;
+	if (previewState.open === open && (savedOpen === open || openSaveTimer)) return;
 	previewState.open = open;
 	writeRailOpenMirror(open);
 	if (openSaveTimer) clearTimeout(openSaveTimer);
 	openSaveTimer = setTimeout(() => {
 		openSaveTimer = null;
-		void setRailOpen(previewState.open).catch(() => {
-			// Same as the selection: the fold still holds for this session.
-		});
+		const next = previewState.open;
+		void setRailOpen(next)
+			.then(() => {
+				savedOpen = next;
+			})
+			.catch(() => {
+				// Same as the selection: the fold still holds for this session.
+			});
 	}, 400);
 }
 

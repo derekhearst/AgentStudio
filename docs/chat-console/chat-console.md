@@ -93,7 +93,14 @@ appears the way you left it straight away, instead of starting as the strip and 
 jumping open a moment later. Your saved preference still has the last word: if you folded
 the rail on another device, it folds here too as soon as the preference loads.
 
-On a tablet, the rail button in the chat's header expands or folds the rail.
+On a tablet, the rail button in the chat's header expands or folds the rail. Its name
+changes to say which it will do next ("Expand chat rail" or "Collapse chat rail"), and
+screen readers are told whether the rail is open.
+
+When you expand or fold the rail from the keyboard, focus stays in the rail. The button you
+pressed is replaced, so focus moves to the one that took its place: the tab you asked for,
+the collapse button, or the strip's expand button. Opening a file from Files puts focus on
+the Preview tab, and closing the preview puts it back on the rail.
 
 ### On a phone
 
@@ -121,6 +128,13 @@ The most recently changed file is at the top. Edits made while a reply is still 
 appear as they happen. An edit that failed or was refused is not listed, and neither is a
 write that left the file exactly as it was. Edits made inside a sub-agent are not listed.
 
+A file the agent **created** is always listed and marked **new**, with every line it wrote
+counted as added — even an empty file, which is still a change. Its card in the thread
+shows what was written, as added lines, instead of saying nothing changed. A very large
+new file shows only its beginning on the card, with a note that the rest was cut. In chats
+from before this was fixed, a created file is still listed as new, but without a line
+count, and its card asks you to open the file to see it.
+
 ### Where everything else went
 
 The rail used to have four tabs and a stats strip. Issue #14 removed what was empty most of
@@ -130,7 +144,7 @@ the time or repeated what is shown elsewhere:
 | --- | --- |
 | **Research** tab (research runs started from this chat) | The research run's own page. Its Back button and breadcrumb lead to the chat it came from. |
 | **Activity** tab (tool calls in this turn and earlier ones) | The run's own page, `/runs/<id>`, which has every tool call and event. Open it from **Run → Timeline** in a reply's stats popover, or by clicking the **running** chip at the top of the chat while a turn runs. |
-| Stats strip: context and cost | The chat's header on every screen size: the context ring (hover for the breakdown and a Compact button) and the metered cost, when there is any. |
+| Stats strip: context and cost | The top of the chat on every screen size: the context ring (hover for the breakdown and a Compact button) and the metered cost, when there is any. On a desktop both sit in the bar above the thread. On a tablet or phone the ring is in the chat's header, and the cost is beside it on a tablet and in the row of chips under the header on a phone. |
 | Stats strip: tokens and latency | Per reply, in the reply's stats popover. |
 | Files placeholder ("main · clean", Switch, Pull) | The real Files tab above. |
 

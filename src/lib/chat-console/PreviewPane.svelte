@@ -13,7 +13,14 @@
 		previewState,
 	} from './preview-state.svelte';
 
-	let { conversationId }: { conversationId: string | null } = $props();
+	let {
+		conversationId,
+		onClosed,
+	}: {
+		conversationId: string | null;
+		/** After "Close preview" — which removes that button, and may fold the rail (#14). */
+		onClosed?: () => void;
+	} = $props();
 
 	let address = $state('');
 	let addressError = $state<string | null>(null);
@@ -172,7 +179,15 @@
 						<Icon name="external" size={12} />
 					</a>
 				{/if}
-				<button type="button" title="Close preview" aria-label="Close preview" onclick={clearPreview}>
+				<button
+					type="button"
+					title="Close preview"
+					aria-label="Close preview"
+					onclick={() => {
+						clearPreview();
+						onClosed?.();
+					}}
+				>
 					<Icon name="x" size={12} />
 				</button>
 			</div>

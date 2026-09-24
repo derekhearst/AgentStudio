@@ -32,6 +32,13 @@
 /** Total diff lines kept across all hunks of one edit. Beyond this the edit is truncated. */
 export const MAX_DIFF_LINES = 400
 
+/**
+ * Characters of a new file's contents kept as its diff (its lines also count against
+ * `MAX_DIFF_LINES`). A created file's "diff" is the file itself, and one long minified line
+ * would otherwise carry all of it into the database.
+ */
+export const MAX_CREATED_FILE_CHARS = 32_000
+
 /** Characters kept per output stream. The tail is kept — a failing command explains itself at the end. */
 export const MAX_STREAM_CHARS = 16_000
 
@@ -70,10 +77,13 @@ export type FileEditDetails = {
 	 * Set when `hunks` is empty and that is not a bug: `no_change` for a write that changed
 	 * nothing, `diff_missing` when the SDK could not produce one (it documents an empty
 	 * patch for a diff that timed out, and a null `originalFile` when the previous contents
-	 * were too large to include).
+	 * were too large to include). Never set on a created file: its diff is its contents.
 	 */
 	unavailable: DiffUnavailable
-	/** True when hunks were dropped to stay inside `MAX_DIFF_LINES`. */
+	/**
+	 * True when hunks were dropped to stay inside `MAX_DIFF_LINES`, or a created file's
+	 * contents were cut to fit `MAX_DIFF_LINES` / `MAX_CREATED_FILE_CHARS`.
+	 */
 	truncated: boolean
 }
 
@@ -342,6 +352,35 @@ function countChanges(hunks: DiffHunk[]): { additions: number; deletions: number
 	return { additions, deletions }
 }
 
+/**
+ * A new file as the diff that created it: one hunk, every line added.
+ *
+ * The SDK's `Write` reports a new file with an empty `structuredPatch` and
+ * `originalFile: null` — there is no "before" to diff against — so without this a created
+ * file read as a write that changed nothing. Its `content` is the whole change. The hunk is
+ * kept inside the same budgets as any other diff; `lineCount` counts the whole file.
+ */
+function createdFileHunk(content: string): { hunks: DiffHunk[]; truncated: boolean; lineCount: number } {
+	const lines = content.split('\n')
+	// A trailing newline ends the last line; it does not start another.
+	if (lines.at(-1) === '') lines.pop()
+	const lineCount = lines.length
+
+	const kept: string[] = []
+	let budget = MAX_CREATED_FILE_CHARS
+	for (const raw of lines) {
+		if (kept.length >= MAX_DIFF_LINES || budget <= 0) break
+		const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+		kept.push(`+${line.slice(0, budget)}`)
+		budget -= line.length
+	}
+
+	const truncated = kept.length < lineCount || budget < 0
+	const hunks =
+		kept.length > 0 ? [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: kept.length, lines: kept }] : []
+	return { hunks, truncated, lineCount }
+}
+
 function fileEditDetails(
 	toolName: string,
 	result: Record<string, unknown>,
@@ -351,24 +390,32 @@ function fileEditDetails(
 	if (!path) return null
 
 	const all = readHunks(result.structuredPatch)
-	const { hunks, truncated } = capHunks(all)
+	let { hunks, truncated } = capHunks(all)
 
 	// `type` is FileWriteOutput's own field; Edit has no equivalent, and an edit by
 	// definition changes a file that already existed.
 	const changeType = str(result.type) === 'create' ? 'create' : 'update'
 
+	let counted = countChanges(hunks)
+	if (changeType === 'create' && all.length === 0 && typeof result.content === 'string') {
+		const created = createdFileHunk(result.content)
+		hunks = created.hunks
+		truncated = created.truncated
+		counted = { additions: created.lineCount, deletions: 0 }
+	}
+
 	const gitDiff = asRecord(result.gitDiff)
-	const counted = countChanges(hunks)
 	// Prefer git's counts: they describe the whole change even when hunks were dropped.
 	const additions = num(gitDiff?.additions) ?? counted.additions
 	const deletions = num(gitDiff?.deletions) ?? counted.deletions
 
+	// A created file changed something even when it is empty: it did not exist before.
 	let unavailable: DiffUnavailable = 'none'
-	if (all.length === 0) {
+	if (all.length === 0 && changeType === 'update') {
 		// An empty patch with the original contents in hand means nothing actually changed.
-		// An empty patch with `originalFile: null` on an update means the SDK could not
-		// produce one — a diff that timed out, or previous contents too large to include.
-		unavailable = changeType === 'update' && result.originalFile === null ? 'diff_missing' : 'no_change'
+		// An empty patch with `originalFile: null` means the SDK could not produce one — a
+		// diff that timed out, or previous contents too large to include.
+		unavailable = result.originalFile === null ? 'diff_missing' : 'no_change'
 	}
 
 	return {

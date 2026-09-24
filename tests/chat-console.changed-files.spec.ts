@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { changedFilesInThread, collectChangedFiles, sameChangedFiles } from '../src/lib/chat-console/changed-files'
+import { toolResultDetails } from '../src/lib/engine/tool-result-details'
 
 /**
  * #14 — the rail's Files tab: "changed in this chat".
@@ -8,9 +9,16 @@ import { changedFilesInThread, collectChangedFiles, sameChangedFiles } from '../
  * import), so this runs without Postgres or a dev server, like
  * `engine.tool-result-details.spec.ts`.
  *
+ * The edits are not hand-written `file_edit` objects: each one is what the engine's own
+ * `toolResultDetails` makes of the payload the Agent SDK returns for that tool, so these
+ * rows are the shape production stores. (A hand-written create once hid the fact that every
+ * file the agent created with `Write` was missing from the tab.)
+ *
  * What is pinned here:
  *   - one row per file, with the +/- counts of every edit to it added up
- *   - a file created at any point in the chat stays "new"
+ *   - a file created with `Write` is listed, marked new, with every line counted, and it
+ *     stays new whatever edits follow — including a create saved before new files were
+ *     diffed, which was stored as "no change"
  *   - newest first, by the most recent edit
  *   - a block the live stream and a saved list both hold is counted once
  *   - only successful `file_edit` blocks count: other tools, failed or denied calls,
@@ -19,23 +27,37 @@ import { changedFilesInThread, collectChangedFiles, sameChangedFiles } from '../
  *   - `sameChangedFiles`, which spares the rail a redraw on every streamed token
  */
 
-function edit(
-	path: string,
-	additions: number,
-	deletions: number,
-	extra: { changeType?: 'create' | 'update'; unavailable?: 'none' | 'no_change' | 'diff_missing'; tool?: string } = {},
-) {
-	return {
-		kind: 'file_edit' as const,
-		tool: extra.tool ?? 'Edit',
-		path,
-		changeType: extra.changeType ?? 'update',
-		hunks: [],
-		additions,
-		deletions,
-		unavailable: extra.unavailable ?? 'none',
-		truncated: false,
-	}
+/** An `Edit` as the SDK answers one: a patch of `deletions` removed and `additions` added lines. */
+function edit(path: string, additions: number, deletions: number) {
+	const lines = [
+		...Array.from({ length: deletions }, (_, i) => `-old ${i}`),
+		...Array.from({ length: additions }, (_, i) => `+new ${i}`),
+	]
+	return toolResultDetails('Edit', {
+		filePath: path,
+		oldString: 'old',
+		newString: 'new',
+		originalFile: 'old\n',
+		structuredPatch: [{ oldStart: 1, oldLines: deletions, newStart: 1, newLines: additions, lines }],
+		userModified: false,
+		replaceAll: false,
+	})
+}
+
+/** A `Write` that created a file, as the SDK answers one: no patch and no original. */
+function create(path: string, content: string) {
+	return toolResultDetails('Write', { type: 'create', filePath: path, content, structuredPatch: [], originalFile: null })
+}
+
+/** A `Write` that left an existing file exactly as it was. */
+function unchangedWrite(path: string) {
+	return toolResultDetails('Write', {
+		type: 'update',
+		filePath: path,
+		content: 'same\n',
+		structuredPatch: [],
+		originalFile: 'same\n',
+	})
 }
 
 /** A saved tool block: no id, `success` rather than a status. */
@@ -59,13 +81,37 @@ test.describe('collectChangedFiles', () => {
 		expect(app).toMatchObject({ name: 'app.ts', dir: '/w/src/', additions: 7, deletions: 3, edits: 2, changeType: 'update' })
 	})
 
+	test('a file the agent created with Write is listed, marked new, with every line counted', () => {
+		expect(collectChangedFiles([[saved(create('/w/new.ts', 'a\nb\nc\n'))]])).toEqual([
+			{ path: '/w/new.ts', name: 'new.ts', dir: '/w/', changeType: 'create', additions: 3, deletions: 0, edits: 1 },
+		])
+		// An empty new file is still a new file.
+		expect(collectChangedFiles([[saved(create('/w/.keep', ''))]])).toMatchObject([{ path: '/w/.keep', changeType: 'create' }])
+	})
+
 	test('a file created anywhere in the chat stays new', () => {
 		const [file] = collectChangedFiles([
-			[saved(edit('/w/new.ts', 10, 0, { changeType: 'create', tool: 'Write' }))],
+			[saved(create('/w/new.ts', 'one\ntwo\n'))],
 			[saved(edit('/w/new.ts', 1, 1))],
 		])
-		expect(file.changeType).toBe('create')
-		expect(file.edits).toBe(2)
+		expect(file).toMatchObject({ changeType: 'create', edits: 2, additions: 3, deletions: 1 })
+	})
+
+	test('a create saved before new files were diffed is still listed as new', () => {
+		// What the engine stored for every Write create until the fix: an empty patch, read as
+		// "nothing changed". Those replies are still in people's chats.
+		const legacy = {
+			kind: 'file_edit',
+			tool: 'Write',
+			path: '/w/old-new.ts',
+			changeType: 'create',
+			hunks: [],
+			additions: 0,
+			deletions: 0,
+			unavailable: 'no_change',
+			truncated: false,
+		}
+		expect(collectChangedFiles([[saved(legacy)]])).toMatchObject([{ path: '/w/old-new.ts', changeType: 'create', edits: 1 }])
 	})
 
 	test('orders files by their most recent edit, newest first', () => {
@@ -95,7 +141,7 @@ test.describe('collectChangedFiles', () => {
 				saved({ kind: 'file_edit', path: '   ' }),
 				saved(null),
 				saved('not an object'),
-				saved(edit('/w/same.ts', 0, 0, { tool: 'Write', unavailable: 'no_change' })),
+				saved(unchangedWrite('/w/same.ts')),
 				null,
 				undefined,
 				saved(edit('/w/kept.ts', 1, 0)),
@@ -107,7 +153,7 @@ test.describe('collectChangedFiles', () => {
 	})
 
 	test('treats a missing or nonsense count as zero', () => {
-		const [file] = collectChangedFiles([[saved({ ...edit('/w/a.ts', 0, 0), additions: 'many', deletions: -4 })]])
+		const [file] = collectChangedFiles([[saved({ ...edit('/w/a.ts', 1, 0), additions: 'many', deletions: -4 })]])
 		expect(file).toMatchObject({ additions: 0, deletions: 0 })
 	})
 
