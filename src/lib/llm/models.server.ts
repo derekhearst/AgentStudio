@@ -8,6 +8,13 @@ export type ModelInfo = {
 	contextLength: number | null
 	promptPrice: string
 	completionPrice: string
+	/**
+	 * Per-token price of a cached prompt token read, and of one written to the cache, when the
+	 * catalogue lists them. Null when it does not; a caller then prices those tokens at the
+	 * ordinary prompt rate.
+	 */
+	cacheReadPrice?: string | null
+	cacheWritePrice?: string | null
 	modality?: string | null
 	inputModalities?: string[]
 	outputModalities?: string[]
@@ -60,7 +67,7 @@ export async function listModels(): Promise<ModelInfo[]> {
 				description?: string | null
 				contextLength?: number | null
 				created?: number | null
-				pricing?: { prompt?: string; completion?: string }
+				pricing?: { prompt?: string; completion?: string; inputCacheRead?: string; inputCacheWrite?: string }
 				architecture?: {
 					modality?: string | null
 					inputModalities?: string[]
@@ -74,6 +81,10 @@ export async function listModels(): Promise<ModelInfo[]> {
 
 			const promptPrice = Math.max(0, parseFloat(m.pricing?.prompt ?? '0') || 0)
 			const completionPrice = Math.max(0, parseFloat(m.pricing?.completion ?? '0') || 0)
+			const optionalPrice = (raw: string | undefined) => {
+				const value = raw === undefined ? NaN : parseFloat(raw)
+				return Number.isFinite(value) ? Math.max(0, value).toString() : null
+			}
 
 			return {
 				id: m.id,
@@ -82,6 +93,8 @@ export async function listModels(): Promise<ModelInfo[]> {
 				contextLength: m.contextLength ?? null,
 				promptPrice: promptPrice.toString(),
 				completionPrice: completionPrice.toString(),
+				cacheReadPrice: optionalPrice(m.pricing?.inputCacheRead),
+				cacheWritePrice: optionalPrice(m.pricing?.inputCacheWrite),
 				modality: m.architecture?.modality ?? null,
 				inputModalities: m.architecture?.inputModalities ?? [],
 				outputModalities: m.architecture?.outputModalities ?? [],

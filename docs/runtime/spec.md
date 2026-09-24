@@ -176,8 +176,8 @@ A shell command cannot get around this in a **trusted** project: the sandbox mak
 | --- | --- |
 | What a process needs to run | `PATH`, `HOME`, `TMPDIR`, locale (`LANG`, `LC_*`), and on Windows `USERPROFILE`, `SystemRoot`, `APPDATA` and similar |
 | How to reach the network | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` |
-| Its own login | `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN` |
-| For gateway models only | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, set from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN` |
+| Its own login | `CLAUDE_CONFIG_DIR`, and on Claude runs `CLAUDE_CODE_OAUTH_TOKEN` |
+| For gateway models only | `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN`; `ANTHROPIC_API_KEY` set to empty; and the chosen model in `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, so helper and subagent calls stay on it. A gateway run does not get `CLAUDE_CODE_OAUTH_TOKEN`. See [../llm/llm.md](../llm/llm.md) |
 
 Inside the sandbox, the login variables are hidden from shell commands as well.
 

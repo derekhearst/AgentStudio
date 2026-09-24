@@ -31,6 +31,7 @@
 
 import { isAgentPaused } from '$lib/agents/agent-status'
 import { BUILTIN_TOOL_SET } from './builtin-tools'
+import { isSubscriptionModel, normalizeModelId } from './model-backend'
 import { OWN_MCP_SERVER } from './permission-mode'
 
 /** The subset of `AgentDefinition` this app populates. Mirrors the SDK type structurally. */
@@ -93,13 +94,6 @@ export function agentKey(name: string): string {
 	return slug.length > 0 ? slug : 'agent'
 }
 
-/** True when a model id is one the Claude CLI serves directly, rather than via the gateway. */
-function isClaudeModelId(model: string): boolean {
-	const normalized = model.toLowerCase()
-	const bare = normalized.startsWith('anthropic/') ? normalized.slice('anthropic/'.length) : normalized
-	return ['claude-', 'opus', 'sonnet', 'haiku'].some((prefix) => bare.startsWith(prefix))
-}
-
 /**
  * Build one definition, or null when the agent must not be offered.
  *
@@ -126,8 +120,11 @@ export function agentDefinitionFrom(
 		disallowedTools: [...SUBAGENT_DISALLOWED_TOOLS],
 	}
 
-	if (row.model && isClaudeModelId(row.model) && options.parentIsClaude) {
-		definition.model = row.model.includes('/') ? row.model.split('/').slice(1).join('/') : row.model
+	// The same normalisation the parent's model gets, so `anthropic/claude-haiku-4.5` reaches
+	// the CLI as `claude-haiku-4-5` whichever of the two it was named in. A Claude id the CLI
+	// cannot run (a retired model) inherits instead of failing the delegation.
+	if (row.model && isSubscriptionModel(row.model) && options.parentIsClaude) {
+		definition.model = normalizeModelId(row.model)
 	} else {
 		definition.model = 'inherit'
 	}

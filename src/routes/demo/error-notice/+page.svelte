@@ -13,7 +13,8 @@
 		'Stream interrupted',
 		'Tool call was denied by the operator',
 		'Daily budget limit reached ($5.00)',
-		'Model "kimi-2.6" needs an Anthropic-compatible gateway, but LLM_GATEWAY_URL is not set.',
+		'Model "moonshotai/kimi-k2" needs an Anthropic-compatible gateway, but LLM_GATEWAY_URL / LLM_GATEWAY_TOKEN are not set.',
+		'Model "anthropic/claude-sonnet-4" is not a Claude model Claude Code can run: it has been retired, or it is not an Anthropic model id. Pick a model from the list.',
 		'ECONNRESET reading from upstream after 30s',
 	];
 </script>

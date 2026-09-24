@@ -43,6 +43,11 @@ services:
       # value, so the existing GitHub token still decrypts. Change the value and it
       # will not — the connection then has to be re-authorized.
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY}
+      # Optional, off by default: an Anthropic-compatible gateway for non-Claude models (#9).
+      # Both empty means only Claude models are offered, and they run on the subscription.
+      # Gateway runs are billed per token. See docs/llm/llm.md.
+      - LLM_GATEWAY_URL=${LLM_GATEWAY_URL:-}
+      - LLM_GATEWAY_TOKEN=${LLM_GATEWAY_TOKEN:-}
       - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
       # BODY_SIZE_LIMIT (the largest upload the server accepts) is 25M, set by the image.
