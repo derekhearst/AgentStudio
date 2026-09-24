@@ -458,6 +458,9 @@ test.describe('the engine hands AskUserQuestion to the host', () => {
 
 	test('an agent scoped without it is refused in the hook at once, and nobody is asked', async () => {
 		let asked = 0
+		// Load the stream module first: a cold import (this test run alone, or as a retry in a
+		// fresh worker) would otherwise count against the refusal's time budget.
+		await import('../src/lib/engine/stream.server')
 		const started = Date.now()
 		const { hooks, permissions } = await driveQuestions(
 			{
