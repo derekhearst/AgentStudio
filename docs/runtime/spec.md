@@ -57,7 +57,7 @@ A stateful event bus for one run. The Session is the only thing that touches SSE
 | `getMessages`     | () => Promise\<LlmMessage[]\> | Loads current message history                    |
 | `appendMessage`   | (m) => Promise\<void\>        | Persists a message                               |
 | `pendingApproval` | (req) => Promise\<boolean\>   | Blocks until user approves or denies a tool call |
-| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Blocks until user answers via `ask_user`         |
+| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Retired with `ask_user` (#4): these runs are unattended and never ask; chat questions are the SDK's AskUserQuestion |
 
 ## Features
 
@@ -151,11 +151,14 @@ The mode is orthogonal to the bound **agent**. The Plan agent changes the person
 
 ### How every tool call is checked (chat runs)
 
-Chat runs execute on the Claude Agent SDK. Before any tool runs — the agent's own or one a delegated subagent makes — AgentStudio answers one question: allow, ask the operator, or refuse. Three checks feed that answer, and the strictest one wins:
+Chat runs execute on the Claude Agent SDK. Before any tool runs — the agent's own or one a delegated subagent makes — AgentStudio answers one question: allow, ask the operator, or refuse. Four checks feed that answer, and the strictest one wins:
 
 1. **The agent's tool list.** An agent with a fixed list (the Research and Plan built-ins, or a custom agent with `allowedTools`) can only call what is on it. Tools that are not listed are not offered to the model at all, and a call to one is refused. An agent that was given other agents to delegate to also gets the delegation tool, `Agent`. Tool names are compared as Claude Code calls them today: a list that says `Task` (the old name for `Agent`) or `KillShell` (now `TaskStop`) still works. Until 2026-09-23 it did not, and every delegation by the Research and Plan agents was refused.
 2. **Workspace containment.** File tools must stay inside the run's workspace — judged by where a path really leads, so a link inside the workspace that points out of it does not count as inside. Shell commands run inside the operating-system sandbox where the host has one, and need approval where it does not. A request to run a command outside the sandbox is always refused.
 3. **The permission mode and per-tool settings**, as described above. The mandatory-approval tools always ask.
+4. **Connectors.** A tool from a remote MCP server added on Settings → Connectors follows that connector's own Allow / Ask / Block setting (Plan mode still refuses it), and a call from any MCP server that is not one of this chat's connectors is refused. See [Connectors](../mcp/mcp.md).
+
+A question from the agent (AskUserQuestion) passes the first check like any tool and then skips the rest: you answer it in its own card, so there is nothing to approve, and plan mode is exactly when a question is wanted.
 
 Being on an agent's list approves nothing — a listed tool still goes through containment and approval. The check runs *before* the SDK's own shortcuts (its allow rules, a trusted project's `permissions.allow`, its auto-accept for edits), so none of them can skip it.
 
@@ -178,8 +181,8 @@ A shell command cannot get around this in a **trusted** project: the sandbox mak
 | --- | --- |
 | What a process needs to run | `PATH`, `HOME`, `TMPDIR`, locale (`LANG`, `LC_*`), and on Windows `USERPROFILE`, `SystemRoot`, `APPDATA` and similar |
 | How to reach the network | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` |
-| Its own login | `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN` |
-| For gateway models only | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, set from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN` |
+| Its own login | `CLAUDE_CONFIG_DIR`, and on Claude runs `CLAUDE_CODE_OAUTH_TOKEN` |
+| For gateway models only | `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN`; `ANTHROPIC_API_KEY` set to empty; and the chosen model in `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, so helper and subagent calls stay on it. A gateway run does not get `CLAUDE_CODE_OAUTH_TOKEN`. See [../llm/llm.md](../llm/llm.md) |
 
 Inside the sandbox, the login variables are hidden from shell commands as well.
 

@@ -8,9 +8,23 @@ Self-hosted autonomous AI agent platform for a single owner, with a sandboxed wo
 
 AgentStudio provides a streaming chat interface where the assistant can call tools such as web search and sandboxed code execution. The filesystem toolset supports ranged file reads, full writes, unified-diff patch apply, deterministic string replace, recursive directory listing, search, move/rename, delete, and file metadata lookups. Chat supports editing and branching, interleaved tool and thinking blocks, per-message performance and cost metrics, model selection, and per-prompt reasoning effort selection.
 
+Conversations can be pinned to the top of the sidebar, archived (the everyday way to tidy the list: hidden, never deleted, restored from the Archived view or by replying), renamed, deleted behind a confirmation, and exported as a Markdown transcript or a complete JSON file. The sidebar's search box also searches the whole history on the server — message text and the work each turn did (file paths, commands, links a tool printed) — and shows highlighted extracts. See [docs/chat/chat.md](docs/chat/chat.md).
+
+Shell commands render as a small terminal: the command, its output in a fixed-width font with colour codes cleaned out, the last 20 lines first with a control to show the rest, a copy button, and a badge for how it ended (such as `exit 2`). A command the agent runs in the background (a dev server, a long build) streams its output into that card while the turn runs, shows as a header chip with a stop button, and ends when the reply does; the card and the agent both say so. Deleting a conversation stops its running turn and those commands first. See [docs/chat/spec.md](docs/chat/spec.md#command-output).
+
+Editing a message or regenerating a reply cuts the conversation back so the model sees only what was kept plus the message it is answering. In a project (or an agent with a persistent workspace) the agent's file changes are checkpointed every turn, and Edit and Regenerate offer to restore the files the dropped replies changed — showing the files and line counts first, and asking again before overwriting uncommitted changes in an imported repository. **Compact Conversation** runs the SDK's own `/compact`. See [docs/chat/chat.md](docs/chat/chat.md).
+
+When the agent needs a decision it asks with the Agent SDK's own AskUserQuestion, shown as a question card: a header chip, option cards with a recommended badge, a sandboxed HTML preview of each option where one helps, multi-select, and a free-text "Other". It can be answered in the chat, from the composer, or from the /review inbox, and never answers itself. See [docs/chat/spec.md](docs/chat/spec.md#questions-from-the-agent).
+
+Chats run on Claude models through the Claude subscription, at no per-token cost. The model pickers — the composer (its model pill and the `/model` command), the default model and each agent's model — offer only models that can actually run here: the current Claude models Claude Code knows, plus, when the operator configures an Anthropic-compatible gateway such as OpenRouter's, the gateway's models, labelled **Gateway · paid** and priced per token in the usage ledger. The gateway is off by default. See [docs/llm/llm.md](docs/llm/llm.md).
+
+The message box has two shortcuts. Typing `@` lists the files in the chat's workspace (a bound project's folder, or an agent's persistent workspace) and inserts the chosen file's relative path. Typing `/` at the start opens a command palette over the app's own actions: `/compact`, `/model`, `/agent`, `/research`, `/plan`, `/effort`, `/attach` and `/voice`. Both work from the keyboard and by tapping on a phone. See "Composer shortcuts" in [docs/chat/spec.md](docs/chat/spec.md).
+
 Replies can be read aloud: a speaker button on each reply plays it through an OpenRouter text-to-speech model (code blocks are skipped), and an opt-in, per-device **Auto-read** switch above the message box reads each new reply when its turn finishes, for hands-free use. The model and voice are set in Settings → Model & AI; spend is recorded in the usage ledger under "Read Aloud" and counts toward budget limits. See [docs/speech/speech.md](docs/speech/speech.md).
 
-Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
+Beside each chat sits a right rail with two tabs: **Preview** (a workspace file or a web page) and **Files** (every file the agent changed in the chat, with +/- counts; click one to preview it). It stays folded to a thin strip until something opens a preview or you expand it, and remembers whether you left it open; on a phone it is a drawer. The context ring and metered cost sit in the chat's header, and each reply links to its run's full tool timeline. See [docs/chat-console/chat-console.md](docs/chat-console/chat-console.md).
+
+Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with a question card), then executes directly with tool-level approvals where configured.
 
 ### Connectors
 
@@ -18,7 +32,7 @@ Chats can use the tools of remote MCP servers — GitHub's remote MCP server, an
 
 ### Agents
 
-Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page lists every agent with its status — Available or Paused — and lets you pause or resume a custom agent: a paused agent is not offered for delegation and its automations and monitors are skipped, but you can still chat with it. Agent detail pages allow editing the assigned model, system prompt and hook bindings; hooks run for an agent's chats as well as its automations (see [docs/hooks/hooks.md](docs/hooks/hooks.md)). The Plan and Research agents hand an approved plan to another agent — usually Chat or Autonomous — and find its id with the read-only `list_agents` tool. See [docs/agents/agents.md](docs/agents/agents.md).
+Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page lists every agent with its status — Available or Paused — and lets you pause or resume a custom agent: a paused agent is not offered for delegation and its automations and monitors are skipped, but you can still chat with it. Agent detail pages allow editing the assigned model, system prompt and hook bindings; hooks run for an agent's chats as well as its automations (see [docs/hooks/hooks.md](docs/hooks/hooks.md)). The Plan and Research agents hand an approved plan to another agent — usually Chat or Autonomous — and find its id with the read-only `list_agents` tool. A built-in agent can also fan work out to several custom agents at once: up to four children run in parallel inside the turn, one level deep, each budget-checked against its own agent before it starts and charged to it in the usage ledger; each child shows in the reply as a collapsed card that expands to its own transcript, and Stop stops them all. See [docs/agents/agents.md](docs/agents/agents.md).
 
 ### Skills
 
@@ -96,11 +110,11 @@ cp .env.example .env
 - `APP_ENCRYPTION_KEY` is also what encrypts connector tokens and headers: without it, a connector that needs credentials cannot be saved.
 - `MCP_ALLOWED_PRIVATE_HOSTS` (optional; connectors reach the public internet only — list hosts on your own network, comma- or space-separated, that a connector may use anyway). See [docs/mcp/mcp.md](docs/mcp/mcp.md#urls).
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
-- `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` (only needed for non-Claude models, which run through an Anthropic-compatible gateway)
+- `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` (optional, off by default; only needed to chat with non-Claude models, which run through an Anthropic-compatible gateway and are billed per token. For OpenRouter: `LLM_GATEWAY_URL="https://openrouter.ai/api"` and an OpenRouter key as the token. Unset, only Claude models are offered. See [docs/llm/llm.md](docs/llm/llm.md))
 - `CRON_SECRET` (optional; lets an external scheduler fire `POST /api/cron` with `Authorization: Bearer <secret>` when the in-process scheduler is turned off; unset → only a signed-in session can fire it)
 - `BODY_SIZE_LIMIT` (production only; the largest request body the server accepts, e.g. `25M`). The Docker image sets `25M`, which fits a 20MB project knowledge file or chat attachment. Without it the server's own default of 512K refuses every upload over half a megabyte. Raise it (e.g. `110M`) for 100MB video attachments; never set it to an empty value, which the server reads as 0 and refuses every upload. `bun run dev` enforces no limit. See [`src/lib/server/body-limit.ts`](src/lib/server/body-limit.ts).
 
-The Claude Code process that runs each chat turn does **not** inherit these. It gets a short allow-list — `PATH`, `HOME` / `USERPROFILE`, temp and locale variables, proxy and CA settings, `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN` for its own login, and the gateway's `ANTHROPIC_*` for gateway models — so an agent's shell command cannot read the server's secrets. A proxy or certificate setting the agent needs must use one of those names. See [`docs/runtime/spec.md`](docs/runtime/spec.md).
+The Claude Code process that runs each chat turn does **not** inherit these. It gets a short allow-list — `PATH`, `HOME` / `USERPROFILE`, temp and locale variables, proxy and CA settings, `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN` for its own login, and for gateway models only the gateway's own `ANTHROPIC_*` (address, token, a blank API key and the chosen model) in place of the login token — so an agent's shell command cannot read the server's secrets. A proxy or certificate setting the agent needs must use one of those names. See [`docs/runtime/spec.md`](docs/runtime/spec.md).
 
 Database note:
 
@@ -212,12 +226,15 @@ Notes:
 - Runtime spec: `docs/runtime/spec.md`
 - Tools (what agents can call, approvals, code execution): `docs/tools/tools.md`
 - Chat plan: `docs/chat/plan.md`
+- Chat spec (composer shortcuts, attachments, safe rendering): `docs/chat/spec.md`
+- Chat (conversations: pin, archive, search, export; editing, regenerating, restoring files and compacting): `docs/chat/chat.md`
+- Models, the subscription and the optional gateway: `docs/llm/llm.md`
 - Memory spec: `docs/memory/spec.md`
 - Automations: `docs/automations/automations.md`
 - Monitors: `docs/monitors/monitors.md`
 - Background jobs: `docs/jobs/jobs.md`
 - UI spec: `docs/ui/spec.md`
-- Chat console + right-rail preview: `docs/chat-console/chat-console.md`
+- Chat console and its right rail (Preview + Files): `docs/chat-console/chat-console.md`
 - Operations spec: `docs/operations/spec.md`
 - Authentication (owner account, sessions, what is public): `docs/auth/auth.md`
 - Agents: `docs/agents/agents.md`
@@ -269,7 +286,9 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/login` Sign in
 - `/setup` First-run owner account creation (only until an owner exists; asks for the setup token on a production build)
 - `/chat` Conversations
-- `/chat/[id]` Chat detail
+- `/chat/[id]` Chat detail, with the Preview + Files rail ([docs](docs/chat-console/chat-console.md))
+- `GET /chat/[id]/export?format=md|json` Download one conversation as a Markdown transcript or complete JSON ([docs](docs/chat/chat.md#export-a-conversation))
+- `/runs/[id]` One run's event timeline: every tool call, result and approval ([docs](docs/runs/spec.md))
 - `/activity` Usage strip (runs, tokens, tools, budget headroom, anomalies) above the activity feed ([docs](docs/activity/spec.md))
 - `/review` Cost, recent failures, logs and the review inbox
 - `/agents` Agent management

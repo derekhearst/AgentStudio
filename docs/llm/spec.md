@@ -6,12 +6,14 @@ The LLM domain is AgentStudio's adapter layer between the application and AI mod
 
 The implementation is consolidated under `src/lib/llm/`.
 
+Which models a *chat* can run on — Claude on the subscription, or other models through an optional gateway — is described in plain English in [llm.md](llm.md).
+
 ## Responsibilities
 
 - **Chat completion** — stream chat messages to a model via OpenRouter with tool call support, reasoning tokens, and image input.
 - **Model catalog** — list all available models with context windows, pricing, modalities, and capabilities. Cached with a 1-hour TTL.
 - **Cost calculation** — given model ID + token counts, return USD cost using live catalog pricing.
-- **Model selection UI** — `ModelSelector` component for picking a model across the app.
+- **Model selection UI** — `ModelSelector` component for picking a model across the app. With `surface="engine"` (the chat composer, the default model, an agent's model) it lists only models the engine can run, from `getEngineModels`, labelled Subscription or Gateway · paid; otherwise (transcription) it lists OpenRouter's whole catalogue from `getAvailableModels`.
 - **Text-to-speech** — `tts.server.ts` turns reply text into MP3 through OpenRouter's speech endpoint, prices it from the separate speech-model catalogue (speech models are not in the chat-model list), checks budget limits and records the spend under `tts`. See [../speech/speech.md](../speech/speech.md).
 
 ## Model ids
@@ -26,6 +28,12 @@ The app keeps two spellings of a Claude model. The Agent SDK engine uses Anthrop
 | `openai/gpt-4o-mini`, or an alias such as `sonnet` | unchanged |
 
 A bare Claude id gains the `anthropic/` prefix, loses any snapshot date or `[1m]` suffix, and has its version written with a dot. Only ids it can map with certainty are changed; anything else goes to OpenRouter as written, so OpenRouter's own error names it. Callers that log usage log the converted id, since that is the one the model catalogue prices. Before 2026-09-23 the bare id was sent as-is, so every research run failed at its first planner call, every memory extraction and rerank quietly degraded, and the few calls that did succeed were priced at nothing.
+
+The other direction is `normalizeModelId` in `src/lib/engine/model-backend.ts`: an OpenRouter Claude slug becomes the engine's id (`anthropic/claude-haiku-4.5` → `claude-haiku-4-5`: prefix stripped, dotted version dashed). Non-Anthropic ids are left alone — they are the gateway's ids. It only fixes spelling: `anthropic/claude-sonnet-4` becomes `claude-sonnet-4`, which is no model at all, so whether a Claude id can run is `isSubscriptionModel`'s question (below).
+
+## Engine backends
+
+The chat engine runs a Claude model on the Claude Code subscription and anything else through an Anthropic-compatible gateway, only when `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` are set. `modelBackend()` in `src/lib/engine/model-backend.ts` answers `subscription`, `gateway` or `unavailable` for a model; the picker, the stream route (which refuses `unavailable` before saving anything), the default-model and agent-model saves, and `buildEngineOptions` all use it, and `unrunnableModelMessage()` gives each the same refusal. A Claude id is `subscription` only when `isSubscriptionModel()` accepts it: an id in `SUBSCRIPTION_MODEL_IDS` (the bundled CLI 2.1.278's model table, less the models it dates as retired on Anthropic's API) in either spelling, a dated snapshot of one, or a CLI alias (`opus`, `sonnet[1m]`…). Any other Claude id is `unavailable`, gateway or not. Subagent definitions use the same check and fall back to `inherit`. The gateway's environment is built by `buildGatewayEnv()` (`src/lib/engine/gateway-env.ts`); a gateway turn is priced by `gatewayTurnCost()` (`src/lib/engine/gateway-cost.ts`) from the catalogue, cache prices included. `getEngineModels` builds the engine list with `buildEngineModelList()` (`src/lib/llm/engine-models.ts`) from `SUBSCRIPTION_MODEL_IDS` (described from the catalogue where it lists them, offered either way) plus, with a gateway, the ids the gateway lists at `/v1/models` (`src/lib/llm/gateway-models.server.ts`, cached an hour, a failure retried after a minute), less any the catalogue lists without `tools` in `supportedParameters` or without `text` in its output modalities. See [llm.md](llm.md) for the rules in plain English.
 
 ## Data Model
 
@@ -59,6 +67,8 @@ type ModelInfo = {
 	contextLength: number | null
 	promptPrice: string // USD per token as string
 	completionPrice: string // USD per token as string
+	cacheReadPrice?: string | null // per cached prompt token read, when the catalogue lists one
+	cacheWritePrice?: string | null // per prompt token written to the cache, when listed
 	modality?: string | null
 	inputModalities?: string[]
 	outputModalities?: string[]
@@ -138,6 +148,8 @@ OpenRouter availability is not treated as a special case. If the service is down
 | `OPENROUTER_API_KEY`   | Required for all LLM calls        |
 | `OPENROUTER_SITE_URL`  | Optional — sent as HTTP referer   |
 | `OPENROUTER_SITE_NAME` | Optional — sent as X-Title header |
+| `LLM_GATEWAY_URL`      | Optional — the chat engine's gateway for non-Claude models, e.g. `https://openrouter.ai/api`. Off when unset |
+| `LLM_GATEWAY_TOKEN`    | Optional — the gateway's key (an OpenRouter key for OpenRouter). Off when unset |
 
 ## Rewrite Authority
 

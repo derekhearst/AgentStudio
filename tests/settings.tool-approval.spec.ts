@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { authenticateContext } from './helpers'
 import { ENGINE_EXCLUDED_TOOLS, HOST_OWNED_TOOLS } from '../src/lib/engine/builtin-tools'
+import { ASK_USER_QUESTION_TOOL } from '../src/lib/engine/ask-user-question'
 import { allToolNames } from '../src/lib/tools/tool-schemas'
 import { BUILTIN_TOOLS, MANDATORY_APPROVAL_TOOLS } from '../src/lib/tools/tools'
 
@@ -17,8 +18,9 @@ import { BUILTIN_TOOLS, MANDATORY_APPROVAL_TOOLS } from '../src/lib/tools/tools'
  *   - and the "Always loaded" chips were rendered disabled, so `web_search`, which the engine
  *     registers and gates by name, could only be made to ask through the all-tools wildcard.
  *
- * Unlocking the chips must not swap one false promise for another: `ask_user` is handed to
- * the host before any approval gate runs, so a tick on it could never take effect. And the
+ * Unlocking the chips must not swap one false promise for another: a question to the user is
+ * answered by the user, so no approval setting reaches it — and since #4 it is the SDK's own
+ * `AskUserQuestion`, not a registry tool, so it has no row to tick at all. And the
  * mandatory-approval tools ask whatever is stored, so an untick on them could not either.
  *
  * The first block is pure. The second opens the page but saves nothing: settings are a
@@ -28,20 +30,19 @@ import { BUILTIN_TOOLS, MANDATORY_APPROVAL_TOOLS } from '../src/lib/tools/tools'
 test.describe('settings/tool-approval — the list is the engine surface', () => {
 	test('it lists exactly the registry tools the engine registers and gates', () => {
 		// `buildToolServer` registers every registry tool outside ENGINE_EXCLUDED_TOOLS for an
-		// unscoped run, and the engine's gate sees all of them but HOST_OWNED_TOOLS, which
-		// `runEngineStream` hands to the host before its PreToolUse hook and `canUseTool`. A
-		// setting for anything else could never take effect. That the engine hands over
-		// exactly this set is pinned where the engine is driven: engine.stream-approvals.
-		const gated = allToolNames
-			.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name) && !HOST_OWNED_TOOLS.has(name))
-			.sort()
+		// unscoped run, and the engine's gate sees all of them. The one call it hands to the
+		// host ungated, AskUserQuestion (HOST_OWNED_TOOLS), is the SDK's and not in the
+		// registry, so there is nothing to leave out on its account. That the engine gates
+		// every registry tool is pinned where the engine is driven: engine.stream-approvals.
+		const gated = allToolNames.filter((name) => !ENGINE_EXCLUDED_TOOLS.has(name)).sort()
 		expect(BUILTIN_TOOLS.map((t) => t.name)).toEqual(gated)
-		expect(HOST_OWNED_TOOLS.has('ask_user')).toBe(true)
+		expect([...HOST_OWNED_TOOLS]).toEqual([ASK_USER_QUESTION_TOOL])
+		for (const name of HOST_OWNED_TOOLS) expect(allToolNames as readonly string[], name).not.toContain(name)
 	})
 
 	test('no entry promises a tool that is gone, hidden or never gated', () => {
 		const names = new Set(BUILTIN_TOOLS.map((t) => t.name))
-		for (const gone of ['run_code', 'search_tools', 'run_subagent', 'ask_user']) {
+		for (const gone of ['run_code', 'search_tools', 'run_subagent', 'ask_user', 'AskUserQuestion']) {
 			expect(names.has(gone), gone).toBe(false)
 		}
 		expect(names.has('web_search')).toBe(true)

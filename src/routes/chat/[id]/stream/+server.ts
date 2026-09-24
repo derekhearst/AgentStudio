@@ -33,9 +33,10 @@ import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
-import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { createAskUserHost } from '$lib/chat/ask-user-host.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
+import { ledgerCostOverride, priceGatewayTurn, resolveRunnableModel } from '$lib/engine/gateway-run.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
@@ -66,7 +67,8 @@ import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
 import { claimRun, registerRunHandle } from '$lib/engine/run-registry.server'
 import { turnInProgress } from '$lib/runs/live-chat-run.server'
-import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
+import { loadSubagentRoster } from '$lib/engine/agent-definitions.server'
+import { createChatDelegation } from '$lib/chat/stream-delegation.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
@@ -76,9 +78,12 @@ import { loadRunMcpServers } from '$lib/mcp/mcp.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
-	singleUserMessageStream,
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
+import { runWithResumeFallback, userTurnMessages, withTurnResume } from '$lib/engine/turn-input'
+import { supportsFileCheckpoints, turnPromptContent } from '$lib/chat/turn-plan'
+import { planTurn, recordTurnJoinInBackground } from '$lib/chat/turn-plan.server'
+import { isConversationRewinding } from '$lib/chat/rewind.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
 import { createChatRunHooks } from '$lib/hooks/chat-run-hooks.server'
 import { logger } from '$lib/observability/logger'
@@ -113,12 +118,37 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (liveRunId) {
 		return json({ error: 'This conversation already has a turn in progress.', runId: liveRunId }, { status: 409 })
 	}
+	// #24 — a rewind restoring this conversation's files owns its session and workspace for a moment.
+	if (isConversationRewinding(body.conversationId)) {
+		return json({ error: 'Files are being restored in this conversation. Try again in a moment.' }, { status: 409 })
+	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
-	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
+	const {
+		routedModel: requestedModel,
+		reasoningEffort,
+		modelSelection: requestedSelection,
+	} = resolveModelConfig({
 		body,
 		settings: currentSettings,
 	})
+
+	// A model nothing here can run is refused before the message is saved or a run is
+	// started, so it leaves no orphan turn behind (#9). `buildEngineOptions` still checks.
+	// A chat whose stored model has been retired moves to the settings default instead.
+	const runnable = resolveRunnableModel({
+		requested: requestedModel,
+		stored: conversation.model,
+		fallback: currentSettings.defaultModel,
+	})
+	if (!runnable.ok) return json({ error: runnable.message }, { status: 400 })
+	const routedModel = runnable.model
+	const modelSelection = runnable.replaced
+		? {
+				source: 'settingsDefault' as const,
+				reason: `Default model from settings — this chat's model (${runnable.replaced}) can no longer run`,
+			}
+		: requestedSelection
 
 	const parentResult = await resolveParentMessage({
 		conversationId: body.conversationId,
@@ -127,6 +157,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	})
 	if (!parentResult.ok) return json({ error: parentResult.error }, { status: 400 })
 	const parentMessageId = parentResult.parentMessageId
+
+	/*
+	 * What this turn sends, and how it starts its SDK session. A regenerate — after an edit
+	 * too — sends the user row's own text and attachments and cuts the session back to the
+	 * turn before it, so the model sees exactly the kept history. See `$lib/chat/turn-plan`.
+	 */
+	const planned = await planTurn({
+		conversationId: body.conversationId,
+		regenerate: Boolean(body.regenerate),
+		sdkSessionId: conversation.sdkSessionId,
+		pivotMessageId: parentMessageId,
+		body,
+	})
+	if (!planned.ok) return json({ error: planned.error }, { status: 400 })
+	const turn = planned.turn
 
 	// A conversation with no SDK session yet is on its first exchange as far as the
 	// engine is concerned, which is also when the title gets generated.
@@ -173,7 +218,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const skillSummariesText = await buildSkillSummariesText({
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 		skillTopK: resolveSkillTopK(currentSettings),
 	})
 	if (skillSummariesText) {
@@ -188,7 +233,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const memorySlot = await buildMemoryRecallSlot({
 		settings: currentSettings,
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 	})
 	if (memorySlot) contextSlots.push(memorySlot)
 
@@ -287,40 +332,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ error: message }, { status: 500 })
 	}
 
-	// The tool server is constructed before the stream opens, but ask_user needs to
-	// push a frame, so the emitter is assigned once the stream starts.
+	// The stream's emitter only exists once the response stream starts; `onToolResult` below
+	// uses it to push the pinned checklist.
 	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
-	let askUserSeq = 0
 	/** What an approval answer carries: on the call's `tool_pending` frame and in `pendingApprovals`. */
 	const approvalTokenFor = (toolUseId: string) => `${run.id}:${toolUseId}`
-
-	async function fulfilAskUser(questions: unknown[]): Promise<string> {
-		askUserSeq += 1
-		const token = `${run.id}:q${askUserSeq}`
-		const normalized = (questions as Array<Record<string, unknown>>).map((q) => ({
-			header: String(q.header ?? ''),
-			question: String(q.question ?? ''),
-			options: (q.options ?? []) as Array<{ label: string; description?: string; recommended?: boolean }>,
-			allowFreeformInput: true,
-		}))
-
-		await enqueuePendingQuestion(
-			run.id,
-			{ token, questions: normalized, requestedAt: new Date().toISOString() },
-			{ state: 'waiting_user_input', label: 'Waiting for your answer' },
-		)
-
-		await emitFrame?.('ask_user', { id: token, name: 'ask_user', token, questions: normalized })
-
-		const answers = await awaitQuestionAnswers(run.id, token)
-
-		await markChatRunRunning(run.id)
-
-		if (!answers) return 'The user did not answer in time.'
-		return Object.entries(answers)
-			.map(([header, answer]) => `${header}: ${answer}`)
-			.join('\n')
-	}
 
 	/*
 	 * Delegation is the SDK's now (#5): the agents this run may hand work to are described
@@ -370,8 +386,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * warning the user actually sees instead of a silent drop.
 	 */
 	const preparedPrompt = await prepareAttachmentPrompt({
-		text: body.content ?? '',
-		attachments: body.attachments,
+		text: turn.text,
+		attachments: turn.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
 		io: createAttachmentIo(workspace.context),
 	}).catch(abandonSetup)
@@ -404,12 +420,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * The agents this run may delegate to (#5). Loaded per run, like the trust flag above:
 	 * an agent created or paused between turns has to take effect on the next one.
 	 */
-	const subagents = await loadSubagentDefinitions({
+	const roster = await loadSubagentRoster({
 		parentAgentId: agent.id,
 		parentIsOrchestrator: isOrchestrator,
 		parentIsClaude: isClaudeModel(routedModel),
 	}).catch(abandonSetup)
+	const subagents = roster.definitions
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
+	// #24 — back files up before the agent changes them, where the workspace outlives the turn.
+	const fileCheckpointing = supportsFileCheckpoints(workspace.context)
 
 	/*
 	 * #17 — the operator's connectors, loaded per run like the two above so an edit on Settings →
@@ -434,11 +453,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
-			resumeSessionId: conversation.sdkSessionId ?? undefined,
+			resumeSessionId: turn.attempts.first.resumeSessionId,
+			resumeSessionAt: turn.attempts.first.resumeSessionAt,
+			fileCheckpointing,
 			tools: {
 				userId: user.id,
 				runId: run.id,
-				onAskUser: (questions) => fulfilAskUser(questions),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,
@@ -471,8 +491,13 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 * `notice` and `background_tasks` are NOT in this set on purpose: they are sparse,
 			 * and a client that reconnects mid-turn should still learn that the context was
 			 * compacted or that three commands are running in the background.
+			 *
+			 * `shell_output` (#35) is a background command's output, read once a second while it
+			 * runs — a row per tick would be the same flood. A reconnecting client catches up from
+			 * `shell_output_checkpoint` instead, the same output saved every few seconds, and from
+			 * `shell_task_done`, which carries the final output.
 			 */
-			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress'])
+			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress', 'shell_output'])
 
 			/** Closing a cancelled controller throws as well, and is just as harmless. */
 			const closeStream = (c: ReadableStreamDefaultController<Uint8Array>) => {
@@ -546,13 +571,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
 				for (const notice of connectors.notices) await emit('notice', notice)
 
-				const summary = await runEngineStream(
+				// #32 — the concurrency cap, the one-level rule and each child's budget check, and a
+				// ledger row for each child the moment it reports back. One for the turn: a resume
+				// fallback (#24) only retries an attempt that produced nothing, so no child ran in it.
+				const delegation = createChatDelegation({
+					userId: user.id,
+					conversationId: body.conversationId,
+					parentAgentId: conversation.agentId ?? null,
+					agentIdByKey: roster.agentIdByKey,
+					parentIsClaude: isClaudeModel(routedModel),
+					routedModel,
+					runId: run.id,
+				})
+				const summary = await runWithResumeFallback(turn.attempts, async (attempt) => runEngineStream(
 					{
-						prompt: preparedPrompt.content
-							? singleUserMessageStream(preparedPrompt.content)
-							: preparedPrompt.text,
-						options: engineOptions,
+						// One user message with a uuid we chose: the row's join to the transcript.
+						prompt: userTurnMessages(turnPromptContent(preparedPrompt, attempt.preamble), attempt.sdkUserUuid),
+						options: withTurnResume(engineOptions, attempt),
 						emit,
+						delegation: delegation.gate,
+						onSubagentDone: delegation.ledger.record,
 						/*
 						 * Every completed call gets a ledger row. Before this, only `web_search`
 						 * and the media generators wrote one, so the entire built-in filesystem
@@ -616,9 +654,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								.catch((error) =>
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
+							recordTurnJoinInBackground(parentMessageId, {
+								uuid: attempt.sdkUserUuid,
+								sessionId,
+								cwd: workspace.root,
+								checkpointed: fileCheckpointing,
+							})
 						},
 						// What the resumed session had already spent, so this turn logs its own share.
-						usageBaseline: await loadSessionUsageBaseline(body.conversationId, conversation.sdkSessionId),
+						usageBaseline: await loadSessionUsageBaseline(body.conversationId, attempt.resumeSessionId),
 						// Settings-only view; `permissionMode` composes with it inside the engine's
 						// `resolveToolGate`, which is what decides allow / ask / deny.
 						requiresApproval: (name) =>
@@ -627,6 +671,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						toolScope,
 						mcpConnectors: connectors.connectors,
 						approvalToken: approvalTokenFor,
+						// #4 — the SDK's AskUserQuestion, shown as the question card and in /review.
+						askUser: createAskUserHost({ runId: run.id, emit }),
 						// Confines every built-in filesystem call to this run's workspace (#15) —
 						// the same root the SDK was given as its cwd, so a relative path means the
 						// same file to the guard and to the tool.
@@ -649,7 +695,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
-				})
+				}), (reason) =>
+					logger.warn('[chat/stream] the session could not be cut back; starting a fresh one', {
+						runId: run.id,
+						reason,
+					}),
+				)
 
 				// Fold the attachment notice into the persisted turn so the reloaded
 				// message matches what the user watched stream in.
@@ -659,10 +710,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					else summary.blocks.unshift({ kind: 'text', content: attachmentNotice })
 				}
 
+				const claudeRun = isClaudeModel(routedModel)
+				// #32 — the children's rows are carved out of the turn's usage rather than added to
+				// it, and each child's cost is on its card before the blocks persist.
+				const { parentUsage, childCostUsd } = await delegation.ledger.settle({
+					blocks: summary.blocks,
+					usage: summary.usage,
+					coverage: summary.usageIncludesSubagents,
+				})
+
 				await persistRunBlocks(run.id, summary.blocks)
 
 				const totalMs = Date.now() - startedAt
-				const claudeRun = isClaudeModel(routedModel)
 				const tokensPerSec =
 					totalMs > 0 && summary.usage.outputTokens > 0
 						? Math.round((summary.usage.outputTokens / (totalMs / 1000)) * 100) / 100
@@ -670,21 +729,29 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				// Subscription runs have no per-token price, so record tokens and force the
 				// dollar figure to zero rather than inventing one from list pricing. A gateway
-				// run logs this turn's share of the SDK's estimate; when that share cannot be
-				// told apart (`costUsd: null`), the tokens are priced from the model table.
-				const messageCost = await logLlmUsage({
+				// run prices the parent's own tokens from the OpenRouter catalogue (#9) — the SDK's
+				// own figure is a guess at a Claude rate for a model it has no price for. Its
+				// children were carved out above and priced on their own rows (#32).
+				const gatewayCost = claudeRun ? null : await priceGatewayTurn(routedModel, parentUsage)
+				const parentCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
-					tokensIn: summary.usage.inputTokens,
-					tokensOut: summary.usage.outputTokens,
-					tokensCacheWrite: summary.usage.cacheCreationTokens,
-					tokensCacheRead: summary.usage.cacheReadTokens,
+					tokensIn: parentUsage.inputTokens,
+					tokensOut: parentUsage.outputTokens,
+					tokensCacheWrite: parentUsage.cacheCreationTokens,
+					tokensCacheRead: parentUsage.cacheReadTokens,
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: claudeRun ? 0 : (summary.usage.costUsd ?? undefined),
-					metadata: { conversationId: body.conversationId, subscription: claudeRun },
+					costOverride: ledgerCostOverride(gatewayCost),
+					metadata: {
+						conversationId: body.conversationId,
+						subscription: claudeRun,
+						...(gatewayCost ? { backend: 'gateway', costBasis: gatewayCost.costBasis } : {}),
+					},
 				})
+				// The turn's cost, children included: what the message and the conversation total show.
+				const messageCost = childCostUsd > 0 ? (parseFloat(parentCost) + childCostUsd).toPrecision(15) : parentCost
 
 				const assistantMessage = await persistAssistantMessage({
 					conversationId: body.conversationId,
@@ -705,6 +772,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
+						// Where a later edit of the next message cuts the session back to.
+						sdkTailUuid: summary.sdkTailUuid ?? undefined,
 						// The next turn's usage baseline — see `loadSessionUsageBaseline`.
 						sessionUsage: summary.sessionUsage ?? undefined,
 						numTurns: summary.numTurns,
@@ -722,7 +791,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				maybeGenerateTitle({
 					isFirstExchange,
-					userContent: body.content ?? '',
+					userContent: turn.text,
 					assistantContent: summary.text,
 					conversationId: body.conversationId,
 				})
@@ -747,7 +816,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						runId: run.id,
 						userId: user.id,
 						conversationId: body.conversationId,
-						userContent: body.content,
+						userContent: turn.text,
 						assistantContent: summary.text,
 						toolCalls: [],
 					})

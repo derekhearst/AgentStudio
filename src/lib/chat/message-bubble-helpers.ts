@@ -12,9 +12,13 @@
 
 // Relative rather than `$lib/...`: `chat.model-tag.spec.ts` imports this module directly in
 // the plain Playwright loader, where the SvelteKit alias is not guaranteed to resolve.
-import type { ToolResultDetails } from '../engine/tool-result-details'
+import type { SubagentDetails, ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
+import type { SubagentTranscriptEntry } from '../engine/subagent-transcript'
+import type { SubagentSpend } from '../engine/subagent-usage'
 import { readAskUserAnswers } from './ask-user-answers'
+import { getAskUserAnswersFromTool, getAskUserQuestionsFromTool } from './tool-block-helpers'
+import { answerKey } from '../engine/ask-user-question'
 
 export type SavedBlock =
 	| { kind: 'text'; content: string }
@@ -42,6 +46,14 @@ export type SavedBlock =
 			task: string
 			content: string
 			success: boolean
+			/** #32 — absent on blocks persisted before it; see `StreamBlock` in `$lib/runs/runs.schema`. */
+			status?: 'running' | 'completed' | 'failed' | 'stopped'
+			transcript?: SubagentTranscriptEntry[]
+			transcriptTruncated?: boolean
+			details?: SubagentDetails
+			error?: string | null
+			costUsd?: number | null
+			usage?: SubagentSpend
 	  }
 
 /** Coerce a JSONB column value (object, JSON string, or raw) into a record. */
@@ -113,6 +125,33 @@ export function getAskUserAnswer(resultValue: unknown, header: string, headers: 
 	if (typeof value !== 'string') return null
 	const trimmed = value.trim()
 	return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * A saved question block as the transcript shows it: each question, and the answer under it
+ * when there is one. Reads an AskUserQuestion block (#4) — answers on its `details`, keyed by
+ * question text — and a retired `ask_user` block, whose answers are in its result.
+ */
+export function savedAskUserExchanges(block: {
+	name: string
+	arguments: unknown
+	result: unknown
+	details?: unknown
+}): Array<{ question: string; answer: string | null }> {
+	const toText = (value: unknown) =>
+		value === undefined || value === null ? null : typeof value === 'string' ? value : JSON.stringify(value)
+	const like = {
+		name: block.name,
+		arguments: toText(block.arguments) ?? '',
+		result: toText(block.result),
+		details: block.details,
+	}
+	const questions = getAskUserQuestionsFromTool(like)
+	const answers = getAskUserAnswersFromTool(like)
+	return questions.map((question) => {
+		const answer = answers?.[answerKey(question)]?.trim()
+		return { question: question.question || question.header, answer: answer ? answer : null }
+	})
 }
 
 /** Lowercase + collapse whitespace for the dedupe-text comparison. */

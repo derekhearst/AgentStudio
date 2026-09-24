@@ -13,6 +13,9 @@
  *   tool_progress { id, elapsedSeconds }
  *   notice        { kind, level, title, detail, persist }
  *   background_tasks { tasks: [{ id, type, description }] }
+ *   shell_output  { id, taskId, chunk, reset, truncated, from, to }   (live-only)
+ *   shell_output_checkpoint { same }   (persisted, at most every few seconds)
+ *   shell_task_done { id, taskId, status, exitCode, stdout, truncated }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
@@ -20,7 +23,8 @@
  *
  * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
  * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
- * always has.
+ * always has. `shell_output` / `shell_output_checkpoint` / `shell_task_done` follow a
+ * backgrounded `Bash` command against its call's id — see `./background-shells.server`.
  *
  * `details` is the SDK's typed tool output, distilled by
  * `./tool-result-details` for the built-ins whose result is worth rendering as something
@@ -46,8 +50,34 @@ import { toolResultDetails, type ToolResultDetails } from './tool-result-details
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
 import { watchConnectorStatus } from './mcp-status-watch'
-import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
+import { createBackgroundShells } from './background-shells.server'
+import { ASK_USER_QUESTION_TOOL, answerAskUserQuestion, type AskUserHost } from './ask-user-question'
+import { askUserQuestionDetails } from './tool-result-details'
+import {
+	readTurnUsage,
+	resultErrorMessage,
+	type EngineUsage,
+	type SessionUsage,
+	type UsageCoverage,
+} from './run-result'
+import { nextTranscriptTail } from './turn-input'
 import type { EngineQueryHandle } from './run-registry.server'
+import { isDelegationTool } from './builtin-tools'
+import type { DelegationGate } from './delegation-gate'
+import {
+	closeBackgroundedSubagent,
+	finishSubagentBlock,
+	openSubagentBlock,
+	recordChildSpend,
+	recordChildText,
+	recordChildToolCall,
+	recordChildToolResult,
+	stopUnfinishedSubagents,
+	type EngineSubagentBlock,
+	type SubagentDonePayload,
+	type TaskNotificationOutcome,
+} from './subagent-block'
+import { createSubagentUsageTally } from './subagent-usage'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
@@ -80,10 +110,11 @@ export type CreateEngineQuery = (params: {
 }) => EngineQuerySource
 
 /**
- * Tools the host renders itself, so the engine must not emit tool frames for them.
- * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ * Tools the host renders itself, so the engine must not emit tool frames for them. The SDK's
+ * `AskUserQuestion` (#4) is answered in `canUseTool` by `askUser`, which mints its own
+ * `ask_user` frame and card.
  */
-const HOST_OWNED_TOOLS = new Set(['ask_user'])
+const HOST_OWNED_TOOLS = new Set([ASK_USER_QUESTION_TOOL])
 
 export type EngineRunInput = {
 	/**
@@ -111,6 +142,16 @@ export type EngineRunInput = {
 	 * recorded as the user's denial.
 	 */
 	approvalToken?: (toolUseId: string) => string
+	/**
+	 * Answers the SDK's `AskUserQuestion` (#4): shows the question and resolves with what the
+	 * user chose — in the chat, the question card and the /review inbox. See
+	 * `./ask-user-question` for how the answers go back to the SDK.
+	 *
+	 * Omit when nobody can answer: the question is then refused at once with a reason telling
+	 * the model to carry on without it, never left waiting. A subagent's question is refused
+	 * either way.
+	 */
+	askUser?: AskUserHost
 	/**
 	 * The agent's fixed tool surface (`./tool-scope`). A call outside it is refused before
 	 * anything else is considered. Omit for every tool.
@@ -191,11 +232,27 @@ export type EngineRunInput = {
 	 */
 	onHandle?: (handle: EngineQueryHandle) => void
 	/**
+	 * #32 — admission control for delegations: the concurrency cap, the one-level rule, the
+	 * per-child budget check and the foreground rewrite. See `./delegation-gate`. Consulted
+	 * from the PreToolUse hook below, which is the one place every `Agent` call passes. Omit
+	 * and delegations are gated like any other call, uncapped.
+	 */
+	delegation?: DelegationGate
+	/**
+	 * #32 — a delegated child's card has just closed, however it ended, carrying what the
+	 * child spent (`usage`). Awaited before the loop reads on, so a child's ledger row is
+	 * written before the parent's next delegation meets its budget check. A throw is ignored:
+	 * the ledger never ends a turn.
+	 */
+	onSubagentDone?: (block: EngineSubagentBlock) => Promise<void> | void
+	/**
 	 * Where the message stream comes from. Defaults to the SDK's `query()`.
 	 *
 	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
 	 */
 	createQuery?: CreateEngineQuery
+	/** How often a background command's output file is read (`./background-shells.server`). Only a spec sets it. */
+	backgroundOutputPollMs?: number
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -212,6 +269,11 @@ export type EngineRunSummary = {
 	text: string
 	sessionId: string | null
 	usage: EngineUsage
+	/**
+	 * Whether `usage` already counts the delegated children (#32), so the caller can carve a
+	 * child's ledger row out of it rather than count the child twice. See `./run-result`.
+	 */
+	usageIncludesSubagents: UsageCoverage
 	/** The session's running totals as of this turn, for the caller to keep as the next turn's baseline. */
 	sessionUsage: SessionUsage | null
 	durationMs: number
@@ -230,6 +292,12 @@ export type EngineRunSummary = {
 	 * frames. The SDK calls these estimates, so treat them as such.
 	 */
 	reasoningTokens: number
+	/**
+	 * The uuid of the last main-thread chain entry this turn wrote to the transcript, or null
+	 * when there is none to cut after (see `./turn-input`). What a later edit or regenerate
+	 * of the NEXT message passes as `resumeSessionAt`.
+	 */
+	sdkTailUuid: string | null
 }
 
 /**
@@ -245,6 +313,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	let sessionId: string | null = null
 	let finalText = ''
 	let reasoningTokens = 0
+	/** The transcript's last main-thread entry so far — `EngineRunSummary.sdkTailUuid`. */
+	let tailUuid: string | null = null
 
 	/*
 	 * Blocks are accumulated alongside the frames. Consecutive deltas of the same
@@ -260,6 +330,20 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
 	const toolInputs = new Map<string, unknown>()
+	/** AskUserQuestion id → the answers the SDK was given, for a result with no attributable `tool_use_result`. */
+	const askedAnswers = new Map<string, Record<string, string>>()
+
+	/*
+	 * #35 — backgrounded `Bash` commands: live output into their cards while the turn runs,
+	 * and an honest ending when it stops. They end with the turn (see the module).
+	 */
+	const shells = createBackgroundShells({ emit, pollMs: input.backgroundOutputPollMs })
+	const endBackgroundShells = async () => {
+		const ended = await shells.endTurn()
+		if (!ended) return
+		blocks.push({ kind: 'notice', notice: ended })
+		await emit('notice', ended)
+	}
 
 	/*
 	 * The UI keys its blocks on the tool_use id, and the permission callbacks have to emit
@@ -304,6 +388,43 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const childParents = new Map<string, string>()
 	/** `Task` tool_use id → its block, so repeated child messages append to one place. */
 	const subagentBlocks = new Map<string, Extract<StreamBlock, { kind: 'subagent' }>>()
+	/**
+	 * #32 — the parent's delegation calls. Their card is their representation (`./subagent-block`),
+	 * so they get no `tool` block and no `tool_call` frame of their own.
+	 */
+	const delegationIds = new Set<string>()
+	/**
+	 * Children whose text arrived as stream deltas. The SDK documents a child's text as whole
+	 * assistant messages (`forwardSubagentText`); a producer that streams deltas as well would
+	 * otherwise have every sentence recorded twice.
+	 */
+	const childrenStreamingText = new Set<string>()
+	/** #32 — what each child spent, added up from its own model calls. See `./subagent-usage`. */
+	const childUsage = createSubagentUsageTally()
+	/**
+	 * A delegation's `task_notification` that came before anything could close its card: the
+	 * ending of a child the CLI sent to the background, if its launch placeholder is still to come.
+	 */
+	const taskOutcomes = new Map<string, TaskNotificationOutcome>()
+	/** Whether the turn has been sent an interrupt (Stop). See `./subagent-block`. */
+	let interrupted = false
+
+	/**
+	 * #32 — a child's card closed: free its concurrency slot, tell the page, and let the caller
+	 * book what it spent. The slot is freed here and nowhere earlier, so a child that is still
+	 * working (a background launch) keeps holding it.
+	 */
+	const closeChild = async (done: SubagentDonePayload) => {
+		input.delegation?.settle(done.agentId)
+		await emit('subagent_done', done)
+		const block = subagentBlocks.get(done.agentId)
+		if (!block || !input.onSubagentDone) return
+		try {
+			await input.onSubagentDone(block)
+		} catch {
+			// The ledger's own failure handling applies; a turn is never ended over it.
+		}
+	}
 
 	/** Fetch or open the block for a subagent, emitting `subagent_start` the first time. */
 	const subagentBlockFor = async (taskId: string) => {
@@ -311,16 +432,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		if (existing) return existing
 		const agentName = subagentNames.get(taskId) ?? 'subagent'
 		const task = subagentTasks.get(taskId) ?? ''
-		const block: Extract<StreamBlock, { kind: 'subagent' }> = {
-			kind: 'subagent',
-			agentId: taskId,
-			agentName,
-			// SDK subagents have no child conversation row to link to.
-			conversationId: null,
-			task,
-			content: '',
-			success: true,
-		}
+		const block = openSubagentBlock(taskId, { agentName, task })
 		subagentBlocks.set(taskId, block)
 		blocks.push(block)
 		await emit('subagent_start', {
@@ -431,7 +543,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	}
 
 	/** Whether the parent's transcript has a block for this call that a frame has to resolve. */
-	const hasParentBlock = (id: string) => !childParents.has(id) || pendingShown.has(id)
+	const hasParentBlock = (id: string) => pendingShown.has(id) || (!childParents.has(id) && !delegationIds.has(id))
 
 	const emitDenied = async (id: string) => {
 		if (hasParentBlock(id)) await emit('tool_denied', { id })
@@ -452,11 +564,39 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const preToolUse: HookCallback = async (hookInput, toolUseId) => {
 		if (hookInput.hook_event_name !== 'PreToolUse') return {}
 		const name = bareToolName(hookInput.tool_name)
-		// The host owns ask_user end to end (see the assistant branch below).
-		if (HOST_OWNED_TOOLS.has(name)) return {}
-
+		// A host-owned tool is allowed here unless it is out of scope (`./tool-decision`).
 		const decision = decide(name, hookInput.tool_input, hookInput.mcp_server ?? null)
-		if (decision.gate === 'allow') return {}
+
+		/*
+		 * #32 — a delegation the gate would let through also meets admission control: the
+		 * concurrency cap, the one-level rule and the child's budget, and on admission its
+		 * input is rewritten to run in the foreground (`./delegation-gate`). This hook is the
+		 * only place that can hold: the CLI's `Agent` tool never asks `canUseTool` in the
+		 * modes we run. The rewrite rides without a decision where the gate allows, which the
+		 * CLI applies as a plain input change and leaves the rest of its pipeline alone.
+		 */
+		let delegatedInput: Record<string, unknown> | undefined
+		if (decision.gate !== 'deny' && input.delegation && isDelegationTool(name)) {
+			const admission = await input.delegation.admit({
+				toolUseId: hookInput.tool_use_id || toolUseId || `delegation-${Date.now()}`,
+				toolInput: hookInput.tool_input,
+				callerAgentId: hookInput.agent_id ?? null,
+			})
+			if (!admission.admit) {
+				return {
+					hookSpecificOutput: {
+						hookEventName: 'PreToolUse',
+						permissionDecision: 'deny',
+						permissionDecisionReason: admission.reason,
+					},
+				}
+			}
+			delegatedInput = admission.updatedInput
+		}
+
+		if (decision.gate === 'allow') {
+			return delegatedInput ? { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: delegatedInput } } : {}
+		}
 
 		if (decision.gate === 'deny') {
 			const id = hookInput.tool_use_id || toolUseId
@@ -477,6 +617,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				hookEventName: 'PreToolUse',
 				permissionDecision: 'ask',
 				...(decision.reason ? { permissionDecisionReason: decision.reason } : {}),
+				...(delegatedInput ? { updatedInput: delegatedInput } : {}),
 			},
 		}
 	}
@@ -489,11 +630,22 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
 		// answer still needs this to refuse rather than hang.
-		canUseTool: async (toolName, toolInput, { signal, toolUseID, mcpServer }): Promise<PermissionResult> => {
+		canUseTool: async (toolName, toolInput, { signal, toolUseID, agentID, mcpServer }): Promise<PermissionResult> => {
 			const name = bareToolName(toolName)
-			// The host owns ask_user end to end (see the assistant branch below): it
-			// renders its own card, so no tool_call / tool_pending frame may go out.
-			if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
+			// The host answers AskUserQuestion itself (#4): it renders its own card, so no
+			// tool_call / tool_pending frame may go out, and the answers go back as the input.
+			if (HOST_OWNED_TOOLS.has(name)) {
+				const id = toolUseID || claimToolUseId(name, toolInput)
+				const asked = await answerAskUserQuestion({
+					toolUseId: id,
+					input: toolInput,
+					signal,
+					fromSubagent: Boolean(agentID) || childParents.has(id),
+					host: input.askUser,
+				})
+				if (asked.answers) askedAnswers.set(id, asked.answers)
+				return asked.permission
+			}
 
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
@@ -511,7 +663,9 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						await emit('tool_call', { id, name, arguments: JSON.stringify(toolInput) })
 					}
 				}
-				return { behavior: 'allow' }
+				// An approved delegation keeps the rewrite its admission made (#32).
+				const delegated = input.delegation?.admittedInput(id)
+				return delegated ? { behavior: 'allow', updatedInput: delegated } : { behavior: 'allow' }
 			}
 			const deny = async (message: string): Promise<PermissionResult> => {
 				await emitDenied(id)
@@ -565,6 +719,9 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 	input.onHandle?.({
 		interrupt: async () => {
+			// Set before the request goes out: the CLI may answer the children it cuts short
+			// before it answers the interrupt itself.
+			interrupted = true
 			await session.interrupt?.()
 		},
 		stopTask: async (taskId: string) => {
@@ -599,6 +756,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				sessionId = msg.session_id
 				input.onSessionId?.(sessionId)
 			}
+			tailUuid = nextTranscriptTail(tailUuid, msg)
 
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
@@ -620,11 +778,30 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			 */
 			const interpreted = interpretSdkMessage(msg)
 			if (interpreted) {
+				// A delegated child's own end is on its card (#32); a generic "background task
+				// finished" line beside it would be a second, vaguer account of the same thing.
+				if (
+					interpreted.kind === 'notice' &&
+					interpreted.notice.kind === 'task_finished' &&
+					delegationIds.has(String(msg.tool_use_id ?? ''))
+				) {
+					// It does close the card of a child that went to the background. Otherwise it is
+					// kept, in case it came ahead of that child's launch placeholder.
+					const id = String(msg.tool_use_id)
+					const outcome: TaskNotificationOutcome = { status: msg.status, summary: msg.summary }
+					const child = subagentBlocks.get(id)
+					const closed = child ? closeBackgroundedSubagent(child, outcome) : null
+					if (closed) await closeChild(closed)
+					else taskOutcomes.set(id, outcome)
+					continue
+				}
 				if (interpreted.kind === 'notice') {
 					// Persisted notices become blocks so a reloaded transcript still explains
 					// itself; the transient ones are live-only. See `./sdk-notices`.
 					if (interpreted.notice.persist) blocks.push({ kind: 'notice', notice: interpreted.notice })
 					await emit('notice', interpreted.notice)
+					// A background task settled: close its command's card, if it has one.
+					if (interpreted.task) await shells.settle(interpreted.task)
 				} else if (interpreted.kind === 'background_tasks') {
 					// REPLACE semantics — the payload is the whole live set.
 					await emit('background_tasks', { tasks: interpreted.tasks })
@@ -640,6 +817,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			// Token-level text and thinking, from includePartialMessages.
 			if (msg.type === 'stream_event') {
 				const ev = msg.event as Record<string, any> | undefined
+				// #32 — a child's model call: its id and input on start, its output count at the end.
+				if (parentToolUseId && (ev?.type === 'message_start' || ev?.type === 'message_delta')) {
+					const spend = childUsage.recordStreamEvent(parentToolUseId, ev)
+					if (spend) recordChildSpend(await subagentBlockFor(parentToolUseId), spend)
+					continue
+				}
 				if (ev?.type === 'content_block_delta') {
 					const delta = ev.delta as Record<string, any>
 					if (parentToolUseId) {
@@ -648,7 +831,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						// never the reply the user is shown.
 						if (delta?.type === 'text_delta' && delta.text) {
 							const child = await subagentBlockFor(parentToolUseId)
-							child.content += delta.text
+							childrenStreamingText.add(parentToolUseId)
+							recordChildText(child, delta.text)
 							await emit('subagent_delta', {
 								agentId: parentToolUseId,
 								conversationId: null,
@@ -673,7 +857,23 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'assistant') {
+				// #32 — every model call a child makes carries its usage. See `./subagent-usage`.
+				if (parentToolUseId) {
+					const spend = childUsage.recordMessage(parentToolUseId, msg.message)
+					if (spend) recordChildSpend(await subagentBlockFor(parentToolUseId), spend)
+				}
 				for (const block of msg.message?.content ?? []) {
+					// #32 — a child's prose arrives as whole assistant messages (`forwardSubagentText`),
+					// unless this producer already streamed it as deltas.
+					if (parentToolUseId && block.type === 'text' && typeof block.text === 'string' && block.text) {
+						if (!childrenStreamingText.has(parentToolUseId)) {
+							const child = await subagentBlockFor(parentToolUseId)
+							const content = child.content && !child.content.endsWith('\n') ? `\n\n${block.text}` : block.text
+							recordChildText(child, content)
+							await emit('subagent_delta', { agentId: parentToolUseId, conversationId: null, content })
+						}
+						continue
+					}
 					if (block.type !== 'tool_use') continue
 					const name = bareToolName(String(block.name))
 					const id = String(block.id)
@@ -708,11 +908,13 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 							...(idByCall.get(callKey(name, block.input)) ?? []),
 							id,
 						])
-						await subagentBlockFor(parentToolUseId)
+						const child = await subagentBlockFor(parentToolUseId)
+						const label = recordChildToolCall(child, name, block.input)
 						await emit('subagent_tool_call', {
 							agentId: parentToolUseId,
 							conversationId: null,
 							name,
+							...(label ? { label } : {}),
 						})
 						// One that needs an answer gets a card the operator can answer — see the
 						// subagent note above. One that is refused or allowed outright needs none.
@@ -724,11 +926,28 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					}
 					toolInputs.set(id, block.input ?? null)
 
-					if (name === 'ask_user') {
-						// The host's onAskUser owns this one: it mints the answer token,
-						// emits the `ask_user` frame and blocks until the user replies.
-						// Emitting a tool_call here would render it as an ordinary
-						// collapsed tool block alongside the card.
+					if (HOST_OWNED_TOOLS.has(name)) {
+						// The host's `askUser` owns this one: it mints the answer token, emits the
+						// `ask_user` frame and blocks until the user replies. Emitting a tool_call
+						// here would render it as an ordinary collapsed tool block beside the card.
+						// Announced all the same, so a scope refusal in the hook does not wait on it.
+						announcementFor(id).resolve()
+						continue
+					}
+
+					if (isDelegationTool(name)) {
+						// #32 — the child's card, opened here at the call, is the delegation's whole
+						// representation: a refused or failed child still gets one, and the call gets
+						// no tool card beside it. Still parked for `canUseTool`, and only an approval
+						// needs a card of its own in the parent's transcript. See `./subagent-block`.
+						delegationIds.add(id)
+						const key = callKey(name, block.input)
+						idByCall.set(key, [...(idByCall.get(key) ?? []), id])
+						// The approval card goes first, so a listener on the card's frames
+						// (`$lib/hooks/chat-run-hooks.server`) knows the call is not cleared yet.
+						if (decide(name, block.input).gate === 'ask') await emitPending(id, name, block.input, true)
+						await subagentBlockFor(id)
+						announcementFor(id).resolve()
 						continue
 					}
 
@@ -777,14 +996,16 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					// every other tool's result is the plain text join.
 					const text = toolResultText(block.content, toolName)
 					const toolArguments = toolInputs.get(id) ?? null
-					const details = toolResultDetails(toolName, structured, toolArguments)
+					const details =
+						toolResultDetails(toolName, structured, toolArguments) ??
+						(askedAnswers.has(id) ? askUserQuestionDetails(askedAnswers.get(id)) : null)
 
 					if (parentToolUseId) {
 						// The child's result belongs to the child's block. The ledger still counts it:
 						// a subagent's tool call is work this run did, and `onToolResult` records
 						// calls rather than attributing them to a transcript position.
 						const child = await subagentBlockFor(parentToolUseId)
-						if (block.is_error === true) child.success = false
+						recordChildToolResult(child, toolName, block.is_error !== true)
 						await emit('subagent_tool_result', {
 							agentId: parentToolUseId,
 							conversationId: null,
@@ -812,11 +1033,45 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						continue
 					}
 
+					if (delegationIds.has(id)) {
+						// #32 — the delegation's result closes its child's card and frees its slot.
+						// No `tool` block: the card is the delegation (`./subagent-block`).
+						const child = await subagentBlockFor(id)
+						recordChildSpend(child, childUsage.recordFinalCall(id, details?.kind === 'subagent' ? details.usage : null))
+						const done = finishSubagentBlock(child, { isError: block.is_error === true, text, details, interrupted })
+						// A launch placeholder closes nothing: that child is still working, in the
+						// background, and keeps its slot until its task notification.
+						const outcome = taskOutcomes.get(id)
+						const closed = done ?? (outcome ? closeBackgroundedSubagent(child, outcome) : null)
+						if (closed) await closeChild(closed)
+						// Close the approval card the call had in the parent's transcript, if any.
+						if (pendingShown.has(id)) {
+							await emit('tool_result', {
+								id,
+								name: toolName,
+								success: block.is_error !== true,
+								executionMs: null,
+								result: text,
+							})
+						}
+						input.onToolResult?.({
+							name: toolName,
+							success: block.is_error !== true,
+							...(details ? { details } : {}),
+						})
+						continue
+					}
+
 					// A `Task` result closes the child it started.
 					if (subagentBlocks.has(id)) {
 						const child = subagentBlocks.get(id)!
 						if (block.is_error === true) child.success = false
+						child.status = child.success ? 'completed' : 'failed'
 						await emit('subagent_done', { agentId: id, conversationId: null })
+					}
+					// A backgrounded command keeps filling this block while the turn runs (#35).
+					if (details?.kind === 'shell' && details.backgroundTaskId) {
+						await shells.track({ toolUseId: id, sessionId, resultText: text, details })
 					}
 					blocks.push({
 						kind: 'tool',
@@ -847,10 +1102,13 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'result') {
-				const { usage, session } = readTurnUsage(msg, {
+				await endBackgroundShells()
+				const { usage, session, includesSubagents } = readTurnUsage(msg, {
 					resumed: Boolean(input.options.resume),
 					baseline: input.usageBaseline ?? null,
 				})
+				// A child still open was cut short with the turn (#32): close it, live and persisted.
+				for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await closeChild(done)
 				for (let i = blocks.length - 1; i >= 0; i--) {
 					const b = blocks[i]
 					if (b.kind === 'thinking') {
@@ -862,6 +1120,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					text: finalText,
 					sessionId,
 					usage,
+					usageIncludesSubagents: includesSubagents,
 					sessionUsage: session,
 					durationMs: typeof msg.duration_ms === 'number' ? msg.duration_ms : 0,
 					numTurns: typeof msg.num_turns === 'number' ? msg.num_turns : 0,
@@ -869,16 +1128,21 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					blocks,
 					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
 					reasoningTokens,
+					sdkTailUuid: tailUuid,
 				}
 			}
 		}
 
 		// The iterator ended without a `result` message — treat as a completed run
 		// with no usage rather than inventing numbers.
+		await endBackgroundShells()
+		for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await closeChild(done)
 		return {
 			text: finalText,
 			sessionId,
 			usage: { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+			// Nothing was counted, so there is nothing to carve a child out of.
+			usageIncludesSubagents: { tokens: false, cost: false },
 			sessionUsage: null,
 			durationMs: 0,
 			numTurns: 0,
@@ -886,6 +1150,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			blocks,
 			ttftMs: null,
 			reasoningTokens,
+			sdkTailUuid: tailUuid,
 		}
 	} finally {
 		/*
@@ -895,10 +1160,13 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		 * belt-and-braces against an exception path that skips it and leaves a child process
 		 * holding the workspace.
 		 */
+		await shells.stopAll()
 		try {
 			session.close?.()
 		} catch {
 			// Already gone. Nothing to do and nothing worth logging.
 		}
+		// Closing the CLI took any child still running with it; its slot goes too.
+		input.delegation?.reset()
 	}
 }

@@ -10,7 +10,8 @@ import { CHAT_RUN_ONLY_TOOLS, MANDATORY_APPROVAL_TOOLS, mcpExposedToolNames } fr
  * The endpoint calls a tool with no chat run behind it. It used to list the whole registry,
  * so it advertised tools that always refuse without a run (#69 triage, step 0.3): `ask_user`
  * ("must be handled by chat streaming flow"), the mandatory-approval tools (nobody to press
- * Allow) and `set_project_context` (no conversation to bind).
+ * Allow) and `set_project_context` (no conversation to bind). `ask_user` has since left the
+ * registry altogether, for the SDK's own AskUserQuestion (#4), which MCP never had.
  *
  * The first block is pure. The second calls the endpoint; nothing it calls writes.
  */
@@ -18,15 +19,17 @@ import { CHAT_RUN_ONLY_TOOLS, MANDATORY_APPROVAL_TOOLS, mcpExposedToolNames } fr
 test.describe('mcp surface — which registry tools are offered', () => {
 	test('the chat-run-only tools are named, and are real registry tools', () => {
 		expect([...CHAT_RUN_ONLY_TOOLS].sort()).toEqual(
-			['ask_user', 'create_pull_request', 'push_branch', 'request_plan_approval', 'set_project_context'].sort(),
+			['create_pull_request', 'push_branch', 'request_plan_approval', 'set_project_context'].sort(),
 		)
 		// A stale name here would quietly re-expose the renamed tool.
 		for (const name of CHAT_RUN_ONLY_TOOLS) expect(allToolNames, name).toContain(name)
 	})
 
-	test('they are derived from the engine and approval sets, not copied', () => {
-		for (const name of HOST_OWNED_TOOLS) expect(CHAT_RUN_ONLY_TOOLS.has(name), name).toBe(true)
+	test('they are derived from the approval set, not copied', () => {
 		for (const name of MANDATORY_APPROVAL_TOOLS) expect(CHAT_RUN_ONLY_TOOLS.has(name), name).toBe(true)
+		// The engine's one host-owned call is the SDK's AskUserQuestion — not a registry tool,
+		// so the endpoint never listed it and has nothing to leave out.
+		for (const name of HOST_OWNED_TOOLS) expect(allToolNames as readonly string[], name).not.toContain(name)
 	})
 
 	test('everything else in the registry stays exposed', () => {
@@ -64,13 +67,16 @@ test.describe('mcp surface — the endpoint', () => {
 
 	test('tools/call refuses them as invalid params, before any handler runs', async ({ page }) => {
 		await authenticateContext(page.context())
-		for (const name of ['ask_user', 'push_branch', 'set_project_context']) {
+		for (const name of ['push_branch', 'set_project_context']) {
 			const body = await rpc(page, 'tools/call', { name, arguments: {} })
 			expect(body.error?.code, name).toBe(-32602)
 			expect(body.error?.message, name).toContain('only runs inside a chat conversation')
 		}
-		const unknown = await rpc(page, 'tools/call', { name: 'no_such_tool', arguments: {} })
-		expect(unknown.error?.code).toBe(-32602)
-		expect(unknown.error?.message).toContain('Unknown tool')
+		// A retired name is simply unknown now.
+		for (const name of ['no_such_tool', 'ask_user']) {
+			const unknown = await rpc(page, 'tools/call', { name, arguments: {} })
+			expect(unknown.error?.code, name).toBe(-32602)
+			expect(unknown.error?.message, name).toContain('Unknown tool')
+		}
 	})
 })

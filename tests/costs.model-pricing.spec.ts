@@ -20,7 +20,34 @@ test.describe('costs/model-pricing — the price table', () => {
 		const { createModelPriceTable } = await import('../src/lib/costs/model-pricing')
 		const table = createModelPriceTable(async () => CATALOGUE)
 		const price = await table.lookup('claude-sonnet-5')
-		expect(price).toEqual({ status: 'priced', promptPrice: 0.000003, completionPrice: 0.000015 })
+		expect(price).toEqual({
+			status: 'priced',
+			promptPrice: 0.000003,
+			completionPrice: 0.000015,
+			cacheReadPrice: null,
+			cacheWritePrice: null,
+		})
+	})
+
+	test('carries the catalogue cache prices when it lists them, for gateway turns (#9)', async () => {
+		const { createModelPriceTable } = await import('../src/lib/costs/model-pricing')
+		const table = createModelPriceTable(async () => [
+			{
+				id: 'moonshotai/kimi-k2',
+				promptPrice: '0.0000006',
+				completionPrice: '0.0000025',
+				cacheReadPrice: '0.00000015',
+				cacheWritePrice: 'not-a-number',
+			},
+		])
+		expect(await table.lookup('moonshotai/kimi-k2')).toEqual({
+			status: 'priced',
+			promptPrice: 0.0000006,
+			completionPrice: 0.0000025,
+			cacheReadPrice: 0.00000015,
+			// A malformed price is no price: the gateway pricing falls back to the prompt rate.
+			cacheWritePrice: null,
+		})
 	})
 
 	test('a failed refresh keeps pricing from the previous copy, and waits before retrying', async () => {

@@ -9,9 +9,28 @@
  * stats, or building the persistence payload on stop / error).
  */
 
-import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
-import type { ToolResultDetails } from '../engine/tool-result-details'
+import { getAskUserQuestionsFromTool, parseJsonFallback } from '$lib/chat/tool-block-helpers'
+import {
+	ASK_USER_QUESTION_TOOL,
+	LEGACY_ASK_USER_TOOL,
+	isAskUserToolName,
+	type AskQuestion,
+} from '../engine/ask-user-question'
+import {
+	appendStreamTail,
+	type BackgroundShellStatus,
+	type SubagentDetails,
+	type ToolResultDetails,
+} from '../engine/tool-result-details'
+import type { SubagentSpend } from '../engine/subagent-usage'
 import type { RunNotice } from '../engine/sdk-notices'
+import {
+	appendTranscriptText,
+	appendTranscriptToolCall,
+	settleTranscriptToolCall,
+	type SubagentTranscript,
+	type SubagentTranscriptEntry,
+} from '../engine/subagent-transcript'
 
 export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
 
@@ -43,6 +62,8 @@ export type ToolBlock = {
 	 * generic card the default rather than a fallback.
 	 */
 	details?: ToolResultDetails
+	/** Characters of a background command's output the card has, since its last reset (#35) — see `applyShellOutput`. */
+	shellStreamed?: number
 }
 
 export type ThinkingBlock = {
@@ -53,6 +74,8 @@ export type ThinkingBlock = {
 	expanded: boolean
 }
 
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
 export type SubagentBlock = {
 	kind: 'subagent'
 	id: string
@@ -61,9 +84,18 @@ export type SubagentBlock = {
 	conversationId: string | null
 	task: string
 	content: string
-	status: 'running' | 'completed' | 'failed'
+	status: SubagentStatus
 	toolCalls: Array<{ name: string; success?: boolean }>
 	expanded: boolean
+	/** #32 — what the child said and did, in order, built from the same frames. */
+	transcript: SubagentTranscriptEntry[]
+	transcriptTruncated?: boolean
+	/** The SDK's typed result, from `subagent_done`: report, tokens, duration. */
+	details?: SubagentDetails
+	/** Why it failed, was refused or stopped. */
+	error?: string | null
+	/** What it spent over all its model calls, from `subagent_done`. */
+	usage?: SubagentSpend
 }
 
 export type NoticeBlock = {
@@ -102,6 +134,16 @@ export function getLatestReasoningTokens(blocks: StreamingBlock[]): number | nul
 }
 
 /**
+ * A block saved from the page is saved because its turn is over (Stop, an error, a lost
+ * stream), and a background command does not outlive its turn (#35). One still marked
+ * running would read as running forever in the saved transcript.
+ */
+function settledDetails(details: ToolResultDetails): ToolResultDetails {
+	if (details.kind !== 'shell' || details.background?.status !== 'running') return details
+	return { ...details, background: { status: 'ended_with_turn' } }
+}
+
+/**
  * Build the metadata payload that gets persisted on the assistant message row.
  * Drops empty text/thinking blocks (they're noise in the persisted history) and
  * normalizes tool blocks into `{ name, arguments, result, success, executionMs }`.
@@ -136,6 +178,15 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				task: block.task,
 				content: block.content,
 				success: block.status === 'completed',
+				// #32 — a partial save (Stop, an error) keeps the child's card as it was, not a
+				// bare name: its transcript, its result and how it ended. A child still running
+				// when the save happens was cut short by it.
+				status: block.status === 'running' ? 'stopped' : block.status,
+				...(block.transcript.length > 0 ? { transcript: block.transcript } : {}),
+				...(block.transcriptTruncated ? { transcriptTruncated: true } : {}),
+				...(block.details ? { details: block.details } : {}),
+				...(block.error ? { error: block.error } : {}),
+				...(block.usage ? { usage: block.usage } : {}),
 			})
 		} else {
 			out.push({
@@ -147,7 +198,7 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				executionMs: block.executionMs ?? 0,
 				// Persisted so a reloaded conversation renders the same diff / terminal / todo
 				// card as the live stream did, rather than degrading to the generic one.
-				...(block.details ? { details: block.details } : {}),
+				...(block.details ? { details: settledDetails(block.details) } : {}),
 			})
 		}
 	}
@@ -364,6 +415,93 @@ export function applyToolProgress(
 	)
 }
 
+/**
+ * `shell_output` and `shell_output_checkpoint` frames (#35) — output from a backgrounded
+ * command, added to its card.
+ *
+ * `shell_output` arrives about once a second and is live-only. `shell_output_checkpoint` is
+ * the same output saved every few seconds, and the resume replay delivers it, so a page that
+ * reloaded or reconnected mid-turn — which gets only saved frames from then on — still catches
+ * up and keeps moving, a few seconds behind. A connected page gets both; the positions
+ * (`from` / `to`, in characters since the last reset) sort that out:
+ *
+ * - `reset` replaces instead of adding: the first read of the output file, a truncated file,
+ *   or a jump ahead to the newest output.
+ * - A chunk that ends where the card already is, or before, is one it has. One that overlaps
+ *   adds only its new part.
+ * - A chunk that starts past where the card left off means output was missed, so the card is
+ *   marked as a tail rather than passing a fragment off as the whole thing.
+ *
+ * Capped to the same tail the server keeps (`appendStreamTail`), so the live card and the
+ * persisted block agree.
+ */
+export function applyShellOutput(
+	blocks: StreamingBlock[],
+	payload: { id: string; chunk?: string; reset?: boolean; truncated?: boolean; from?: number; to?: number },
+): StreamingBlock[] {
+	const chunk = typeof payload.chunk === 'string' ? payload.chunk : ''
+	return blocks.map((b) => {
+		if (b.kind !== 'tool' || b.id !== payload.id || b.details?.kind !== 'shell') return b
+		// Already settled: `shell_task_done` carried the final output, and nothing comes after it.
+		if (b.details.background && b.details.background.status !== 'running') return b
+		const reset = payload.reset === true
+		const have = b.shellStreamed ?? 0
+		const to = typeof payload.to === 'number' ? payload.to : (reset ? 0 : have) + chunk.length
+		const from = typeof payload.from === 'number' ? payload.from : to - chunk.length
+		let added = chunk
+		let gap = false
+		if (!reset) {
+			if (to <= have) return b
+			if (from > have) gap = true
+			else added = chunk.slice(Math.max(0, chunk.length - (to - have)))
+		}
+		const next = appendStreamTail(reset ? '' : b.details.stdout, added)
+		return {
+			...b,
+			shellStreamed: to,
+			details: {
+				...b.details,
+				stdout: next.text,
+				truncated: next.truncated || gap || payload.truncated === true || (!reset && b.details.truncated),
+				background: { status: 'running' as const },
+			},
+		}
+	})
+}
+
+/**
+ * `shell_task_done` frame (#35) — a background command finished, was stopped, or its turn
+ * ended. Carries the final output, which replaces whatever the live frames built up: it is
+ * what the server persisted, so the card now matches the saved transcript exactly.
+ */
+export function applyShellTaskDone(
+	blocks: StreamingBlock[],
+	payload: {
+		id: string
+		status?: BackgroundShellStatus
+		exitCode?: number | null
+		stdout?: string
+		truncated?: boolean
+	},
+): StreamingBlock[] {
+	const status = payload.status
+	if (status !== 'completed' && status !== 'failed' && status !== 'stopped' && status !== 'ended_with_turn') {
+		return blocks
+	}
+	return blocks.map((b) => {
+		if (b.kind !== 'tool' || b.id !== payload.id || b.details?.kind !== 'shell') return b
+		return {
+			...b,
+			details: {
+				...b.details,
+				...(typeof payload.stdout === 'string' ? { stdout: payload.stdout, truncated: payload.truncated === true } : {}),
+				...(typeof payload.exitCode === 'number' ? { exitCode: payload.exitCode } : {}),
+				background: { status },
+			},
+		}
+	})
+}
+
 export function applyToolDenied(blocks: StreamingBlock[], toolId: string): StreamingBlock[] {
 	return blocks.map((b) =>
 		b.kind === 'tool' && b.id === toolId ? { ...b, status: 'denied' as const, expanded: true } : b,
@@ -378,13 +516,23 @@ export type SubagentStartPayload = {
 }
 
 /**
- * Append a new subagent block. Collapses any open thinking blocks so the new
- * subagent span gets visual focus.
+ * Append a new subagent block, collapsed (#32): a fan-out opens several at once, and each
+ * card expands to its own transcript on demand. Collapses any open thinking blocks too.
+ *
+ * Idempotent: a resumed stream replays `subagent_start`, and a second card for the same
+ * delegation would split its transcript in two.
  */
 export function applySubagentStart(
 	blocks: StreamingBlock[],
 	payload: SubagentStartPayload,
 ): StreamingBlock[] {
+	if (
+		blocks.some(
+			(b) => b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId,
+		)
+	) {
+		return blocks
+	}
 	return [
 		...blocks.map((b) => (b.kind === 'thinking' ? { ...b, expanded: false } : b)),
 		{
@@ -397,12 +545,26 @@ export function applySubagentStart(
 			content: '',
 			status: 'running' as const,
 			toolCalls: [],
-			expanded: true,
+			transcript: [],
+			expanded: false,
 		},
 	]
 }
 
 type SubagentTargetMatch = { agentId: string; conversationId: string | null }
+
+function isTarget(b: StreamingBlock, target: SubagentTargetMatch): b is SubagentBlock {
+	return b.kind === 'subagent' && b.agentId === target.agentId && b.conversationId === target.conversationId
+}
+
+/** Apply a transcript change to a live block, keeping the helpers' shape. */
+function withTranscript(
+	block: SubagentBlock,
+	change: (t: SubagentTranscript) => SubagentTranscript,
+): Pick<SubagentBlock, 'transcript' | 'transcriptTruncated'> {
+	const next = change({ entries: block.transcript ?? [], truncated: block.transcriptTruncated === true })
+	return { transcript: next.entries, ...(next.truncated ? { transcriptTruncated: true } : {}) }
+}
 
 /** Append a delta chunk to the currently-running subagent block matching the target. */
 export function applySubagentDelta(
@@ -411,25 +573,26 @@ export function applySubagentDelta(
 	content: string,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, content: b.content + content }
+		isTarget(b, target)
+			? { ...b, content: b.content + content, ...withTranscript(b, (t) => appendTranscriptText(t, content)) }
 			: b,
 	)
 }
 
-/** Append a tool call entry to the matching subagent block. */
+/** Append a tool call entry to the matching subagent block. `label` hints at what it touched. */
 export function applySubagentToolCall(
 	blocks: StreamingBlock[],
 	target: SubagentTargetMatch,
 	name: string,
+	label?: string | null,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, toolCalls: [...b.toolCalls, { name }] }
+		isTarget(b, target)
+			? {
+					...b,
+					toolCalls: [...b.toolCalls, { name }],
+					...withTranscript(b, (t) => appendTranscriptToolCall(t, name, label)),
+				}
 			: b,
 	)
 }
@@ -452,20 +615,40 @@ export function applySubagentToolResult(
 		const updatedTools = b.toolCalls.map((tc, i) =>
 			i === b.toolCalls.length - 1 && tc.name === name ? { ...tc, success } : tc,
 		)
-		return { ...b, toolCalls: updatedTools }
+		return { ...b, toolCalls: updatedTools, ...withTranscript(b, (t) => settleTranscriptToolCall(t, name, success)) }
 	})
 }
 
-/** Mark the matching subagent block completed and collapse it. */
+/** What `subagent_done` carries. Every field is optional: older servers sent only the target. */
+export type SubagentDonePayload = {
+	success?: boolean
+	status?: Exclude<SubagentStatus, 'running'>
+	details?: SubagentDetails
+	error?: string | null
+	usage?: SubagentSpend
+}
+
+/**
+ * Close the matching subagent block. Its status is the one the server sent — completed,
+ * failed, or stopped with the turn (#32) — or completed when the payload predates it.
+ */
 export function applySubagentDone(
 	blocks: StreamingBlock[],
 	target: SubagentTargetMatch,
+	payload: SubagentDonePayload = {},
 ): StreamingBlock[] {
+	const status: Exclude<SubagentStatus, 'running'> =
+		payload.status ?? (payload.success === false ? 'failed' : 'completed')
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, status: 'completed' as const, expanded: false }
+		isTarget(b, target)
+			? {
+					...b,
+					status,
+					expanded: false,
+					...(payload.details ? { details: payload.details } : {}),
+					...(payload.error ? { error: payload.error } : {}),
+					...(payload.usage ? { usage: payload.usage } : {}),
+				}
 			: b,
 	)
 }
@@ -693,15 +876,18 @@ export function applyToolResult(
 	const finalStatus = payload.success ? ('completed' as const) : ('failed' as const)
 	const resultText = payload.result ?? (payload.success ? 'Success' : 'Tool execution failed')
 	/*
-	 * #81 — an ask_user card is keyed by the host's answer token (the `ask_user` frame) and
-	 * its result by the SDK's tool_use id, so the two never met: the card stayed open with its
-	 * Submit button and an empty block was appended instead. The result belongs to the oldest
-	 * card still waiting for one — a card whose id is still its token — and the card takes the
-	 * SDK's id with it, so a replayed result finds it directly.
+	 * #81 — a retired `ask_user` card was keyed by the host's answer token (the `ask_user`
+	 * frame) and its result by the SDK's tool_use id, so the two never met: the card stayed
+	 * open with its Submit button and an empty block was appended instead. The result belongs
+	 * to the oldest card still waiting for one — a card whose id is still its token — and the
+	 * card takes the SDK's id with it, so a replayed result finds it directly.
+	 *
+	 * An AskUserQuestion card (#4) is opened under the tool_use id itself, so its result finds
+	 * it by id like any other call's.
 	 */
 	const askUserCard =
-		payload.name === 'ask_user' && !blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
-			? blocks.findIndex((b) => b.kind === 'tool' && b.name === 'ask_user' && !!b.token && b.id === b.token)
+		payload.name === LEGACY_ASK_USER_TOOL && !blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
+			? blocks.findIndex((b) => b.kind === 'tool' && b.name === LEGACY_ASK_USER_TOOL && !!b.token && b.id === b.token)
 			: -1
 	const idx = askUserCard !== -1 ? askUserCard : blocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id)
 	if (idx === -1) {
@@ -728,10 +914,11 @@ export function applyToolResult(
 		}
 	}
 	const existing = blocks[idx]
-	// An answered ask_user card is already marked completed by `applyAskUserAnswered`.
+	// An answered question card is already marked completed by `applyAskUserAnswered`.
 	const unexpected =
 		askUserCard === -1 &&
 		existing.kind === 'tool' &&
+		!isAskUserToolName(existing.name) &&
 		existing.status !== 'executing' &&
 		existing.status !== 'approved'
 	return {
@@ -753,9 +940,9 @@ export function applyToolResult(
 }
 
 /**
- * The server recorded the user's answers to an ask_user card (#81): show it answered now,
+ * The server recorded the user's answers to a question card (#81): show it answered now,
  * rather than with its Submit button still live until the call's `tool_result` arrives. The
- * card keeps its token as its id, so that result still finds it (`applyToolResult`).
+ * card keeps its id, so that result still finds it (`applyToolResult`).
  */
 export function applyAskUserAnswered(
 	blocks: StreamingBlock[],
@@ -763,16 +950,56 @@ export function applyAskUserAnswered(
 	answers: Record<string, string>,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'tool' && b.name === 'ask_user' && b.token === token
+		b.kind === 'tool' && isAskUserToolName(b.name) && b.token === token
 			? { ...b, status: 'completed' as const, result: JSON.stringify({ answers }) }
 			: b,
 	)
+}
+
+/** The question the chat page's composer and modal answer: one card's token and questions. */
+export type PendingAskUser = { token: string; questions: AskQuestion[] }
+
+/** The answer token of the question card a call's result landed on, if it is one. */
+export function askUserTokenFor(blocks: StreamingBlock[], id: string): string | null {
+	const block = blocks.find((b) => b.kind === 'tool' && b.id === id)
+	return block?.kind === 'tool' && isAskUserToolName(block.name) ? (block.token ?? null) : null
+}
+
+/**
+ * Which question the page treats as pending once the card for `settledToken` is answered or
+ * has its call's result (#4).
+ *
+ * The CLI runs AskUserQuestion calls concurrently (`isConcurrencySafe`), so one assistant
+ * message can put two cards on screen, each answered under its own token. The page keeps one
+ * of them as *the* pending question — the one the composer's free-text reply and the modal
+ * answer. Settling another card leaves it alone. Settling it hands the role to the newest
+ * card still waiting, so a composer reply still has a question to go to; with none, nothing
+ * is pending. An unknown `settledToken` (null) just re-reads which card is still waiting.
+ */
+export function settlePendingAskUser(
+	blocks: StreamingBlock[],
+	current: PendingAskUser | null,
+	settledToken: string | null,
+): PendingAskUser | null {
+	if (current && settledToken !== null && current.token !== settledToken) return current
+	for (let i = blocks.length - 1; i >= 0; i -= 1) {
+		const block = blocks[i]
+		if (block.kind !== 'tool' || !isAskUserToolName(block.name) || !block.token) continue
+		if (block.token === settledToken) continue
+		if (block.status !== 'pending' && block.status !== 'approved' && block.status !== 'executing') continue
+		const questions = getAskUserQuestionsFromTool(block)
+		if (questions.length > 0) return { token: block.token, questions }
+	}
+	return null
 }
 
 /**
  * `ask_user` event — append a synthetic executing tool block carrying the
  * questions so the AskUserCard can render inline. Skips the append when a tool
  * block with the same id already exists (idempotent re-emit).
+ *
+ * The frame names the tool: `AskUserQuestion`, with the SDK's tool_use id as its id (#4), or
+ * `ask_user` from a run that predates it. A frame that names none is the former.
  */
 export function applyAskUser(
 	blocks: StreamingBlock[],
@@ -788,7 +1015,7 @@ export function applyAskUser(
 		{
 			kind: 'tool' as const,
 			id: payload.id,
-			name: payload.name ?? 'ask_user',
+			name: payload.name ?? ASK_USER_QUESTION_TOOL,
 			arguments: askUserArgs,
 			status: 'executing' as const,
 			expanded: true,

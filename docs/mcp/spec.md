@@ -6,7 +6,7 @@ This replaces an earlier pre-SDK design (capability groups and `enable_capabilit
 
 ## Data model
 
-### `mcp_servers` (migration `0079_mcp_servers`)
+### `mcp_servers` (migration `0080_mcp_servers`)
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -71,6 +71,8 @@ For a name `mcp__<server>__<tool>` whose server is not `agentstudio`, `decideToo
 4. Provenance present and not `{ source: 'dynamic', name: <server> }` → deny.
 5. Policy = the row's entry for `cliToolNameSegment(<tool>)` (two names the CLI spells alike take the stricter), else `ask`. With no provenance reported (`null`), `allow` becomes `ask`.
 6. `resolveToolGate`: mandatory-approval tools first (none are external); then `block` → deny in every mode; in `default` / `acceptEdits`, `allow` → allow unless `settingsRequiresApproval` (for an external name, only the `'*'` wildcard) → ask; `ask` → ask; `plan` → deny; `bypassPermissions` → allow.
+
+Steps 2–4 run before `decideToolCall`'s exemption for the SDK's AskUserQuestion (#4, allowed straight after the scope check because the user answers it), so a call that wears our server's name from anywhere but `sdk` is refused whatever tool it names. A connector's tool can never take the exemption: its name keeps its `mcp__<server>__` prefix.
 
 The PreToolUse hook and `canUseTool` pass the SDK's `mcp_server` / `mcpServer`. The frame the chat shows when the model announces a call is decided with provenance `undefined` (not yet reported), which applies the row's policy; the hook and `canUseTool` decide again with what the SDK reported. Runs that pass no connector map (automations) keep the earlier posture: every external tool asks, and with no approval surface is refused.
 

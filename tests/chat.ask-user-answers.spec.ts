@@ -3,7 +3,14 @@ import { expect, test } from '@playwright/test'
 import { authenticateContext, cleanupPrefixedRecords, getActiveUserId, getSql, seedConversation, uniquePrefix } from './helpers'
 import { openAndSend, scriptHeldRun } from './chat-stream-script'
 import { parseAskUserAnswerText, readAskUserAnswers } from '../src/lib/chat/ask-user-answers'
-import { applyAskUser, applyAskUserAnswered, applyToolResult, type StreamingBlock } from '../src/lib/chat/streaming-blocks'
+import {
+	applyAskUser,
+	applyAskUserAnswered,
+	applyToolResult,
+	askUserTokenFor,
+	settlePendingAskUser,
+	type StreamingBlock,
+} from '../src/lib/chat/streaming-blocks'
 import { getAskUserAnswersFromTool } from '../src/lib/chat/tool-block-helpers'
 import { getAskUserAnswer } from '../src/lib/chat/message-bubble-helpers'
 import { askUserAnswerProblem } from '../src/lib/chat/run-controls'
@@ -114,6 +121,44 @@ test.describe('the live ask_user card', () => {
 		})
 		const outcome = applyToolResult(withSecond, { id: 'toolu_B', name: 'ask_user', success: true, result: 'Size: large' })
 		expect(outcome.blocks.map((b) => b.id)).toEqual(['toolu_A', 'toolu_B'])
+	})
+})
+
+test.describe('two AskUserQuestion cards open at once (#4)', () => {
+	// The CLI runs AskUserQuestion calls concurrently, so one assistant message can open two
+	// cards. The page keeps the newest as *the* pending question (the composer and the modal
+	// answer it); every card answers under its own token.
+	const first = { id: 'toolu_q1', name: 'AskUserQuestion', token: 'run-1:ask:toolu_q1', questions: [{ header: 'Color', question: 'Which color?', options: [{ label: 'green' }, { label: 'blue' }] }] }
+	const second = { id: 'toolu_q2', name: 'AskUserQuestion', token: 'run-1:ask:toolu_q2', questions: [{ header: 'Size', question: 'Which size?', options: [{ label: 'S' }, { label: 'L' }] }] }
+	const both = (): StreamingBlock[] => applyAskUser(applyAskUser([], first), second)
+	const pendingSecond = () => ({ token: second.token, questions: settlePendingAskUser(both(), null, null)!.questions })
+
+	test('the newest open card is the pending one', () => {
+		expect(settlePendingAskUser(both(), null, null)).toMatchObject({ token: second.token, questions: [{ question: 'Which size?' }] })
+	})
+
+	test('answering the other card leaves the pending question alone', () => {
+		const current = pendingSecond()
+		const answered = applyAskUserAnswered(both(), first.token, { 'Which color?': 'green' })
+		expect(settlePendingAskUser(answered, current, first.token)).toBe(current)
+		// …and only that card shows answered.
+		expect(answered.map((b) => (b.kind === 'tool' ? b.status : null))).toEqual(['completed', 'executing'])
+	})
+
+	test('answering the pending card hands the role to the one still waiting, then to nobody', () => {
+		const answered = applyAskUserAnswered(both(), second.token, { 'Which size?': 'L' })
+		const next = settlePendingAskUser(answered, pendingSecond(), second.token)
+		expect(next).toMatchObject({ token: first.token, questions: [{ question: 'Which color?' }] })
+		const done = applyAskUserAnswered(answered, first.token, { 'Which color?': 'blue' })
+		expect(settlePendingAskUser(done, next, first.token)).toBeNull()
+	})
+
+	test("a call's result settles the card it landed on, found by its tool_use id", () => {
+		const outcome = applyToolResult(both(), { id: first.id, name: 'AskUserQuestion', success: false, result: 'The user did not answer.' })
+		expect(askUserTokenFor(outcome.blocks, first.id)).toBe(first.token)
+		expect(settlePendingAskUser(outcome.blocks, pendingSecond(), askUserTokenFor(outcome.blocks, first.id))?.token).toBe(second.token)
+		// Not a question card: no token to settle.
+		expect(askUserTokenFor(outcome.blocks, 'toolu_missing')).toBeNull()
 	})
 })
 

@@ -101,6 +101,7 @@ test.describe('/settings — CRUD lifecycle', () => {
 				await pollDb(
 					() => sql<{ budget_config: { dailyLimit: number | null }; memory_config: { topK: number }; tts_voice: string }[]>`
 						select budget_config, memory_config, tts_voice from app_settings where user_id = ${userId}
+						order by created_at asc limit 1
 					`,
 					(rows) =>
 						rows[0]?.budget_config?.dailyLimit === sentinelDaily &&

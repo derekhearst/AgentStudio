@@ -133,6 +133,3 @@ export async function executeTool(
 		},
 	)
 }
-
-export type AskUserQuestion = z.infer<typeof toolSchemas.ask_user>['questions'][number]
-export type AskUserAnswers = Record<string, string>

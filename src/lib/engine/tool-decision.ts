@@ -26,6 +26,7 @@ import { guardWorkspaceAccess, type BashPolicy, type GuardDecision } from './wor
 import { OWN_MCP_SERVER, resolveToolGate, type ConversationPermissionMode, type ToolGateDecision } from './permission-mode'
 import { isToolInScope, type ToolScope } from './tool-scope'
 import { connectorCallVerdict, type McpProvenance, type RunMcpConnectors } from './mcp-connectors'
+import { HOST_OWNED_TOOLS } from './builtin-tools'
 
 export type ToolDecisionContext = {
 	mode: ConversationPermissionMode
@@ -67,7 +68,8 @@ export function decideToolCall(
 	if (!isToolInScope(ctx.scope, bareName)) return { gate: 'deny', reason: outOfScopeReason(bareName) }
 
 	// Our own server is the one in-process server we register, so the SDK reports it as `sdk`.
-	// Our name from anywhere else is a configured server wearing it (#17).
+	// Our name from anywhere else is a configured server wearing it (#17). Checked before the
+	// host-owned exemption below, which is keyed on a bare name that such a call would share.
 	if (provenance && provenance.name === OWN_MCP_SERVER && provenance.source !== 'sdk') {
 		return {
 			gate: 'deny',
@@ -76,6 +78,12 @@ export function decideToolCall(
 	}
 	const connector = ctx.connectors ? connectorCallVerdict(ctx.connectors, bareName, provenance) : null
 	if (connector?.kind === 'refused') return { gate: 'deny', reason: connector.reason }
+
+	// A question to the user (#4) is answered by the user, in its own card: there is nothing
+	// for an approval setting or a mode to add, and plan mode is exactly when it is wanted.
+	// `canUseTool` hands it to the host before this answer is ever acted on. A connector's
+	// tool never lands here: its name keeps its `mcp__<server>__` prefix.
+	if (HOST_OWNED_TOOLS.has(bareName)) return { gate: 'allow', reason: null }
 
 	const containment: GuardDecision = ctx.workspaceRoot
 		? guardWorkspaceAccess({

@@ -61,7 +61,6 @@ test('the exclusions stay narrow — everything else is still exposed', () => {
 	const mustBeExposed = [
 		'web_search',
 		'web_fetch',
-		'ask_user',
 		'create_monitor',
 		'create_automation',
 		'push_branch',

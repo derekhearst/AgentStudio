@@ -7,7 +7,7 @@ import { logger } from '$lib/observability/logger'
  * "Needs input" notifications: a run has been waiting on the user for a while.
  *
  * The toggle existed in Settings and nothing ever sent one. A run that pauses on a tool
- * approval or an `ask_user` question waits five minutes (`DECISION_TIMEOUT_MS`) and then
+ * approval or a question from the agent waits five minutes (`DECISION_TIMEOUT_MS`) and then
  * gives up — denying the tool, or answering "the user did not answer in time" — so a user
  * who has walked away from the chat loses the turn without knowing it was waiting.
  *

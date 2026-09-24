@@ -46,7 +46,7 @@ Hooks run for chats and for background work alike.
 
 The other events in the binding editor (`before_round`, `on_compact`, `on_skill_loaded` and so on) are not raised anywhere yet, so binding them does nothing for now.
 
-In a chat, a tool call is reported exactly as it appears in the conversation, including the built-in `Bash`, `Write` and `Edit`. When the agent hands work to another agent, that agent's own tool calls are not reported as the chat agent's, but an approval card it raises is.
+In a chat, a tool call is reported exactly as it appears in the conversation, including the built-in `Bash`, `Write` and `Edit`. When the agent hands work to another agent, that agent's own tool calls are not reported as the chat agent's, but an approval card it raises is. The hand-off itself is the chat agent's call and is reported as the `Agent` tool: `before_tool` when the child starts, `after_tool` when it finishes, with the child's final report as the result. A hand-off that was refused (for example because four children were already running) is reported as a failed call with the reason.
 
 The agent a chat hook runs for is the agent the conversation uses. A conversation that names no agent uses the built-in Chat agent, so the Chat agent's bindings apply to it.
 

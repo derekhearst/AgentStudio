@@ -19,13 +19,35 @@
 import { logger } from '$lib/observability/logger'
 import { toOpenRouterModelId } from '$lib/llm/openrouter-model'
 
-export type ModelPrice = { promptPrice: number; completionPrice: number }
+export type ModelPrice = {
+	promptPrice: number
+	completionPrice: number
+	/**
+	 * Per-token price of a cached prompt token read, and of one written to the cache. Null when
+	 * the catalogue lists none; the ledger ignores them, the gateway's per-turn pricing (#9)
+	 * falls back to the prompt price.
+	 */
+	cacheReadPrice?: number | null
+	cacheWritePrice?: number | null
+}
 
 export type UnpricedReason = 'catalogue_unavailable' | 'model_not_in_catalogue'
 
 export type PriceLookup = ({ status: 'priced' } & ModelPrice) | { status: 'unpriced'; reason: UnpricedReason }
 
-type CatalogueEntry = { id: string; promptPrice: string; completionPrice: string }
+type CatalogueEntry = {
+	id: string
+	promptPrice: string
+	completionPrice: string
+	cacheReadPrice?: string | null
+	cacheWritePrice?: string | null
+}
+
+/** A catalogue price that may be missing or malformed: a number, or null. */
+function optionalPrice(value: string | null | undefined): number | null {
+	const parsed = value == null ? NaN : parseFloat(value)
+	return Number.isFinite(parsed) ? parsed : null
+}
 
 export const PRICE_TABLE_TTL_MS = 60 * 60 * 1000
 /** After a failed refresh, how long the previous copy is served before trying again. */
@@ -84,6 +106,8 @@ export function createModelPriceTable(
 				status: 'priced',
 				promptPrice: parseFloat(entry.promptPrice),
 				completionPrice: parseFloat(entry.completionPrice),
+				cacheReadPrice: optionalPrice(entry.cacheReadPrice),
+				cacheWritePrice: optionalPrice(entry.cacheWritePrice),
 			}
 		},
 	}

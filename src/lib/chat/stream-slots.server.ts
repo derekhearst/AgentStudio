@@ -17,7 +17,7 @@ import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { builtinHandoffNote } from '$lib/agents/builtin-agents.server'
-import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
+import { DELEGATION_POLICY_LINES, SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
 import type { getSettings } from '$lib/settings'
@@ -240,24 +240,44 @@ export async function buildProjectContextSlot(input: {
 	}
 }
 
+/**
+ * #35 — what a background command really is here.
+ *
+ * The CLI tells the model a backgrounded command "will be notified when it completes" and
+ * to Read its output file for interim output. Neither holds in AgentStudio: the engine
+ * closes the CLI after every turn, which ends every command it started, and the output file
+ * is outside the run's workspace, where the containment guard refuses a Read. Without this
+ * the model promises a user a dev server that is already gone. The user does see the output:
+ * the command's card streams it while the turn runs.
+ */
+export const BACKGROUND_COMMAND_POLICY_LINES = [
+	'- A Bash command run with run_in_background only runs until your reply ends: it is stopped when you finish, whatever its tool result says about notifying you later. Finish any work that needs it in this same reply, and never tell the user that something is still running after you have answered.',
+	"- A background command's output file is outside your workspace, so Read cannot open it; the user sees that output live in the chat. If you need to read it yourself, have the command also write it into your workspace (for example `npm run dev 2>&1 | tee dev.log`) and Read that file.",
+]
+
 const ORCHESTRATOR_TOOL_POLICY = [
 	'Tool usage policy:',
-	'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
-	"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
-	'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
-	'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
+	'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the AskUserQuestion tool.',
+	"- Do not only say you'll ask a question in plain text when AskUserQuestion is appropriate.",
+	'- Use concise questions with clear option labels. The user can always pick "Other" and type their own answer, so never add an "Other" option yourself.',
+	'- For AskUserQuestion: aim for ~3 options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question. Set multiSelect when the choices are not mutually exclusive.',
+	'- When the options are things to compare by eye (layouts, snippets, configurations), give each one an HTML preview. The user sees it in a sandboxed pane, so keep it self-contained with inline styles.',
+	...BACKGROUND_COMMAND_POLICY_LINES,
+	'',
+	...DELEGATION_POLICY_LINES,
 	'',
 	...SUBAGENT_RESULT_POLICY_LINES,
 ].join('\n')
 
 const AGENT_TOOL_POLICY = [
 	'Tool usage policy:',
-	'- You cannot call ask_user directly in agent conversations.',
+	'- You cannot ask the user questions directly (AskUserQuestion) in agent conversations.',
 	'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
+	...BACKGROUND_COMMAND_POLICY_LINES,
 ].join('\n')
 
 /**
- * The tool-usage policy slot. Orchestrator agents get the ask_user-encouraging
+ * The tool-usage policy slot. Orchestrator agents get the AskUserQuestion-encouraging
  * variant; sub-agents get the variant that tells them they can't ask the user
  * directly. Priority 90 — high enough to be near the top, below identity and
  * project context.

@@ -167,6 +167,12 @@ export async function getAgentDetail(agentId: string, userId: string) {
 	}
 }
 
+/** An agent's stored model, or undefined when there is no such agent. */
+export async function getAgentModel(agentId: string): Promise<string | undefined> {
+	const [row] = await db.select({ model: agents.model }).from(agents).where(eq(agents.id, agentId)).limit(1)
+	return row?.model
+}
+
 export async function updateAgentRecord(
 	agentId: string,
 	patch: {
