@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import {
 	MAX_LEDGER_LABEL_CHARS,
 	SELF_LOGGED_CALL_TOOLS,
+	connectorProvider,
 	ledgerLabel,
 	toolCallLedgerEntry,
 } from '../src/lib/costs/tool-call-ledger'
@@ -119,5 +120,26 @@ test.describe('labels, from the typed result', () => {
 		expect(entry).not.toBeNull()
 		expect(entry?.metadata.label).toBe(undefined)
 		expect(ledgerLabel(undefined)).toBeNull()
+	})
+})
+
+test.describe('a connector’s tool (#17)', () => {
+	test('is counted under its full name, with the connector as the provider', () => {
+		// The provider column lets usage be grouped by the connector that served the call.
+		const entry = toolCallLedgerEntry({ name: 'mcp__github__create_issue', success: true })
+
+		expect(entry?.toolName).toBe('mcp__github__create_issue')
+		expect(entry?.provider).toBe('mcp:github')
+		expect(entry?.cost).toBe(0)
+	})
+
+	test('ours and the built-ins carry no provider', () => {
+		expect(connectorProvider('mcp__agentstudio__file_read')).toBeNull()
+		expect(connectorProvider('Edit')).toBeNull()
+		expect(toolCallLedgerEntry({ name: 'Edit', success: true })).not.toHaveProperty('provider')
+	})
+
+	test('the provider is the connector’s key, split where the CLI splits the name', () => {
+		expect(connectorProvider('mcp__my-tracker__list__items')).toBe('mcp:my-tracker')
 	})
 })
