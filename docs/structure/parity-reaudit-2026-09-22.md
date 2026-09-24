@@ -371,6 +371,15 @@ overwrite, checked again on the server.
   the file history), falling back to a fresh session primed with the kept history when the cut
   is refused. "Compact Conversation" now runs the SDK's `/compact` instead of asking for a
   summary the session then carried on top of everything.
+- **A cut that has to survive a failed request.** An edit or regenerate marks the row it cut
+  back to (`metadata.sdkCutPending`). If the reply never starts, the next turn of any kind
+  (Retry, or just a new message) still resumes at the previous reply's tail. Any unanswered
+  user rows in between go in front of the new message as text. The mark is cleared when a
+  turn records its join.
+- **Partial restores are reported.** A real `rewindFiles` can leave files alone because a link
+  is in the way (`RewindFilesResult.skippedLinks`; the dry run never reports these). The edit
+  or regenerate result carries the count, and the page shows how many listed files were not
+  put back.
 
 Left for later: a "restore files only" action on a message, and deleting a conversation's
 SDK transcript and file backups when the conversation is deleted.

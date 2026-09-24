@@ -21,12 +21,13 @@ Chat is where you talk to an agent. Each conversation is a list of messages in A
 
 ### The transcript join
 
-No schema change: two keys on `messages.metadata`.
+No schema change: three keys on `messages.metadata`.
 
 | Row | Key | What it holds |
 | --- | --- | --- |
 | Your message | `sdkTurn` | The id the message carried into the SDK transcript, the SDK session it went into, the working directory the run used, and whether files were checkpointed on that turn. |
 | The agent's reply | `sdkTailUuid` | The last transcript entry that turn wrote — the point an edit of the *next* message cuts back to. |
+| Your message | `sdkCutPending` | Set when an edit or regenerate cuts the conversation back to this message. It means the SDK session still holds the replies that were dropped. It is cleared as soon as a new turn starts on a session that has been cut to match (or on a fresh one). |
 
 AgentStudio chooses the id each message carries into the transcript, rather than letting the SDK make one up, so it knows it in advance. Messages from before this change have no join; they still work, as described under business rules.
 
@@ -39,6 +40,8 @@ AgentStudio chooses the id each message carries into the transcript, rather than
 3. If you chose to restore files, the files are restored first. If that fails, nothing else happens: the conversation is left exactly as it was and the error says so, so you can try again or go on without restoring.
 4. Your message is updated and everything after it is deleted.
 5. A new reply is written. The model sees the conversation up to the reply before your message, followed by your edited text — nothing from the replies you dropped.
+
+If step 5 never starts — the connection drops, the server fails or restarts before the reply begins — the edit is not lost. The message is marked as cut (`sdkCutPending`). Whatever you do next, **Retry** or simply sending a new message, cuts the session back the same way first. The model then sees the conversation as the page shows it, never the replies you dropped.
 
 ### Regenerating a reply
 
@@ -57,6 +60,8 @@ It shows:
 **Cancel** does nothing at all, and an edit stays open so you can try again. When a checkpoint exists but cannot be used right now (a reply is still being written, the conversation was compacted since, the backup has expired), the dialog says why and offers to continue without restoring.
 
 The dialog does not appear when there is nothing to restore: a chat with no project, a message from before this feature, or a turn that did not change any files.
+
+After a restore, the page warns you if some of the listed files were **not** put back. The SDK leaves a file alone when a link is in the way: a symlink or hard link at that path, or a folder that has moved since the message. The warning says how many files were restored and how many were left alone, and it stays until you dismiss it. The SDK can only find this out during the real restore, not the preview, so the dialog may have listed files that end up skipped.
 
 ### Compacting a conversation
 
@@ -98,10 +103,12 @@ Before this change both sent an ordinary message asking the model for a summary.
 | Situation | What happens |
 | --- | --- |
 | A new message | The session is resumed as it is. |
+| A new message sent after an edit or regenerate whose reply never started | Treated like the edit: the session is cut back to the reply before the edited message. Any of your messages after that reply that never got an answer (the edited one, for example) are put in front of the new message as text, because the cut session never saw them. |
 | Edit or regenerate, and the reply before it recorded where it ended | The session is resumed and cut right after that reply. Same session id. |
 | Edit or regenerate of the first message | A fresh session; there is nothing before it to keep. |
 | The reply before it predates this feature, belongs to an earlier session, or has no record of where it ended (a reply the page saved itself after a dropped connection) | A fresh session, primed with the kept conversation as text (up to about 24,000 characters, most recent first). Tool calls are not in that text. |
 | The SDK refuses the cut (for example, it is from before a compaction) | Detected before the model is called; the turn runs once more on a fresh session primed as above. A turn that already produced anything is never re-run. |
+| A slash command such as `/compact` sent while a cut is pending | The session is still cut, but nothing is put in front of the command, because the SDK only recognises a command at the very start of the message. Unanswered messages before it stay on the page but are not in the model's context. |
 
 **When files are checkpointed.** Only when the run's working directory outlives the turn: a conversation in a project (any repository kind, including none), or an agent with a persistent workspace. A chat with no project gets a new, throwaway directory every turn, so there is never anything to go back to; the same goes for per-run worktrees.
 
@@ -127,7 +134,8 @@ Before this change both sent an ordinary message asking the model for a summary.
 | --- | --- |
 | Turn planning: text, attachments and how the session starts | `src/lib/chat/turn-plan.ts`, `src/lib/chat/turn-plan.server.ts` |
 | The prompt's own id, the transcript tail, the refused-cut fallback | `src/lib/engine/turn-input.ts` |
-| Edit and regenerate on the rows | `src/lib/chat/message-branch.server.ts` |
+| Edit and regenerate on the rows, and the pending-cut mark | `src/lib/chat/message-branch.server.ts` |
+| The `/compact` prompt and the model-switch notice | `src/lib/chat/compact-command.ts` |
 | Restore preview and restore, with the guards | `src/lib/chat/rewind.server.ts`, `src/lib/chat/rewind-plan.ts`, `src/lib/chat/rewind-preview.ts` |
 | The short-lived SDK session a restore runs in | `src/lib/engine/rewind.server.ts` |
 | The dialog | `src/lib/chat/RewindPreviewDialog.svelte`, `src/lib/chat/rewind-dialog.svelte.ts` |
