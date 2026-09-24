@@ -149,6 +149,24 @@ export function findEngineModel<T extends { id: string }>(models: readonly T[], 
 	return models.find((model) => model.id === id)
 }
 
+/** The context window assumed for a model no list describes. */
+export const DEFAULT_CONTEXT_LIMIT = 128_000
+
+/**
+ * The context window of `value`, read from the engine list.
+ *
+ * Not from the OpenRouter catalogue: the pickers store the CLI's id (`claude-sonnet-4-5`),
+ * which the catalogue does not list, so every Claude pick would read as the 128K fallback —
+ * and a switch from a model with a known, larger window would look like a move to a smaller
+ * one and start an automatic compaction nobody asked for. A subscription row carries the
+ * catalogue's window under the CLI's id, and `findEngineModel` matches either spelling, so an
+ * older conversation stored as `anthropic/claude-sonnet-4.5` reads the same size.
+ */
+export function engineContextLimit(models: readonly Pick<ModelInfo, 'id' | 'contextLength'>[], value: string): number {
+	const length = findEngineModel(models, value)?.contextLength
+	return length && length > 0 ? length : DEFAULT_CONTEXT_LIMIT
+}
+
 /**
  * The ids in a gateway's `GET /v1/models` answer — OpenAI's `{ data: [{ id }] }` shape, which
  * OpenRouter and LiteLLM both use. Anything malformed is skipped rather than trusted.

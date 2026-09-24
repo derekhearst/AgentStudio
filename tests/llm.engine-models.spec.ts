@@ -11,7 +11,14 @@
  */
 
 import { expect, test } from '@playwright/test'
-import { buildEngineModelList, claudeDisplayName, findEngineModel, parseGatewayModelIds } from '../src/lib/llm/engine-models'
+import {
+	buildEngineModelList,
+	claudeDisplayName,
+	DEFAULT_CONTEXT_LIMIT,
+	engineContextLimit,
+	findEngineModel,
+	parseGatewayModelIds,
+} from '../src/lib/llm/engine-models'
 import { SUBSCRIPTION_MODEL_IDS } from '../src/lib/engine/model-backend'
 import { getCreator } from '../src/lib/llm/model-filters'
 import type { ModelInfo } from '../src/lib/llm/models.server'
@@ -217,6 +224,39 @@ test('findEngineModel matches a stored id however it is spelled', () => {
 	expect(findEngineModel(list, 'anthropic/claude-haiku-4.5')?.id).toBe('claude-haiku-4-5')
 	expect(findEngineModel(list, 'claude-haiku-4-5')?.id).toBe('claude-haiku-4-5')
 	expect(findEngineModel(list, 'moonshotai/kimi-k2')).toBeUndefined()
+})
+
+test.describe('engineContextLimit — the chat page’s context window', () => {
+	const catalogue: ModelInfo[] = [
+		{ ...model('anthropic/claude-sonnet-4.5', 'Anthropic: Claude Sonnet 4.5'), contextLength: 1_000_000 },
+		{ ...model('moonshotai/kimi-k2', 'MoonshotAI: Kimi K2'), contextLength: 262_144 },
+	]
+	const list = buildEngineModelList({ catalogue, gatewayConfigured: true, gatewayModelIds: ['moonshotai/kimi-k2'] })
+
+	test('a Claude model picked in the composer reads its real window, not the fallback', () => {
+		// The composer stores the CLI id, which the OpenRouter catalogue does not list: looked up
+		// there, every Claude pick read as 128K.
+		expect(catalogue.find((m) => m.id === 'claude-sonnet-4-5')).toBeUndefined()
+		expect(engineContextLimit(list, 'claude-sonnet-4-5')).toBe(1_000_000)
+	})
+
+	test('an older conversation stored under OpenRouter’s spelling reads the same window', () => {
+		// So switching it to the composer's spelling is not a move to a smaller window, which
+		// the page answers with an automatic compaction turn.
+		expect(engineContextLimit(list, 'anthropic/claude-sonnet-4.5')).toBe(engineContextLimit(list, 'claude-sonnet-4-5'))
+	})
+
+	test('a gateway model reads the catalogue’s window under its own id', () => {
+		expect(engineContextLimit(list, 'moonshotai/kimi-k2')).toBe(262_144)
+	})
+
+	test('a model no list describes falls back to 128K', () => {
+		expect(DEFAULT_CONTEXT_LIMIT).toBe(128_000)
+		expect(engineContextLimit(list, 'anthropic/claude-sonnet-4')).toBe(DEFAULT_CONTEXT_LIMIT)
+		// Listed, but the catalogue could not describe it.
+		expect(engineContextLimit(list, 'claude-fable-5-1')).toBe(DEFAULT_CONTEXT_LIMIT)
+		expect(engineContextLimit([], 'claude-sonnet-4-5')).toBe(DEFAULT_CONTEXT_LIMIT)
+	})
 })
 
 test('parseGatewayModelIds reads OpenAI-style lists and skips anything malformed', () => {
