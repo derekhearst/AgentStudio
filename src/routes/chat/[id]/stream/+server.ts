@@ -33,7 +33,7 @@ import { assembleSystemPrompt, applySlotOverrides, type ContextSlot } from '$lib
 import { loadSlotOverrides } from '$lib/context/overrides.server'
 import { resolveAgentToolPolicy } from '$lib/chat/agent-tool-filter'
 import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approvals.server'
-import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
+import { createAskUserHost } from '$lib/chat/ask-user-host.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
@@ -286,40 +286,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		return json({ error: message }, { status: 500 })
 	}
 
-	// The tool server is constructed before the stream opens, but ask_user needs to
-	// push a frame, so the emitter is assigned once the stream starts.
+	// The stream's emitter only exists once the response stream starts; `onToolResult` below
+	// uses it to push the pinned checklist.
 	let emitFrame: ((event: string, payload: unknown) => Promise<void>) | null = null
-	let askUserSeq = 0
 	/** What an approval answer carries: on the call's `tool_pending` frame and in `pendingApprovals`. */
 	const approvalTokenFor = (toolUseId: string) => `${run.id}:${toolUseId}`
-
-	async function fulfilAskUser(questions: unknown[]): Promise<string> {
-		askUserSeq += 1
-		const token = `${run.id}:q${askUserSeq}`
-		const normalized = (questions as Array<Record<string, unknown>>).map((q) => ({
-			header: String(q.header ?? ''),
-			question: String(q.question ?? ''),
-			options: (q.options ?? []) as Array<{ label: string; description?: string; recommended?: boolean }>,
-			allowFreeformInput: true,
-		}))
-
-		await enqueuePendingQuestion(
-			run.id,
-			{ token, questions: normalized, requestedAt: new Date().toISOString() },
-			{ state: 'waiting_user_input', label: 'Waiting for your answer' },
-		)
-
-		await emitFrame?.('ask_user', { id: token, name: 'ask_user', token, questions: normalized })
-
-		const answers = await awaitQuestionAnswers(run.id, token)
-
-		await markChatRunRunning(run.id)
-
-		if (!answers) return 'The user did not answer in time.'
-		return Object.entries(answers)
-			.map(([header, answer]) => `${header}: ${answer}`)
-			.join('\n')
-	}
 
 	/*
 	 * Delegation is the SDK's now (#5): the agents this run may hand work to are described
@@ -426,7 +397,6 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			tools: {
 				userId: user.id,
 				runId: run.id,
-				onAskUser: (questions) => fulfilAskUser(questions),
 				workspace: {
 					persistentKey: workspaceConfig?.persistentKey ?? null,
 					worktree: workspaceConfig?.worktreeConfig ?? null,
@@ -613,6 +583,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						permissionMode: permission.mode,
 						toolScope,
 						approvalToken: approvalTokenFor,
+						// #4 — the SDK's AskUserQuestion, shown as the question card and in /review.
+						askUser: createAskUserHost({ runId: run.id, emit }),
 						// Confines every built-in filesystem call to this run's workspace (#15) —
 						// the same root the SDK was given as its cwd, so a relative path means the
 						// same file to the guard and to the tool.

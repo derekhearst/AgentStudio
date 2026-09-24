@@ -24,6 +24,7 @@ import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
 import { engineSandboxSettings } from './engine-sandbox'
+import { ASK_USER_QUESTION_SETTINGS, ASK_USER_QUESTION_TOOL_CONFIG } from './ask-user-question'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
 import { env } from '$env/dynamic/private'
@@ -284,6 +285,13 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * so a child transcript can appear either way.
 		 */
 		forwardSubagentText: true,
+		/*
+		 * #4 — the SDK's own AskUserQuestion, answered by the chat's question card through
+		 * `canUseTool` (`./ask-user-question`): HTML option previews, and a question that never
+		 * answers itself (`askUserQuestionTimeout: 'never'`, a Settings field, not an Option).
+		 */
+		toolConfig: ASK_USER_QUESTION_TOOL_CONFIG,
+		settings: ASK_USER_QUESTION_SETTINGS,
 		// Always set: omitted, the SDK hands the CLI the server's whole environment.
 		env: cliEnv,
 	}

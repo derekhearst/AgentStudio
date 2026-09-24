@@ -108,7 +108,20 @@ export type TodoDetails = {
 	truncated: boolean
 }
 
-export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails
+/**
+ * What the user answered an `AskUserQuestion` (#4). The questions themselves are the call's
+ * arguments, so only the answers are kept: question text → the answer the model was given,
+ * which for a multi-select question is the chosen labels comma-separated, as the SDK has it.
+ */
+export type AskUserQuestionDetails = {
+	kind: 'ask_user_question'
+	answers: Record<string, string>
+}
+
+export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails | AskUserQuestionDetails
+
+/** Characters kept per answer — what the /review answer endpoint accepts. */
+export const MAX_ANSWER_CHARS = 4_000
 
 /** Built-ins whose output this module knows how to distil. */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit'])
@@ -120,7 +133,8 @@ export function hasToolResultDetails(toolName: string): boolean {
 		FILE_EDIT_TOOLS.has(toolName) ||
 		FILE_WRITE_TOOLS.has(toolName) ||
 		SHELL_TOOLS.has(toolName) ||
-		toolName === 'TodoWrite'
+		toolName === 'TodoWrite' ||
+		toolName === 'AskUserQuestion'
 	)
 }
 
@@ -303,6 +317,29 @@ function todoDetails(
 }
 
 /**
+ * The answers on an `AskUserQuestionOutput`, or null when there are none.
+ *
+ * Also the shape the engine records itself when it answers the call (`./ask-user-question`),
+ * for the case where the result arrives without a `tool_use_result` it can attribute. The
+ * CLI also accepts a list for a multi-select answer, so one is joined the way the SDK
+ * documents its own output.
+ */
+export function askUserQuestionDetails(answers: unknown): AskUserQuestionDetails | null {
+	const record = asRecord(answers)
+	if (!record) return null
+	const out: Record<string, string> = {}
+	for (const [question, value] of Object.entries(record)) {
+		const text = Array.isArray(value)
+			? value.filter((item): item is string => typeof item === 'string').join(', ')
+			: typeof value === 'string'
+				? value
+				: ''
+		if (question && text.trim()) out[question] = text.slice(0, MAX_ANSWER_CHARS)
+	}
+	return Object.keys(out).length > 0 ? { kind: 'ask_user_question', answers: out } : null
+}
+
+/**
  * Distil one tool call's structured output, or return null to fall back to the generic card.
  *
  * `toolUseResult` is `SDKUserMessage.tool_use_result`; `toolArguments` is the matching
@@ -327,6 +364,9 @@ export function toolResultDetails(
 		}
 		if (toolName === 'TodoWrite') {
 			return todoDetails(result ?? {}, args)
+		}
+		if (toolName === 'AskUserQuestion') {
+			return askUserQuestionDetails(result?.answers)
 		}
 	} catch {
 		// Never let a shape surprise kill the turn — the generic card is always a valid answer.

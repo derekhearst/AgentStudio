@@ -145,10 +145,18 @@ async function readEntry(runId: string, token: string): Promise<PendingQuestionE
 	return entry ?? null
 }
 
+/**
+ * Wait for the answers to a pending question, or null when there are none to wait for.
+ *
+ * Gives up after `timeoutMs`, and at once when `signal` aborts — the run was stopped while the
+ * question was open. Either way the question comes off the run and its review item closes, so
+ * nothing is left offering an answer that would go nowhere.
+ */
 export async function awaitQuestionAnswers(
 	runId: string,
 	token: string,
 	timeoutMs: number = QUESTION_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<Record<string, string> | null> {
 	const deadline = Date.now() + timeoutMs
 
@@ -161,12 +169,31 @@ export async function awaitQuestionAnswers(
 			return answers
 		}
 
+		if (signal?.aborted) {
+			await removePendingQuestion(runId, token)
+			await closePromptReviewItem('question', token, { action: 'expired' })
+			return null
+		}
+
 		if (Date.now() >= deadline) {
 			await removePendingQuestion(runId, token)
 			await closePromptReviewItem('question', token, { action: 'timed_out' })
 			return null
 		}
 
-		await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+		await pollDelay(signal)
 	}
+}
+
+/** One poll interval, cut short by an abort. */
+function pollDelay(signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve) => {
+		const done = () => {
+			clearTimeout(timer)
+			signal?.removeEventListener('abort', done)
+			resolve()
+		}
+		const timer = setTimeout(done, POLL_INTERVAL_MS)
+		signal?.addEventListener('abort', done, { once: true })
+	})
 }

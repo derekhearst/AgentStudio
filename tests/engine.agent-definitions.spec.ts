@@ -68,11 +68,13 @@ test.describe('what is offered to the model', () => {
 		expect(scoped?.definition.tools).toEqual(['mcp__agentstudio__file_write'])
 	})
 
-	test('every subagent is refused ask_user', () => {
+	test('every subagent is refused AskUserQuestion', () => {
 		// A child has no stream to ask down; without this it hangs on a question nobody sees.
+		// The SDK's question tool replaced the in-house `ask_user` (#4); the rule survived it.
 		const built = agentDefinitionFrom(row(), { parentIsClaude: true })
 		expect(built?.definition.disallowedTools).toEqual([...SUBAGENT_DISALLOWED_TOOLS])
-		expect(SUBAGENT_DISALLOWED_TOOLS).toContain('mcp__agentstudio__ask_user')
+		expect(SUBAGENT_DISALLOWED_TOOLS).toContain('AskUserQuestion')
+		expect(SUBAGENT_DISALLOWED_TOOLS).not.toContain('mcp__agentstudio__ask_user')
 	})
 
 	test('a scoped agent carries its allow-list; an unscoped one carries none', () => {

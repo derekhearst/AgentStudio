@@ -44,6 +44,8 @@ import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
+import { ASK_USER_QUESTION_TOOL, answerAskUserQuestion, type AskUserHost } from './ask-user-question'
+import { askUserQuestionDetails } from './tool-result-details'
 import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
@@ -76,10 +78,11 @@ export type CreateEngineQuery = (params: {
 }) => EngineQuerySource
 
 /**
- * Tools the host renders itself, so the engine must not emit tool frames for them.
- * `ask_user` blocks on `onAskUser`, which mints its own `ask_user` frame and card.
+ * Tools the host renders itself, so the engine must not emit tool frames for them. The SDK's
+ * `AskUserQuestion` (#4) is answered in `canUseTool` by `askUser`, which mints its own
+ * `ask_user` frame and card.
  */
-const HOST_OWNED_TOOLS = new Set(['ask_user'])
+const HOST_OWNED_TOOLS = new Set([ASK_USER_QUESTION_TOOL])
 
 export type EngineRunInput = {
 	/**
@@ -107,6 +110,16 @@ export type EngineRunInput = {
 	 * recorded as the user's denial.
 	 */
 	approvalToken?: (toolUseId: string) => string
+	/**
+	 * Answers the SDK's `AskUserQuestion` (#4): shows the question and resolves with what the
+	 * user chose — in the chat, the question card and the /review inbox. See
+	 * `./ask-user-question` for how the answers go back to the SDK.
+	 *
+	 * Omit when nobody can answer: the question is then refused at once with a reason telling
+	 * the model to carry on without it, never left waiting. A subagent's question is refused
+	 * either way.
+	 */
+	askUser?: AskUserHost
 	/**
 	 * The agent's fixed tool surface (`./tool-scope`). A call outside it is refused before
 	 * anything else is considered. Omit for every tool.
@@ -250,6 +263,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
 	const toolInputs = new Map<string, unknown>()
+	/** AskUserQuestion id → the answers the SDK was given, for a result with no attributable `tool_use_result`. */
+	const askedAnswers = new Map<string, Record<string, string>>()
 
 	/*
 	 * The UI keys its blocks on the tool_use id, and the permission callbacks have to emit
@@ -439,9 +454,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	const preToolUse: HookCallback = async (hookInput, toolUseId) => {
 		if (hookInput.hook_event_name !== 'PreToolUse') return {}
 		const name = bareToolName(hookInput.tool_name)
-		// The host owns ask_user end to end (see the assistant branch below).
-		if (HOST_OWNED_TOOLS.has(name)) return {}
-
+		// A host-owned tool is allowed here unless it is out of scope (`./tool-decision`).
 		const decision = decide(name, hookInput.tool_input)
 		if (decision.gate === 'allow') return {}
 
@@ -476,11 +489,22 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
 		// answer still needs this to refuse rather than hang.
-		canUseTool: async (toolName, toolInput, { signal, toolUseID }): Promise<PermissionResult> => {
+		canUseTool: async (toolName, toolInput, { signal, toolUseID, agentID }): Promise<PermissionResult> => {
 			const name = bareToolName(toolName)
-			// The host owns ask_user end to end (see the assistant branch below): it
-			// renders its own card, so no tool_call / tool_pending frame may go out.
-			if (HOST_OWNED_TOOLS.has(name)) return { behavior: 'allow' }
+			// The host answers AskUserQuestion itself (#4): it renders its own card, so no
+			// tool_call / tool_pending frame may go out, and the answers go back as the input.
+			if (HOST_OWNED_TOOLS.has(name)) {
+				const id = toolUseID || claimToolUseId(name, toolInput)
+				const asked = await answerAskUserQuestion({
+					toolUseId: id,
+					input: toolInput,
+					signal,
+					fromSubagent: Boolean(agentID) || childParents.has(id),
+					host: input.askUser,
+				})
+				if (asked.answers) askedAnswers.set(id, asked.answers)
+				return asked.permission
+			}
 
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
@@ -699,11 +723,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					}
 					toolInputs.set(id, block.input ?? null)
 
-					if (name === 'ask_user') {
-						// The host's onAskUser owns this one: it mints the answer token,
-						// emits the `ask_user` frame and blocks until the user replies.
-						// Emitting a tool_call here would render it as an ordinary
-						// collapsed tool block alongside the card.
+					if (HOST_OWNED_TOOLS.has(name)) {
+						// The host's `askUser` owns this one: it mints the answer token, emits the
+						// `ask_user` frame and blocks until the user replies. Emitting a tool_call
+						// here would render it as an ordinary collapsed tool block beside the card.
+						// Announced all the same, so a scope refusal in the hook does not wait on it.
+						announcementFor(id).resolve()
 						continue
 					}
 
@@ -752,7 +777,9 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					// every other tool's result is the plain text join.
 					const text = toolResultText(block.content, toolName)
 					const toolArguments = toolInputs.get(id) ?? null
-					const details = toolResultDetails(toolName, structured, toolArguments)
+					const details =
+						toolResultDetails(toolName, structured, toolArguments) ??
+						(askedAnswers.has(id) ? askUserQuestionDetails(askedAnswers.get(id)) : null)
 
 					if (parentToolUseId) {
 						// The child's result belongs to the child's block. The ledger still counts it:
