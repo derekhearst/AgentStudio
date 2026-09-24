@@ -295,6 +295,27 @@ export function applySecretsPatch(current: ConnectorSecrets, patch: ConnectorSec
 	return { bearerToken, headers }
 }
 
+/**
+ * Whether a patch asks for anything at all. The edit form sends a blank token and blank header
+ * values for everything it did not touch, and those ask for nothing.
+ */
+export function secretsPatchRequestsChange(patch: ConnectorSecretsPatch): boolean {
+	if (patch.bearerToken === null) return true
+	if (typeof patch.bearerToken === 'string' && patch.bearerToken.trim() !== '') return true
+	return Object.values(patch.headers ?? {}).some((value) => value === null || value !== '')
+}
+
+/** Whether two sets of secrets would send the same requests. Header names compare without regard to case. */
+export function sameSecrets(a: ConnectorSecrets, b: ConnectorSecrets): boolean {
+	if (a.bearerToken !== b.bearerToken) return false
+	const normalise = (headers: Record<string, string>) =>
+		Object.entries(headers)
+			.map(([name, value]) => `${name.toLowerCase()}\n${value}`)
+			.sort()
+			.join('\0')
+	return normalise(a.headers) === normalise(b.headers)
+}
+
 /** The headers every request to the server carries: the custom ones, and the bearer token. */
 export function connectorRequestHeaders(secrets: ConnectorSecrets): Record<string, string> {
 	return {

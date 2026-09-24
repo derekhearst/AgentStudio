@@ -12,6 +12,8 @@ import {
 	normalizeToolPolicies,
 	parseAllowedPrivateHosts,
 	parseSecrets,
+	sameSecrets,
+	secretsPatchRequestsChange,
 	serializeSecrets,
 	suggestConnectorName,
 	toSdkServerConfig,
@@ -176,6 +178,24 @@ test.describe('an edit merges with secrets it never saw', () => {
 			bearerToken: 'new-token',
 			headers: { 'X-Team': 'blue', 'x-api-key': 'new-key', 'X-New': 'n' },
 		})
+	})
+
+	test('a patch of blanks asks for nothing, so an edit to the label leaves the secrets alone', () => {
+		// What the edit form sends when only the label changed.
+		expect(secretsPatchRequestsChange({ bearerToken: '', headers: {} })).toBe(false)
+		expect(secretsPatchRequestsChange({ bearerToken: '  ', headers: { 'X-Api-Key': '' } })).toBe(false)
+		expect(secretsPatchRequestsChange({})).toBe(false)
+		expect(secretsPatchRequestsChange({ bearerToken: null })).toBe(true)
+		expect(secretsPatchRequestsChange({ bearerToken: 'new' })).toBe(true)
+		expect(secretsPatchRequestsChange({ headers: { 'X-Team': null } })).toBe(true)
+		expect(secretsPatchRequestsChange({ headers: { 'X-Team': 'red' } })).toBe(true)
+	})
+
+	test('re-entering the stored values is not a change', () => {
+		expect(sameSecrets(stored, applySecretsPatch(stored, { bearerToken: 'old-token', headers: { 'x-team': 'blue' } }))).toBe(true)
+		expect(sameSecrets(stored, applySecretsPatch(stored, { headers: { 'X-Team': 'red' } }))).toBe(false)
+		expect(sameSecrets(stored, applySecretsPatch(stored, { bearerToken: null }))).toBe(false)
+		expect(sameSecrets(stored, { ...stored, headers: { 'X-Api-Key': 'old-key' } })).toBe(false)
 	})
 
 	test('the stored document round-trips, and a damaged one reads as empty', () => {

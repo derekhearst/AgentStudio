@@ -43,6 +43,8 @@ import {
 	normalizeToolPolicies,
 	parseAllowedPrivateHosts,
 	parseSecrets,
+	sameSecrets,
+	secretsPatchRequestsChange,
 	serializeSecrets,
 	toSdkServerConfig,
 	type ConnectorSecrets,
@@ -276,9 +278,12 @@ export async function updateMcpServer(userId: string, id: string, patch: UpdateM
 	if (patch.url !== undefined) changes.url = checkedUrl(patch.url)
 	if (patch.timeoutMs !== undefined) changes.timeoutMs = checkedTimeout(patch.timeoutMs)
 
-	const touchesSecrets = patch.bearerToken !== undefined || Object.keys(patch.headers ?? {}).length > 0
-	if (touchesSecrets) {
+	// The form sends a blank token and blank header values for everything left alone; only a
+	// patch that asks for something reads, re-checks and re-seals the stored secrets.
+	let secretsChanged = false
+	if (secretsPatchRequestsChange(patch)) {
 		let current: ConnectorSecrets
+		let unreadable = false
 		try {
 			current = openSecrets(row)
 		} catch (err) {
@@ -289,15 +294,18 @@ export async function updateMcpServer(userId: string, id: string, patch: UpdateM
 				error: err instanceof Error ? err.message : String(err),
 			})
 			current = { ...EMPTY_SECRETS, headers: {} }
+			unreadable = true
 		}
-		Object.assign(changes, sealSecrets(applySecretsPatch(current, patch)))
+		const next = applySecretsPatch(current, patch)
+		secretsChanged = unreadable || !sameSecrets(current, next)
+		if (secretsChanged) Object.assign(changes, sealSecrets(next))
 	}
 
 	// A different address or different credentials make the last test say nothing about now.
 	const connectionChanged =
 		(changes.transport !== undefined && changes.transport !== row.transport) ||
 		(changes.url !== undefined && changes.url !== row.url) ||
-		touchesSecrets
+		secretsChanged
 	if (connectionChanged) {
 		changes.lastTestedAt = null
 		changes.lastTestOk = null
