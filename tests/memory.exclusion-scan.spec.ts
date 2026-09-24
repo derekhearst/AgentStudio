@@ -396,7 +396,12 @@ test.describe('memory/mining — exclusion scan in the miner', () => {
 			// Now it really matched: excluded for good, and counted.
 			expect(await tombstoneOf()).toBe('excluded_by_rule')
 			expect(await hitsOf()).toBe(1)
-			expect(stub.calls, 'nothing reached the extractor or the embeddings').toHaveLength(0)
+			// Only this turn's calls: the stub sees every OpenRouter request in the worker, and the
+			// in-process job worker can run another spec's job (an evaluator call) meanwhile.
+			expect(
+				stub.calls.filter((call) => JSON.stringify(call.body ?? {}).includes(marker)),
+				'nothing reached the extractor or the embeddings',
+			).toHaveLength(0)
 		} finally {
 			// Its messages and their tombstones go with it.
 			await sql`delete from conversations where id = ${conversation.id}`
@@ -423,6 +428,10 @@ test.describe('memory/mining — exclusion scan in the miner', () => {
 				},
 			}),
 		).rejects.toThrow()
-		expect(stub.calls, 'nothing reached the extractor or the embeddings').toHaveLength(0)
+		// Only calls carrying this turn (see above: other jobs can reach the stub meanwhile).
+		expect(
+			stub.calls.filter((call) => JSON.stringify(call.body ?? {}).includes('hunter2')),
+			'nothing reached the extractor or the embeddings',
+		).toHaveLength(0)
 	})
 })
