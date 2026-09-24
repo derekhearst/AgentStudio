@@ -13,6 +13,8 @@
  *   tool_progress { id, elapsedSeconds }
  *   notice        { kind, level, title, detail, persist }
  *   background_tasks { tasks: [{ id, type, description }] }
+ *   shell_output  { id, taskId, chunk, reset, truncated, from, to }   (live-only)
+ *   shell_task_done { id, taskId, status, exitCode, stdout, truncated }
  *   done          { ... }
  *
  * Every frame carries a monotonic `id:` so the resume endpoint can replay from
@@ -20,7 +22,8 @@
  *
  * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
  * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
- * always has.
+ * always has. `shell_output` / `shell_task_done` follow a backgrounded `Bash` command
+ * against its call's id — see `./background-shells.server`.
  *
  * `details` is the SDK's typed tool output, distilled by
  * `./tool-result-details` for the built-ins whose result is worth rendering as something
@@ -44,6 +47,7 @@ import type { ToolScope } from './tool-scope'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
+import { createBackgroundShells } from './background-shells.server'
 import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
@@ -186,6 +190,8 @@ export type EngineRunInput = {
 	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
 	 */
 	createQuery?: CreateEngineQuery
+	/** How often a background command's output file is read (`./background-shells.server`). Only a spec sets it. */
+	backgroundOutputPollMs?: number
 	/**
 	 * Writes one frame. Owned by the caller because sequence ids come from
 	 * `chat_runs.nextEventSeq` via `appendRunEvent` — the same counter the resume
@@ -250,6 +256,18 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	// tool_use id → bare name, so tool_result frames can report the name the UI knows.
 	const toolNames = new Map<string, string>()
 	const toolInputs = new Map<string, unknown>()
+
+	/*
+	 * #35 — backgrounded `Bash` commands: live output into their cards while the turn runs,
+	 * and an honest ending when it stops. They end with the turn (see the module).
+	 */
+	const shells = createBackgroundShells({ emit, pollMs: input.backgroundOutputPollMs })
+	const endBackgroundShells = async () => {
+		const ended = await shells.endTurn()
+		if (!ended) return
+		blocks.push({ kind: 'notice', notice: ended })
+		await emit('notice', ended)
+	}
 
 	/*
 	 * The UI keys its blocks on the tool_use id, and the permission callbacks have to emit
@@ -600,6 +618,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					// itself; the transient ones are live-only. See `./sdk-notices`.
 					if (interpreted.notice.persist) blocks.push({ kind: 'notice', notice: interpreted.notice })
 					await emit('notice', interpreted.notice)
+					// A background task settled: close its command's card, if it has one.
+					if (interpreted.task) await shells.settle(interpreted.task)
 				} else if (interpreted.kind === 'background_tasks') {
 					// REPLACE semantics — the payload is the whole live set.
 					await emit('background_tasks', { tasks: interpreted.tasks })
@@ -793,6 +813,10 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 						if (block.is_error === true) child.success = false
 						await emit('subagent_done', { agentId: id, conversationId: null })
 					}
+					// A backgrounded command keeps filling this block while the turn runs (#35).
+					if (details?.kind === 'shell' && details.backgroundTaskId) {
+						shells.track({ toolUseId: id, sessionId, resultText: text, details })
+					}
 					blocks.push({
 						kind: 'tool',
 						name: toolName,
@@ -822,6 +846,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'result') {
+				await endBackgroundShells()
 				const { usage, session } = readTurnUsage(msg, {
 					resumed: Boolean(input.options.resume),
 					baseline: input.usageBaseline ?? null,
@@ -850,6 +875,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 		// The iterator ended without a `result` message — treat as a completed run
 		// with no usage rather than inventing numbers.
+		await endBackgroundShells()
 		return {
 			text: finalText,
 			sessionId,
@@ -870,6 +896,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		 * belt-and-braces against an exception path that skips it and leaves a child process
 		 * holding the workspace.
 		 */
+		await shells.stopAll()
 		try {
 			session.close?.()
 		} catch {
