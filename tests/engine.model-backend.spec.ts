@@ -203,3 +203,42 @@ test.describe('checkRunnableModelChange — the rule every model save follows', 
 		expect(checkRunnableModelChange('claude-sonnet-4', 'anthropic/claude-sonnet-4', off)).toEqual({ ok: true, model: 'claude-sonnet-4' })
 	})
 })
+
+test.describe('resolveRunnableModel — a chat on a retired model moves to the default (#9)', () => {
+	test.skip(Boolean(process.env.LLM_GATEWAY_URL), 'the gateway-off posture, as CI runs')
+
+	test('a runnable request runs as asked', async () => {
+		const { resolveRunnableModel } = await import('../src/lib/engine/gateway-run.server')
+		expect(resolveRunnableModel({ requested: 'claude-opus-5-5', stored: 'claude-sonnet-5', fallback: 'claude-sonnet-5' })).toEqual({
+			ok: true,
+			model: 'claude-opus-5-5',
+			replaced: null,
+		})
+	})
+
+	test('repeating the chat’s stored, retired Claude model falls back to the default', async () => {
+		const { resolveRunnableModel } = await import('../src/lib/engine/gateway-run.server')
+		expect(
+			resolveRunnableModel({ requested: 'anthropic/claude-sonnet-4', stored: 'anthropic/claude-sonnet-4', fallback: 'claude-sonnet-5' }),
+		).toEqual({ ok: true, model: 'claude-sonnet-5', replaced: 'anthropic/claude-sonnet-4' })
+	})
+
+	test('picking a retired Claude model that is not the stored one is refused', async () => {
+		const { resolveRunnableModel } = await import('../src/lib/engine/gateway-run.server')
+		const result = resolveRunnableModel({ requested: 'anthropic/claude-sonnet-4', stored: 'claude-sonnet-5', fallback: 'claude-sonnet-5' })
+		expect(result.ok).toBe(false)
+	})
+
+	test('a stored gateway model keeps its refusal rather than silently moving to Claude', async () => {
+		const { resolveRunnableModel } = await import('../src/lib/engine/gateway-run.server')
+		const result = resolveRunnableModel({ requested: 'moonshotai/kimi-k2', stored: 'moonshotai/kimi-k2', fallback: 'claude-sonnet-5' })
+		expect(result.ok).toBe(false)
+		if (!result.ok) expect(result.message).toContain('LLM_GATEWAY_URL')
+	})
+
+	test('no fallback when the default itself cannot run', async () => {
+		const { resolveRunnableModel } = await import('../src/lib/engine/gateway-run.server')
+		const result = resolveRunnableModel({ requested: 'anthropic/claude-sonnet-4', stored: 'anthropic/claude-sonnet-4', fallback: 'claude-3-haiku' })
+		expect(result.ok).toBe(false)
+	})
+})

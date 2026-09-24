@@ -83,7 +83,10 @@ test('a send naming a model nothing can run is refused before the message or a r
 		expect(body.error).toContain(GATEWAY_MODEL)
 		expect(body.error).toContain('LLM_GATEWAY_URL')
 
-		// A Claude slug the CLI cannot run is refused the same way, for its own reason.
+		// A Claude slug the CLI cannot run is refused the same way, for its own reason — when it
+		// is a pick. (The seed stores this very slug, and a send that only repeats a chat's stored,
+		// retired model falls back to the default instead, so put the chat on a runnable one first.)
+		await sql`update conversations set model = 'claude-sonnet-5' where id = ${conversation.id}`
 		const stale = await page.request.post(`/chat/${conversation.id}/stream`, {
 			data: { conversationId: conversation.id, content: `${prefix} hello`, model: STALE_CLAUDE_MODEL },
 		})
@@ -194,7 +197,7 @@ test('the default model cannot be set to one nothing can run', async ({ page, ba
 	const userId = await getActiveUserId()
 	const sql = getSql()
 	const defaultModel = async () =>
-		(await sql<{ default_model: string }[]>`select default_model from app_settings where user_id = ${userId}`)[0]
+		(await sql<{ default_model: string }[]>`select default_model from app_settings where user_id = ${userId} order by created_at asc limit 1`)[0]
 			?.default_model ?? null
 
 	await page.goto('/settings')
