@@ -21,7 +21,7 @@ The narrow LLM-provider surface. Only this module knows OpenRouter exists.
 ### `src/lib/runtime/`
 The pre-engine agent loop. Interactive chat runs on the Claude Agent SDK (`src/lib/engine/`); what still runs here is unattended — automations with an agent attached, a monitor's start_conversation, and CI fix runs (#8).
 - `loop.server.ts` — `runChatLoop()`. Drives streaming, multi-round tool execution and approval gates. Calls `streamChat()` from `llm/`.
-- `tool-handlers.server.ts` — per-tool-call dispatch (ask_user, normal tool). Owns the emit / pushBlock / approval-await flow.
+- `tool-handlers.server.ts` — per-tool-call dispatch: the offered-list gate, approval, then the registry. Owns the emit / pushBlock / approval-await flow. (Its `ask_user` branch went with the tool, #4 — these runs are unattended and were never offered it.)
 - `types.ts` — `Session`, `RunChatLoopInput`, `LoopMessage`. The contract the three callers implement.
 - `agent-definition.server.ts` — slot assembly + workspace context resolution.
 - `detached-tools.ts` — the short tool list an unattended run is offered (`web_search`).

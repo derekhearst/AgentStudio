@@ -15,6 +15,8 @@
 import type { ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
 import { readAskUserAnswers } from './ask-user-answers'
+import { getAskUserAnswersFromTool, getAskUserQuestionsFromTool } from './tool-block-helpers'
+import { answerKey } from '../engine/ask-user-question'
 
 export type SavedBlock =
 	| { kind: 'text'; content: string }
@@ -113,6 +115,33 @@ export function getAskUserAnswer(resultValue: unknown, header: string, headers: 
 	if (typeof value !== 'string') return null
 	const trimmed = value.trim()
 	return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * A saved question block as the transcript shows it: each question, and the answer under it
+ * when there is one. Reads an AskUserQuestion block (#4) — answers on its `details`, keyed by
+ * question text — and a retired `ask_user` block, whose answers are in its result.
+ */
+export function savedAskUserExchanges(block: {
+	name: string
+	arguments: unknown
+	result: unknown
+	details?: unknown
+}): Array<{ question: string; answer: string | null }> {
+	const toText = (value: unknown) =>
+		value === undefined || value === null ? null : typeof value === 'string' ? value : JSON.stringify(value)
+	const like = {
+		name: block.name,
+		arguments: toText(block.arguments) ?? '',
+		result: toText(block.result),
+		details: block.details,
+	}
+	const questions = getAskUserQuestionsFromTool(like)
+	const answers = getAskUserAnswersFromTool(like)
+	return questions.map((question) => {
+		const answer = answers?.[answerKey(question)]?.trim()
+		return { question: question.question || question.header, answer: answer ? answer : null }
+	})
 }
 
 /** Lowercase + collapse whitespace for the dedupe-text comparison. */

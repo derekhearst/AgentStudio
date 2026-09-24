@@ -267,7 +267,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 		}
 	})
 
-	test('ask_user flow persists, resolves via endpoint, and emits a gapless event log', async ({ context }) => {
+	test('an AskUserQuestion persists, resolves via endpoint, and emits a gapless event log (#4)', async ({ context }) => {
 		test.setTimeout(STREAM_TIMEOUT_MS + 30_000)
 		const prefix = uniquePrefix('runs-live-askuser')
 		await cleanupPrefixedRecords(prefix)
@@ -276,13 +276,15 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 		await setApprovalRequiredTools(userId, [])
 
 		const conversationId = await seedConversationOwnedBy(userId, prefix)
-		const prompt = `Use the ask_user tool exactly once to ask me which color I prefer with options "red" and "blue". Header should be "Color". Do not write any other text first.`
+		const prompt = `Use the AskUserQuestion tool exactly once to ask me which color I prefer with options "red" and "blue". Header should be "Color". Do not write any other text first.`
 
 		const cookie = await buildCookieHeader(context)
 		const abort = new AbortController()
 		try {
 			const body = await postChatStream(cookie, conversationId, prompt, abort.signal)
 			let questionToken: string | null = null
+			// The SDK takes answers keyed by question text; the frame's `key` carries it.
+			let questionKey: string | null = null
 			const collected: SseEvent[] = []
 			await readSseUntil(
 				body,
@@ -290,6 +292,8 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 					const last = events[events.length - 1]
 					if (last?.type === 'ask_user' && typeof last.data.token === 'string') {
 						questionToken = last.data.token
+						const questions = last.data.questions as Array<{ key?: string }> | undefined
+						questionKey = questions?.[0]?.key ?? null
 						return true
 					}
 					return false
@@ -297,6 +301,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 				{ onEvent: (e) => collected.push(e) },
 			)
 			expect(questionToken, 'expected ask_user event with token').toBeTruthy()
+			expect(questionKey, 'expected the question keyed by its text').toBeTruthy()
 
 			const runMid = await readChatRun(conversationId)
 			expect(runMid.state).toBe('waiting_user_input')
@@ -304,7 +309,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 			expect(runMid.pending_questions.find((e) => e.token === questionToken)?.answers).toBeUndefined()
 
 			const answerRes = await context.request.post(`/chat/${conversationId}/ask-user`, {
-				data: { token: questionToken, answers: { Color: 'blue' } },
+				data: { token: questionToken, answers: { [questionKey!]: 'blue' } },
 			})
 			expect(await answerRes.json()).toEqual({ resolved: true })
 
@@ -316,7 +321,7 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 
 			const runFinal = await readChatRun(conversationId)
 			expect(runFinal.pending_questions).toEqual([])
-			expect(runFinal.stream_blocks.some((b) => b.kind === 'tool' && b.name === 'ask_user')).toBeTruthy()
+			expect(runFinal.stream_blocks.some((b) => b.kind === 'tool' && b.name === 'AskUserQuestion')).toBeTruthy()
 
 			const events = await listRunEvents(runFinal.id)
 			expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1))
@@ -338,15 +343,15 @@ test.describe('runs/live — durable runs through real LLM calls', () => {
 			const assistantMsg = persisted.find((m) => m.role === 'assistant')
 			expect(assistantMsg).toBeDefined()
 			const persistedBlocks = assistantMsg!.metadata.blocks ?? []
-			const askBlock = persistedBlocks.find((b) => b.kind === 'tool' && b.name === 'ask_user')
-			expect(askBlock, 'ask_user must remain visible as a tool block in the saved message').toBeDefined()
+			const askBlock = persistedBlocks.find((b) => b.kind === 'tool' && b.name === 'AskUserQuestion')
+			expect(askBlock, 'the question must remain visible as a tool block in the saved message').toBeDefined()
 
 			const askArgs = askBlock!.arguments as { questions?: Array<{ header?: string }> }
 			expect(askArgs.questions?.[0]?.header).toBe('Color')
 
-			const askResult = askBlock!.result as { answers?: Record<string, string>; timedOut?: boolean }
-			expect(askResult.answers).toEqual({ Color: 'blue' })
-			expect(askResult.timedOut).toBe(false)
+			// The answers ride on `details`, distilled from the CLI's tool_use_result.
+			const askDetails = (askBlock as { details?: { kind?: string; answers?: Record<string, string> } }).details
+			expect(askDetails).toEqual({ kind: 'ask_user_question', answers: { [questionKey!]: 'blue' } })
 			expect(askBlock!.success).toBe(true)
 
 			// Persisted streamBlocks (run row) and rendered blocks (message row) agree on order.

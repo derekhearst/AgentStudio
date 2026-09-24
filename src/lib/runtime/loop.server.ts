@@ -71,7 +71,6 @@ async function runChatLoopRounds(input: RunChatLoopInput): Promise<RunChatLoopRe
 		projectId: input.projectId,
 		offeredTools: offeredToolNames(input.tools),
 		approvalRequiredTools: input.approvalRequiredTools,
-		isOrchestrator: input.isOrchestrator,
 	}
 
 	for (let round = 0; round <= input.maxRounds; round++) {

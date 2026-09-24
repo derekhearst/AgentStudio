@@ -250,7 +250,37 @@ A run's tool calls and events are on its own page, `/runs/<id>`, linked from eac
 
 ### Inline approvals and answers
 
-Approval requests and `ask_user` questions render inline in the thread, but are also reflected in the global Review Inbox. Resolving from either place updates the same durable state.
+Approval requests and the agent's questions render inline in the thread, but are also reflected in the global Review Inbox. Resolving from either place updates the same durable state.
+
+### Questions from the agent
+
+When the agent needs a decision from you before it carries on, it asks with **AskUserQuestion** — the Agent SDK's own question tool, which replaced AgentStudio's home-made `ask_user` in September 2026 (#4). A call holds one to four questions.
+
+**What the card shows.** Each question gets:
+
+| Part | What it is |
+| --- | --- |
+| Header chip | A short label for the question ("Layout", "Auth method") |
+| Question | The full question, in a sentence |
+| Option cards | Two to four choices, each with a label and a line saying what it means. The one the agent recommends carries a **Recommended** badge |
+| Preview | For options that are easier to compare by eye (a layout, a snippet, a configuration), a small rendered picture of what the choice produces. It shows the option under your pointer or keyboard, otherwise the one you chose, otherwise the recommended one. Beside the options on a wide screen, below them on a phone |
+| Other | Always there: type your own answer instead of — or, on a "choose any" question, as well as — the options |
+
+Some questions say **Choose any that apply**: tick as many options as you like. The rest take one answer, and typing in Other (or clicking Other itself) replaces the option you picked. Just moving through Other with the keyboard changes nothing, so you can pick an option and Tab on to Submit. With several questions the card steps through them (Question 1/3, Next, Submit), and Submit waits until every question has an answer.
+
+**How you answer.** In the card, in the chat composer (typing a reply while a question is waiting answers it), or from the /review inbox, which shows the same card. Whichever comes first counts. Once the server has recorded it, the card shows each question with your answer under it, and so does the conversation after a reload.
+
+**Several questions at once.** The agent can ask more than one AskUserQuestion in the same step, so two or three cards can be waiting side by side. Each card sends its answer for its own question only. A reply typed in the composer (or given in the modal) goes to the newest card still waiting; once that one is answered, the next one still waiting takes its place.
+
+**If nobody answers.** The question waits five minutes, like a tool approval. After a minute you get a "Needs input" notification. After five, the agent is told nobody answered and that it must not assume an answer — it carries on only with what does not depend on it, or ends its turn and says what it needs. Stopping the run settles the question at once. A question never answers itself: the SDK's own idle auto-continue (`askUserQuestionTimeout`) is set to `never`, because on a box that runs while you sleep an auto-picked option is a decision you never saw.
+
+**Who can ask.** Only the agent in a chat. A delegated subagent cannot — it is told to put the question in its result so the agent that delegated to it can ask. Automations, monitors and CI-fix runs have no one to ask and are never offered the tool; if the model tries anyway the call is refused, and the run does not wait.
+
+**Previews are safe to show.** A preview is HTML the model wrote, and the model may be repeating text from a web page or a repository. So it is never put into the page. It is shown in a sealed frame that cannot run scripts, cannot reach the app or your session, cannot submit forms or open windows, and cannot load anything from the internet — an image pointing at someone's server is simply not fetched. Tags that could act on the frame itself are shown as text. A preview over 12,000 characters is dropped.
+
+**What was checked in the SDK** (`@anthropic-ai/claude-agent-sdk` 0.3.278, bundled CLI 2.1.278), rather than assumed: `toolConfig.askUserQuestion.previewFormat` exists and is set to `html` (the default is markdown, for a terminal); `askUserQuestionTimeout` is a Settings field, reached through the `settings` option; the tool always asks permission, so each call reaches the app's permission callback, which answers it by returning the call's input with the answers added (question text to answer, several choices comma-separated); and the tool is only switched on when a permission callback is installed, which the chat engine always does. The CLI also reads back and reports the answers it was given, which is what the saved transcript shows.
+
+Transcripts from before the change keep their `ask_user` blocks, and those still show each question with its answer.
 
 ### Diff and artifact preview
 
@@ -299,7 +329,7 @@ How the controls that exist today behave:
 - **Coming back to a running turn.** Opening a conversation whose turn is still running — after a reload, or from another tab — shows that turn streaming again, with its tool and approval cards and the Stop button. Text written before you came back appears once the turn finishes.
 - **One turn at a time.** A message sent while a turn is still running is not sent. The page says so, keeps the message for Retry, and shows the running turn instead.
 - **Allow / Deny.** An approval card only shows a call as approved or denied once the server has recorded the answer. If it could not be recorded (the approval timed out, or was answered in another tab), the card keeps its buttons and says why.
-- **Answering a question.** When the agent asks a question (`ask_user`), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
+- **Answering a question.** When the agent asks a question (see [Questions from the agent](#questions-from-the-agent)), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
 - **Switching conversations mid-turn.** Opening another conversation while a reply is streaming shows only the other conversation. Nothing from the first one comes along: not its reply, its tool cards, its Stop button, its error message or its Retry. Leaving is not a Stop. The first turn keeps running, saves its own reply, and shows again with Stop when you go back to it.
 - **A turn that ends in an error.** Some turns end in an error after the reply was already saved, for example when the agent reaches its maximum number of steps or the model provider is overloaded. The page shows the error and keeps the one saved reply. It used to save a second, partial copy of the same reply.
 - **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it. The chips go away when the turn's stream ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
@@ -334,7 +364,7 @@ Every assistant reply has a speaker button beside Copy. It reads the reply throu
 
 ### How replies are displayed safely
 
-Assistant replies, thinking, subagent results and `ask_user` questions are written by the model, and the model may be repeating text it picked up from a web page, a repository or a tool result. Someone who plants instructions there can try to make the model write HTML that would run inside the app, or an image link that quietly sends data to their server the moment the reply is shown. So replies are displayed as formatted markdown, but under these rules:
+Assistant replies, thinking, subagent results and the agent's questions are written by the model, and the model may be repeating text it picked up from a web page, a repository or a tool result. Someone who plants instructions there can try to make the model write HTML that would run inside the app, or an image link that quietly sends data to their server the moment the reply is shown. So replies are displayed as formatted markdown, but under these rules:
 
 | Content in a reply | What the reader sees |
 | ------------------ | -------------------- |
@@ -391,7 +421,7 @@ This domain follows [../ui/spec.md](../ui/spec.md) and defines the primary app-s
 
 - Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and the right rail (Preview + Files).
 - States and badges: running, blocked, needs-input, queued interjection, completed, failed, and pending approvals count.
-- Blocking actions: plan approvals, tool approvals, and ask_user responses must resolve through durable review items.
+- Blocking actions: plan approvals, tool approvals, and answers to the agent's questions must resolve through durable review items.
 - Mobile behavior: the right rail opens as a drawer from the chat header; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
 
 ## References

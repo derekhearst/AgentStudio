@@ -5,8 +5,8 @@ import { reviewItems } from '$lib/observability/observability.schema'
 import { logger } from '$lib/observability/logger'
 
 /**
- * The review-inbox items a paused run opens — one per tool approval, one per `ask_user`
- * question — and how they close.
+ * The review-inbox items a paused run opens — one per tool approval, one per question the
+ * agent asks (AskUserQuestion, #4) — and how they close.
  *
  * They used to be opened and never closed. Approving a call in the chat left its item open
  * in /review for good, each approval added another, and the inbox's open count and the

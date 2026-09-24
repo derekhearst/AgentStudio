@@ -17,9 +17,10 @@ import {
  * - `/plan` flips the permission-mode chip between Plan only and Ask, through the same
  *   command the chip calls. It never switches to Bypass, which needs the chip's confirm.
  *
- * The message box can be open while a reply is still running: an ask_user question pauses the
- * turn and hands the box back. `/compact` and `/plan` then say why they cannot run, as their
- * buttons are disabled (the chip) or do nothing (Compact) until the reply ends.
+ * The message box can be open while a reply is still running: a question from the agent (its
+ * AskUserQuestion, #4) pauses the turn and hands the box back. `/compact` and `/plan` then say
+ * why they cannot run, as their buttons are disabled (the chip) or do nothing (Compact) until
+ * the reply ends.
  */
 export function buildChatPageCommands(input: {
 	conversationId: string

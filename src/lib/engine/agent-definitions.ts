@@ -18,9 +18,10 @@
  * `idle` and `active` both available — lives in `$lib/agents/agent-status`, which the Pause
  * button, the automation gate and this filter all read.
  *
- * **`ask_user` is disallowed for every subagent.** The old loop refused it for
- * non-orchestrators — a child has no stream to ask down — and that rule has to survive the
- * port or a delegated agent will hang waiting for an answer nobody is being shown.
+ * **`AskUserQuestion` is disallowed for every subagent.** The old loop refused `ask_user` for
+ * non-orchestrators — a child has no stream to ask down — and that rule survived the port to
+ * the SDK's own question tool (#4). The engine refuses a child's question in `canUseTool` as
+ * well, for the SDK's built-in agents, which no definition here reaches.
  *
  * **The model is inherited unless the row asks for a Claude model.** A run against the
  * gateway sets `ANTHROPIC_MODEL` for the whole process, so a subagent naming a different
@@ -31,6 +32,7 @@
 
 import { isAgentPaused } from '$lib/agents/agent-status'
 import { BUILTIN_TOOL_SET } from './builtin-tools'
+import { ASK_USER_QUESTION_TOOL } from './ask-user-question'
 import { isSubscriptionModel, normalizeModelId } from './model-backend'
 import { OWN_MCP_SERVER } from './permission-mode'
 
@@ -73,9 +75,9 @@ export function qualifyAgentTools(allowedTools: readonly string[]): string[] {
 
 /** Tools no subagent may call, whatever its own allow-list says. */
 export const SUBAGENT_DISALLOWED_TOOLS: readonly string[] = [
-	// A child has no stream to ask down. The old loop refused this for non-orchestrators;
-	// without it a delegated agent hangs on a question nobody is shown.
-	'mcp__agentstudio__ask_user',
+	// A child has no stream to ask down. The old loop refused its `ask_user` for
+	// non-orchestrators; the SDK's question tool is refused the same way.
+	ASK_USER_QUESTION_TOOL,
 ]
 
 /**

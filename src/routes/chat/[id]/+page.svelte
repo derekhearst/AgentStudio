@@ -51,6 +51,7 @@
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
 		getAskUserAnswersFromTool,
+		isAskUserToolName,
 		type AskUserOption,
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
@@ -58,6 +59,8 @@
 		appendThinking,
 		applyAskUser,
 		applyAskUserAnswered,
+		askUserTokenFor,
+		settlePendingAskUser,
 		applyDeltaStart,
 		applySubagentDelta,
 		applySubagentDone,
@@ -180,6 +183,7 @@
 		| {
 				kind: 'askUser';
 				answers: Record<string, string>;
+				token: string;
 		  }
 		| {
 				kind: 'edit';
@@ -244,7 +248,7 @@
 				return;
 			}
 			if (intent.kind === 'askUser') {
-				await resolveAskUser(intent.answers);
+				await resolveAskUser(intent.answers, intent.token);
 				return;
 			}
 			if (intent.kind === 'regenerate') {
@@ -755,9 +759,14 @@
 		);
 	}
 
-	async function resolveAskUser(answers: Record<string, string>) {
-		if (!pendingAskUser) return;
-		const { token } = pendingAskUser;
+	/**
+	 * #4 — `cardToken` is the answering card's own token: AskUserQuestion calls run
+	 * concurrently, so two cards can be open and `pendingAskUser` holds only the newest.
+	 * The modal and the composer answer that one.
+	 */
+	async function resolveAskUser(answers: Record<string, string>, cardToken?: string | null) {
+		const token = cardToken ?? pendingAskUser?.token;
+		if (!token) return;
 		try {
 			const response = await fetch(`/chat/${conversationId}/ask-user`, {
 				method: 'POST',
@@ -781,17 +790,22 @@
 			// Do not create optimistic user bubbles for ask_user to avoid ordering/race issues.
 			// The card itself shows the recorded answers (#81).
 			streamingBlocks = applyAskUserAnswered(streamingBlocks, token, answers);
-
-			pendingAskUser = null;
-			askUserModalOpen = false;
+			settleAskUser(token);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Failed to submit ask_user answers',
-				{ kind: 'askUser', answers },
+				{ kind: 'askUser', answers, token },
 				{ token, answerCount: Object.keys(answers).length, action: 'resolveAskUser' }
 			);
 			throw error;
 		}
+	}
+
+	/** A question card was answered or got its result: keep or hand over the pending question. */
+	function settleAskUser(settledToken: string | null) {
+		const next = settlePendingAskUser(streamingBlocks, pendingAskUser, settledToken);
+		if (!next || next.token !== pendingAskUser?.token) askUserModalOpen = false;
+		pendingAskUser = next;
 	}
 
 	function closeAskUserModal() {
@@ -1017,10 +1031,6 @@
 					}
 
 					if (eventName === 'tool_result') {
-						if (payload.name === 'ask_user') {
-							pendingAskUser = null;
-							askUserModalOpen = false;
-						}
 						const outcome = applyToolResult(streamingBlocks, payload as Parameters<typeof applyToolResult>[1]);
 						if (outcome.missing) {
 							logChatUi('warn', 'tool_result without matching tool block', {
@@ -1034,6 +1044,7 @@
 							});
 						}
 						streamingBlocks = outcome.blocks;
+						if (isAskUserToolName(payload.name)) settleAskUser(askUserTokenFor(streamingBlocks, payload.id));
 					}
 
 					if (eventName === 'tool_denied') {
@@ -1163,7 +1174,7 @@
 							const fullText = getPartialText(streamingBlocks);
 							const completedToolCalls = getCompletedToolCalls(streamingBlocks);
 							const hasAskUserTool = completedToolCalls.some(
-								(call) => String(call.name ?? '') === 'ask_user'
+								(call) => isAskUserToolName(call.name)
 							);
 							if (!hasAskUserTool && (fullText.trim() || completedToolCalls.length > 0)) {
 								pendingAssistantDrafts = [
@@ -1608,7 +1619,7 @@
 				-->
 				{:else if streaming && !pendingMessageId}
 					{#each streamingBlocks as block (block.id)}
-						{#if block.kind === 'tool' && block.name === 'ask_user'}
+						{#if block.kind === 'tool' && isAskUserToolName(block.name)}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
 							{@const askAnswers = getAskUserAnswersFromTool(block)}
 							{@const askLive = block.status === 'pending' || block.status === 'approved' || block.status === 'executing'}
@@ -1617,7 +1628,7 @@
 									questions={askQuestions}
 									status={block.status}
 									answers={askAnswers}
-									onSubmit={resolveAskUser}
+									onSubmit={(answers) => resolveAskUser(answers, block.token)}
 								/>
 							{/if}
 						<!--
@@ -1634,7 +1645,7 @@
 							<TodoListCard details={block.details} />
 						{:else if block.kind === 'notice'}
 							<RunNoticeCard notice={block.notice} />
-						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
+						{:else if block.kind === 'tool' && !isAskUserToolName(block.name)}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}

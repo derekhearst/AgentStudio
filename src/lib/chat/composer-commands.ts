@@ -260,7 +260,8 @@ export function voiceCommand(input: {
 
 /**
  * Why a command that acts on the conversation cannot run now. A reply can still be running while
- * the message box is open: an ask_user question pauses it and hands the box back to the user.
+ * the message box is open: a question from the agent (AskUserQuestion, #4) pauses it and hands the
+ * box back to the user.
  */
 export const REPLY_RUNNING = 'A reply is still running. Wait for it to finish, or stop it, first.'
 

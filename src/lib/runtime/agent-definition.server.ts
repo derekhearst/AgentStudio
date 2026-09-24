@@ -40,8 +40,8 @@ export type BuildAgentDefinitionInput = {
 	 */
 	intent?: string
 	/**
-	 * The agent collaboration policy text — varies by caller. Sub-agents say "you cannot
-	 * ask_user, return a handoff"; automations say "no human in the loop, summarize what you
+	 * The agent collaboration policy text — varies by caller. Sub-agents say "you cannot ask
+	 * the user, return a handoff"; automations say "no human in the loop, summarize what you
 	 * did"; tasks say similar. Caller picks the right one.
 	 */
 	toolPolicy: string
@@ -173,8 +173,8 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 
 	const assembled = assembleSystemPrompt(slots)
 
-	// Tool surface: the unattended-run list, narrowed by allowedTools when set. ask_user is
-	// never on it — the loop's `isOrchestrator: false` would refuse it anyway.
+	// Tool surface: the unattended-run list, narrowed by allowedTools when set. Nothing on it
+	// asks the user: nobody is there to answer.
 	const tools = getToolDefinitions(
 		detachedRunToolNames(Array.isArray(config?.allowedTools) ? config.allowedTools : null),
 	)
