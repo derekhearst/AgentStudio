@@ -27,6 +27,7 @@
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import RewindPreviewDialog from '$lib/chat/RewindPreviewDialog.svelte';
 	import { chooseFileRestore, reportFileRestore } from '$lib/chat/rewind-dialog.svelte';
+	import { compactCommand, compactSwitchNotice } from '$lib/chat/compact-command';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -1350,10 +1351,8 @@
 
 		if (nextLimit < currentLimit && projectedPct >= autoCompactThresholdPct) {
 			// The SDK's own `/compact`: it really replaces the session's history with a summary.
-			await streamMessage(`/compact ${COMPACT_INSTRUCTIONS} This is a handoff to a model with a smaller context window.`, false);
-			modelSwitchNotice = streamError
-				? `Compacting before the switch to ${nextModel.split('/').at(-1)} failed; the full conversation is still in context.`
-				: `Compacted the conversation on ${currentModel.split('/').at(-1)} before switching to ${nextModel.split('/').at(-1)}.`;
+			await streamMessage(compactCommand({ handoff: true }), false);
+			modelSwitchNotice = compactSwitchNotice({ failed: Boolean(streamError), from: currentModel, to: nextModel });
 			setTimeout(() => {
 				modelSwitchNotice = null;
 			}, 5000);
@@ -1362,18 +1361,10 @@
 		model = nextModel;
 	}
 
-	/**
-	 * What `/compact` is told to keep. It used to be sent as an ordinary message asking the model
-	 * for a summary, which the SDK session then carried on top of the full history it was meant
-	 * to replace — so the context grew. `/compact` is the CLI's own command: it summarises and
-	 * starts the session again from the summary, and the turn shows a "Context compacted" notice.
-	 */
-	const COMPACT_INSTRUCTIONS =
-		'Preserve all requirements, decisions, open tasks, constraints, and the latest user intent.';
-
+	/** Finding 80 — the CLI's own `/compact`, which really shrinks the session (`$lib/chat/compact-command`). */
 	async function compactContext() {
 		if (!conversationId || streaming) return;
-		await streamMessage(`/compact ${COMPACT_INSTRUCTIONS}`, false);
+		await streamMessage(compactCommand(), false);
 	}
 
 	// Console-redesign — surface streaming/context data to the right rail.
