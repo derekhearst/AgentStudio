@@ -25,6 +25,8 @@
 	import PinnedTodoPanel from '$lib/chat/PinnedTodoPanel.svelte';
 	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
+	import RewindPreviewDialog from '$lib/chat/RewindPreviewDialog.svelte';
+	import { chooseFileRestore } from '$lib/chat/rewind-dialog.svelte';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -1251,13 +1253,17 @@
 		if (runId && !streaming) attachToRun(runId);
 	});
 
-	async function handleEdit(messageId: string, content: string) {
-		if (streaming) return;
+	/** Resolves false when nothing was done — the user cancelled — so the editor stays open. */
+	async function handleEdit(messageId: string, content: string): Promise<boolean> {
+		if (streaming) return false;
+		// #24 — whether to restore the files the dropped replies changed. Null: cancelled.
+		const restore = await chooseFileRestore(messageId, 'edit');
+		if (!restore) return false;
 		try {
-			const result = await editMessage({ messageId, content });
+			const result = await editMessage({ messageId, content, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(result?.error ?? 'Unable to edit message', { kind: 'edit', messageId, content }, { action: 'handleEdit' });
-				return;
+				return true;
 			}
 
 			clearRecoverableError();
@@ -1282,14 +1288,17 @@
 				{ action: 'handleEdit', messageId }
 			);
 		}
+		return true;
 	}
 
 	async function handleRegenerate() {
 		if (!conversationId || streaming) return;
 		const pivotId = lastUserMessageId;
 		if (!pivotId) return;
+		const restore = await chooseFileRestore(pivotId, 'regenerate');
+		if (!restore) return;
 		try {
-			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId });
+			const result = await deleteMessagesAfter({ conversationId, messageId: pivotId, ...restore });
 			if (!result || result.success !== true) {
 				setRecoverableError(
 					result?.error ?? 'Unable to regenerate response',
@@ -1778,6 +1787,7 @@
 		</div>
 	</section>
 
+	<RewindPreviewDialog />
 </div>
 
 

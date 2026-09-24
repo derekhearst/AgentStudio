@@ -80,6 +80,7 @@ import {
 import { runWithResumeFallback, userTurnMessages, withTurnResume } from '$lib/engine/turn-input'
 import { supportsFileCheckpoints, turnPromptContent } from '$lib/chat/turn-plan'
 import { planTurn, recordTurnJoinInBackground } from '$lib/chat/turn-plan.server'
+import { isConversationRewinding } from '$lib/chat/rewind.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
 import { createChatRunHooks } from '$lib/hooks/chat-run-hooks.server'
 import { logger } from '$lib/observability/logger'
@@ -113,6 +114,10 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const liveRunId = await turnInProgress(body.conversationId, user.id)
 	if (liveRunId) {
 		return json({ error: 'This conversation already has a turn in progress.', runId: liveRunId }, { status: 409 })
+	}
+	// #24 — a rewind restoring this conversation's files owns its session and workspace for a moment.
+	if (isConversationRewinding(body.conversationId)) {
+		return json({ error: 'Files are being restored in this conversation. Try again in a moment.' }, { status: 409 })
 	}
 
 	const currentSettings = await getOrCreateSettings(user.id)

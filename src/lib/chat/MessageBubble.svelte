@@ -44,7 +44,8 @@
 		modelChanged = true,
 	} = $props<{
 		message: MessageRow;
-		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
+		/** Resolves `false` when nothing was done (the user cancelled), which keeps the editor open. */
+		onEdit?: ((messageId: string, content: string) => Promise<boolean | void> | boolean | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
 		canRegenerate?: boolean;
 		/** False while a reply is streaming: an edit would cut the conversation out from under it. */
@@ -116,6 +117,9 @@
 		if (!editing) return;
 
 		const onPointerDown = (event: PointerEvent) => {
+			// While a save is pending the page may be asking about restoring files (#24); a click
+			// in that dialog is not a click away from the editor.
+			if (editingBusy) return;
 			const target = event.target;
 			if (editorRoot && target instanceof Node && !editorRoot.contains(target)) {
 				cancelEditing();
@@ -123,7 +127,7 @@
 		};
 
 		const onEscape = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
+			if (event.key === 'Escape' && !editingBusy) {
 				event.preventDefault();
 				cancelEditing();
 			}
@@ -154,8 +158,8 @@
 		if (!trimmed || editingBusy) return;
 		editingBusy = true;
 		try {
-			await onEdit?.(message.id, trimmed);
-			editing = false;
+			const done = await onEdit?.(message.id, trimmed);
+			if (done !== false) editing = false;
 		} finally {
 			editingBusy = false;
 		}
