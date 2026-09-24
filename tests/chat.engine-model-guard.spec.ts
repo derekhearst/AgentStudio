@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 import * as devalue from 'devalue'
 import {
@@ -140,6 +141,50 @@ test('an agent’s model: a change to an unrunnable model is refused, a dotted C
 		expect(await agentModel(agent.id)).toBe('claude-haiku-4-5')
 	} finally {
 		await sql`delete from audit_events where target_id = ${agent.id}`
+		await cleanupPrefixedRecords(prefix)
+	}
+})
+
+test('the update_agent tool is held to the agent editor’s rule', async () => {
+	// The orchestrator's tool, served to the engine and the MCP endpoint alike. It used to
+	// save any model it was given, and the agent's monitors then started conversations that
+	// failed on every send.
+	const prefix = uniquePrefix('engine-model-tool')
+	await cleanupPrefixedRecords(prefix)
+	const { agentAutomationHandlers } = await import('../src/lib/tools/handlers/agents-automations.server')
+	const ctx = { userId: await getActiveUserId(), runId: null, startedAt: Date.now() }
+	const agent = await seedAgent(prefix)
+	const sql = getSql()
+	const updateAgent = (args: Record<string, unknown>) =>
+		agentAutomationHandlers.update_agent({ name: 'update_agent', arguments: { agentId: agent.id, ...args } }, ctx)
+	const agentName = async () => (await sql<{ name: string }[]>`select name from agents where id = ${agent.id}`)[0]?.name
+	try {
+		await sql`update agents set model = ${'deepseek/deepseek-chat'} where id = ${agent.id}`
+
+		// Resending the model it already has is not a change, so an unrelated edit goes through.
+		const unrelated = await updateAgent({ role: `${prefix} new role`, model: 'deepseek/deepseek-chat' })
+		expect(unrelated.success).toBe(true)
+
+		for (const model of [GATEWAY_MODEL, STALE_CLAUDE_MODEL]) {
+			const refused = await updateAgent({ name: `${prefix} renamed`, model })
+			expect(refused.success, model).toBe(false)
+			expect(refused.error, model).toContain(model)
+		}
+		// Refused whole: neither the model nor the rename in the same call was saved.
+		expect(await agentModel(agent.id)).toBe('deepseek/deepseek-chat')
+		expect(await agentName()).toBe(agent.name)
+
+		const claude = await updateAgent({ model: 'anthropic/claude-haiku-4.5' })
+		expect(claude.success).toBe(true)
+		expect(await agentModel(agent.id)).toBe('claude-haiku-4-5')
+
+		const missing = await agentAutomationHandlers.update_agent(
+			{ name: 'update_agent', arguments: { agentId: randomUUID(), model: 'claude-sonnet-5' } },
+			ctx,
+		)
+		expect(missing.success).toBe(false)
+		expect(missing.error).toMatch(/not found/i)
+	} finally {
 		await cleanupPrefixedRecords(prefix)
 	}
 })

@@ -11,6 +11,7 @@
 
 import { expect, test } from '@playwright/test'
 import {
+	checkRunnableModelChange,
 	gatewayNotConfiguredMessage,
 	isClaudeModel,
 	isSubscriptionModel,
@@ -161,5 +162,41 @@ test.describe('modelBackend', () => {
 		expect(message).toContain('anthropic/claude-sonnet-4')
 		expect(message).toContain('retired')
 		expect(message).not.toContain('LLM_GATEWAY')
+	})
+})
+
+test.describe('checkRunnableModelChange — the rule every model save follows', () => {
+	const off = { gatewayConfigured: false }
+	const on = { gatewayConfigured: true }
+
+	test('a field that was not sent passes through', () => {
+		expect(checkRunnableModelChange(undefined, 'claude-sonnet-5', off)).toEqual({ ok: true, model: undefined })
+	})
+
+	test('a change to a model that can run is stored the way the engine sends it', () => {
+		expect(checkRunnableModelChange('anthropic/claude-haiku-4.5', 'claude-sonnet-5', off)).toEqual({ ok: true, model: 'claude-haiku-4-5' })
+		expect(checkRunnableModelChange('fable', null, off)).toEqual({ ok: true, model: 'fable' })
+		expect(checkRunnableModelChange('moonshotai/kimi-k2', 'claude-sonnet-5', on)).toEqual({ ok: true, model: 'moonshotai/kimi-k2' })
+	})
+
+	test('a change to a model nothing can run is refused with the reason', () => {
+		expect(checkRunnableModelChange('openai/gpt-5', 'claude-sonnet-5', off)).toEqual({
+			ok: false,
+			message: gatewayNotConfiguredMessage('openai/gpt-5'),
+		})
+		for (const settings of [off, on]) {
+			const refused = checkRunnableModelChange('anthropic/claude-sonnet-4', 'claude-sonnet-5', settings)
+			expect(refused.ok).toBe(false)
+			expect(!refused.ok && refused.message).toContain('retired')
+		}
+	})
+
+	test('resending the model already stored is not a change, in either spelling', () => {
+		// An editor sends every field; a model saved before the rule must not block other edits.
+		expect(checkRunnableModelChange('deepseek/deepseek-chat', 'deepseek/deepseek-chat', off)).toEqual({
+			ok: true,
+			model: 'deepseek/deepseek-chat',
+		})
+		expect(checkRunnableModelChange('claude-sonnet-4', 'anthropic/claude-sonnet-4', off)).toEqual({ ok: true, model: 'claude-sonnet-4' })
 	})
 })

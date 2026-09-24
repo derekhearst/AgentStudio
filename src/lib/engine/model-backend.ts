@@ -146,3 +146,34 @@ export function unknownClaudeModelMessage(model: string): string {
 export function unrunnableModelMessage(model: string): string {
 	return isClaudeModel(model) ? unknownClaudeModelMessage(model) : gatewayNotConfiguredMessage(model)
 }
+
+/** A save's answer about a model: the id to store, or why it cannot be stored. */
+export type RunnableModelChange = { ok: true; model: string | undefined } | { ok: false; message: string }
+
+/**
+ * Whether a save may set an engine model, and the id to store for it.
+ *
+ * For every save that feeds the engine — the default model, an agent's model from its editor
+ * or from the `update_agent` tool. The pickers already offer only runnable models; this is
+ * the same rule for a request that did not come through one, so an unrunnable model cannot
+ * be saved and then fail on the first message.
+ *
+ * - `next` undefined (the field was not sent) passes through.
+ * - Only a change is checked. Editors send every field on save, and a model stored before
+ *   this rule — an agent left on a third-party model for its automations, say — must not
+ *   stop its owner saving an unrelated edit. So `next` equal to `current`, in either
+ *   spelling, is kept as sent.
+ * - A change to a model that can run is stored as the engine sends it (`normalizeModelId`).
+ */
+export function checkRunnableModelChange(
+	next: string | undefined,
+	current: string | null | undefined,
+	options: { gatewayConfigured: boolean },
+): RunnableModelChange {
+	if (next === undefined) return { ok: true, model: undefined }
+	if (current != null && (next === current || normalizeModelId(next) === normalizeModelId(current))) {
+		return { ok: true, model: next }
+	}
+	if (modelBackend(next, options) === 'unavailable') return { ok: false, message: unrunnableModelMessage(next) }
+	return { ok: true, model: normalizeModelId(next) }
+}

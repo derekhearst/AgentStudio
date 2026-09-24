@@ -75,7 +75,7 @@ To turn it off again, clear either variable and restart.
 
 ## Roles and permissions
 
-AgentStudio has one owner. The owner picks models in all three pickers. Only the operator — whoever controls the server's environment — can turn the gateway on or off. Saving a model that cannot run is refused by the server, not just hidden in the picker: a default model or an agent's model can only be changed to a model something here can run.
+AgentStudio has one owner. The owner picks models in all three pickers. Only the operator — whoever controls the server's environment — can turn the gateway on or off. Saving a model that cannot run is refused by the server, not just hidden in the picker: a default model or an agent's model can only be changed to a model something here can run. The same rule holds when the chat agent changes an agent's model itself with its `update_agent` tool: the tool answers with the reason and saves nothing from that call.
 
 ## Integrations
 
