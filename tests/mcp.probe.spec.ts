@@ -277,7 +277,16 @@ test.describe('what the page is told', () => {
 			openWorld: null,
 		})
 		expect(toolSnapshot(TOOLS[2])).toMatchObject({ title: 'Delete a repository', destructive: true, readOnly: null })
-		expect(toolSnapshot({ name: 'x', description: 'd'.repeat(2_000) }).description?.length).toBeLessThanOrEqual(501)
+		expect(toolSnapshot({ name: 'x', description: 'd'.repeat(2_000) })?.description?.length).toBeLessThanOrEqual(501)
+	})
+
+	test('a tool that could never carry a policy is left out, not listed under a clipped name', () => {
+		// 128 characters is the longest name a policy is saved under; a clipped name would match
+		// no call and fail validation for every policy save on the connector. Left out, it asks.
+		expect(toolSnapshot({ name: 'a'.repeat(128) })?.name).toBe('a'.repeat(128))
+		expect(toolSnapshot({ name: 'a'.repeat(129) })).toBeNull()
+		expect(toolSnapshot({ name: '   ' })).toBeNull()
+		expect(toolSnapshot({} as never)).toBeNull()
 	})
 
 	test('secrets are found in headers, a bearer token on its own too, and redacted longest first', () => {

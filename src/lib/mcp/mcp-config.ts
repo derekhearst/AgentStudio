@@ -280,16 +280,21 @@ export function applySecretsPatch(current: ConnectorSecrets, patch: ConnectorSec
 	else if (typeof patch.bearerToken === 'string' && patch.bearerToken.trim() !== '') bearerToken = patch.bearerToken.trim()
 
 	const headers: Record<string, string> = { ...current.headers }
-	for (const [rawName, value] of Object.entries(patch.headers ?? {})) {
-		const name = rawName.trim()
-		// Header names are case-insensitive: an edit to "x-api-key" replaces a stored "X-Api-Key".
-		const existing = Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase())
-		if (value === null) {
-			if (existing !== undefined) delete headers[existing]
-			continue
-		}
-		if (value === '') continue
-		if (existing !== undefined) delete headers[existing]
+	// Header names are case-insensitive: an edit to "x-api-key" replaces a stored "X-Api-Key".
+	const existing = (name: string) => Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase())
+	const entries = Object.entries(patch.headers ?? {}).map(([name, value]) => [name.trim(), value] as const)
+	// Removals first, then values. Removing a stored header and adding it back under another
+	// case (`X-Team` removed, `x-team` added) is a replacement, whatever order the form sent
+	// them in; applied in the form's order the removal would delete the header just added.
+	for (const [name, value] of entries) {
+		if (value !== null) continue
+		const key = existing(name)
+		if (key !== undefined) delete headers[key]
+	}
+	for (const [name, value] of entries) {
+		if (value === null || value === '') continue
+		const key = existing(name)
+		if (key !== undefined) delete headers[key]
 		headers[name] = value
 	}
 	return { bearerToken, headers }

@@ -69,10 +69,21 @@ type ListedTool = {
 	annotations?: { title?: string; readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean }
 }
 
-/** One `tools/list` entry, reduced to what the settings page shows. */
-export function toolSnapshot(tool: ListedTool): McpToolSnapshot {
+/** The longest tool name a policy can be saved under (`normalizeToolPolicies`, the policies command). */
+const MAX_TOOL_NAME = 128
+
+/**
+ * One `tools/list` entry, reduced to what the settings page shows — or null for a tool that
+ * could never carry a policy: one with no name, or a name longer than `MAX_TOOL_NAME`. Such a
+ * tool is left out of the list rather than shown under a clipped name, which would match no
+ * call and make every policy save for the connector fail validation. Left out, it asks, like
+ * any tool without a policy.
+ */
+export function toolSnapshot(tool: ListedTool): McpToolSnapshot | null {
+	const name = typeof tool.name === 'string' ? tool.name.trim() : ''
+	if (!name || name.length > MAX_TOOL_NAME) return null
 	return {
-		name: clip(tool.name, 128) ?? '(unnamed)',
+		name,
 		title: clip(tool.title ?? tool.annotations?.title, 120),
 		description: clip(tool.description, 500),
 		readOnly: hint(tool.annotations?.readOnlyHint),
@@ -227,7 +238,8 @@ export async function probeMcpServer(input: {
 				const result = await client.listTools(cursor ? { cursor } : undefined, { timeout: timeoutMs })
 				for (const tool of result.tools) {
 					if (tools.length >= MAX_TOOLS) break
-					tools.push(toolSnapshot(tool as ListedTool))
+					const snapshot = toolSnapshot(tool as ListedTool)
+					if (snapshot) tools.push(snapshot)
 				}
 				cursor = result.nextCursor
 				if (!cursor) break

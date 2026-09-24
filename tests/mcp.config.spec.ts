@@ -191,6 +191,18 @@ test.describe('an edit merges with secrets it never saw', () => {
 		})
 	})
 
+	test('removing a stored header and adding it back under another case replaces it, in either order', () => {
+		// The edit form sends its new headers first and the stored rows' removals after them.
+		expect(applySecretsPatch(stored, { headers: { 'x-team': 'red', 'X-Team': null } })).toEqual({
+			bearerToken: 'old-token',
+			headers: { 'X-Api-Key': 'old-key', 'x-team': 'red' },
+		})
+		expect(applySecretsPatch(stored, { headers: { 'X-Team': null, 'x-team': 'red' } })).toEqual({
+			bearerToken: 'old-token',
+			headers: { 'X-Api-Key': 'old-key', 'x-team': 'red' },
+		})
+	})
+
 	test('a patch of blanks asks for nothing, so an edit to the label leaves the secrets alone', () => {
 		// What the edit form sends when only the label changed.
 		expect(secretsPatchRequestsChange({ bearerToken: '', headers: {} })).toBe(false)
