@@ -17,6 +17,8 @@ import {
 import { fuzzyMatch, highlightSegments, rankItems, rankPaths, splitPathForDisplay } from '../src/lib/chat/mention-match'
 import {
 	agentCommand,
+	CHOICE_LIMIT,
+	choiceMenu,
 	compactCommand,
 	effortCommand,
 	findCommand,
@@ -27,6 +29,7 @@ import {
 	rankCommands,
 	researchCommand,
 	resolveChoice,
+	type ComposerChoice,
 	type ComposerCommand,
 } from '../src/lib/chat/composer-commands'
 
@@ -339,5 +342,62 @@ test.describe('palette commands', () => {
 		const ordered = orderCommands([compactCommand(() => {}), sdk])
 		expect(ordered.map((c) => c.name)).toEqual(['compact', 'review'])
 		expect(ordered[1].source).toBe('sdk')
+	})
+})
+
+test.describe('choice lists — the rows shown and the row they start on', () => {
+	/** A catalogue in name order, like the model list, with the current value at `currentAt`. */
+	function catalogue(size: number, currentAt: number | null): ComposerChoice[] {
+		return Array.from({ length: size }, (_, i) => {
+			const n = String(i).padStart(3, '0')
+			return { id: `vendor/m-${n}`, label: `Model ${n}`, current: i === currentAt }
+		})
+	}
+
+	test('a current value past the cut leads the list, once, and is the row it starts on', () => {
+		const choices = catalogue(300, 180)
+		const { matches, initial } = choiceMenu('', choices)
+		expect(matches).toHaveLength(CHOICE_LIMIT)
+		expect(initial).toBe(0)
+		expect(matches[initial].item.id).toBe('vendor/m-180')
+		expect(matches.filter((match) => match.item.current)).toHaveLength(1)
+		// Everything else keeps the catalogue's order.
+		expect(matches.slice(1).map((match) => match.item.id)).toEqual(
+			choices.slice(0, CHOICE_LIMIT - 1).map((choice) => choice.id),
+		)
+	})
+
+	test('a current value inside the cut stays where it is, and the list starts on it', () => {
+		const { matches, initial } = choiceMenu('', catalogue(300, 12))
+		expect(matches).toHaveLength(CHOICE_LIMIT)
+		expect(initial).toBe(12)
+		expect(matches[12].item.current).toBe(true)
+		expect(matches[0].item.id).toBe('vendor/m-000')
+	})
+
+	test('typing narrows the list and starts on the best match, not on the current value', () => {
+		const { matches, initial } = choiceMenu('model 250', catalogue(300, 180))
+		expect(initial).toBe(0)
+		expect(matches[0].item.id).toBe('vendor/m-250')
+	})
+
+	test('no current value, or nothing loaded yet, starts on the first row', () => {
+		expect(choiceMenu('', catalogue(10, null)).initial).toBe(0)
+		expect(choiceMenu('', [])).toEqual({ matches: [], initial: 0 })
+	})
+
+	test('a model list that arrives after the menu opened starts on the current model, not on row 0', () => {
+		// The composer opens the /model list before the catalogue has loaded, and works the menu
+		// out again when it arrives; the start row must come from the loaded list.
+		let loaded: Array<{ id: string; name: string }> | null = null
+		const model = modelCommand({ current: () => 'vendor/m-180', models: () => loaded, pick: () => {} })
+		const choices = () => (model.argument?.kind === 'choice' ? model.argument.choices() : null)
+
+		expect(choices()).toBeNull()
+		expect(choiceMenu('', choices() ?? [])).toEqual({ matches: [], initial: 0 })
+
+		loaded = catalogue(300, null).map((choice) => ({ id: choice.id, name: choice.label }))
+		const after = choiceMenu('', choices() ?? [])
+		expect(after.matches[after.initial].item).toMatchObject({ id: 'vendor/m-180', current: true })
 	})
 })

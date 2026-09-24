@@ -20,11 +20,11 @@
 	import {
 		agentCommand,
 		attachCommand,
+		choiceMenu,
 		effortCommand,
 		findCommand,
 		modelCommand,
 		orderCommands,
-		rankChoices,
 		rankCommands,
 		REASONING_OPTIONS,
 		resolveChoice,
@@ -139,15 +139,16 @@
 				return
 			}
 			const count = view.items.length
-			if (count > 0 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+			const plain = !e.altKey && !e.ctrlKey && !e.metaKey
+			if (count > 0 && plain) {
 				if (e.key === 'ArrowDown') {
 					e.preventDefault()
-					activeIndex = (active + 1) % count
+					chosenIndex = (active + 1) % count
 					return
 				}
 				if (e.key === 'ArrowUp') {
 					e.preventDefault()
-					activeIndex = (active - 1 + count) % count
+					chosenIndex = (active - 1 + count) % count
 					return
 				}
 				if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
@@ -156,7 +157,16 @@
 					return
 				}
 			}
-			// An open menu with nothing in it does not swallow Enter: the message sends as typed.
+			// The file search has not answered yet. Enter here would send "@READ" as typed while the
+			// user is waiting for README.md, so Enter and Tab wait for the list instead.
+			if (count === 0 && plain && view.kind === 'mention' && view.loading) {
+				if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
+					e.preventDefault()
+					return
+				}
+			}
+			// An open menu that has settled with nothing in it does not swallow Enter: the message
+			// sends as typed.
 		}
 
 		if (e.key === 'Enter' && !e.shiftKey) {
@@ -202,7 +212,12 @@
 
 	let composerEl: HTMLDivElement | undefined = $state()
 	let trigger = $state<ComposerTrigger | null>(null)
-	let activeIndex = $state(0)
+	/**
+	 * The row the user moved the highlight to (arrow keys, or the pointer), or null until they
+	 * do. While it is null the highlight follows the menu's own starting row, which can change
+	 * after the menu opens: the model list arrives, and the current model's row is only known then.
+	 */
+	let chosenIndex = $state<number | null>(null)
 	let placement = $state<'above' | 'below'>('above')
 	/** The trigger Escape closed. It stays closed until the caret leaves it. */
 	let dismissed: ComposerTrigger | null = null
@@ -254,7 +269,15 @@
 	})
 	const allCommands = $derived(orderCommands([...builtinCommands, ...commands]))
 
-	type MenuBase = { title: string; items: SuggestItem[]; loading: boolean; emptyText: string; footer: string | null }
+	type MenuBase = {
+		title: string
+		items: SuggestItem[]
+		/** The row highlighted until the user moves it. */
+		initial: number
+		loading: boolean
+		emptyText: string
+		footer: string | null
+	}
 	type MenuView = MenuBase &
 		(
 			| { kind: 'mention'; entries: MentionResult[] }
@@ -299,6 +322,7 @@
 				title: 'Files in this chat’s workspace',
 				entries: mentionResults,
 				items: mentionResults.map(mentionItem),
+				initial: 0,
 				loading: mentionLoading,
 				emptyText:
 					mentionMessage ?? (trigger.query ? `No files match “${trigger.query}”.` : 'This workspace has no files yet.'),
@@ -312,6 +336,7 @@
 				title: 'Commands',
 				entries: ranked.map((match) => match.item),
 				items: ranked.map((match) => commandItem(match.item, match.key === 0 ? match.indices : [])),
+				initial: 0,
 				loading: false,
 				emptyText: 'No matching command. Enter sends the message as typed.',
 				footer: null,
@@ -324,18 +349,21 @@
 				kind: 'hint',
 				title: `/${command.name} ${command.argument.placeholder}`,
 				items: [],
+				initial: 0,
 				loading: false,
 				emptyText: command.argument.hint,
 				footer: null,
 			}
 		}
 		const choices = command.argument.choices()
-		const ranked = choices ? rankChoices(trigger.query, choices) : []
+		// The rows and the row to start on, worked out together, so the start is a row on screen.
+		const { matches: ranked, initial } = choiceMenu(trigger.query, choices ?? [])
 		return {
 			kind: 'choice',
 			command,
 			title: `/${command.name}: ${command.description}`,
 			entries: ranked.map((match) => match.item),
+			initial,
 			items: ranked.map(({ item, indices, key }) => ({
 				id: item.id,
 				label: item.label,
@@ -350,7 +378,9 @@
 		}
 	})
 
-	const active = $derived(menu && menu.items.length > 0 ? Math.min(activeIndex, menu.items.length - 1) : 0)
+	const active = $derived(
+		menu && menu.items.length > 0 ? Math.min(chosenIndex ?? menu.initial, menu.items.length - 1) : 0,
+	)
 	const menuOpen = $derived(menu !== null)
 	const listOpen = $derived(menu !== null && menu.items.length > 0)
 
@@ -382,7 +412,8 @@
 		if (sameTrigger(trigger, next)) return
 		const previous = trigger
 		trigger = next
-		activeIndex = initialActiveIndex(next)
+		// A new trigger, or a new query: the highlight goes back to the menu's own starting row.
+		chosenIndex = null
 		if (next?.kind === 'mention') {
 			// A different `@` from the one on screen: its old results would be wrong, not just stale.
 			if (previous?.kind !== 'mention' || previous.start !== next.start) {
@@ -394,14 +425,6 @@
 		} else {
 			cancelMentionSearch()
 		}
-	}
-
-	/** A choice list opened with nothing typed starts on the value in effect now. */
-	function initialActiveIndex(next: ComposerTrigger | null): number {
-		if (next?.kind !== 'argument' || next.query) return 0
-		const argument = findCommand(allCommands, next.name)?.argument
-		if (argument?.kind !== 'choice') return 0
-		return Math.max(0, argument.choices()?.findIndex((choice) => choice.current) ?? 0)
 	}
 
 	function closeMenu() {
@@ -618,7 +641,7 @@
 				footer={menu.footer}
 				{placement}
 				onPick={(index) => void accept(index)}
-				onHover={(index) => (activeIndex = index)}
+				onHover={(index) => (chosenIndex = index)}
 			/>
 		{/if}
 

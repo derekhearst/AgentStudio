@@ -24,7 +24,7 @@ import { sse } from './chat-stream-script'
 
 type Seeded = { conversationId: string; projectPath: string | null }
 
-async function seedChat(prefix: string, options: { withProject: boolean }): Promise<Seeded> {
+async function seedChat(prefix: string, options: { withProject: boolean; model?: string }): Promise<Seeded> {
 	const sql = getSql()
 	const userId = await getActiveUserId()
 	let projectId: string | null = null
@@ -41,7 +41,7 @@ async function seedChat(prefix: string, options: { withProject: boolean }): Prom
 	}
 	const [row] = await sql<{ id: string }[]>`
 		insert into conversations (user_id, agent_id, project_id, title, model, total_tokens, total_cost)
-		values (${userId}, ${await getBuiltinChatAgentId()}, ${projectId}, ${`${prefix} convo`}, 'anthropic/claude-sonnet-4', 0, '0')
+		values (${userId}, ${await getBuiltinChatAgentId()}, ${projectId}, ${`${prefix} convo`}, ${options.model ?? 'anthropic/claude-sonnet-4'}, 0, '0')
 		returning id
 	`
 	return { conversationId: row.id, projectPath }
@@ -78,6 +78,35 @@ async function openChat(page: Page, conversationId: string) {
 }
 
 const suggest = (page: Page) => page.getByTestId('composer-suggest')
+
+/**
+ * Hold every `@` search until `release()`, so a spec can act while the list is still loading.
+ * The requests then go through to the real server.
+ */
+async function holdMentionSearches(page: Page) {
+	let release!: () => void
+	const held = new Promise<void>((resolve) => (release = resolve))
+	await page.route('**/_app/remote/**', async (route) => {
+		if (new URL(route.request().url()).pathname.endsWith('/searchWorkspaceFiles')) await held
+		await route.fallback()
+	})
+	return release
+}
+
+/**
+ * The OpenRouter model catalogue in the order the app lists it (by name), or null when it
+ * cannot be reached. It answers without a key, which is also how the app's picker gets it.
+ */
+async function modelCatalogue(): Promise<Array<{ id: string; name: string }> | null> {
+	try {
+		const response = await fetch('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(15_000) })
+		if (!response.ok) return null
+		const body = (await response.json()) as { data?: Array<{ id: string; name: string }> }
+		return (body.data ?? []).map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+	} catch {
+		return null
+	}
+}
 
 /** A tap on a phone, a click on a desktop: the row has to take either without losing focus. */
 async function pick(locator: ReturnType<Page['locator']>, testInfo: TestInfo) {
@@ -218,6 +247,40 @@ test.describe('chat composer — @ mentions', () => {
 		}
 	})
 
+	test('Enter while the file search is still loading waits for the list instead of sending', async ({ page }) => {
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('composer-mention-loading')
+		let seeded: Seeded | null = null
+		try {
+			await authenticateContext(page.context())
+			seeded = await seedChat(prefix, { withProject: true })
+			const sends = await recordSends(page, seeded.conversationId)
+			const release = await holdMentionSearches(page)
+			const composer = await openChat(page, seeded.conversationId)
+
+			await composer.click()
+			await composer.pressSequentially('look at @READ')
+			await expect(suggest(page)).toContainText('Searching…')
+			// Neither key sends the half-typed mention, or takes focus away from the box.
+			await composer.press('Enter')
+			await composer.press('Tab')
+			await page.waitForTimeout(300)
+			expect(sends).toHaveLength(0)
+			await expect(composer).toHaveValue('look at @READ')
+			await expect(composer).toBeFocused()
+
+			// Once the list arrives, Enter takes the file the user was waiting for.
+			release()
+			const list = page.getByRole('listbox', { name: /Files in this chat/ })
+			await expect(list.getByRole('option')).toHaveCount(1, { timeout: 15_000 })
+			await composer.press('Enter')
+			await expect(composer).toHaveValue('look at `README.md` ')
+			expect(sends).toHaveLength(0)
+		} finally {
+			await cleanup(prefix, seeded)
+		}
+	})
+
 	test('Enter while an IME is composing neither sends nor picks', async ({ page }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('composer-ime')
@@ -352,6 +415,43 @@ test.describe('chat composer — / commands', () => {
 				'reasoning:high',
 			)
 			await expect(page.getByTestId('composer-notice')).toContainText('Reasoning effort: high')
+			expect(sends).toHaveLength(0)
+		} finally {
+			await cleanup(prefix, seeded)
+		}
+	})
+
+	test('/model starts on the current model, even one past the first 50 that loads after the list opens', async ({
+		page,
+	}) => {
+		test.setTimeout(90_000)
+		const catalogue = await modelCatalogue()
+		test.skip(!catalogue || catalogue.length < 120, 'the OpenRouter model catalogue is not reachable from here')
+		// Well past the 50 rows the list shows with nothing typed.
+		const current = catalogue![100]
+		const prefix = uniquePrefix('composer-model')
+		let seeded: Seeded | null = null
+		try {
+			await authenticateContext(page.context())
+			seeded = await seedChat(prefix, { withProject: false, model: current.id })
+			const sends = await recordSends(page, seeded.conversationId)
+			const composer = await openChat(page, seeded.conversationId)
+
+			// The first /model on the page: the list opens before the composer has the catalogue.
+			await composer.click()
+			await composer.pressSequentially('/model ')
+			const list = page.getByRole('listbox', { name: /\/model/ })
+			const options = list.getByRole('option')
+			await expect(options).toHaveCount(50, { timeout: 30_000 })
+			// The current model leads the list, marked and highlighted, so Enter keeps it.
+			await expect(options.first()).toContainText(current.name)
+			await expect(options.first()).toContainText('current')
+			await expect(options.first()).toHaveAttribute('aria-selected', 'true')
+			await expect(list.locator('[aria-selected="true"]')).toHaveCount(1)
+			await composer.press('Enter')
+
+			await expect(page.getByTestId('composer-notice')).toContainText(`Model: ${current.name}`)
+			await expect(composer).toHaveValue('')
 			expect(sends).toHaveLength(0)
 		} finally {
 			await cleanup(prefix, seeded)

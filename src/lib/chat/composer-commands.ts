@@ -12,7 +12,7 @@
  * Whoever builds a command hands it the functions it needs.
  */
 
-import { rankItems } from './mention-match'
+import { rankItems, type RankedItem } from './mention-match'
 import type { ReasoningEffort } from './reasoning-effort'
 import { normalizePermissionMode, type ConversationPermissionMode } from '../engine/permission-mode'
 
@@ -83,8 +83,35 @@ export function rankCommands(query: string, commands: readonly ComposerCommand[]
 	return rankItems(query, commands, (command) => [command.name, ...(command.aliases ?? [])])
 }
 
-export function rankChoices(query: string, choices: readonly ComposerChoice[], limit = 50) {
+/** How many choices a list shows at once. The model catalogue runs to hundreds. */
+export const CHOICE_LIMIT = 50
+
+export function rankChoices(query: string, choices: readonly ComposerChoice[], limit = CHOICE_LIMIT) {
 	return rankItems(query, choices, (choice) => [choice.label, choice.id], limit)
+}
+
+/**
+ * A choice list as the menu shows it, and the row it starts on. The two come from the same
+ * array, so the starting row is always a row that is on screen.
+ *
+ * With nothing typed, the list keeps its given order and starts on the value in effect now, so
+ * Enter keeps it. A long list is cut to `limit`, and the current value can sort past the cut
+ * (most of the model catalogue does): it then leads the list, so it is still shown, marked and
+ * highlighted, rather than the highlight landing on whichever row happens to be at its index.
+ * With something typed, the best match leads and starts highlighted.
+ */
+export function choiceMenu(
+	query: string,
+	choices: readonly ComposerChoice[],
+	limit = CHOICE_LIMIT,
+): { matches: RankedItem<ComposerChoice>[]; initial: number } {
+	const matches = rankChoices(query, choices, limit)
+	if (query.trim()) return { matches, initial: 0 }
+	const shown = matches.findIndex((match) => match.item.current)
+	if (shown >= 0) return { matches, initial: shown }
+	const current = choices.find((choice) => choice.current)
+	if (!current || limit < 1) return { matches, initial: 0 }
+	return { matches: [{ item: current, score: 0, indices: [], key: 0 }, ...matches.slice(0, limit - 1)], initial: 0 }
 }
 
 /**

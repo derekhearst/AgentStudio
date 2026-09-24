@@ -156,12 +156,13 @@ Typing `/` as the very first character of the message opens the command palette.
 
 How it behaves:
 
-1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and highlighted first. Typing after the command narrows the list (`/model sonnet`).
-2. `/research` takes free text: type the question after it and press Enter.
-3. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
-4. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
-5. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds.
-6. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
+1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and starts highlighted, so Enter keeps it. Typing after the command narrows the list (`/model sonnet`), and the best match is then highlighted instead.
+2. The model list is long, so it shows 50 models at a time. When the current model is not among those 50, it is shown first, so it is never missing from the list. The first time the list opens on a page it may still be loading; the highlight lands on the current model when the list arrives, unless you have already moved it with the arrow keys or the pointer.
+3. `/research` takes free text: type the question after it and press Enter.
+4. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
+5. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
+6. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds.
+7. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
 
 #### Keyboard and touch
 
@@ -170,7 +171,8 @@ How it behaves:
 | Up / Down | Move through the list (it wraps around) |
 | Enter or Tab | Take the highlighted entry |
 | Escape | Close the list. It stays closed until the cursor leaves that word |
-| Enter, when the list is empty | Sends the message as typed |
+| Enter or Tab, while the file list is still searching | Nothing yet. Pick from the list once it arrives, or press Escape to close it and send the message as typed |
+| Enter, when the list has finished and is empty | Sends the message as typed |
 
 While a Japanese, Chinese or Korean input method is composing, Enter confirms the composition. It never sends the message or picks from a list; before this, Enter could send half-composed text.
 
