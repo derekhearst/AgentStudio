@@ -248,6 +248,83 @@ test.describe('the live question card', () => {
 		}
 	})
 
+	test('questions asked at once are each answered under their own token', async ({ page }) => {
+		// The CLI runs AskUserQuestion calls concurrently, so one message can open several
+		// cards. Each card answers for itself; the composer answers the newest one still open.
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('chat-auq-many')
+		await cleanupPrefixedRecords(prefix)
+		await authenticateContext(page.context())
+		const conversation = await seedConversation(prefix, { userId: await getActiveUserId() })
+		const runId = randomUUID()
+		const [layout, features] = PENDING
+		const [theme] = readAskQuestions({
+			questions: [
+				{
+					question: 'Which theme should it start in?',
+					header: 'Theme',
+					multiSelect: false,
+					options: [
+						{ label: 'Light', description: 'Light background' },
+						{ label: 'Dark', description: 'Dark background' },
+					],
+				},
+			],
+		})
+		const token = (id: string) => `${runId}:ask:${id}`
+		const { release } = await scriptHeldRun(page, conversation.id, [
+			{ id: 1, event: 'context_stats', data: { runId, tokenEstimate: 10, contextWindow: 200_000 } },
+			{ id: 2, event: 'ask_user', data: { id: 'toolu_m1', name: 'AskUserQuestion', token: token('toolu_m1'), questions: [layout] } },
+			{ id: 3, event: 'ask_user', data: { id: 'toolu_m2', name: 'AskUserQuestion', token: token('toolu_m2'), questions: [features] } },
+			{ id: 4, event: 'ask_user', data: { id: 'toolu_m3', name: 'AskUserQuestion', token: token('toolu_m3'), questions: [theme] } },
+		])
+		const posted: Array<{ token: string; answers: Record<string, string> }> = []
+		await page.route(
+			(url) => url.pathname === `/chat/${conversation.id}/ask-user`,
+			(route) => {
+				posted.push(route.request().postDataJSON())
+				return route.fulfill({ json: { resolved: true } })
+			},
+		)
+
+		try {
+			await openAndSend(page, conversation.id, `${prefix} set it up`)
+			const cards = page.getByRole('main').locator('.ask-user-card')
+			await expect(cards).toHaveCount(3, { timeout: 30_000 })
+			const [layoutCard, featuresCard, themeCard] = [cards.nth(0), cards.nth(1), cards.nth(2)]
+			await expect(layoutCard.getByText(LAYOUT.question)).toBeVisible()
+
+			// The oldest card answers under its own token, not the newest one's.
+			await layoutCard.getByRole('button', { name: /^Top bar/ }).click()
+			await layoutCard.getByRole('button', { name: 'Submit', exact: true }).click()
+			await expect.poll(() => posted.length).toBe(1)
+			expect(posted[0]).toEqual({ token: token('toolu_m1'), answers: { [LAYOUT.question]: 'Top bar' } })
+			await expect(layoutCard.locator('.user-bubble', { hasText: /^Top bar$/ })).toBeVisible()
+			// The others are still waiting.
+			await expect(featuresCard.getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+			await expect(themeCard.getByRole('button', { name: 'Submit', exact: true })).toBeVisible()
+
+			// The newest card, answered on the card.
+			await themeCard.getByRole('button', { name: /^Dark/ }).click()
+			await themeCard.getByRole('button', { name: 'Submit', exact: true }).click()
+			await expect.poll(() => posted.length).toBe(2)
+			expect(posted[1]).toEqual({ token: token('toolu_m3'), answers: { [theme.question]: 'Dark' } })
+			await expect(themeCard.locator('.user-bubble', { hasText: /^Dark$/ })).toBeVisible()
+
+			// A reply in the composer goes to the one still open.
+			const composer = page.getByPlaceholder('Message AgentStudio...')
+			await composer.fill('Search')
+			await page.getByRole('button', { name: /send message/i }).first().click()
+			await expect.poll(() => posted.length).toBe(3)
+			expect(posted[2]).toEqual({ token: token('toolu_m2'), answers: { Features: 'Search' } })
+			await expect(featuresCard.locator('.user-bubble', { hasText: /^Search$/ })).toBeVisible()
+		} finally {
+			release()
+			await page.unrouteAll({ behavior: 'ignoreErrors' })
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
 	test("an answer that arrives only as the call's result still shows on the card", async ({ page }) => {
 		test.setTimeout(90_000)
 		const prefix = uniquePrefix('chat-auq-result')

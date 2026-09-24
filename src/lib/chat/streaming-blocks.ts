@@ -9,8 +9,13 @@
  * stats, or building the persistence payload on stop / error).
  */
 
-import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
-import { ASK_USER_QUESTION_TOOL, LEGACY_ASK_USER_TOOL, isAskUserToolName } from '../engine/ask-user-question'
+import { getAskUserQuestionsFromTool, parseJsonFallback } from '$lib/chat/tool-block-helpers'
+import {
+	ASK_USER_QUESTION_TOOL,
+	LEGACY_ASK_USER_TOOL,
+	isAskUserToolName,
+	type AskQuestion,
+} from '../engine/ask-user-question'
 import type { ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
 
@@ -772,6 +777,43 @@ export function applyAskUserAnswered(
 			? { ...b, status: 'completed' as const, result: JSON.stringify({ answers }) }
 			: b,
 	)
+}
+
+/** The question the chat page's composer and modal answer: one card's token and questions. */
+export type PendingAskUser = { token: string; questions: AskQuestion[] }
+
+/** The answer token of the question card a call's result landed on, if it is one. */
+export function askUserTokenFor(blocks: StreamingBlock[], id: string): string | null {
+	const block = blocks.find((b) => b.kind === 'tool' && b.id === id)
+	return block?.kind === 'tool' && isAskUserToolName(block.name) ? (block.token ?? null) : null
+}
+
+/**
+ * Which question the page treats as pending once the card for `settledToken` is answered or
+ * has its call's result (#4).
+ *
+ * The CLI runs AskUserQuestion calls concurrently (`isConcurrencySafe`), so one assistant
+ * message can put two cards on screen, each answered under its own token. The page keeps one
+ * of them as *the* pending question — the one the composer's free-text reply and the modal
+ * answer. Settling another card leaves it alone. Settling it hands the role to the newest
+ * card still waiting, so a composer reply still has a question to go to; with none, nothing
+ * is pending. An unknown `settledToken` (null) just re-reads which card is still waiting.
+ */
+export function settlePendingAskUser(
+	blocks: StreamingBlock[],
+	current: PendingAskUser | null,
+	settledToken: string | null,
+): PendingAskUser | null {
+	if (current && settledToken !== null && current.token !== settledToken) return current
+	for (let i = blocks.length - 1; i >= 0; i -= 1) {
+		const block = blocks[i]
+		if (block.kind !== 'tool' || !isAskUserToolName(block.name) || !block.token) continue
+		if (block.token === settledToken) continue
+		if (block.status !== 'pending' && block.status !== 'approved' && block.status !== 'executing') continue
+		const questions = getAskUserQuestionsFromTool(block)
+		if (questions.length > 0) return { token: block.token, questions }
+	}
+	return null
 }
 
 /**
