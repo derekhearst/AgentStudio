@@ -27,6 +27,9 @@ export const auditActionEnum = pgEnum('audit_action', [
 	'user.created',
 	'user.deactivated',
 	'user.role.changed',
+	'mcp_server.created',
+	'mcp_server.updated',
+	'mcp_server.deleted',
 ])
 
 export const auditEvents = pgTable(

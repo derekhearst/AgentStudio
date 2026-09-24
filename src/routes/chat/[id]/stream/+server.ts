@@ -72,6 +72,7 @@ import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
 import { prepareRunWorkspace, type RunWorkspace } from '$lib/workspace/workspace.server'
 import { resolveToolScope } from '$lib/engine/tool-scope'
+import { loadRunMcpServers } from '$lib/mcp/mcp.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -410,6 +411,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}).catch(abandonSetup)
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
 
+	/*
+	 * #17 — the operator's connectors, loaded per run like the two above so an edit on Settings →
+	 * Connectors takes effect on the next turn. None for an agent with a fixed tool list. Never
+	 * throws: a connector that cannot be used is left out and named in a notice.
+	 */
+	const connectors = await loadRunMcpServers({ userId: user.id, runSource: RUN_SOURCE, toolScoped: Boolean(toolScope) })
+	if (connectors.skipped.length > 0) {
+		logger.warn('[chat/stream] connectors left out of the run', { runId: run.id, skipped: connectors.skipped })
+	}
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
@@ -419,6 +430,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
 			toolScope,
+			externalMcp: connectors,
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
@@ -532,6 +544,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 * behaviour never was.
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
+				for (const notice of connectors.notices) await emit('notice', notice)
 
 				const summary = await runEngineStream(
 					{
@@ -612,6 +625,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
 						toolScope,
+						mcpConnectors: connectors.connectors,
 						approvalToken: approvalTokenFor,
 						// Confines every built-in filesystem call to this run's workspace (#15) —
 						// the same root the SDK was given as its cwd, so a relative path means the
