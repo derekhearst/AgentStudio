@@ -17,6 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport, StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { SSEClientTransport, SseError } from '@modelcontextprotocol/sdk/client/sse.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { EgressBlockedError, EgressTooLargeError } from '$lib/tools/egress.server'
 import { createGuardedFetch, type GuardedFetch } from '$lib/tools/egress-fetch.server'
 import type { McpToolSnapshot, McpTransport } from './mcp-config'
@@ -38,9 +39,14 @@ export type McpProbeResult =
 			needsAuth: boolean
 	  }
 
+function noAnswerWithin(ms: number): string {
+	const seconds = Math.max(1, Math.round(ms / 1000))
+	return `No answer within ${seconds} ${seconds === 1 ? 'second' : 'seconds'}.`
+}
+
 class ProbeTimeoutError extends Error {
 	constructor(ms: number) {
-		super(`No answer within ${Math.round(ms / 1000)} seconds.`)
+		super(noAnswerWithin(ms))
 		this.name = 'ProbeTimeoutError'
 	}
 }
@@ -90,8 +96,20 @@ function errorCode(err: unknown): string | null {
 /** Replace any secret that turns up in `text` — a server may echo a header back in an error. */
 export function redactSecrets(text: string, secrets: readonly string[]): string {
 	let out = text
-	for (const secret of secrets) {
+	// Longest first, so a whole `Bearer <token>` goes before the token inside it.
+	for (const secret of [...secrets].sort((a, b) => b.length - a.length)) {
 		if (secret.length >= 4) out = out.split(secret).join('[redacted]')
+	}
+	return out
+}
+
+/** Every header value, and a bearer token on its own as well — a server may echo either. */
+export function secretsIn(headers: Record<string, string>): string[] {
+	const out: string[] = []
+	for (const value of Object.values(headers)) {
+		out.push(value)
+		const token = /^Bearer\s+(.+)$/i.exec(value)?.[1]
+		if (token) out.push(token)
 	}
 	return out
 }
@@ -99,7 +117,7 @@ export function redactSecrets(text: string, secrets: readonly string[]): string 
 /** A failure, in words the operator can act on. */
 export function describeProbeFailure(
 	err: unknown,
-	context: { transport: McpTransport; sentCredentials: boolean; secrets: readonly string[] },
+	context: { transport: McpTransport; sentCredentials: boolean; secrets: readonly string[]; timeoutMs?: number },
 ): { error: string; needsAuth: boolean } {
 	const status = statusOf(err)
 	const message = err instanceof Error ? err.message : String(err)
@@ -140,6 +158,10 @@ export function describeProbeFailure(
 	if (err instanceof EgressTooLargeError || err instanceof ProbeTimeoutError) {
 		return { needsAuth: false, error: message }
 	}
+	// The MCP client's own per-request deadline, which is the same length as ours.
+	if (err instanceof McpError && err.code === ErrorCode.RequestTimeout) {
+		return { needsAuth: false, error: noAnswerWithin(context.timeoutMs ?? PROBE_TIMEOUT_MS) }
+	}
 	if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
 		return { needsAuth: false, error: 'The host name does not resolve. Check the URL.' }
 	}
@@ -169,8 +191,8 @@ export async function probeMcpServer(input: {
 	fetch?: GuardedFetch
 }): Promise<McpProbeResult> {
 	const timeoutMs = input.timeoutMs ?? PROBE_TIMEOUT_MS
-	const secrets = Object.values(input.headers)
-	const context = { transport: input.transport, sentCredentials: secrets.length > 0, secrets }
+	const secrets = secretsIn(input.headers)
+	const context = { transport: input.transport, sentCredentials: secrets.length > 0, secrets, timeoutMs }
 
 	let url: URL
 	try {
