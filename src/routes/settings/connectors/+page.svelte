@@ -178,9 +178,9 @@
 			<div class="space-y-1.5 text-xs leading-relaxed opacity-75">
 				<p>
 					A connector's tools join chats whose agent has no fixed tool list. Each tool asks for your approval every
-					time until you set it to <strong>Allow</strong> (runs without asking in the Ask and Accept-edits modes) or
-					<strong>Block</strong> (refused in every mode). Plan mode refuses connector tools; Bypass runs every tool that is
-					not blocked.
+					time until you set it to <strong>Allow</strong> (runs without asking in the Ask and Accept-edits modes, unless
+					"Require approval for all tools" is on) or <strong>Block</strong> (refused in every mode). Plan mode refuses
+					connector tools; Bypass runs every tool that is not blocked.
 				</p>
 				<p>
 					Remote servers only, over Streamable HTTP or SSE, with a bearer token or headers for sign-in. Servers that need

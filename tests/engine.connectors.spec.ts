@@ -154,15 +154,30 @@ test.describe('the gate, across every mode', () => {
 		}
 	})
 
-	test('the per-tool settings do not override a connector’s allow — that list enumerates our tools', () => {
-		expect(
-			resolveToolGate({
-				mode: 'default',
+	test('“Require approval for all tools” still asks for a tool its connector allows', () => {
+		// For an external name the settings callback is true only under the `'*'` wildcard: the
+		// per-tool list enumerates our registry, so nobody can tick a connector's tool on it.
+		for (const mode of ['default', 'acceptEdits'] as const) {
+			const decision = resolveToolGate({
+				mode,
 				toolName: 'mcp__github__search_issues',
 				settingsRequiresApproval: true,
 				externalPolicy: 'allow',
-			}).gate,
-		).toBe('allow')
+			})
+			expect(decision.gate, mode).toBe('ask')
+			expect(decision.reason, mode).toMatch(/Require approval for all tools/)
+		}
+	})
+
+	test('the settings never loosen a connector tool: ask still asks, block still refuses', () => {
+		expect(
+			resolveToolGate({ mode: 'default', toolName: 'mcp__github__x', settingsRequiresApproval: false, externalPolicy: 'ask' })
+				.gate,
+		).toBe('ask')
+		expect(
+			resolveToolGate({ mode: 'default', toolName: 'mcp__github__x', settingsRequiresApproval: false, externalPolicy: 'block' })
+				.gate,
+		).toBe('deny')
 	})
 
 	test('a policy means nothing for a tool that is not external', () => {

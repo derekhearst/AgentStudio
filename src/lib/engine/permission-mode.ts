@@ -347,6 +347,9 @@ const EXTERNAL_REASON =
 const EXTERNAL_BLOCKED_REASON =
 	'This tool is blocked in its connector settings (Settings → Connectors), so it is refused in every permission mode.'
 
+const EXTERNAL_ALL_TOOLS_REASON =
+	'"Require approval for all tools" is on in Settings → Tool Approval, so this connector tool asks even though its connector allows it.'
+
 /**
  * The single decision point. Every caller — `canUseTool`, the pending-block predicate, the
  * HUD — derives its behaviour from this so there is one place to read and one place to test.
@@ -387,16 +390,20 @@ export function resolveToolGate(input: ToolGateInput): ToolGateDecision {
 	 *           that would otherwise ask. Plan mode still refuses it (an allowed tool can
 	 *           still write), and a mode added later still lands on `ask`.
 	 *
-	 * The per-tool *settings* (`settingsRequiresApproval`, the `'*'` wildcard included) are
-	 * not consulted for an external tool at all: that list enumerates our registry, and the
-	 * connector's own page is where its tools are decided.
+	 * The per-tool *settings* never loosen anything here: their list enumerates our registry,
+	 * and the connector's own page is where its tools are decided. They can only tighten: for
+	 * an external name `settingsRequiresApproval` is true only under "Require approval for all
+	 * tools" (the `'*'` wildcard — nobody can tick a connector's tool on that list), and "every
+	 * tool call pauses" includes a connector tool its connector allows.
 	 */
 	if (capabilities.has('external')) {
 		const policy = input.externalPolicy ?? 'ask'
 		if (policy === 'block') return { gate: 'deny', reason: EXTERNAL_BLOCKED_REASON }
 		if (input.mode !== 'plan' && input.mode !== 'bypassPermissions') {
 			if (policy === 'allow' && (input.mode === 'default' || input.mode === 'acceptEdits')) {
-				return { gate: 'allow', reason: null }
+				return input.settingsRequiresApproval
+					? { gate: 'ask', reason: EXTERNAL_ALL_TOOLS_REASON }
+					: { gate: 'allow', reason: null }
 			}
 			return { gate: 'ask', reason: EXTERNAL_REASON }
 		}
