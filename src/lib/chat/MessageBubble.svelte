@@ -12,6 +12,7 @@
 		type SavedBlock,
 	} from './message-bubble-helpers';
 	import type { ChatMessageMetadata, PersistedToolCall } from './streaming-blocks';
+	import { isAskUserToolName } from '$lib/engine/ask-user-question';
 
 	type MessageRow = {
 		id: string;
@@ -40,12 +41,16 @@
 		onEdit,
 		onRegenerate,
 		canRegenerate = false,
+		canEdit = true,
 		modelChanged = true,
 	} = $props<{
 		message: MessageRow;
-		onEdit?: ((messageId: string, content: string) => Promise<void> | void) | undefined;
+		/** Resolves `false` when nothing was done (the user cancelled), which keeps the editor open. */
+		onEdit?: ((messageId: string, content: string) => Promise<boolean | void> | boolean | void) | undefined;
 		onRegenerate?: ((messageId: string) => Promise<void> | void) | undefined;
 		canRegenerate?: boolean;
+		/** False while a reply is streaming: an edit would cut the conversation out from under it. */
+		canEdit?: boolean;
 		/**
 		 * Whether this message's model differs from the previous assistant message's.
 		 * The tag is noise when it repeats down a whole conversation; it earns its place
@@ -77,6 +82,9 @@
 		const value = message.metadata?.reasoningTokens;
 		return typeof value === 'number' && value > 0 ? value : null;
 	});
+
+	/** #14 — the run that produced this reply; its page holds the full tool timeline. */
+	const runId = $derived(typeof message.metadata?.runId === 'string' && message.metadata.runId ? message.metadata.runId : null);
 
 	const savedBlocks = $derived.by(() => {
 		const blocks = message.metadata?.blocks;
@@ -113,6 +121,9 @@
 		if (!editing) return;
 
 		const onPointerDown = (event: PointerEvent) => {
+			// While a save is pending the page may be asking about restoring files (#24); a click
+			// in that dialog is not a click away from the editor.
+			if (editingBusy) return;
 			const target = event.target;
 			if (editorRoot && target instanceof Node && !editorRoot.contains(target)) {
 				cancelEditing();
@@ -120,7 +131,7 @@
 		};
 
 		const onEscape = (event: KeyboardEvent) => {
-			if (event.key === 'Escape') {
+			if (event.key === 'Escape' && !editingBusy) {
 				event.preventDefault();
 				cancelEditing();
 			}
@@ -151,8 +162,8 @@
 		if (!trimmed || editingBusy) return;
 		editingBusy = true;
 		try {
-			await onEdit?.(message.id, trimmed);
-			editing = false;
+			const done = await onEdit?.(message.id, trimmed);
+			if (done !== false) editing = false;
 		} finally {
 			editingBusy = false;
 		}
@@ -225,9 +236,11 @@
 					<p class="whitespace-pre-wrap">{message.content}</p>
 				</div>
 				<div class="console-msg__actions">
-					<button class="console-pill" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
-						<i class="mdi mdi-pencil-outline" aria-hidden="true"></i>
-					</button>
+					{#if canEdit}
+						<button class="console-pill" type="button" onclick={startEditing} title="Edit message" aria-label="Edit message">
+							<i class="mdi mdi-pencil-outline" aria-hidden="true"></i>
+						</button>
+					{/if}
 					{#if canRegenerate}
 						<button class="console-pill" type="button" onclick={() => onRegenerate?.(message.id)} title="Regenerate response" aria-label="Regenerate response">
 							<i class="mdi mdi-refresh" aria-hidden="true"></i>
@@ -254,7 +267,7 @@
 		{#if normalizedToolCalls.length > 0}
 			<div class="mb-2 w-full space-y-2">
 				{#each normalizedToolCalls as call, idx (`${message.id}-${idx}`)}
-				{#if call.name === 'ask_user'}
+				{#if isAskUserToolName(call.name)}
 					{@const askQuestions = getAskUserQuestions(call.arguments, call.result)}
 					{#if askQuestions.length > 0}
 						{#each askQuestions as q}
@@ -335,6 +348,10 @@
 						<span class="text-right">{message.totalMs ?? 'n/a'}{message.totalMs !== null ? 'ms' : ''}</span>
 						<span class="opacity-70">Tok/s</span>
 						<span class="text-right">{message.tokensPerSec ?? 'n/a'}</span>
+						{#if runId}
+							<span class="opacity-70">Run</span>
+							<a class="link link-hover text-right" href="/runs/{runId}" title="Every tool call and event in this run">Timeline</a>
+						{/if}
 					</div>
 				</div>
 			</div>

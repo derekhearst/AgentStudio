@@ -3,6 +3,9 @@ import { db } from '$lib/db.server'
 import { chatRuns, type PendingQuestionEntry } from '$lib/runs/runs.schema'
 import { DECISION_TIMEOUT_MS, POLL_INTERVAL_MS } from '$lib/runtime/constants'
 import { logger } from '$lib/observability/logger'
+import { scheduleNeedsInputNotification } from './needs-input.server'
+import { closePromptReviewItem, promptDedupeKey } from './prompt-review-items.server'
+import type { DecisionContext } from './approvals.server'
 
 export const QUESTION_TIMEOUT_MS = DECISION_TIMEOUT_MS
 
@@ -41,7 +44,8 @@ export async function enqueuePendingQuestion(
 		await tx.update(chatRuns).set(patch).where(eq(chatRuns.id, runId))
 	})
 	// Wave 5 #20 — open a review item so user_question prompts show up in /review even
-	// when the SSE client is disconnected. Best-effort + deduped by token.
+	// when the SSE client is disconnected. Best-effort + deduped by token. It is closed again
+	// when the question is answered or given up on; see prompt-review-items.server.
 	void (async () => {
 		try {
 			const { openReviewItem } = await import('$lib/observability/review.server')
@@ -55,20 +59,28 @@ export async function enqueuePendingQuestion(
 				summary: `Agent asked: ${summaryFragment}`,
 				payload: { token: entry.token, questions: entry.questions ?? [] },
 				runId,
-				dedupeKey: `question:${entry.token}`,
+				dedupeKey: promptDedupeKey('question', entry.token),
 			})
 		} catch (err) {
 			logger.warn('[questions] review item open failed (non-fatal)', { err })
 		}
 	})()
+	scheduleNeedsInputNotification({
+		runId,
+		token: entry.token,
+		kind: 'question',
+		summary: entry.questions?.[0]?.question || 'The agent is waiting for your answer',
+	})
 }
 
+/** Record the answers to a pending question, from the chat or from /review; its review item closes with it. */
 export async function recordQuestionAnswers(
 	runId: string,
 	token: string,
 	answers: Record<string, string>,
+	context: DecisionContext = {},
 ): Promise<{ resolved: boolean }> {
-	return db.transaction(async (tx) => {
+	const result = await db.transaction(async (tx) => {
 		const [row] = await tx
 			.select({ pendingQuestions: chatRuns.pendingQuestions })
 			.from(chatRuns)
@@ -93,6 +105,14 @@ export async function recordQuestionAnswers(
 		await tx.update(chatRuns).set({ pendingQuestions: next }).where(eq(chatRuns.id, runId))
 		return { resolved: true }
 	})
+	if (result.resolved) {
+		await closePromptReviewItem('question', token, {
+			action: 'answered',
+			decidedBy: context.decidedBy,
+			note: context.note,
+		})
+	}
+	return result
 }
 
 async function removePendingQuestion(runId: string, token: string): Promise<void> {
@@ -125,10 +145,18 @@ async function readEntry(runId: string, token: string): Promise<PendingQuestionE
 	return entry ?? null
 }
 
+/**
+ * Wait for the answers to a pending question, or null when there are none to wait for.
+ *
+ * Gives up after `timeoutMs`, and at once when `signal` aborts — the run was stopped while the
+ * question was open. Either way the question comes off the run and its review item closes, so
+ * nothing is left offering an answer that would go nowhere.
+ */
 export async function awaitQuestionAnswers(
 	runId: string,
 	token: string,
 	timeoutMs: number = QUESTION_TIMEOUT_MS,
+	signal?: AbortSignal,
 ): Promise<Record<string, string> | null> {
 	const deadline = Date.now() + timeoutMs
 
@@ -141,11 +169,31 @@ export async function awaitQuestionAnswers(
 			return answers
 		}
 
-		if (Date.now() >= deadline) {
+		if (signal?.aborted) {
 			await removePendingQuestion(runId, token)
+			await closePromptReviewItem('question', token, { action: 'expired' })
 			return null
 		}
 
-		await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+		if (Date.now() >= deadline) {
+			await removePendingQuestion(runId, token)
+			await closePromptReviewItem('question', token, { action: 'timed_out' })
+			return null
+		}
+
+		await pollDelay(signal)
 	}
+}
+
+/** One poll interval, cut short by an abort. */
+function pollDelay(signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve) => {
+		const done = () => {
+			clearTimeout(timer)
+			signal?.removeEventListener('abort', done)
+			resolve()
+		}
+		const timer = setTimeout(done, POLL_INTERVAL_MS)
+		signal?.addEventListener('abort', done, { once: true })
+	})
 }

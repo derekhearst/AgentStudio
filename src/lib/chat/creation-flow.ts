@@ -12,7 +12,7 @@ type GuidedCreationInput = {
 function buildPrompt({ kind, context = {} }: GuidedCreationInput) {
 	const commonRules = [
 		'Help me create this using a cooperative execution flow.',
-		'First ask clarifying questions one at a time if needed, using ask_user when options are helpful.',
+		'First ask clarifying questions one at a time if needed, using AskUserQuestion when options are helpful.',
 		'Execute tool calls directly as needed once requirements are clear.',
 		'If user input is missing, ask for it and then continue execution.',
 		'Summarize what was created and any follow-up options.',

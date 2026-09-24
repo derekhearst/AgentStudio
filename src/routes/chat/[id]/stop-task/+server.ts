@@ -8,9 +8,9 @@ import { logger } from '$lib/observability/logger'
 /**
  * Stop one background task (#35).
  *
- * The model can already background a command — `BUILTIN_SHELL_TOOLS` allow-lists `Bash`,
- * `BashOutput` and `KillShell`, and the SDK reports every live task through
- * `background_tasks_changed`. What was missing is the other direction: a way to stop one.
+ * The model can already background a command — `Bash` takes `run_in_background`, `TaskStop`
+ * stops one, and the SDK reports every live task through `background_tasks_changed`. What was
+ * missing is the other direction: a way for the user to stop one.
  * `Query.stopTask(id)` is a control request on the live session, so it needs the handle the
  * run registry publishes — which is exactly why the registry exists, since "stop" arrives
  * as a separate HTTP call from the run it is stopping.

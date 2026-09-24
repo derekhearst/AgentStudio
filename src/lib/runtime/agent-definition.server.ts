@@ -9,6 +9,7 @@ import { getOrCreateSettings } from '$lib/settings/settings.server'
 import { assembleSystemPrompt, type ContextSlot } from '$lib/context/slots.server'
 import { expandFragments } from '$lib/agents/fragment-expand'
 import type { ToolDefinition } from './types'
+import { detachedRunToolNames } from './detached-tools'
 import { logger } from '$lib/observability/logger'
 
 /**
@@ -22,7 +23,7 @@ import { logger } from '$lib/observability/logger'
  *
  * Returns a fully-resolved object the caller hands directly to `runChatLoop`:
  *   - `systemPrompt` (already slot-assembled — caller doesn't need to know about slots)
- *   - `tools` (filtered for the non-chat surface: never ask_user; respects allowedTools)
+ *   - `tools` (the short unattended-run list in `./detached-tools`, narrowed by allowedTools)
  *   - `persistentKey` / `worktree` (from agent.config.workspace)
  *
  * The chat stream stays inline because its slot pipeline is fundamentally different.
@@ -39,8 +40,8 @@ export type BuildAgentDefinitionInput = {
 	 */
 	intent?: string
 	/**
-	 * The agent collaboration policy text — varies by caller. Sub-agents say "you cannot
-	 * ask_user, return a handoff"; automations say "no human in the loop, summarize what you
+	 * The agent collaboration policy text — varies by caller. Sub-agents say "you cannot ask
+	 * the user, return a handoff"; automations say "no human in the loop, summarize what you
 	 * did"; tasks say similar. Caller picks the right one.
 	 */
 	toolPolicy: string
@@ -172,13 +173,11 @@ export async function buildAgentDefinition(input: BuildAgentDefinitionInput): Pr
 
 	const assembled = assembleSystemPrompt(slots)
 
-	// Tool surface: never expose ask_user (the loop's `isOrchestrator: false` would refuse it
-	// anyway, but trimming up front keeps the prompt slim). Respect allowedTools when set.
-	const allTools = getToolDefinitions().filter((t) => t.function.name !== 'ask_user')
-	const tools =
-		Array.isArray(config?.allowedTools) && config.allowedTools.length > 0
-			? allTools.filter((t) => config.allowedTools!.includes(t.function.name))
-			: allTools
+	// Tool surface: the unattended-run list, narrowed by allowedTools when set. Nothing on it
+	// asks the user: nobody is there to answer.
+	const tools = getToolDefinitions(
+		detachedRunToolNames(Array.isArray(config?.allowedTools) ? config.allowedTools : null),
+	)
 
 	return {
 		systemPrompt: assembled.systemPrompt,

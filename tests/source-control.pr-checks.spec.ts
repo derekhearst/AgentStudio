@@ -14,10 +14,12 @@ import {
 	redactSecrets,
 	shouldNotifyFailure,
 	summarizeCheckFailure,
+	CI_FIX_POLICY,
 	PR_WATCH_LOG_EXCERPT_MAX_CHARS,
 	PR_WATCH_MAX_AGE_DAYS,
 	type NormalizedCheck,
 } from '../src/lib/source-control/pr-checks'
+import { DETACHED_RUN_TOOLS } from '../src/lib/runtime/detached-tools'
 
 /**
  * Issue #20 — watch CI after the agent opens a pull request, pure half.
@@ -424,6 +426,48 @@ test.describe('pr-checks/presentation — what the operator and the agent read',
 		// an unrelated red check go away.
 		expect(prompt).toContain('Diagnose the failure first')
 		expect(prompt.toLowerCase()).toContain('unrelated to this branch')
+	})
+
+	/**
+	 * A fix run cannot touch the checkout: it runs on the old loop, whose unattended tool list
+	 * is web_search alone since run_code was retired (#69). Telling it to "fix it on this
+	 * branch, and report what you changed" invited a report of edits that never happened.
+	 */
+	test('the prompt and the policy ask for a proposed patch, not an edit the run cannot make', () => {
+		const prompt = buildFixPrompt({
+			owner: 'o',
+			repo: 'r',
+			prNumber: 42,
+			checkName: 'ci / test',
+			prTitle: 'Add the thing',
+			headBranch: 'feat/thing',
+		})
+		for (const text of [prompt, CI_FIX_POLICY]) {
+			expect(text).toContain('cannot edit files, run commands or push')
+			expect(text).toContain('patch')
+			expect(text).not.toContain('fix it on this branch')
+			expect(text).not.toContain('report what you changed')
+			expect(text).not.toContain('before you change a line')
+		}
+	})
+
+	test('the unattended tool list still cannot touch the checkout, so that wording holds', () => {
+		// The day a fix run can edit again, this fails, and the prompt and policy above should
+		// go back to asking for the fix itself.
+		const CAN_CHANGE_THE_CHECKOUT = [
+			'Write',
+			'Edit',
+			'MultiEdit',
+			'NotebookEdit',
+			'Bash',
+			'move_file',
+			'delete_file',
+			'clone_repository',
+			'prepare_commit',
+			'push_branch',
+			'create_pull_request',
+		]
+		expect(DETACHED_RUN_TOOLS.filter((name) => CAN_CHANGE_THE_CHECKOUT.includes(name))).toEqual([])
 	})
 
 	/**

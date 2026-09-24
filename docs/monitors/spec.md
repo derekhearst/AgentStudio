@@ -147,7 +147,7 @@ The `tool_result` path costs nothing beyond whatever the tool itself costs, whic
 | `costs/budget.server`     | The gate on the model path                                                                          |
 | `observability/review`    | `monitor_fired` items on the firing edge and on a retirement without firing                          |
 | `notifications/`          | In-app rows plus web push for the `push` action                                                     |
-| `runtime/`                | The detached agent loop behind `start_conversation`                                                 |
+| `runtime/`                | The detached agent loop behind `start_conversation`; its only tool is `web_search` ([tools](../tools/tools.md)) |
 | `automations/`            | `run_automation` checks the automation is still the owner's and switched on, then enqueues `automation_run` by job type, without importing the engine |
 
 ## Business rules

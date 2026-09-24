@@ -1,5 +1,7 @@
 /**
- * Deleting a conversation (#18) — the irreversible end of its lifecycle.
+ * Deleting a conversation (#18, #35) — the irreversible end of its lifecycle. Archiving is
+ * the reversible one (`./conversation-lifecycle.server`); an archived conversation is deleted
+ * exactly like any other.
  *
  * The delete itself is one statement: everything that belongs to the conversation (messages,
  * runs, their events, the search index) goes with it by cascade. What needs care is a turn
@@ -7,18 +9,25 @@
  *
  * Deleting under a live turn used to leave that turn running with nothing to stop it: the
  * cascade removes its `chat_runs` row, Stop finds runs through that row, and so from then on
- * Stop answered "not active" while the agent kept running tools in the sandbox. Its final
- * write then failed on a conversation that no longer existed.
+ * Stop answered "not active" while the agent kept running tools in the sandbox — the CLI
+ * session, the commands it had put in the background, the dev server one of them started.
+ * Its final write then failed on a conversation that no longer existed.
  *
- * So the live turn is stopped first, the way the Stop button stops it (the run registry), and
- * given a moment to wind down: an interrupted turn ends with an ordinary result, saves its
- * partial reply and closes its run row, and only then lets go of its claim. The delete waits
- * for that, up to `RUN_SETTLE_MS`, and goes ahead regardless once the time is up — a turn
- * that has been told to stop will stop, and a delete must not hang on one that is slow to.
+ * So the live turn is stopped first, the way the Stop button stops it (the run registry's
+ * `interruptRun`). With no `perTaskStopAffordance` declared (`options.server` leaves it
+ * unset), the CLI's interrupt also kills the session's background tasks and delegated
+ * agents (`sdk.d.ts`), and the turn then ends, which closes the session (#35, #32). The turn
+ * is given a moment to wind down: an interrupted turn ends with an ordinary result, saves
+ * its partial reply and closes its run row, and only then lets go of its claim. The delete
+ * waits for that, up to `RUN_SETTLE_MS`, and goes ahead regardless once the time is up — a
+ * turn that has been told to stop will stop, and a delete must not hang on one that is slow
+ * to.
  *
  * A turn another process is running (an automation in the jobs worker) cannot be reached
  * from here, exactly as Stop cannot reach it; it is short and bounded, and its writes simply
  * fail once the conversation is gone.
+ *
+ * Ownership is checked before anything is stopped, and is the WHERE clause on the delete.
  */
 
 import { and, eq, isNull } from 'drizzle-orm'

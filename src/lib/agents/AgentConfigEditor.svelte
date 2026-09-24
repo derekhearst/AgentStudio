@@ -146,6 +146,7 @@
 			<div class="mt-2 max-w-md">
 				<ModelSelector
 					value={draftModel}
+					surface="engine"
 					showChevron={false}
 					showBrowseBadge={false}
 					onchange={(id: string) => {

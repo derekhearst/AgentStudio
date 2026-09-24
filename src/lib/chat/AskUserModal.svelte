@@ -1,62 +1,52 @@
 <script lang="ts">
 	import AskUserQuestionCard from './AskUserQuestionCard.svelte'
+	import {
+		EMPTY_SELECTION,
+		answerKey,
+		selectionAnswers,
+		type AskQuestion,
+		type AskSelection,
+	} from '$lib/engine/ask-user-question'
 
-	type AskUserOption = {
-		label: string
-		description?: string
-		recommended?: boolean
-	}
-
-	type AskUserQuestion = {
-		header: string
-		question: string
-		options: AskUserOption[]
-		allowFreeformInput?: boolean
-	}
-
+	/**
+	 * The pending question over the composer, for a page that did not watch it being asked —
+	 * a reload, or another tab. Same question card and the same answer keys as the inline
+	 * `AskUserCard` (#4); "Type in chat" hands the answer to the composer instead.
+	 */
 	let {
 		open = false,
 		questions = [],
 		onSubmit,
 		onClose,
 		onSkipToChat,
-	} = $props<{
+	}: {
 		open?: boolean
-		questions?: AskUserQuestion[]
+		questions?: AskQuestion[]
 		onSubmit?: ((answers: Record<string, string>) => Promise<void> | void) | undefined
 		onClose?: (() => void) | undefined
 		onSkipToChat?: (() => void) | undefined
-	}>()
+	} = $props()
 
 	let collapsed = $state(false)
-	let answers = $state<Record<string, string>>({})
+	let selections = $state<Record<string, AskSelection>>({})
 	let activeQuestionIndex = $state(0)
 
 	const totalQuestions = $derived(questions.length)
 	const clampedQuestionIndex = $derived(
 		totalQuestions > 0 ? Math.min(Math.max(activeQuestionIndex, 0), totalQuestions - 1) : 0,
 	)
-	const activeQuestion = $derived(questions[clampedQuestionIndex])
-	const activeHeader = $derived(activeQuestion?.header ?? '')
-	const activeQuestionHasAnswer = $derived((answers[activeHeader] ?? '').trim().length > 0)
+	const activeQuestion = $derived<AskQuestion | undefined>(questions[clampedQuestionIndex])
+	const chosen = $derived(selectionAnswers(questions, selections))
+	const activeQuestionHasAnswer = $derived(activeQuestion ? !!chosen[answerKey(activeQuestion)] : false)
+	const hasMissingAnswers = $derived(questions.some((question) => !chosen[answerKey(question)]))
 
-	const hasMissingAnswers = $derived(
-		questions.some((question: AskUserQuestion) => (answers[question.header] ?? '').trim().length === 0),
-	)
-
-	function setAnswer(header: string, value: string) {
-		answers = { ...answers, [header]: value }
+	function setSelection(question: AskQuestion, next: AskSelection) {
+		selections = { ...selections, [answerKey(question)]: next }
 	}
 
 	async function submitAnswers() {
 		if (hasMissingAnswers) return
-		const payload: Record<string, string> = {}
-		for (const question of questions) {
-			const value = (answers[question.header] ?? '').trim()
-			if (value.length > 0) {
-				payload[question.header] = value
-			}
-		}
+		const payload = selectionAnswers(questions, selections)
 		if (Object.keys(payload).length === 0) return
 		await onSubmit?.(payload)
 	}
@@ -85,8 +75,8 @@
 {#if open}
 	<div class="card border-base-300 bg-base-200/95 relative mb-2 rounded-2xl border shadow-xl">
 		<header class="border-base-300 flex items-center gap-2 border-b px-3 py-2.5">
-			<p class="line-clamp-1 text-sm font-semibold">{activeQuestion?.question ?? 'Question'}</p>
-			<p class="ml-2 text-xs font-medium text-base-content/70">{Math.min(clampedQuestionIndex + 1, totalQuestions)} / {totalQuestions || 1}</p>
+			<p class="line-clamp-1 min-w-0 text-sm font-semibold">{totalQuestions > 1 ? 'The agent has questions' : 'The agent has a question'}</p>
+			<p class="ml-2 shrink-0 text-xs font-medium text-base-content/70">{Math.min(clampedQuestionIndex + 1, totalQuestions)} / {totalQuestions || 1}</p>
 			<div class="ml-auto flex items-center gap-1">
 				<button class="btn btn-ghost btn-xs" type="button" aria-label="Collapse" onclick={() => (collapsed = !collapsed)}>
 					<svg class={`h-4 w-4 transition-transform ${collapsed ? 'rotate-180' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -103,13 +93,15 @@
 		</header>
 
 		{#if !collapsed}
-			<div class="max-h-[38vh] space-y-2 overflow-y-auto px-3 py-3">
+			<div class="max-h-[60vh] space-y-2 overflow-y-auto px-3 py-3 tablet:max-h-[50vh]">
 				{#if activeQuestion}
-					<AskUserQuestionCard
-						question={activeQuestion}
-						value={answers[activeQuestion.header] ?? ''}
-						onChange={(value) => setAnswer(activeQuestion.header, value)}
-					/>
+					{#key answerKey(activeQuestion)}
+						<AskUserQuestionCard
+							question={activeQuestion}
+							selection={selections[answerKey(activeQuestion)] ?? EMPTY_SELECTION}
+							onChange={(next) => setSelection(activeQuestion, next)}
+						/>
+					{/key}
 				{/if}
 			</div>
 

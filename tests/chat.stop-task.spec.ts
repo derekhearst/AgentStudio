@@ -11,9 +11,9 @@ import {
 /**
  * #35 — stopping one background task.
  *
- * The model has been able to background a `Bash` command since #15 (`BUILTIN_SHELL_TOOLS`
- * allow-lists `Bash` / `BashOutput` / `KillShell`), and the SDK reports every live task
- * through `background_tasks_changed`. The missing direction was stopping one:
+ * The model has been able to background a `Bash` command since #15 (`run_in_background`,
+ * stopped with `TaskStop`), and the SDK reports every live task through
+ * `background_tasks_changed`. The missing direction was stopping one:
  * `Query.stopTask(id)` is a control request on the live session, which is only reachable
  * through the run registry.
  *

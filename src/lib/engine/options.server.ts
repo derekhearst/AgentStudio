@@ -8,8 +8,9 @@
  *                 subscription and cost nothing per token.
  *
  *   Everything  → ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN pointed at a gateway
- *   else          that serves the Anthropic Messages API (LiteLLM et al). Same
- *                 agent loop, same tools, different model behind it.
+ *   else          that serves the Anthropic Messages API (OpenRouter's Anthropic
+ *                 endpoint, LiteLLM et al). Same agent loop, same tools, different
+ *                 model behind it, billed per token. See `./gateway-env`.
  *
  * Either way the CLI gets an allow-listed environment, never the server's own — see
  * `./engine-env`.
@@ -23,10 +24,13 @@ import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-
 import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
+import { buildGatewayEnv } from './gateway-env'
+import { gatewayConfig } from './gateway.server'
+import { modelBackend, normalizeModelId, unrunnableModelMessage } from './model-backend'
 import { engineSandboxSettings } from './engine-sandbox'
+import { ASK_USER_QUESTION_SETTINGS, ASK_USER_QUESTION_TOOL_CONFIG } from './ask-user-question'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
-import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
 import {
@@ -37,29 +41,10 @@ import {
 	type RunSurface,
 } from './permission-mode'
 
-/** Models that run natively on the Claude Code CLI login. */
-const CLAUDE_MODEL_PREFIXES = ['claude-', 'opus', 'sonnet', 'haiku']
-
-/**
- * Strip an OpenRouter-style vendor prefix.
- *
- * Conversations created before the engine migration carry ids like
- * `anthropic/claude-sonnet-4`, because everything used to be routed through
- * OpenRouter. The Agent SDK wants the bare id. Without this, every pre-existing
- * Claude conversation looks like a third-party model and fails closed on the
- * gateway path.
- */
-export function normalizeModelId(model: string): string {
-	const slash = model.indexOf('/')
-	if (slash === -1) return model
-	const vendor = model.slice(0, slash).toLowerCase()
-	return vendor === 'anthropic' ? model.slice(slash + 1) : model
-}
-
-export function isClaudeModel(model: string): boolean {
-	const normalized = normalizeModelId(model).toLowerCase()
-	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
-}
+// Which backend runs a model, and the id it is sent as, live in `./model-backend` so the
+// picker and the specs can read them without `$env`. Re-exported: callers look here.
+export { isClaudeModel, modelBackend, normalizeModelId, type EngineBackend } from './model-backend'
+export { isGatewayConfigured } from './gateway.server'
 
 /** AgentStudio's six-level control mapped onto the SDK's five effort levels. */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
@@ -115,6 +100,18 @@ export type EngineOptionsInput = {
 	/** Resume a prior SDK session instead of starting a new one. */
 	resumeSessionId?: string
 	/**
+	 * With `resumeSessionId`: resume only up to and including this transcript entry — how an
+	 * edited or regenerated turn drops the turns after it (`./turn-input`). Ignored without
+	 * `resumeSessionId`, as the SDK ignores it.
+	 */
+	resumeSessionAt?: string
+	/**
+	 * #24 — back up files before the SDK's file tools change them, so `Query.rewindFiles()`
+	 * can restore them to any user message later (`./rewind.server`). Only worth it for a
+	 * workspace that outlives the turn; see `supportsFileCheckpoints`.
+	 */
+	fileCheckpointing?: boolean
+	/**
 	 * Whether this run's project has its committed settings marked trusted
 	 * (`projects.settings_trusted`). Decides whether the repo's `CLAUDE.md`, commands and
 	 * skills load — and, inseparably, its `.claude/settings.json`. See `./setting-sources`.
@@ -132,27 +129,13 @@ export type EngineOptionsInput = {
 }
 
 /**
- * Gateway env for non-Claude models. Returns undefined when the gateway isn't
- * configured, so the caller can fail loudly rather than silently falling back
- * to Claude and billing the wrong backend.
+ * Thrown for a model nothing here can run — a non-Claude model with no gateway configured,
+ * or a Claude id the CLI cannot run — rather than silently falling back to another model
+ * and billing the wrong backend.
  */
-function gatewayEnv(model: string): Record<string, string> | undefined {
-	const baseUrl = env.LLM_GATEWAY_URL
-	const token = env.LLM_GATEWAY_TOKEN
-	if (!baseUrl || !token) return undefined
-
-	return buildEngineEnv(process.env, {
-		ANTHROPIC_BASE_URL: baseUrl,
-		ANTHROPIC_AUTH_TOKEN: token,
-		ANTHROPIC_MODEL: model,
-	})
-}
-
 export class GatewayNotConfiguredError extends Error {
 	constructor(model: string) {
-		super(
-			`Model "${model}" needs an Anthropic-compatible gateway, but LLM_GATEWAY_URL / LLM_GATEWAY_TOKEN are not set.`,
-		)
+		super(unrunnableModelMessage(model))
 		this.name = 'GatewayNotConfiguredError'
 	}
 }
@@ -197,16 +180,22 @@ export function sandboxAvailable(): boolean {
 }
 
 export function buildEngineOptions(input: EngineOptionsInput): Options {
-	const claude = isClaudeModel(input.model)
-	const sdkModel = claude ? normalizeModelId(input.model) : input.model
-	const proxyEnv = claude ? undefined : gatewayEnv(input.model)
-
-	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
-	const cliEnv = proxyEnv ?? buildEngineEnv(process.env)
+	const gateway = gatewayConfig()
+	const backend = modelBackend(input.model, { gatewayConfigured: gateway !== null })
+	if (backend === 'unavailable') throw new GatewayNotConfiguredError(input.model)
+	const gatewayRun = backend === 'gateway' && gateway !== null
+	// A Claude id in the CLI's spelling; a gateway model under the gateway's own id.
+	const sdkModel = gatewayRun ? input.model : normalizeModelId(input.model)
+	const cliEnv = gatewayRun
+		? buildGatewayEnv({ model: input.model, gateway, source: process.env })
+		: buildEngineEnv(process.env)
 	const cliAuthEnv = engineAuthEnvNames(cliEnv)
 	const scopedBuiltins = scopeBuiltinTools(input.toolScope)
 
-	const { thinking, effort } = resolveThinking(input.reasoningEffort)
+	// Adaptive thinking and `effort` are Anthropic parameters. Whether a gateway passes them
+	// on to a non-Anthropic model — or rejects the request — is not something to find out on
+	// a paid run, so a gateway run has thinking off and sends no effort (#9).
+	const { thinking, effort } = gatewayRun ? resolveThinking('none') : resolveThinking(input.reasoningEffort)
 
 	const agents = input.agents && Object.keys(input.agents).length > 0 ? input.agents : null
 
@@ -269,6 +258,8 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
 		...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
+		...(input.resumeSessionId && input.resumeSessionAt ? { resumeSessionAt: input.resumeSessionAt } : {}),
+		...(input.fileCheckpointing ? { enableFileCheckpointing: true } : {}),
 		// Needed for token-level `delta` frames; without it text only arrives in
 		// whole-message chunks and the UI loses its typing effect.
 		includePartialMessages: true,
@@ -284,6 +275,21 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * so a child transcript can appear either way.
 		 */
 		forwardSubagentText: true,
+		/*
+		 * `perTaskStopAffordance` is deliberately never set (#32). Declared, an interrupt would
+		 * spare running background agents and leave each to be stopped one at a time; absent,
+		 * the CLI "fails closed … an interrupt kills background tasks" (sdk.d.ts). Children run
+		 * in the foreground anyway (`./delegation-gate`), as tool calls inside the turn, so the
+		 * parent's Stop — `interrupt()`, then `close()` in the engine's `finally` — ends them
+		 * with it. Setting this would be the one way to break that.
+		 */
+		/*
+		 * #4 — the SDK's own AskUserQuestion, answered by the chat's question card through
+		 * `canUseTool` (`./ask-user-question`): HTML option previews, and a question that never
+		 * answers itself (`askUserQuestionTimeout: 'never'`, a Settings field, not an Option).
+		 */
+		toolConfig: ASK_USER_QUESTION_TOOL_CONFIG,
+		settings: ASK_USER_QUESTION_SETTINGS,
 		// Always set: omitted, the SDK hands the CLI the server's whole environment.
 		env: cliEnv,
 	}

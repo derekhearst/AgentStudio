@@ -32,6 +32,8 @@ The **auto-compact threshold** is the point at which conversation history is com
 
 Compaction is the process of replacing older conversation turns with a summary to free up window space. The summary becomes a `system` message injected before the recent turns.
 
+> **Today:** chats run on the Claude Agent SDK, which compacts a conversation itself. AgentStudio's own compaction (`compactMessages`, `shouldCompact`) had no caller after the move to the SDK and was deleted (#8). The rules below describe that earlier design. The auto-compact threshold setting now does one thing: when you switch a chat to a model with a smaller context window and the conversation would fill more than that share of it, the chat first compacts the conversation with the SDK's own `/compact` command, on the current model. (Until 2026-09 it sent an ordinary message asking for a summary, which the SDK session then carried on top of the full history — the context grew instead of shrinking. See [../chat/chat.md](../chat/chat.md#compacting-a-conversation).)
+
 Compaction rules:
 
 - Always keep the last N turns uncompacted (default: 8).
@@ -129,6 +131,8 @@ Assembly:
 ### Token estimation accuracy
 
 Replace the `chars / 4` heuristic with a proper tokenizer (tiktoken or equivalent) for models where the library is available. Fall back to the heuristic for unknown models. Accurate token counts prevent compaction firing too late and prevent context overflow.
+
+> **Today:** a model-aware estimator (`js-tiktoken`) was built for this, but its only user was AgentStudio's own compaction, and it was deleted with it (#8). The context slots still budget with `chars / 4`; a chat's real token counts come from the Claude Agent SDK.
 
 ### Tool call pair integrity
 

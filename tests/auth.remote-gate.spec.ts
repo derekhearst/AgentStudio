@@ -118,7 +118,7 @@ test.describe('auth/remote-gate — every remote function refuses an anonymous c
 			'src/lib/skills/skills.remote.ts#importSkillCommand',
 			'src/lib/agents/agents.remote.ts#listAgents',
 			'src/lib/runs/runs.remote.ts#getRunDetailQuery',
-			'src/lib/tools/tools.remote.ts#execCommand',
+			'src/lib/settings/settings.remote.ts#updateAppSettings',
 			'src/lib/auth/auth.remote.ts#loginCommand',
 		]) {
 			expect(names, expected).toContain(expected)

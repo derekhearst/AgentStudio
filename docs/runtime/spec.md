@@ -4,6 +4,16 @@
 
 The runtime is the transport-agnostic core of AgentStudio's agent loop. It owns the LLM call cycle, tool execution, context assembly, compaction, skill loading, output offloading, and event emission. It does not know about HTTP, SSE, WebSockets, or any other delivery channel. Any entry point — chat stream, automation, scheduled job, sub-agent spawn — constructs three primitives and hands them to `runAgentLoop`.
 
+### Where this stands (September 2026)
+
+Most of this page describes a design, not the code. What actually runs today:
+
+- **Every chat runs on the Claude Agent SDK** (`src/lib/engine/`). The SDK drives the conversation, compacts it when it grows too long, and runs Claude's own file and command tools next to AgentStudio's. Delegation to another agent is the SDK's `Agent` tool.
+- **The older in-house loop** (`src/lib/runtime/`, `runChatLoop`) still runs three unattended jobs: an automation with an agent attached, a monitor that starts a conversation, and a CI fix run from the review inbox. Nobody watches these runs, so they are given one tool, `web_search`, and an agent's `allowedTools` list can only narrow that. The loop enforces that list: if the model calls any other tool by name, the call is refused with "not available to this run" before any approval check or execution, and the attempt is recorded in the transcript as a failed tool call.
+- The pieces of the old loop that only the chat or the in-house subagents used have been deleted (#8): its live-stream and forwarded sessions, sub-agent spawning, deferred tool loading (`search_tools`), in-house compaction, and `run_code` (#69). The rest goes once those three jobs move onto the engine.
+
+See [`docs/tools/tools.md`](../tools/tools.md) for the tools each kind of run gets.
+
 ## Data Model
 
 ### AgentDefinition
@@ -47,7 +57,7 @@ A stateful event bus for one run. The Session is the only thing that touches SSE
 | `getMessages`     | () => Promise\<LlmMessage[]\> | Loads current message history                    |
 | `appendMessage`   | (m) => Promise\<void\>        | Persists a message                               |
 | `pendingApproval` | (req) => Promise\<boolean\>   | Blocks until user approves or denies a tool call |
-| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Blocks until user answers via `ask_user`         |
+| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Retired with `ask_user` (#4): these runs are unattended and never ask; chat questions are the SDK's AskUserQuestion |
 
 ## Features
 
@@ -166,8 +176,8 @@ A shell command cannot get around this in a **trusted** project: the sandbox mak
 | --- | --- |
 | What a process needs to run | `PATH`, `HOME`, `TMPDIR`, locale (`LANG`, `LC_*`), and on Windows `USERPROFILE`, `SystemRoot`, `APPDATA` and similar |
 | How to reach the network | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` |
-| Its own login | `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN` |
-| For gateway models only | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, set from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN` |
+| Its own login | `CLAUDE_CONFIG_DIR`, and on Claude runs `CLAUDE_CODE_OAUTH_TOKEN` |
+| For gateway models only | `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from `LLM_GATEWAY_URL` / `LLM_GATEWAY_TOKEN`; `ANTHROPIC_API_KEY` set to empty; and the chosen model in `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL`, so helper and subagent calls stay on it. A gateway run does not get `CLAUDE_CODE_OAUTH_TOKEN`. See [../llm/llm.md](../llm/llm.md) |
 
 Inside the sandbox, the login variables are hidden from shell commands as well.
 

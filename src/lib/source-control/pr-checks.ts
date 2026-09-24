@@ -371,6 +371,10 @@ export function summarizeCheckFailure(input: {
  * the facts, then asks for a diagnosis before a change, because the most common wrong move
  * here is to "fix" a flake by rewriting working code.
  *
+ * It asks for the change as a patch, not an edit, because the run cannot make one (see
+ * `CI_FIX_POLICY`). A prompt that said "fix it and report what you changed" to a run with
+ * no way to change anything invited a report of edits that never happened.
+ *
  * Every CI-authored field it embeds is re-scrubbed here even though its callers already
  * store scrubbed values. Redaction is idempotent, so the duplicate pass costs nothing, and
  * this way the guarantee is a property of the function rather than of remembering to call
@@ -401,12 +405,29 @@ export function buildFixPrompt(input: {
 		input.summary ? `\nCheck summary:\n${redactSecrets(input.summary).slice(0, 1_000)}` : null,
 		input.logExcerpt ? `\nLog excerpt (tail):\n\`\`\`\n${redactSecrets(input.logExcerpt)}\n\`\`\`` : null,
 		'',
-		'Diagnose the failure first and say what actually broke before changing anything.',
-		'If the failure is unrelated to this branch (a flake, an outage, a pre-existing failure on the base branch), say so and stop — do not rewrite working code to chase it.',
-		'Otherwise fix it on this branch, and report what you changed and why.',
+		'Diagnose the failure first and say what actually broke.',
+		'If the failure is unrelated to this branch (a flake, an outage, a pre-existing failure on the base branch), say so and stop — do not propose rewriting working code to chase it.',
+		'This run cannot edit files, run commands or push. If the branch needs a change, propose it as a patch (a unified diff of the files it touches) and say why, for the operator to apply.',
 	]
 	return lines.filter((line) => line !== null).join('\n')
 }
+
+/**
+ * The tool policy a CI fix run is given, next to the prompt it is seeded with.
+ *
+ * A fix run goes through the old loop (`pr-fix.server.ts`), where an unattended run is
+ * offered `web_search` alone since `run_code` was retired (#69; `$lib/runtime/detached-tools`).
+ * It has no way to touch the checkout, so this and `buildFixPrompt` ask for a diagnosis and
+ * a proposed patch rather than an edit. When fix runs move onto the chat engine and get file
+ * tools back, both go back to "fix it on this branch".
+ */
+export const CI_FIX_POLICY = [
+	'CI fix policy:',
+	'- A continuous-integration check failed on a pull request you opened; no user is watching in real time.',
+	'- Diagnose first. Say what broke and why before you propose any change.',
+	'- If the failure is unrelated to this branch, report that and stop rather than proposing to rewrite working code.',
+	'- This run cannot edit files, run commands or push. Propose any fix as a patch (a unified diff) with its reasoning; the operator applies it and pushes.',
+].join('\n')
 
 // ─────────── Watch lifecycle ───────────
 

@@ -112,6 +112,72 @@ Rules that keep this honest:
 3. The same rules apply whether the conversation is on a Claude model or a third-party model routed through the gateway. A gateway model that cannot see images will simply not use them; nothing about the delivery path changes.
 4. Files attached on the new-chat page (`/`) go with the first message, exactly as if they had been attached inside the conversation. The new-chat page used to upload them, show them, and then send only the text.
 
+### Composer shortcuts: `@` file mentions and `/` commands
+
+The message box has two shortcuts. Both work from the keyboard, and both work on a phone by tapping.
+
+#### Mentioning a file with `@`
+
+Typing `@` at the start of a word opens a list of the files and folders in the chat's workspace. As you keep typing, the list narrows to the closest matches. The letters only have to appear in order, so `pnt` finds `PinnedTodoPanel.svelte`, and a match in a file's name ranks above the same letters spread across folder names. Picking an entry writes its path into the message as inline code (for example `src/lib/app.ts`) followed by a space. Nothing is sent. The **@ Context** button does the same as typing `@`.
+
+Which files are listed depends on where the chat's next turn will run:
+
+| The chat is… | The list shows |
+| --- | --- |
+| Bound to a project | The project's working folder |
+| Talking to an agent that keeps a persistent workspace | That workspace |
+| Neither | Nothing. Each turn in such a chat starts in a fresh, empty folder, so a file the last turn wrote is not where the next turn will look. The list says so and suggests binding the chat to a project. |
+| Not created yet (the new-chat page) | No `@` list and no **@ Context** button |
+
+Rules:
+
+1. A path is relative to the folder the next turn starts in, so the agent can open it exactly as written.
+2. Folders that are never worth mentioning and are often huge are skipped: `.git`, `node_modules`, build output (`build`, `dist`, `.next`, `.svelte-kit`, `.turbo`, `target`), caches, coverage reports and Python virtual environments. Other dot-folders stay, so project knowledge (`.agentstudio/knowledge`), `.github` and `.claude` can be mentioned.
+3. Symbolic links are never followed or listed. A link the agent made, or one a cloned repository contains, cannot be used to see files elsewhere on the server.
+4. Only names reach the browser. File contents and full server paths never do.
+5. A very large workspace is searched only up to 20,000 entries, 16 folders deep or 1.5 seconds of scanning, whichever comes first, and the list says when that happened. The list of files is remembered for 15 seconds, so a brand-new file can take that long to appear.
+6. Only the conversation's owner can search its files. Asking about someone else's conversation gets the same answer as asking about one that does not exist.
+7. The path goes in as inline code, not as `@path`, so what the model receives does not depend on how the Agent SDK happens to treat an `@`.
+
+#### Running a command with `/`
+
+Typing `/` as the very first character of the message opens the command palette. The **/ Commands** button does the same. Every command is an action the app already has a button for; the palette is a quicker way to reach it, and it calls exactly what that button calls. When that button is switched off, the command is too, and it says why instead of running.
+
+| Command | What it does | Available |
+| --- | --- | --- |
+| `/compact` | Compacts the conversation to free up context: runs the Agent SDK's own `/compact`, which summarises the conversation and starts the session again from that summary (see [chat.md](chat.md#compacting-a-conversation)). The same as Compact on the context meter | In a chat, when no reply is running |
+| `/model <model>` | Switches the model for the next message. It lists the same models as the model picker: only models that can run here, with gateway models marked "Gateway · paid" (see [docs/llm/llm.md](../llm/llm.md)) | Everywhere |
+| `/agent <agent>` | Hands the conversation to another agent | Everywhere, when there are agents to pick |
+| `/research <question>` | Starts a deep research run on the question and opens its page | In a chat |
+| `/plan` | Turns plan mode on or off. Plan mode is read-only: the agent plans instead of making changes. Turning it off goes back to Ask. It never switches to Bypass, which still needs the confirmation on the mode chip | In a chat, when no reply is running |
+| `/effort <level>` (also `/reasoning`, `/think`) | Sets how hard the model thinks before answering | Everywhere, except on a gateway model, which always runs with reasoning off |
+| `/attach` | Opens the file picker | Everywhere |
+| `/voice` | Starts or stops dictation | Where the browser supports it, and not while the last recording is still being turned into text |
+
+How it behaves:
+
+1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and starts highlighted, so Enter keeps it. Typing after the command narrows the list (`/model sonnet`), and the best match is then highlighted instead.
+2. A list shows 50 entries at a time; a deployment with a large gateway can offer more models than that. When the current model is not among those 50, it is shown first, so it is never missing from the list. A conversation whose model is stored in OpenRouter's spelling (`anthropic/claude-sonnet-4.5`) still finds its model marked current. A model that can no longer run here is not in the list at all; the model pill marks it "Unavailable". The first time the list opens on a page it may still be loading; the highlight lands on the current model when the list arrives, unless you have already moved it with the arrow keys or the pointer.
+3. `/research` takes free text: type the question on the same line, after the command, and press Enter. Anything on the lines below is left in the message box.
+4. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
+5. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
+6. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds. The message box can be open while a reply is still running, when the agent has paused to ask you a question. `/compact` and `/plan` then say that a reply is running rather than acting: the Compact button does nothing until the reply ends, and the mode chip is switched off because a running reply keeps the mode it started with.
+7. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
+
+#### Keyboard and touch
+
+| Key | With a list open |
+| --- | --- |
+| Up / Down | Move through the list (it wraps around) |
+| Enter or Tab | Take the highlighted entry |
+| Escape | Close the list. It stays closed until the cursor leaves that word |
+| Enter or Tab, while the file list is still searching | Nothing yet. Pick from the list once it arrives, or press Escape to close it and send the message as typed |
+| Enter, when the list has finished and is empty | Sends the message as typed |
+
+While a Japanese, Chinese or Korean input method is composing, Enter confirms the composition. It never sends the message or picks from a list; before this, Enter could send half-composed text.
+
+On a phone the **Attach**, **@ Context** and **/ Commands** buttons sit in a row above the message box (before this they did nothing). Tapping an entry in a list picks it without closing the keyboard. The list opens above the message box, or below it when the box is near the top of the screen, as on the new-chat page.
+
 ### Starting a conversation from the new-chat page
 
 The new-chat page (`/`) greets the owner by the display name they gave during first-run setup ("Good morning, Alex"). If no name was given, the greeting is just "Good morning".
@@ -151,6 +217,31 @@ Each session row can be expanded into a run hierarchy tree derived from `runs.pa
 
 The tree is read-only navigation metadata. It does not create a separate conversation thread; all user-visible conversation messages remain in the session.
 
+**Status (2026-09-23): not built.** There is no `runs.parentRunId`, and delegated agents do not get runs of their own. The tree that exists today is inside the reply: see the next section.
+
+### Delegated agents in the reply (#32)
+
+When the agent hands work to other agents, each child appears in the reply as its own card, in the place where the agent asked for it. Several children asked for at once appear as several cards, one under the other, and work at the same time.
+
+**Collapsed**, a card shows:
+
+| Part | What it says |
+| --- | --- |
+| Name | The child agent's name |
+| Status | `working…`, `done`, `failed`, `refused` (turned away by the concurrency limit, the budget, plan mode, or because a child tried to delegate), or `stopped` (still working when the user pressed **Stop** or the turn ended) |
+| Task | The short description the parent gave it |
+| Figures | Tokens, cost, how long it took and how many tools it called, leaving out any the child did not report. Tokens are everything the child's model calls used, added up, which is also what its usage-ledger row carries. A stopped or failed child shows what it used before it ended. Cost appears once the reply is saved, and never as "$0.00" on the Claude subscription |
+
+**Expanded**, it shows the child's own transcript: what it said and which tools it called, in order, each call with a short hint at what it touched (a file path, a search pattern, a command) and a dot for success or failure. A refused or failed child shows the reason at the top. A long transcript is shortened (at most 200 entries and 20,000 characters of text) and says so.
+
+Cards start collapsed, both while the turn runs and after a reload, because a fan-out opens several at once. A card is opened at the moment the agent asks for the child, so a child that is refused before doing anything still has a card that explains why. The delegation does not also show as a separate tool card, which it used to, repeating the child's report.
+
+The card reads the same whether it is live or reloaded: it is built from the same frames while streaming and saved with the reply afterwards. Replies saved before this change still show their children, from the text and tool names they kept. A card saved before tokens were added up shows the SDK's own figure instead, which covers only the child's last model call.
+
+**Stop.** When the user presses Stop, Claude Code answers each child that is still working with an error of its own ("[Request interrupted by user for tool use]" or a similar cancellation) before the turn ends. The card reads that as `stopped`, not `failed`, and says "Stopped before it finished." A child that had a real error before Stop was pressed still shows `failed` with its reason.
+
+**A child that runs in the background.** Children normally run inside the turn. A trusted project can define an agent that always runs in the background (`background: true` in its `.claude/agents/` file), and Claude Code honours that even though the app asks for the foreground. Such a card stays `working…` until Claude Code reports that the child has ended, and then shows how it ended, with Claude Code's one-line summary as its text. It counts toward the four-at-once limit for that whole time.
+
 ### Plan approval inline
 
 When the main agent proposes a plan, the chat thread renders it as a structured approval card:
@@ -178,21 +269,83 @@ The workbench shows a live run HUD with:
 
 ### Right panel
 
-The right panel is always visible and uses the same set of tabs in all modes. Tab content adapts to what is relevant for the current mode and active run. The panel is partially implemented; some tabs are functional, others are planned.
+The right rail has two tabs, the same for every agent: **Preview** (a file or web page) and **Files** (the files the agent changed in this chat, with +/- counts). It is folded to a thin strip until something opens a preview or the user expands it, and remembers per user whether it was left expanded. On a phone it is a drawer opened from the chat header. The mode-aware tab set this section used to describe (Run HUD, Memory, Task, PR) was never built, and #14 settled on the smaller rail instead. See [../chat-console/chat-console.md](../chat-console/chat-console.md) for the full behaviour.
 
-| Tab         | Agent mode                                                                                | Research mode                 | Plan mode                     | Chat mode              |
-| ----------- | ----------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------- | ---------------------- |
-| **Files**   | Changed files list, unified diff preview                                                  | Read-only file browser        | Read-only file browser        | Read-only file browser |
-| **Run HUD** | Agent, round, active tool, subagents, token+cost budget, pending approvals, blocked state | Progress events, source count | Plan graph, estimate summary  | —                      |
-| **Memory**  | Context window inspector, active memory refs                                              | Active memory refs            | Active memory refs            | Active memory refs     |
-| **Task**    | Linked task, sub-tasks, approval controls, evaluator status                               | Linked task                   | Linked task, success criteria | Linked task            |
-| **PR**      | Pull request status, diff summary, pending review items                                   | —                             | —                             | —                      |
-
-On mobile, the right panel collapses into a bottom sheet tab drawer.
+A run's tool calls and events are on its own page, `/runs/<id>`, linked from each reply's stats popover and from the **running** chip at the top of the chat.
 
 ### Inline approvals and answers
 
-Approval requests and `ask_user` questions render inline in the thread, but are also reflected in the global Review Inbox. Resolving from either place updates the same durable state.
+Approval requests and the agent's questions render inline in the thread, but are also reflected in the global Review Inbox. Resolving from either place updates the same durable state.
+
+### Questions from the agent
+
+When the agent needs a decision from you before it carries on, it asks with **AskUserQuestion** — the Agent SDK's own question tool, which replaced AgentStudio's home-made `ask_user` in September 2026 (#4). A call holds one to four questions.
+
+**What the card shows.** Each question gets:
+
+| Part | What it is |
+| --- | --- |
+| Header chip | A short label for the question ("Layout", "Auth method") |
+| Question | The full question, in a sentence |
+| Option cards | Two to four choices, each with a label and a line saying what it means. The one the agent recommends carries a **Recommended** badge |
+| Preview | For options that are easier to compare by eye (a layout, a snippet, a configuration), a small rendered picture of what the choice produces. It shows the option under your pointer or keyboard, otherwise the one you chose, otherwise the recommended one. Beside the options on a wide screen, below them on a phone |
+| Other | Always there: type your own answer instead of — or, on a "choose any" question, as well as — the options |
+
+Some questions say **Choose any that apply**: tick as many options as you like. The rest take one answer, and typing in Other (or clicking Other itself) replaces the option you picked. Just moving through Other with the keyboard changes nothing, so you can pick an option and Tab on to Submit. With several questions the card steps through them (Question 1/3, Next, Submit), and Submit waits until every question has an answer.
+
+**How you answer.** In the card, in the chat composer (typing a reply while a question is waiting answers it), or from the /review inbox, which shows the same card. Whichever comes first counts. Once the server has recorded it, the card shows each question with your answer under it, and so does the conversation after a reload.
+
+**Several questions at once.** The agent can ask more than one AskUserQuestion in the same step, so two or three cards can be waiting side by side. Each card sends its answer for its own question only. A reply typed in the composer (or given in the modal) goes to the newest card still waiting; once that one is answered, the next one still waiting takes its place.
+
+**If nobody answers.** The question waits five minutes, like a tool approval. After a minute you get a "Needs input" notification. After five, the agent is told nobody answered and that it must not assume an answer — it carries on only with what does not depend on it, or ends its turn and says what it needs. Stopping the run settles the question at once. A question never answers itself: the SDK's own idle auto-continue (`askUserQuestionTimeout`) is set to `never`, because on a box that runs while you sleep an auto-picked option is a decision you never saw.
+
+**Who can ask.** Only the agent in a chat. A delegated subagent cannot — it is told to put the question in its result so the agent that delegated to it can ask. Automations, monitors and CI-fix runs have no one to ask and are never offered the tool; if the model tries anyway the call is refused, and the run does not wait.
+
+**Previews are safe to show.** A preview is HTML the model wrote, and the model may be repeating text from a web page or a repository. So it is never put into the page. It is shown in a sealed frame that cannot run scripts, cannot reach the app or your session, cannot submit forms or open windows, and cannot load anything from the internet — an image pointing at someone's server is simply not fetched. Tags that could act on the frame itself are shown as text. A preview over 12,000 characters is dropped.
+
+**What was checked in the SDK** (`@anthropic-ai/claude-agent-sdk` 0.3.278, bundled CLI 2.1.278), rather than assumed: `toolConfig.askUserQuestion.previewFormat` exists and is set to `html` (the default is markdown, for a terminal); `askUserQuestionTimeout` is a Settings field, reached through the `settings` option; the tool always asks permission, so each call reaches the app's permission callback, which answers it by returning the call's input with the answers added (question text to answer, several choices comma-separated); and the tool is only switched on when a permission callback is installed, which the chat engine always does. The CLI also reads back and reports the answers it was given, which is what the saved transcript shows.
+
+Transcripts from before the change keep their `ask_user` blocks, and those still show each question with its answer.
+
+### Command output
+
+When the agent runs a shell command, the reply shows it as a small terminal instead of a generic tool card. It looks the same while the turn runs and after a reload.
+
+- The first line is the command. Below it is what the command printed, in a fixed-width font with its line breaks kept. Normal output and error output are shown separately; error output is red.
+- Colour codes, terminal links, window titles and redrawn progress bars are cleaned out, so the text reads as plain text. A progress bar that redraws itself on one line shows only its last state (`100%`, not `10% 50% 100%`).
+- Long output opens on its **last 20 lines**, because that is where a command says how it went. **Show all N lines** opens the rest and **Show last 20 lines** folds it back. **Copy output** always copies everything.
+- The card opens on its own when there is output, when the command failed, or when it ran in the background.
+- One badge says how it ended: `exit 2` for a command that failed with an exit code, `failed`, `interrupted`, `timed out`, or no badge for a command that succeeded. Claude Code only reports an exit code for a failed command and for a finished background command, so a successful ordinary command shows no badge rather than `exit 0`.
+- Some commands use an exit code to mean something other than failure (for example, `grep` returns 1 when it finds nothing). When Claude Code explains the code ("No matches found"), the card shows the explanation.
+- Each stream keeps its last 16,000 characters. When earlier output was cut, the card says so, and leaves out the first line of what is left: the cut lands mid-line, and can land in the middle of a colour code, which would otherwise show up as stray text like `[31m`.
+
+### Background commands
+
+The agent can start a command in the background, such as a dev server, a watcher or a long build, and keep working while it runs.
+
+1. The command's card opens straight away with a **live** badge. What the command prints appears in the card about once a second. The card follows the newest line, unless you have scrolled up to read something.
+2. A chip in the header shows each running background command, with a button to stop it.
+3. When the command finishes, the badge changes to how it ended: its exit code (`exit 0`, `exit 2`), or `finished`, `failed` or `stopped`. A notice in the transcript says it finished.
+4. **Background commands end with the turn.** When the agent finishes its reply, every command it started is stopped, because the Claude Code process that ran them is closed after each turn. A command still running at that point is marked **ended with turn**, its card says "Stopped when the turn ended", and one notice in the transcript lists the commands that were stopped. The header chips clear at the same moment.
+5. The agent is told this in its instructions. It should finish any work that needs the command in the same reply, and never tell you a server is still running after it has answered. It is also told that it cannot open the command's output file itself (the file is outside its workspace), and to copy output into its workspace, for example with `tee`, when it needs to read it.
+
+**Reloading or reconnecting mid-turn.** A page that is reloaded while the turn runs, or that reconnects after a dropped connection (a phone tab brought back to the front, a network blip), gets only what the server saved. So the server also saves the command's new output every five seconds or so while it keeps changing. A reloaded card catches up to what the command had printed a few seconds earlier, then keeps updating every few seconds instead of every second, and its **live** badge stays true. When the command ends, the card shows the final output that was saved with the reply. If some output never reached the page at all, the card says earlier output is missing rather than passing a fragment off as the whole thing.
+
+**Deleting a conversation stops it first.** If a turn is still running when a conversation is deleted, that turn is stopped, and every background command it started goes with it. Then the conversation is deleted. Before, the conversation disappeared but its turn and commands kept running, with nothing left in the app that could stop them.
+
+Rules:
+
+- The live output is read by the server from the file Claude Code writes the command's output to. The server only reads that file if Claude Code's own message named it, it sits exactly where Claude Code keeps this session's output for this command (`…/<session id>/tasks/<task id>.output`), and it is a plain file rather than a link to somewhere else. A path the agent or the command wrote is never read. If anything about the file looks wrong, the card shows no live output, but it still shows how the command ended.
+- The once-a-second pieces of output are not saved one by one. What is saved is what arrived since the last save, at most every five seconds and only when there is something new, plus the card's final output (its last 16,000 characters) and how the command ended. A quiet dev server costs a few small saves; a chatty build costs at most one 16,000-character save every five seconds.
+- A command that ends almost at once (a typo, a quick `ls`) can finish before Claude Code reports that it started. Its card opens already settled, with its output and exit code, instead of running until the turn ends.
+- Reading a command's output can never hold up the end of a turn: a last read that has not come back within two seconds is abandoned, and the turn ends normally. A file replaced by something that is not a plain file (for example a named pipe) is refused as soon as it is opened.
+- Background commands started by a subagent are not followed. They belong to the subagent and end with its answer.
+- When the agent stops one of its own background commands (Claude Code's `TaskStop` tool), the rule that makes every command ask first on a machine without the shell sandbox does not apply: `TaskStop` can only stop a command this session started, and it names no file. The conversation's permission mode and the per-tool approval settings still apply to it, as to any other tool (plan mode, for example, refuses it).
+
+What this relies on, checked against the installed Agent SDK (0.3.278, bundled Claude Code 2.1.278):
+
+- From the SDK's published types: `task_notification` reports a finished task with its task id, the id of the call that started it, `completed` / `failed` / `stopped`, a one-line summary and the output file's path. `background_tasks_changed` is the whole set of running tasks each time, and is not to be paired with the finish notices. There is no output for a running ordinary command (`tool_progress` carries elapsed seconds only). The old `BashOutput` / `TaskOutput` polling tools were removed; `BashOutput` is now only the name of the `Bash` result's shape. Without the `perTaskStopAffordance` option, which AgentStudio does not set, stopping a turn also kills its background tasks.
+- Seen in Claude Code itself, not promised by the types, so a future update could change it: the "Output is being written to: …" sentence in a backgrounded command's result, the `<session id>/tasks/<task id>.output` file layout, `KillShell` and `KillBash` as old names for `TaskStop`, and a failed command's result starting with `Exit code N`. Claude Code sends a finish notice the moment a task ends, so for a command that exits at once the notice could come before the command's own result; that order was read from Claude Code's code rather than seen happen, and both orders are handled. Claude Code also adds a last line such as `[exited with code 0]` or `[killed]` to the output file, so a finished card usually ends with it. If any of these change, the cost is quiet cards (no live output, no exit code), never a failed turn.
 
 ### Diff and artifact preview
 
@@ -237,19 +390,19 @@ Users can intervene mid-run from chat:
 
 How the controls that exist today behave:
 
-- **Stop** ends the current turn. The page asks the server to stop the run, and what the agent produced so far is kept as its reply. Reloading the page or losing the connection does **not** stop a run; it keeps working and the page reconnects on its own. See [../runs/spec.md](../runs/spec.md#stopping-a-run).
+- **Stop** ends the current turn. The page asks the server to stop the run, and what the agent produced so far is kept as its reply. Any delegated agent still working stops with it, and its card shows `stopped`. There is no stop button on a single child yet. Reloading the page or losing the connection does **not** stop a run; it keeps working and the page reconnects on its own. See [../runs/spec.md](../runs/spec.md#stopping-a-run).
 - **Coming back to a running turn.** Opening a conversation whose turn is still running — after a reload, or from another tab — shows that turn streaming again, with its tool and approval cards and the Stop button. Text written before you came back appears once the turn finishes.
 - **One turn at a time.** A message sent while a turn is still running is not sent. The page says so, keeps the message for Retry, and shows the running turn instead.
 - **Allow / Deny.** An approval card only shows a call as approved or denied once the server has recorded the answer. If it could not be recorded (the approval timed out, or was answered in another tab), the card keeps its buttons and says why.
-- **Answering a question.** When the agent asks a question (`ask_user`), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
+- **Answering a question.** When the agent asks a question (see [Questions from the agent](#questions-from-the-agent)), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
 - **Switching conversations mid-turn.** Opening another conversation while a reply is streaming shows only the other conversation. Nothing from the first one comes along: not its reply, its tool cards, its Stop button, its error message or its Retry. Leaving is not a Stop. The first turn keeps running, saves its own reply, and shows again with Stop when you go back to it.
 - **A turn that ends in an error.** Some turns end in an error after the reply was already saved, for example when the agent reaches its maximum number of steps or the model provider is overloaded. The page shows the error and keeps the one saved reply. It used to save a second, partial copy of the same reply.
-- **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it. The chips go away when the turn's stream ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
+- **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it, and streams its output into its card (see [Background commands](#background-commands)). The chips go away when the turn ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
 - **Pinned checklist.** The panel above the composer shows the main agent's latest plan. When the agent hands a step to a subagent, the subagent's own checklist does not replace it.
 
 ### Context meter
 
-The context meter above the composer, and the same figure in the right rail, estimate how much of the model's context window the conversation fills. It adds up:
+The context meter above the composer, and the context ring in the chat's header (on desktop as well as mobile, since #14 moved it out of the right rail), estimate how much of the model's context window the conversation fills. It adds up:
 
 | Part | Where the figure comes from |
 | --- | --- |
@@ -258,13 +411,17 @@ The context meter above the composer, and the same figure in the right rail, est
 | Messages | Estimated from the text of every message in the conversation |
 | Tool results | Estimated from the saved output of every tool call. Each reply's output is counted once, from its saved steps when it has them |
 
-Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page asks the agent to summarise the conversation first if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure.
+Everything except the system prompt is an estimate (about four characters per token), so treat it as a guide. It used to show only the system prompt once a turn had run, so a long conversation looked nearly empty. That also mattered for model switching: when you switch to a model with a smaller window, the page compacts the conversation first (the SDK's own `/compact`) if it would fill more of the new window than the auto-compact threshold in settings (72% by default), and that check uses this figure. **Compact Conversation** runs the same command; see [chat.md](chat.md#compacting-a-conversation).
 
 A reply saved after Stop or an error keeps its tool output in two places. The meter counts it once, so a stopped turn with a large command output does not read as twice its size or set off that summary early.
 
+### Editing, regenerating and restoring files
+
+Editing one of your messages, or regenerating the last reply, cuts the SDK session back to the reply before that message and answers the message's own stored text, so the model never sees the replies you dropped. In a project, the same action can also restore the files those replies changed, after showing what it would restore. How it works, and what it cannot undo: [chat.md](chat.md).
+
 ### Mobile and compact layout
 
-On mobile, the right panel collapses into a bottom sheet or tab drawer. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
+On mobile, the right rail is a drawer opened from the chat header. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
 
 ### Reading replies aloud
 
@@ -272,7 +429,7 @@ Every assistant reply has a speaker button beside Copy. It reads the reply throu
 
 ### How replies are displayed safely
 
-Assistant replies, thinking, subagent results and `ask_user` questions are written by the model, and the model may be repeating text it picked up from a web page, a repository or a tool result. Someone who plants instructions there can try to make the model write HTML that would run inside the app, or an image link that quietly sends data to their server the moment the reply is shown. So replies are displayed as formatted markdown, but under these rules:
+Assistant replies, thinking, subagent results and the agent's questions are written by the model, and the model may be repeating text it picked up from a web page, a repository or a tool result. Someone who plants instructions there can try to make the model write HTML that would run inside the app, or an image link that quietly sends data to their server the moment the reply is shown. So replies are displayed as formatted markdown, but under these rules:
 
 | Content in a reply | What the reader sees |
 | ------------------ | -------------------- |
@@ -304,6 +461,10 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Messages keep their order when two writers add to a conversation at the same moment (a Stop saving what was written so far while the turn saves its final reply, or a background run). The one that loses the race takes the next position and is still saved.
 - A staged attachment always lands in the same sandbox workspace the run's own tools resolve, so the path quoted to the agent is a path the agent can open.
 - Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
+- After an edit or regenerate the model sees exactly the kept conversation plus the message being answered — never the dropped replies, and never a placeholder prompt.
+- Restoring files happens before any message changes, and a restore that fails leaves the conversation as it was. Uncommitted changes in an imported repository are never overwritten without an explicit confirmation.
+- A path offered by `@` is one the next turn can open as written: it is relative to the folder that turn starts in, and it never reaches through a symbolic link.
+- A palette command calls the same handler as the button it stands in for. The palette has no copy of its own of any action.
 
 ## Roles & Permissions
 
@@ -311,6 +472,7 @@ The renderer checks itself when the app starts by running a set of known attack 
 | -------------------------------- | ------------------ |
 | View own workbench sessions      | Authenticated user |
 | Approve own plan or tool request | Owner user, admin  |
+| Search a conversation's files with `@` | The conversation's owner |
 | Resolve another user's item      | Admin only         |
 | View admin observability panes   | Admin only         |
 
@@ -322,10 +484,10 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows [../ui/spec.md](../ui/spec.md) and defines the primary app-shell experience.
 
-- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and mode-aware right panel tabs.
+- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and the right rail (Preview + Files).
 - States and badges: running, blocked, needs-input, queued interjection, completed, failed, and pending approvals count.
-- Blocking actions: plan approvals, tool approvals, and ask_user responses must resolve through durable review items.
-- Mobile behavior: right panel collapses to bottom-sheet tabs; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
+- Blocking actions: plan approvals, tool approvals, and answers to the agent's questions must resolve through durable review items.
+- Mobile behavior: the right rail opens as a drawer from the chat header; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
 
 ## References
 

@@ -131,7 +131,7 @@ API routes handle everything that is not a page: SSE streams, webhook receivers,
 ```
 /api/chat/[id]/stream       # SSE: live run event stream
 /api/chat/[id]/approve      # POST: approve/deny tool call
-/api/chat/[id]/answer       # POST: answer ask_user question
+/api/chat/[id]/answer       # POST: answer the agent's question (served at /chat/[id]/ask-user)
 /api/agents/[id]/run        # POST: start a run for an agent
 /api/mcp/[serverId]/proxy   # POST: proxy MCP tool call
 /api/notifications/push     # POST: register push subscription

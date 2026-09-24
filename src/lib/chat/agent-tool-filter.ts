@@ -1,9 +1,10 @@
 /**
- * Pure agent tool-policy resolver + filter.
+ * Pure agent tool-policy resolver.
  *
  * Lives in a non-server module so unit tests can import it without pulling in `$lib/db.server`
  * (which transitively imports `$app/environment`, unresolvable in the Playwright Node test
- * runner). The runtime calls these functions from chat-stream after fetching the agent row.
+ * runner). The chat stream route resolves the bound agent's policy with it, and a `readOnly`
+ * allow-list becomes the engine's tool scope.
  *
  * Two policy shapes are supported:
  *  - `unrestricted`: no filtering (Chat, Autonomous built-ins; all user-created agents).
@@ -31,17 +32,4 @@ export function resolveAgentToolPolicy(config: AgentConfigLike): AgentToolPolicy
 		return { kind: 'readOnly', allow }
 	}
 	return { kind: 'unrestricted' }
-}
-
-export function filterToolsByAgentPolicy<T extends { function: { name: string } }>(
-	tools: T[],
-	policy: AgentToolPolicy,
-): T[] {
-	if (policy.kind === 'unrestricted') return tools
-	return tools.filter((tool) => policy.allow.has(tool.function.name))
-}
-
-export function isToolAllowedByPolicy(toolName: string, policy: AgentToolPolicy): boolean {
-	if (policy.kind === 'unrestricted') return true
-	return policy.allow.has(toolName)
 }

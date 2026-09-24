@@ -182,13 +182,13 @@ export const TOOL_CAPABILITY_RULES: readonly ToolCapabilityRule[] = [
 
 	// 3. Read-only. Before the write rules so `file_read` is not caught by /^file_/.
 	{
-		match: /^(file_read|file_info|list_directory|search_files|web_search|web_fetch|pdf_read|browser_screenshot|git_status|git_log|git_diff|search_tools|ask_user)$/i,
+		match: /^(file_read|file_info|list_directory|search_files|web_search|web_fetch|pdf_read|browser_screenshot|git_status|git_log|git_diff)$/i,
 		capabilities: ['read'],
 	},
 	{
-		match: /^(read|glob|grep|websearch|webfetch|notebookread|todoread)$/i,
+		match: /^(read|glob|grep|websearch|webfetch|notebookread|todoread|askuserquestion)$/i,
 		capabilities: ['read'],
-		note: '#15 built-ins.',
+		note: '#15 built-ins, and AskUserQuestion (#4), which only asks.',
 	},
 	{
 		match: /^(list|get|read|search|describe|show|inspect|count|fetch)_/i,

@@ -1,5 +1,7 @@
 # Tools Spec
 
+> **Read [`tools.md`](tools.md) first.** It describes how tools work today. This spec is an earlier design: capability groups, `enable_capability` and progressive disclosure were replaced by a tier system and `search_tools`, and that was deleted too (#8) — every chat is offered the whole tool list from the start. The sections on web access safety and web tool limits below are current.
+
 ## Overview
 
 Tools are the hands of AgentStudio's agents. They are typed functions the model can call to interact with the outside world: read and write files, run shell commands, search the web, spawn sub-agents, and more. The tools domain defines what tools exist, how they are grouped, how they are disclosed to the model progressively, and how their outputs are managed in the context window.
@@ -12,7 +14,7 @@ Tools are defined in code (`src/lib/tools/catalog/`), not in the database. Their
 
 | Group      | `alwaysOn` | Tools included                                                                                    |
 | ---------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| `core`     | yes        | `web_search`, `ask_user`, `list_automations`, `enable_capability`                                 |
+| `core`     | yes        | `web_search`, `list_automations`, `enable_capability` (questions to the user are the SDK's AskUserQuestion since #4) |
 | `sandbox`  | no         | `shell`, `file_read`, `file_write`, `file_patch`, `file_replace`, `list_directory`, `delete_file` |
 | `browser`  | no         | `browser_screenshot`, `browser_click`, `browser_navigate`                                         |
 | `agents`   | no         | `run_subagent`, `propose_plan`, `list_agents`                                                     |

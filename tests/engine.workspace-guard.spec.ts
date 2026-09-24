@@ -132,6 +132,18 @@ test('Bash never runs outside the sandbox, whatever the policy says', () => {
 	).toBe('allow')
 })
 
+test('stopping a background task is not a shell command (#35)', () => {
+	// `TaskStop` is the CLI's name for the old `KillShell`: it names no path and can only stop
+	// a task this session started, so a host with no sandbox does not ask before it — while a
+	// `Bash` call on the same host still does. This already held before #35 (calls arrive as
+	// `TaskStop`, which was never a command tool); it is pinned because the docs now say so.
+	const WS = process.platform === 'win32' ? 'C:\\sandbox\\user-aaa' : '/sandbox/user-aaa'
+	const g = (toolName: string, toolInput: unknown) =>
+		guardWorkspaceAccess({ toolName, toolInput, workspaceRoot: WS, bashPolicy: 'ask' }).verdict
+	expect(g('TaskStop', { task_id: 'b1' })).toBe('allow')
+	expect(g('Bash', { command: 'ls' })).toBe('ask')
+})
+
 test.describe("the agent's own configuration needs approval to change", () => {
 	// A trusted project's `.claude/settings.json` is loaded by the next run, and its hooks
 	// run as the app user outside the sandbox. An agent that could rewrite it silently could

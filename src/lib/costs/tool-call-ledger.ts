@@ -28,8 +28,8 @@ import type { ToolResultDetails } from '../engine/tool-result-details'
 /**
  * Tools that already write their own `call`-unit row, and so must not get a second one.
  *
- * Only `web_search` qualifies. The media handlers log in `credit` / `second` units and only
- * when a generation actually cost money, so a call row alongside them counts the call
+ * Only `web_search` qualifies. The media handlers log their spend in `credit` / `second`
+ * units (`$lib/costs/media-spend.server`), so a call row alongside them counts the call
  * without double-counting the spend.
  */
 export const SELF_LOGGED_CALL_TOOLS: ReadonlySet<string> = new Set(['web_search'])

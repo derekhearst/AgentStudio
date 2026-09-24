@@ -5,6 +5,7 @@ import {
 	toolSchemas,
 	type ToolName,
 } from '$lib/tools/tools.server'
+import { mcpExposedToolNames } from '$lib/tools/tools'
 import { db } from '$lib/db.server'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
@@ -33,7 +34,7 @@ const SERVER_INFO = {
 
 /**
  * Expose every registered tool as an MCP tool. We re-use the canonical registry by calling
- * `getToolDefinitions(undefined, { tierFilter: false })` — that single call returns
+ * `getToolDefinitions` — that single call returns
  * `{type, function: {name, description, parameters}}` records derived from the same
  * `toolSchemas` + `toolDescriptions` the LLM loop uses, including JSON-schema parameters.
  *
@@ -42,9 +43,12 @@ const SERVER_INFO = {
  * Previously this file kept its own ~350-line copy of descriptions and JSON-schema fragments
  * which silently drifted from `tool-schemas.ts` (e.g. `web_search` had a stale description and
  * the MCP map dropped half the optional parameters). Pulling from the registry kills the drift.
+ *
+ * Every registry tool, that is, except the ones that only work inside a chat run
+ * (`mcpExposedToolNames`): a call here has no run, so they could only ever refuse.
  */
 function listTools() {
-	return getToolDefinitions(undefined, { tierFilter: false }).map((def) => ({
+	return getToolDefinitions(mcpExposedToolNames()).map((def) => ({
 		name: def.function.name,
 		description: def.function.description,
 		inputSchema: def.function.parameters,
@@ -133,6 +137,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				const args = (body.params?.arguments as Record<string, unknown>) ?? {}
 				if (!Object.keys(toolSchemas).includes(name)) {
 					return json(rpcError(body.id, -32602, `Unknown tool: ${name}`))
+				}
+				if (!mcpExposedToolNames().includes(name as ToolName)) {
+					return json(rpcError(body.id, -32602, `${name} only runs inside a chat conversation, not over MCP`))
 				}
 				const result = await executeTool(
 					{ name: name as ToolName, arguments: args },

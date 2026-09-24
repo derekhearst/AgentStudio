@@ -10,10 +10,11 @@
 	import { getCostSummary, getBudgetStatus } from '$lib/costs/cost.remote';
 	import { listAppLogsQuery, countLogsBySourceQuery } from '$lib/observability/logs.remote';
 	import { getSettings } from '$lib/settings';
+	import { remoteErrorMessage } from '$lib/ui/remote-error';
+	import type { ReviewItemType } from '$lib/observability/observability.schema';
 	import ContentPanel from '$lib/ui/ContentPanel.svelte';
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import { fetchFresh } from '$lib/ui/fresh-query';
-	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import KpiStrip from './_components/KpiStrip.svelte';
 	import RecentFailures from './_components/RecentFailures.svelte';
 	import LogsPanel from './_components/LogsPanel.svelte';
@@ -47,6 +48,9 @@
 	});
 
 	let inbox = $state<Inbox | null>(null);
+	// Why the last inbox reload failed. Shown over the list, which still holds the previous
+	// filter's items — without this they sat there under the new filter's label.
+	let inboxError = $state<string | null>(null);
 	let cost = $state<Cost | null>(null);
 	let budget = $state<Budget | null>(null);
 	let snapshot = $state<Snapshot | null>(null);
@@ -114,7 +118,10 @@
 	async function loadAll() {
 		loading = true;
 		await Promise.all([
-			loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v)),
+			loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => {
+				inbox = v;
+				inboxError = null;
+			}),
 			loadSection('cost', fetchFresh(getCostSummary({ period })), (v) => (cost = v)),
 			loadSection('platform health', fetchFresh(getOperationalSnapshotQuery()), (v) => (snapshot = v)),
 			loadSection('logs', fetchFresh(listAppLogsQuery(buildLogsArgs())), (v) => (logs = v)),
@@ -135,7 +142,7 @@
 
 	function buildInboxArgs() {
 		return {
-			type: typeFilter ? (typeFilter as 'approval_request') : undefined,
+			type: typeFilter ? (typeFilter as ReviewItemType) : undefined,
 			status: statusFilter ? (statusFilter as 'open') : undefined,
 			severity: severityFilter ? (severityFilter as 'info' | 'warning' | 'critical') : undefined,
 			openOnly: !statusFilter,
@@ -156,7 +163,15 @@
 	}
 
 	async function reloadInbox() {
-		await loadSection('inbox', fetchFresh(listReviewItemsQuery(buildInboxArgs())), (v) => (inbox = v));
+		// A failed filter change is said over the list (`inboxError`), which still holds the
+		// previous filter's items; a success also clears a failure the first load reported.
+		try {
+			inbox = await fetchFresh(listReviewItemsQuery(buildInboxArgs()));
+			inboxError = null;
+			sectionErrors.inbox = undefined;
+		} catch (e) {
+			inboxError = remoteErrorMessage(e, 'Could not load the inbox for this filter');
+		}
 	}
 
 	async function reloadLogs() {
@@ -274,6 +289,11 @@
 					<span class="badge badge-sm badge-ghost">{inbox?.items.length ?? 0}</span>
 				</div>
 			{/snippet}
+			{#if inboxError}
+				<div role="alert" class="alert alert-error mb-3 text-sm" data-testid="inbox-error">
+					<span>{inboxError}. The items below are from the previous filter.</span>
+				</div>
+			{/if}
 			<InboxList
 				inbox={inbox}
 				bind:typeFilter

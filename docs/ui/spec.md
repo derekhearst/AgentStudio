@@ -91,13 +91,13 @@ Sources:
 
 - Left rail: navigation + running sessions dock + recent sessions
 - Center: chat thread + run HUD + composer + inline action cards
-- Right workbench: mode-aware tabs for artifacts, plans, research, diffs, evaluations, PRs
+- Right rail (chat only): Preview and Files (what the agent changed in this chat), folded to a thin strip until something is opened. See [../chat-console/chat-console.md](../chat-console/chat-console.md)
 
 ### Mobile shell
 
 - Bottom navigation for primary areas
 - Thread-first canvas
-- Right workbench becomes bottom sheet tabs
+- The chat's right rail becomes a drawer opened from the chat header
 - Blocking approvals/questions appear as sticky cards above composer
 - Detail pages (an agent, a skill, a project, a run, a trace, the jobs and hooks views) show a **Back** button in the page header beside the menu button below the desktop breakpoint, where the breadcrumbs are hidden. On wide screens the breadcrumb trail holds the parent link instead. An installed app has no browser Back button, so on phones and tablets this button is the way up. Its label names where it goes, for example "Back to Agents".
 
@@ -141,7 +141,7 @@ Sources:
 - Only a page's first load replaces its content with a spinner. A reload after a change, or from **Refresh**, keeps the current list on screen until the new one arrives, so the reader keeps their place and any panel they had open.
 - On a dashboard made of several sections, each section's error is reported on its own. A section that loads again successfully clears its own error without touching the others.
 - After any change the user makes on a page (create, save, toggle, delete, resolve) and whenever they press **Refresh**, the page reloads its data from the server rather than reusing an earlier answer the browser kept. Otherwise the change is saved but the screen still shows the old state, which reads as the change being lost.
-- Blocking action failures (approval submit, ask_user submit, queue send) must show explicit retry paths.
+- Blocking action failures (approval submit, question answer submit, queue send) must show explicit retry paths.
 - Long-running run disruptions should preserve user intent and offer resume/recover options.
 
 ## Visual System
@@ -211,7 +211,7 @@ Generic boilerplate is not sufficient. Each domain must provide domain-specific 
 | ---------------- | ----------------------------------------------------------------------------- |
 | Primary surface  | e.g. left rail list item / chat inline card / right workbench tab             |
 | Status badges    | e.g. running (green pulse) / blocked (orange) / done (ghost)                  |
-| Blocking actions | e.g. ask_user card — resolved via ActionCard (ask_user type)                  |
+| Blocking actions | e.g. the agent's question card (`AskUserCard`, #4) and tool approval cards     |
 | Mobile behavior  | e.g. surface appears in bottom-sheet tab; blocking card sticky above composer |
 ```
 
@@ -225,7 +225,7 @@ The following components implement the canonical desktop and mobile shells. Doma
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Left rail        | `src/lib/chat-console/ConsoleNavContent.svelte` | Nav groups, recent chats, and a collapsible "Manage" section for the system pages. |
 | Center canvas    | `<main>` in `src/lib/chat-console/ChatConsoleShell.svelte` | Thread and composer.                                             |
-| Right rail       | `src/lib/chat-console/ChatConsoleRail.svelte` | Shown on chat and home only (`showRail`).                                           |
+| Right rail       | `src/lib/chat-console/ChatConsoleRail.svelte` | Conversation pages only (`showRail`). Collapses to a 40px strip; expanded or folded is remembered per user. |
 
 > This table described a layout built around `src/lib/ui/Sidebar.svelte`, `RunningSessionsDock.svelte`
 > and `SidePanel.svelte`. The console redesign replaced all three and none of them were
@@ -238,13 +238,13 @@ The following components implement the canonical desktop and mobile shells. Doma
 | ------------------ | ---------------------------------- | --------------------------------------- |
 | Bottom nav         | `src/lib/ui/MobileNav.svelte`      | Hides on chat detail route (slide-off). |
 | Full-screen canvas | `<main>` (full viewport)           | No border radius or padding on mobile.  |
-| Right workbench    | Not shown inline; bottom sheet TBD | Phase 3.1 work.                         |
+| Right rail         | `src/lib/chat-console/MobileRightDrawer.svelte` | The same rail in a drawer, opened from the chat header's rail button. |
 
 ### Action cards
 
-All blocking agent actions (ask_user, tool approval, confirmation) render via `src/lib/ui/ActionCard.svelte`. Domains invoke ActionCard with one of three `type` props:
+The design called for all blocking agent actions to render through one `src/lib/ui/ActionCard.svelte`, with one of these `type` props. That component was never built; each action has its own card today. The agent's questions use `src/lib/chat/AskUserCard.svelte`, shared by the chat, the modal a reloaded page opens and the /review inbox: a header chip, option cards, sandboxed HTML previews, multi-select and a free-text "Other" (see [../chat/spec.md](../chat/spec.md#questions-from-the-agent)).
 
-- `ask_user` — question with options and optional freeform input
+- `ask_user` — question with options and optional freeform input (now `AskUserCard`)
 - `tool_approval` — tool name + args preview with Allow / Deny buttons
 - `confirmation` — plain message with configurable confirm/cancel labels
 

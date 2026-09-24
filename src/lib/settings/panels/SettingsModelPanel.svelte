@@ -41,6 +41,7 @@
 			<div class="w-full sm:w-64">
 				<ModelSelector
 					value={defaultModel}
+					surface="engine"
 					showChevron={false}
 					showBrowseBadge={false}
 					onchange={onDefaultModelChange}

@@ -11,9 +11,10 @@
  * client secret, the VAPID private key and the gateway token — into a tool result that is
  * sent to the model provider and stored in the run's events.
  *
- * The retired in-house shell never had this problem: it built a minimal env of its own
- * (`run_code` still does). This is that rule applied to the CLI. An allow-list rather than
- * a deny-list, because the secrets this app grows next will not be added to a deny-list.
+ * The retired in-house shell never had this problem: it built a minimal env of its own (so
+ * did `run_code`, retired in #69). This is that rule applied to the CLI. An allow-list
+ * rather than a deny-list, because the secrets this app grows next will not be added to a
+ * deny-list.
  *
  * What survives: what a process needs to run at all (the executable path, the home and temp
  * directories, locale, the Windows system variables), how to reach the network (proxies,
@@ -24,7 +25,7 @@
  * messaging token, which a child CLI must not inherit. `ANTHROPIC_*` from the server is
  * dropped on purpose too: a Claude run is meant to be on the subscription login, and an
  * inherited API key would silently move it onto per-token billing. A gateway run gets its
- * three `ANTHROPIC_*` variables explicitly.
+ * own `ANTHROPIC_*` variables explicitly, from `./gateway-env`.
  *
  * Pure, so the spec can check exactly which names cross.
  */
@@ -105,7 +106,7 @@ export function engineEnvAllows(name: string): boolean {
 
 /**
  * Build the CLI's environment from the server's, keeping only what `engineEnvAllows`, then
- * layering `extra` on top (the gateway's `ANTHROPIC_*`). Undefined values are dropped, and
+ * layering `extra` on top. Undefined values are dropped, and
  * the original spelling of each name is kept.
  */
 export function buildEngineEnv(

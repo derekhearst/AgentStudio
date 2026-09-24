@@ -1,9 +1,10 @@
 import { command, query } from '$app/server'
 import { z } from 'zod'
 import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
-import { cancelJob, enqueueJob } from '$lib/jobs/jobs.server'
+import { cancelJob } from '$lib/jobs/jobs.server'
 import {
 	createResearch,
+	enqueueResearchRun,
 	getResearchById,
 	getResearchDetail,
 	listResearchForUser,
@@ -49,24 +50,6 @@ export const getResearchDetailQuery = query(z.string().uuid(), async (researchId
 	return getResearchDetail(researchId)
 })
 
-/**
- * List research runs back-linked to a conversation (most recent first). Used by the chat
- * page sidebar to show the active/recent research for the open chat — typically there's
- * just one in-flight or recently-completed run, but listing supports the case where the
- * user kicked off several sequentially.
- */
-export const listResearchForConversationQuery = query(
-	z.object({
-		conversationId: z.string().uuid(),
-		limit: z.number().int().min(1).max(20).default(5),
-	}),
-	async (input) => {
-		const user = requireAuthenticatedRequestUser()
-		const { listResearchByConversation } = await import('./research.server')
-		return listResearchByConversation(input.conversationId, user.id, input.limit)
-	},
-)
-
 const startResearchSchema = z.object({
 	query: z.string().trim().min(8).max(2000),
 	conversationId: z.string().uuid().optional(),
@@ -85,16 +68,13 @@ export const startResearchCommand = command(startResearchSchema, async (input) =
 		runId: input.runId ?? null,
 		model: input.model ?? null,
 	})
-	const job = await enqueueJob({
-		type: 'research_run',
-		queue: 'default',
-		priority: 150, // user-initiated research outranks background work
-		payload: { researchId: research.id },
+	// Links the job back to the research row for UI traceability.
+	const job = await enqueueResearchRun({
+		researchId: research.id,
 		userId: user.id,
 		runId: input.runId ?? null,
+		priority: 150, // user-initiated research outranks background work
 	})
-	// Backlink the job to the research row for UI traceability.
-	await updateResearch(research.id, { jobId: job.id })
 	return { research: { ...research, jobId: job.id }, jobId: job.id }
 })
 

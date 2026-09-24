@@ -38,6 +38,13 @@ export const MAX_STREAM_CHARS = 16_000
 /** Todo items kept. A list longer than this is a runaway, not a plan. */
 export const MAX_TODO_ITEMS = 100
 
+/**
+ * Characters of a child agent's final report kept on its card. The whole report went to the
+ * parent model already; this copy is for a person skimming the transcript, and the child's
+ * forwarded text usually carries the same words.
+ */
+export const MAX_REPORT_CHARS = 4_000
+
 /** One hunk of a unified diff, in the shape the SDK computes it. */
 export type DiffHunk = {
 	oldStart: number
@@ -70,9 +77,18 @@ export type FileEditDetails = {
 	truncated: boolean
 }
 
+/**
+ * Where a backgrounded command is in its life (#35).
+ *
+ * Background commands end with the turn that started them — the engine closes the CLI after
+ * each turn, and the CLI's own processes go with it — so a command that is still running when
+ * the reply ends is `ended_with_turn`, not `running` forever.
+ */
+export type BackgroundShellStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'ended_with_turn'
+
 export type ShellDetails = {
 	kind: 'shell'
-	/** Bash, BashOutput or KillShell. */
+	/** Always `Bash` now; kept as data because older persisted blocks name other tools. */
 	tool: string
 	command: string | null
 	/** The model's own one-line description of the command, when it supplied one. */
@@ -80,7 +96,7 @@ export type ShellDetails = {
 	stdout: string
 	stderr: string
 	interrupted: boolean
-	/** Present when the command was backgrounded; the handle `BashOutput` / `KillShell` take. */
+	/** Present when the command was backgrounded: the task id `TaskStop` and the stop chip take. */
 	backgroundTaskId: string | null
 	/** Set when the command hit its timeout and the CLI auto-backgrounded it. */
 	timedOutAfterMs: number | null
@@ -88,6 +104,20 @@ export type ShellDetails = {
 	persistedOutputPath: string | null
 	/** True when either stream was clipped to `MAX_STREAM_CHARS` (the tail is what was kept). */
 	truncated: boolean
+	/*
+	 * Everything below is optional so that blocks persisted before it existed still type-check
+	 * and render exactly as they did.
+	 */
+	/**
+	 * The exit code, when the CLI reported one. It does not for a command that succeeded in
+	 * the foreground — `BashOutput` has no such field — only for one that failed (its result
+	 * begins `Exit code N`) and for a background command's completion (`… (exit code N)`).
+	 */
+	exitCode?: number | null
+	/** The CLI's reading of a non-error exit code with a meaning, e.g. grep's 1: "No matches found". */
+	returnCodeInterpretation?: string | null
+	/** A backgrounded command's status, updated live while its turn runs. Absent in the foreground. */
+	background?: { status: BackgroundShellStatus } | null
 }
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed'
@@ -108,19 +138,88 @@ export type TodoDetails = {
 	truncated: boolean
 }
 
-export type ToolResultDetails = FileEditDetails | ShellDetails | TodoDetails
+/** Token counts in the ledger's own vocabulary, read off the SDK's `usage` object. */
+export type SubagentUsage = {
+	inputTokens: number
+	outputTokens: number
+	cacheCreationTokens: number
+	cacheReadTokens: number
+}
+
+/**
+ * A delegated child's result (#32) — the SDK's `AgentOutput` for the `Agent` / `Task` tool.
+ *
+ * `completed` is a foreground child that ran to the end, with its report and run totals.
+ * `async_launched` and `remote_launched` are the placeholders a background or remote child
+ * answers with immediately; the delegation gate forces foreground, so they should not occur,
+ * but they are recognised so the card can say what happened instead of claiming a result.
+ *
+ * `usage` and `totalTokens` are what the SDK reports, and it is worth being exact about what
+ * that is: the bundled CLI (2.1.278) fills both from the child's LAST model call — `usage` is
+ * that call's usage object and `totalTokens` its input, cache and output tokens added up,
+ * which is the child's context size at the end plus its final answer. They are not the sum
+ * of everything the child spent. The ledger treats them accordingly (`$lib/costs/subagent-ledger`).
+ */
+export type SubagentDetails = {
+	kind: 'subagent'
+	/** `Agent`, or `Task` from an older CLI. */
+	tool: string
+	status: 'completed' | 'async_launched' | 'remote_launched'
+	/** The SDK's id for the child — what its transcript file is named after. */
+	sdkAgentId: string | null
+	/** The agent key it ran as (`subagent_type`), as the SDK resolved it. */
+	agentType: string | null
+	/** The child's final report, capped at `MAX_REPORT_CHARS`. Empty for a launch placeholder. */
+	report: string
+	reportTruncated: boolean
+	totalTokens: number | null
+	totalToolUseCount: number | null
+	totalDurationMs: number | null
+	/** The child's final model call's usage — see the type note. Null when not reported. */
+	usage: SubagentUsage | null
+	/** The model the child ended on. */
+	resolvedModel: string | null
+}
+
+/**
+ * What the user answered an `AskUserQuestion` (#4). The questions themselves are the call's
+ * arguments, so only the answers are kept: question text → the answer the model was given,
+ * which for a multi-select question is the chosen labels comma-separated, as the SDK has it.
+ */
+export type AskUserQuestionDetails = {
+	kind: 'ask_user_question'
+	answers: Record<string, string>
+}
+
+export type ToolResultDetails =
+	| FileEditDetails
+	| ShellDetails
+	| TodoDetails
+	| SubagentDetails
+	| AskUserQuestionDetails
+
+/** Characters kept per answer — what the /review answer endpoint accepts. */
+export const MAX_ANSWER_CHARS = 4_000
 
 /** Built-ins whose output this module knows how to distil. */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'MultiEdit'])
 const FILE_WRITE_TOOLS = new Set(['Write'])
-const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+/**
+ * Only `Bash`. `BashOutput` and `TaskOutput` were removed from the CLI, and `TaskStop` (the
+ * old `KillShell`) answers with `{ message, task_id, task_type }` — no streams to render.
+ */
+const SHELL_TOOLS = new Set(['Bash'])
+/** Both spellings of the delegation tool; duplicated from `./builtin-tools` to stay import-free. */
+const SUBAGENT_TOOLS = new Set(['Agent', 'Task'])
 
 export function hasToolResultDetails(toolName: string): boolean {
 	return (
 		FILE_EDIT_TOOLS.has(toolName) ||
 		FILE_WRITE_TOOLS.has(toolName) ||
 		SHELL_TOOLS.has(toolName) ||
-		toolName === 'TodoWrite'
+		SUBAGENT_TOOLS.has(toolName) ||
+		toolName === 'TodoWrite' ||
+		toolName === 'AskUserQuestion'
 	)
 }
 
@@ -143,6 +242,58 @@ function clipTail(value: unknown): { text: string; truncated: boolean } {
 	if (typeof value !== 'string' || value.length === 0) return { text: '', truncated: false }
 	if (value.length <= MAX_STREAM_CHARS) return { text: value, truncated: false }
 	return { text: value.slice(value.length - MAX_STREAM_CHARS), truncated: true }
+}
+
+/**
+ * Add live output to a stream that is already capped, keeping the same tail `clipTail` keeps.
+ *
+ * Shared by the engine, which grows a background command's persisted block as its output
+ * file grows, and by the chat page, which grows the card from the `shell_output` frames — so
+ * the two cannot disagree about what the last 16k characters are.
+ */
+export function appendStreamTail(current: string, chunk: string): { text: string; truncated: boolean } {
+	return clipTail(`${current}${chunk}`)
+}
+
+/**
+ * A failed `Bash` call, as the CLI reports one.
+ *
+ * A non-zero exit makes the CLI throw, so there is no `BashOutput` object: `tool_use_result`
+ * is the string `Error: Exit code N` followed by the command's output, and the tool_result
+ * the model reads is the same text inside `<tool_use_error>`. The first line is the CLI's own
+ * and the only thing parsed; everything after it is shown as it came. Anything else — a
+ * denial, a pre-spawn error — is not a command's output and is left to the generic card.
+ */
+const FAILED_COMMAND = /^Exit code (-?\d+)[ \t]*(?:\r?\n|$)/
+
+function failedShellDetails(
+	toolName: string,
+	result: string,
+	args: Record<string, unknown> | null,
+): ShellDetails | null {
+	const body = result
+		.replace(/^Error: /, '')
+		.replace(/^<tool_use_error>([\s\S]*)<\/tool_use_error>\s*$/, '$1')
+	const match = FAILED_COMMAND.exec(body)
+	if (!match) return null
+	const exitCode = Number(match[1])
+	if (!Number.isSafeInteger(exitCode)) return null
+	// The CLI merges the streams before it throws, so this is one stream, not stderr.
+	const output = clipTail(body.slice(match[0].length))
+	return {
+		kind: 'shell',
+		tool: toolName,
+		command: str(args?.command),
+		description: str(args?.description),
+		stdout: output.text,
+		stderr: '',
+		interrupted: false,
+		backgroundTaskId: null,
+		timedOutAfterMs: null,
+		persistedOutputPath: null,
+		truncated: output.truncated,
+		exitCode,
+	}
 }
 
 function readHunks(value: unknown): DiffHunk[] {
@@ -260,6 +411,7 @@ function shellDetails(
 		timedOutAfterMs: num(result.timedOutAfterMs),
 		persistedOutputPath: str(result.persistedOutputPath) ?? str(result.rawOutputPath),
 		truncated: stdout.truncated || stderr.truncated,
+		returnCodeInterpretation: str(result.returnCodeInterpretation),
 	}
 }
 
@@ -302,6 +454,77 @@ function todoDetails(
 	}
 }
 
+function readSubagentUsage(value: unknown): SubagentUsage | null {
+	const usage = asRecord(value)
+	if (!usage) return null
+	const input = num(usage.input_tokens)
+	const output = num(usage.output_tokens)
+	if (input === null && output === null) return null
+	return {
+		inputTokens: Math.max(0, input ?? 0),
+		outputTokens: Math.max(0, output ?? 0),
+		cacheCreationTokens: Math.max(0, num(usage.cache_creation_input_tokens) ?? 0),
+		cacheReadTokens: Math.max(0, num(usage.cache_read_input_tokens) ?? 0),
+	}
+}
+
+function subagentDetails(toolName: string, result: Record<string, unknown>): SubagentDetails | null {
+	const status = result.status
+	if (status !== 'completed' && status !== 'async_launched' && status !== 'remote_launched') return null
+
+	let report = ''
+	let reportTruncated = false
+	if (status === 'completed' && Array.isArray(result.content)) {
+		const text = result.content
+			.map((part) => {
+				const block = asRecord(part)
+				return block?.type === 'text' && typeof block.text === 'string' ? block.text : ''
+			})
+			.filter((part) => part.length > 0)
+			.join('\n\n')
+		reportTruncated = text.length > MAX_REPORT_CHARS
+		report = reportTruncated ? text.slice(0, MAX_REPORT_CHARS) : text
+	}
+
+	return {
+		kind: 'subagent',
+		tool: toolName,
+		status,
+		sdkAgentId: str(result.agentId) ?? str(result.taskId),
+		agentType: str(result.agentType),
+		report,
+		reportTruncated,
+		totalTokens: num(result.totalTokens),
+		totalToolUseCount: num(result.totalToolUseCount),
+		totalDurationMs: num(result.totalDurationMs),
+		usage: status === 'completed' ? readSubagentUsage(result.usage) : null,
+		resolvedModel: str(result.resolvedModel),
+	}
+}
+
+/**
+ * The answers on an `AskUserQuestionOutput`, or null when there are none.
+ *
+ * Also the shape the engine records itself when it answers the call (`./ask-user-question`),
+ * for the case where the result arrives without a `tool_use_result` it can attribute. The
+ * CLI also accepts a list for a multi-select answer, so one is joined the way the SDK
+ * documents its own output.
+ */
+export function askUserQuestionDetails(answers: unknown): AskUserQuestionDetails | null {
+	const record = asRecord(answers)
+	if (!record) return null
+	const out: Record<string, string> = {}
+	for (const [question, value] of Object.entries(record)) {
+		const text = Array.isArray(value)
+			? value.filter((item): item is string => typeof item === 'string').join(', ')
+			: typeof value === 'string'
+				? value
+				: ''
+		if (question && text.trim()) out[question] = text.slice(0, MAX_ANSWER_CHARS)
+	}
+	return Object.keys(out).length > 0 ? { kind: 'ask_user_question', answers: out } : null
+}
+
 /**
  * Distil one tool call's structured output, or return null to fall back to the generic card.
  *
@@ -323,10 +546,17 @@ export function toolResultDetails(
 			return result ? fileEditDetails(toolName, result, args) : null
 		}
 		if (SHELL_TOOLS.has(toolName)) {
+			if (typeof toolUseResult === 'string') return failedShellDetails(toolName, toolUseResult, args)
 			return result ? shellDetails(toolName, result, args) : null
 		}
 		if (toolName === 'TodoWrite') {
 			return todoDetails(result ?? {}, args)
+		}
+		if (SUBAGENT_TOOLS.has(toolName)) {
+			return result ? subagentDetails(toolName, result) : null
+		}
+		if (toolName === 'AskUserQuestion') {
+			return askUserQuestionDetails(result?.answers)
 		}
 	} catch {
 		// Never let a shape surprise kill the turn — the generic card is always a valid answer.

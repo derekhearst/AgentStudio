@@ -45,9 +45,8 @@ export const BUILTIN_AGENT_IDS: Record<BuiltinAgentKey, string> = {
  * `Write` from Research would break its only workflow. See docs/agents/spec.md.
  */
 export const READ_ONLY_TOOL_NAMES: readonly string[] = [
-	// Always-loaded essentials (Tool Search Tool `disclosure: 'always'` tier).
-	'ask_user',
-	'search_tools',
+	// Essentials. `AskUserQuestion` is the SDK's question tool (#4), which replaced `ask_user`.
+	'AskUserQuestion',
 	'web_search',
 	// Plan authoring + handoff. The plan lives on disk now: the planner writes a markdown
 	// file with Write and hands off via request_plan_approval. Write is the one

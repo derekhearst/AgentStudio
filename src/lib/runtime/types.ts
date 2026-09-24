@@ -1,4 +1,4 @@
-import type { AudioOutputConfig, CacheControl, ChatPlugin, LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
+import type { CacheControl, LlmMessage, ReasoningConfig } from '$lib/llm/chat.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 
 /** OpenAI-style tool definition shape — same one streamChat accepts. */
@@ -20,10 +20,9 @@ export type ToolDefinition = {
 /**
  * Wave 2 #10 phase 1 — runtime types.
  *
- * The agent loop, after extraction, takes one transport-agnostic Session and a self-contained
- * RunPolicy. The chat stream wraps the Session with SSE + DB writes; future channels (automation
- * detached runs, sub-agent forwarded sessions) can supply their own Session impls without
- * touching the loop.
+ * The loop takes one Session and a self-contained input. Since the chat stream moved to the
+ * Agent SDK engine, its only callers are unattended runs (automations with an agent, a
+ * monitor's start_conversation, CI fix runs), all on the detached Session.
  */
 
 export type RunStateName =
@@ -55,44 +54,25 @@ export type LoopMessage = LlmMessage & {
 }
 
 /**
- * Transport-agnostic session that the loop emits events into and updates run state through.
+ * The session the loop emits events into and updates run state through. The one backing is
+ * the detached session (`./session/detached.server`): it writes run_events and chat_runs and
+ * has no client. The SSE-backed and forwarded sessions went with the chat stream and the
+ * in-house subagents (#8).
  *
- * Two backings exist (or will exist):
- *   - SSE-backed (chat stream) — wraps a ReadableStream controller AND writes run_events + chat_runs.
- *   - Detached (automation / sub-agent) — writes run_events only, no SSE writes.
- *
- * The loop never reaches into either implementation; it just calls `emit` / `updateRun` / `pushBlock`.
+ * The loop never reaches into the implementation; it just calls `emit` / `updateRun` / `pushBlock`.
  */
 export type Session = {
 	/** Stable run ID (matches chat_runs.id). */
 	readonly runId: string
-	/** Whether the SSE client is still connected. Detached sessions return true. */
+	/** Whether a client is still connected. Detached sessions return true. */
 	isClientConnected(): boolean
-	/** Emit a structured event. SSE-backed sessions write to both the wire AND run_events. */
+	/** Emit a structured event into run_events. */
 	emit(eventName: string, payload: unknown): Promise<void>
 	/** Patch the chat_runs row with state / label / heartbeat / etc. No-op fields are skipped. */
 	updateRun(patch: RunPatch): Promise<void>
 	/** Append a new ordered block to chat_runs.streamBlocks (durable mirror of the live stream). */
 	pushBlock(block: StreamBlock): Promise<void>
 }
-
-/**
- * Subagent invocation contract — supplied to the loop as a callback so the loop doesn't have to
- * import the agents domain. Returns the subagent's final-result string and the new conversation
- * ID for the UI to deep-link.
- */
-export type SubagentRequest = {
-	agentId: string
-	task: string
-	context?: string
-}
-
-export type SubagentResponse = {
-	conversationId: string
-	result: string
-}
-
-export type SpawnSubagent = (req: SubagentRequest) => Promise<SubagentResponse>
 
 /**
  * Inputs the loop needs from the caller. Most are pre-resolved (agent definition, environment,
@@ -104,34 +84,15 @@ export type RunChatLoopInput = {
 	conversationId: string
 	model: string
 	initialMessages: LoopMessage[]
-	/** Tool definitions to expose to the LLM on the FIRST round. Recomputed per-round via `computeTools`. */
-	initialTools: ToolDefinition[]
-	/**
-	 * Re-compute the active tool surface at the start of each round. Used by progressive disclosure
-	 * so a `search_tools` call in round N takes effect in round N+1. Pass a function that
-	 * returns the same value every time when deferred loading is off.
-	 */
-	computeTools: () => Promise<ToolDefinition[]>
+	/** Tool definitions exposed to the LLM, the same on every round. */
+	tools: ToolDefinition[]
 	/** Pass-through to streamChat. */
 	reasoningConfig?: ReasoningConfig
-	/**
-	 * Pass-through to streamChat for OpenRouter plugin slots. Used by the chat stream to enable
-	 * the `file-parser` plugin (PDF OCR engine) when the user attaches a PDF.
-	 */
-	chatPlugins?: ChatPlugin[]
-	/**
-	 * Output modalities. When `'audio'` is included, the model emits spoken audio inline with
-	 * text via `delta.audio` SSE chunks. Requires a model that lists `audio` in its
-	 * outputModalities (see `modelCapabilities`).
-	 */
-	modalities?: Array<'text' | 'audio'>
-	/** Audio output configuration. Required when `modalities` includes `'audio'`. */
-	audio?: AudioOutputConfig
 	/** Hard cap on tool rounds. The loop exits when the model stops calling tools or this is hit. */
 	maxRounds: number
 	/** Tools requiring explicit user approval (or the wildcard "*"). */
 	approvalRequiredTools: ReadonlySet<string>
-	/** True when this is the orchestrator (controls ask_user permission, run_subagent dispatch). */
+	/** True when this is the orchestrator — the `before_run` hook's `source`. */
 	isOrchestrator: boolean
 	/** Wave 3 #13 phase 4 — owning agent so per-agent hook config (`agents.config.hooks`) can dispatch. Null for unowned chat runs. */
 	agentId?: string | null
@@ -144,15 +105,6 @@ export type RunChatLoopInput = {
 	 * `<sandbox>/<userId>/projects/<projectId>` instead of an ephemeral run dir.
 	 */
 	projectId: string | null
-	/** Sub-agent spawn callback (only used when the orchestrator calls run_subagent with an agentId). */
-	spawnSubagent?: SpawnSubagent
-	/**
-	 * Tool Search Tool side-effect channel. The `search_tools` handler invokes this with the
-	 * names of tools it matched; the runtime adds them to the per-run loaded set so the next
-	 * round's `computeTools()` includes them. No-op when the caller doesn't supply one (e.g.
-	 * detached automation runs that pre-bind their tool surface).
-	 */
-	loadSearchableTools?: (toolNames: string[]) => void
 }
 
 export type RunChatLoopResult = {
@@ -164,7 +116,7 @@ export type RunChatLoopResult = {
 	reasoningTokens: number | null
 	/** All tool calls executed — used for activity emit + cost rollups. */
 	toolCalls: Array<Record<string, unknown>>
-	/** Ordered stream blocks (text / thinking / tool / subagent) for the persisted message metadata. */
+	/** Ordered stream blocks (text / thinking / tool) for the persisted message metadata. */
 	streamBlocks: StreamBlock[]
 	/** Token usage summed across rounds. */
 	promptTokens: number

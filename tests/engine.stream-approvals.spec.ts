@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test'
 import type { HookCallbackMatcher, Options, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { runEngineStream, type EngineRunInput, type EngineQuerySource } from '../src/lib/engine/stream.server'
 import { resolveToolScope } from '../src/lib/engine/tool-scope'
+import { HOST_OWNED_TOOLS } from '../src/lib/engine/builtin-tools'
+import { allToolNames } from '../src/lib/tools/tool-schemas'
 
 /**
  * How the engine gates a call, driven the way the SDK drives it.
@@ -24,6 +26,10 @@ import { resolveToolScope } from '../src/lib/engine/tool-scope'
  *   - a call that containment will ask about (Bash with no bubblewrap) is shown as pending,
  *     not as executing
  *   - a subagent's call that needs approval gets a card the operator can answer
+ *
+ * And one that has not shipped: the tools the engine hands to the host ungated are exactly
+ * the ones the settings approval list and /api/mcp leave out, so the list never offers a
+ * setting for a call the engine hands over, nor hides one it gates.
  *
  * Needs a database only because `stream.server.ts` transitively imports the tool registry.
  */
@@ -167,6 +173,47 @@ test.describe('every call meets the gate', () => {
 		expect(outcomes[0].hook).toBe('ask')
 		expect(outcomes[0].permission?.behavior).toBe('deny')
 		expect(events(frames, 't1')).toContain('tool_denied')
+	})
+})
+
+test.describe('the tools the host owns', () => {
+	test('no registry tool skips the gate: with every tool set to ask, each one is asked about', async () => {
+		// `builtin-tools`' HOST_OWNED_TOOLS is the set the engine hands to the host ungated. It
+		// used to hold the in-house `ask_user`, which the settings approval list and /api/mcp
+		// had to leave out. Since #4 it holds only the SDK's AskUserQuestion, which is not a
+		// registry tool — so every registry tool must now meet the gate, and the settings list
+		// may offer a tick for each one.
+		const calls = allToolNames.map((name, i) => ({ id: `t${i}`, name: `mcp__agentstudio__${name}`, input: {} }))
+		const { outcomes } = await drive({ requiresApproval: () => true }, calls)
+
+		const handedOver = allToolNames.filter(
+			(_, i) => outcomes[i].hook === 'none' && outcomes[i].permission?.behavior === 'allow',
+		)
+		expect(handedOver).toEqual([])
+		for (const name of HOST_OWNED_TOOLS) expect(allToolNames as readonly string[], name).not.toContain(name)
+	})
+
+	test('AskUserQuestion skips both gates and goes to the host, with no tool frame of its own', async () => {
+		// Every approval setting on, and plan mode: a question is answered by the user in its
+		// own card, so no approval card may appear, and plan mode is exactly when one is wanted.
+		const asked: string[] = []
+		const input = { questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: 'a' }, { label: 'B', description: 'b' }] }] }
+		const { outcomes, frames } = await drive(
+			{
+				requiresApproval: () => true,
+				permissionMode: 'plan',
+				askUser: async ({ toolUseId }) => {
+					asked.push(toolUseId)
+					return { answers: { 'Which?': 'B' } }
+				},
+			},
+			[{ id: 'toolu_q1', name: 'AskUserQuestion', input }],
+		)
+		expect([...HOST_OWNED_TOOLS]).toEqual(['AskUserQuestion'])
+		expect(outcomes[0].hook).toBe('none')
+		expect(outcomes[0].permission).toEqual({ behavior: 'allow', updatedInput: { ...input, answers: { 'Which?': 'B' } } })
+		expect(asked).toEqual(['toolu_q1'])
+		for (const frame of ['tool_call', 'tool_pending', 'tool_denied']) expect(events(frames, 'toolu_q1')).not.toContain(frame)
 	})
 })
 

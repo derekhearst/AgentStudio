@@ -1,6 +1,7 @@
 import { emitHook } from './bus.server'
 import type { HookContext, HookEvent, HookPayload } from './types'
 import { logger } from '$lib/observability/logger'
+import { SUBAGENT_TOOL } from '$lib/engine/builtin-tools'
 
 /**
  * The hook bus, on the chat path.
@@ -28,6 +29,14 @@ import { logger } from '$lib/observability/logger'
  * A delegated subagent's own calls are not the parent's tool calls, and are not reported as
  * them. (Its approval card is: the operator is being asked in this run either way.)
  *
+ * The delegation itself is the parent's call, and is. Since #32 it has no `tool_call` or
+ * `tool_result` frame — the child's card stands in for it — so it is read off the card's
+ * frames instead: `subagent_start` (the call, opened when the model makes it) is its
+ * `before_tool`, and `subagent_done` its `after_tool`, reported as the SDK's `Agent` tool
+ * with the child's report as the result. A delegation that needs approval is different: its
+ * approval card comes first, and like any other call it is reported only once approved, by
+ * the card's own `tool_call`. The id is the same either way, so it is reported once.
+ *
  * Everything is fire-and-forget, as on the old loop: a slow or failing hook never holds up
  * or fails the turn. `agentId` is the agent the turn ran as — the default Chat agent when
  * the conversation names none — because that is whose `config.hooks` the bus reads.
@@ -42,6 +51,8 @@ export function createChatRunHooks(context: HookContext, emit: Emit = emitHook) 
 	const running = new Map<string, { toolName: string; args: unknown; startedAt: number }>()
 	/** Calls a subagent made, known by the `subagentId` on their approval card. */
 	const subagentCalls = new Set<string>()
+	/** Calls shown with an approval card and not yet answered: not cleared to run. */
+	const awaitingApproval = new Set<string>()
 	let runStartedAt = Date.now()
 	let finished = false
 
@@ -77,10 +88,44 @@ export function createChatRunHooks(context: HookContext, emit: Emit = emitHook) 
 				fire('on_user_question', { ...context, token: frame.token, questionCount: questions.length })
 				return
 			}
+
+			// A delegation (#32) — see the module note. Keyed on the delegation's tool_use id,
+			// which is the card's `agentId`, so it shares `running` with the approval path.
+			if (event === 'subagent_start' || event === 'subagent_done') {
+				const delegationId = typeof frame.agentId === 'string' ? frame.agentId : null
+				// A child with a conversation of its own is the old loop's, not an SDK delegation.
+				if (!delegationId || frame.conversationId) return
+				if (event === 'subagent_start') {
+					// Awaiting approval: its `tool_call` on approval is the before_tool.
+					if (running.has(delegationId) || awaitingApproval.has(delegationId)) return
+					const args = {
+						...(typeof frame.agentName === 'string' ? { subagent_type: frame.agentName } : {}),
+						...(typeof frame.task === 'string' && frame.task ? { description: frame.task } : {}),
+					}
+					running.set(delegationId, { toolName: SUBAGENT_TOOL, args, startedAt: Date.now() })
+					fire('before_tool', { ...context, toolName: SUBAGENT_TOOL, args })
+					return
+				}
+				const call = running.get(delegationId)
+				if (!call) return
+				running.delete(delegationId)
+				const details = (frame.details ?? null) as { report?: unknown } | null
+				fire('after_tool', {
+					...context,
+					toolName: call.toolName,
+					args: call.args,
+					result: typeof details?.report === 'string' ? details.report : (frame.error ?? null),
+					success: frame.success !== false,
+					durationMs: Date.now() - call.startedAt,
+				})
+				return
+			}
+
 			if (!id) return
 
 			if (event === 'tool_pending') {
 				if (typeof frame.subagentId === 'string') subagentCalls.add(id)
+				awaitingApproval.add(id)
 				if (typeof frame.token === 'string') {
 					fire('on_approval_required', {
 						...context,
@@ -93,6 +138,7 @@ export function createChatRunHooks(context: HookContext, emit: Emit = emitHook) 
 			}
 
 			if (event === 'tool_call') {
+				awaitingApproval.delete(id)
 				if (subagentCalls.has(id) || running.has(id)) return
 				const call = { toolName: String(frame.name ?? 'unknown'), args: parseArguments(frame.arguments), startedAt: Date.now() }
 				running.set(id, call)
@@ -115,7 +161,10 @@ export function createChatRunHooks(context: HookContext, emit: Emit = emitHook) 
 				return
 			}
 
-			if (event === 'tool_denied') running.delete(id)
+			if (event === 'tool_denied') {
+				awaitingApproval.delete(id)
+				running.delete(id)
+			}
 		},
 
 		/** The turn is over. Only the first call counts. */

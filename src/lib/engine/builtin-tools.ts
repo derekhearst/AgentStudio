@@ -9,15 +9,30 @@
  * them, and importing the server module from the Playwright runtime fails on `$env`.
  */
 
+import { ASK_USER_QUESTION_TOOL } from './ask-user-question'
+
 /** Built-in SDK tools that replaced the in-house filesystem registry entries (#15). */
 export const BUILTIN_FILE_TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Glob', 'Grep'] as const
 
 /**
- * `TaskStop` is what the CLI calls `KillShell` now (see `LEGACY_TOOL_NAMES`). `BashOutput`
- * no longer exists in the bundled CLI at all — a background command's output is read with
- * `Read` — and stays listed only so an agent configured with it keeps validating.
+ * The shell surface as the bundled CLI names it (#35): `Bash` runs a command, in the
+ * foreground or with `run_in_background`, and `TaskStop` stops a background one.
+ *
+ * `BashOutput` is not a tool any more. In `sdk-tools.d.ts` it is only the *output type* of
+ * `Bash`; the CLI removed the polling tool (and `TaskOutput` after it — `sdk.d.ts` says to
+ * read a background task's output file instead). `KillShell` / `KillBash` are aliases the CLI
+ * resolves to `TaskStop` (`LEGACY_TOOL_NAMES`). Old names an agent may still be configured
+ * with are kept recognisable below, so they are not mistaken for our own MCP tools.
  */
-export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop'] as const
+export const BUILTIN_SHELL_TOOLS = ['Bash', 'TaskStop'] as const
+
+/**
+ * Built-ins the bundled CLI no longer has. Still recognised as built-ins, so a stored agent
+ * config that names one stays a bare name instead of becoming `mcp__agentstudio__BashOutput`,
+ * but never handed to the CLI as part of a tool scope (`./tool-scope`): there is nothing for
+ * it to enable.
+ */
+export const REMOVED_BUILTIN_TOOLS: ReadonlySet<string> = new Set(['BashOutput', 'TaskOutput'])
 
 /**
  * Built-ins we deliberately refuse, because an in-house tool does the same job *and* more.
@@ -26,8 +41,18 @@ export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop
  * and write a `logToolUsage` row per call with an operator-tunable per-call cost. The SDK's
  * are billed server-side and invisible to the ledger, so letting both exist would silently
  * move spend off the books depending on which one the model happened to pick.
+ *
+ * `Workflow`: the CLI's scripted fan-out (`agent()`, `parallel()`, `pipeline()`). Its agents
+ * are not `Agent` calls, so none of them would meet the delegation gate — the concurrency
+ * cap, the per-child budget check, the child card and the child's ledger row (#32). One
+ * delegation channel, gated, rather than two with one of them open.
+ *
+ * `SendMessage`: the CLI's way to message another agent, which (read in the bundled CLI
+ * 2.1.278) also wakes an agent that has finished or been stopped ("Resuming agent …"). A
+ * parent could restart a child that way, outside any `Agent` call: no slot, no budget check,
+ * no card. The app has no agent teams for it to serve, so it is off (#32).
  */
-export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch'] as const
+export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Workflow', 'SendMessage'] as const
 
 /**
  * The CLI's current name for each built-in it has renamed, keyed by the old name.
@@ -43,6 +68,12 @@ export const LEGACY_TOOL_NAMES: Readonly<Record<string, string>> = {
 	Task: 'Agent',
 	KillShell: 'TaskStop',
 	KillBash: 'TaskStop',
+	/*
+	 * The one entry that is ours rather than the CLI's: AgentStudio's own `ask_user` was
+	 * retired for the SDK's `AskUserQuestion` (#4). An agent whose tool list still says
+	 * `ask_user` keeps the ability to ask, rather than silently losing it.
+	 */
+	ask_user: ASK_USER_QUESTION_TOOL,
 }
 
 /** A tool name as the CLI calls it today — `Task` → `Agent`; anything else unchanged. */
@@ -59,43 +90,34 @@ export function canonicalToolName(name: string): string {
  */
 export const SUBAGENT_TOOL = 'Agent'
 
+/**
+ * Every name a delegation can arrive under: the tool's current name and the alias the CLI
+ * still answers to. A call is handed to the hook as `Agent`, but a scripted stream, an older
+ * CLI or a transcript written before the rename says `Task`, and a check that knew only one
+ * spelling would wave the other through ungated (#32).
+ */
+export const DELEGATION_TOOL_NAMES: ReadonlySet<string> = new Set([SUBAGENT_TOOL, 'Task'])
+
+/** Whether a (bare) tool name is the SDK's delegation tool, under either spelling. */
+export function isDelegationTool(name: string): boolean {
+	return DELEGATION_TOOL_NAMES.has(name)
+}
+
 /** Membership test so an allowlist can carry both surfaces without qualifying built-ins. */
 export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
 	...BUILTIN_FILE_TOOLS,
 	...BUILTIN_SHELL_TOOLS,
 	'NotebookEdit',
 	'TodoWrite',
+	ASK_USER_QUESTION_TOOL,
+	// Old spellings a stored config may still use — see `BUILTIN_SHELL_TOOLS`.
+	'KillShell',
+	'KillBash',
+	...REMOVED_BUILTIN_TOOLS,
 ])
 
 /**
  * Registry tools the engine deliberately does not expose.
- *
- * `search_tools` implements deferred loading — "only a small core is in your tools array;
- * call this to load the rest". That is real on the *old* loop, where `getToolDefinitions`
- * filters by `toolDisclosure` tier and the runtime maintains a per-run loaded set. It has
- * never been real here: `buildToolServer` registers the whole registry on round one, and
- * the callback the handler needs (`ctx.runtime.loadSearchableTools`) is only ever supplied
- * by `$lib/runtime/loop.server`.
- *
- * So on this path the tool could only ever tell the model it had "loaded N tools for the
- * next round" that were already in its tools array — costing a round, a tool definition in
- * every request, and the model's trust in what its prompt tells it. Unregistering it here
- * leaves the old loop's copy working, because subagents there genuinely need the escape
- * hatch; when `$lib/runtime` goes (#5, #8) the tool goes with it.
- *
- * `run_code` is excluded for a blunter reason: on this path it cannot run at all.
- * `runCodeTool` throws unless `toolUserContext` carries a `runtime` — it needs
- * `currentToolNames()` to decide what the script may call and a `session` to route the
- * approvals those nested calls go through — and the only code that ever supplies one is
- * `$lib/runtime/tool-handlers.server`. The engine passes a workspace with no runtime, so
- * every engine-path invocation ends at "run_code requires runtime context … It can only be
- * invoked from inside the chat loop."
- *
- * Registering it anyway cost a round every time the model believed the ~1,200-character
- * description advertising it, and cost that description in the tool definitions of every
- * single request. Unregistering does not remove a capability; it stops advertising one that
- * was never here. Restoring it properly means giving the engine path its own approval route
- * for nested calls, which is its own piece of work.
  *
  * `run_subagent` is excluded because it has been replaced, not removed. Delegation is the
  * SDK's `Task` tool now, against the agents `./agent-definitions.server` describes in the
@@ -103,5 +125,25 @@ export const BUILTIN_TOOL_SET: ReadonlySet<string> = new Set<string>([
  * model's context — so it could name an agent only by guessing one; the SDK's names every
  * agent it offers. Keeping both would give the model two ways to delegate, one of which
  * renders a nested transcript and one of which does not.
+ *
+ * `search_tools` and `run_code` used to be listed here as well. Both could only work inside
+ * the old loop — deferred loading and a script's nested tool calls — and both were deleted
+ * from the registry instead (#8, #69): hidden here, they were still offered by everything
+ * else that lists the registry, the settings approval list and the MCP endpoint included.
  */
-export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['search_tools', 'run_code', 'run_subagent'])
+export const ENGINE_EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['run_subagent'])
+
+/**
+ * Tools the host answers itself, so the engine emits no tool frames for them.
+ *
+ * Only the SDK's `AskUserQuestion` (#4): the question *is* the prompt to the user, so there is
+ * nothing to approve. `./stream.server` answers it in `canUseTool` through the run's
+ * `askUser` host, which renders its own card, and `./tool-decision` lets it past every
+ * approval setting and permission mode — its scope still applies. It replaced the in-house
+ * `ask_user`, which is gone from the registry, so no registry tool is host-owned any more and
+ * the settings approval list and the MCP endpoint have nothing to leave out on its account.
+ *
+ * The engine keeps its own copy for the bypass; `tests/engine.stream-approvals.spec.ts` drives
+ * the engine and fails if the calls it actually hands over ever differ from this set.
+ */
+export const HOST_OWNED_TOOLS: ReadonlySet<string> = new Set([ASK_USER_QUESTION_TOOL])

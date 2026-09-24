@@ -62,8 +62,27 @@ export type BackgroundTask = {
 	description: string
 }
 
+/**
+ * A background task that settled, as `task_notification` reports it (#35) — carried beside
+ * the notice so whatever tracks the task's tool call can close it. `tool_use_id` and
+ * `output_file` are what the notice alone threw away.
+ */
+export type TaskSettled = {
+	taskId: string
+	/** The call that started the task, when the CLI says. */
+	toolUseId: string | null
+	status: 'completed' | 'failed' | 'stopped'
+	/**
+	 * The CLI's path for the task's output file. A host path the CLI wrote: check it before
+	 * reading anything through it (`./task-output.server`).
+	 */
+	outputFile: string | null
+	/** From the CLI's summary — `Background command "x" completed (exit code 0)` — when it says. */
+	exitCode: number | null
+}
+
 export type SdkInterpretation =
-	| { kind: 'notice'; notice: RunNotice }
+	| { kind: 'notice'; notice: RunNotice; task?: TaskSettled }
 	/** REPLACE semantics: this is the whole live set, not a delta. */
 	| { kind: 'background_tasks'; tasks: BackgroundTask[] }
 	| { kind: 'tool_progress'; toolUseId: string; elapsedSeconds: number }
@@ -111,6 +130,20 @@ function compactionTitle(meta: Record<string, unknown> | null): string {
 	return after === null
 		? `${how} from ${before.toLocaleString()} tokens`
 		: `${how}: ${before.toLocaleString()} → ${after.toLocaleString()} tokens`
+}
+
+/**
+ * The exit code in a background command's summary, which the CLI writes as
+ * `Background command "…" completed (exit code 0)` or `… failed with exit code 1`. Display
+ * text, so read loosely and never relied on: absent means "not said", not "zero". Anchored
+ * at the end, because the quoted description before it is the model's and could say anything.
+ */
+function summaryExitCode(value: unknown): number | null {
+	if (typeof value !== 'string') return null
+	const match = /(?:\(exit code (-?\d+)\)|with exit code (-?\d+))\s*$/.exec(value)
+	if (!match) return null
+	const code = Number(match[1] ?? match[2])
+	return Number.isSafeInteger(code) ? code : null
 }
 
 function backgroundTasks(value: unknown): BackgroundTask[] {
@@ -209,22 +242,32 @@ function systemNotice(subtype: string, msg: Record<string, unknown>): SdkInterpr
 			// `worker_restart` is the one machine-readable cause, and it means the task was
 			// orphaned rather than that it failed on its own terms.
 			const orphaned = msg.reason === 'worker_restart'
+			let interpreted: SdkInterpretation | null = null
 			if (status === 'completed') {
-				return notice('task_finished', 'info', 'A background task finished', summary, true)
-			}
-			if (status === 'stopped') {
-				return notice(
+				interpreted = notice('task_finished', 'info', 'A background task finished', summary, true)
+			} else if (status === 'stopped') {
+				interpreted = notice(
 					'task_finished',
 					'warn',
 					orphaned ? 'A background task was lost to a worker restart' : 'A background task was stopped',
 					summary,
 					true,
 				)
+			} else if (status === 'failed') {
+				interpreted = notice('task_finished', 'error', 'A background task failed', summary, true)
 			}
-			if (status === 'failed') {
-				return notice('task_finished', 'error', 'A background task failed', summary, true)
+			const taskId = str(msg.task_id)
+			if (!interpreted || interpreted.kind !== 'notice' || !taskId) return interpreted
+			return {
+				...interpreted,
+				task: {
+					taskId,
+					toolUseId: str(msg.tool_use_id),
+					status: status as TaskSettled['status'],
+					outputFile: str(msg.output_file),
+					exitCode: summaryExitCode(msg.summary),
+				},
 			}
-			return null
 		}
 
 		default:

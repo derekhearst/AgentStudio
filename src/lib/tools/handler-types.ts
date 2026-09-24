@@ -3,7 +3,7 @@
  *
  * Every handler is `(call, ctx) => Promise<ToolHandlerResult>`. The dispatcher in
  * `tools.server.ts` runs every handler inside `toolUserContext.run(...)`, so handlers
- * can read the per-run context (worktree, runId, runtime) via `toolUserContext.getStore()`
+ * can read the per-run context (worktree, runId, projectId) via `toolUserContext.getStore()`
  * directly without it being passed in.
  *
  * The `ctx` parameter carries the extras the dispatcher resolved before calling the
