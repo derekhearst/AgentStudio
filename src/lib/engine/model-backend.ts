@@ -91,10 +91,16 @@ export function isClaudeModel(model: string): boolean {
  * `anthropic/claude-sonnet-4` is `claude-sonnet-4-0` to the CLI, and `claude-sonnet-4` is
  * nothing. When an SDK upgrade brings a CLI that knows a new model, add it here — until
  * then the pickers do not offer it.
+ *
+ * One exception: `claude-opus-5-5` is newer than the bundled CLI's table but is in daily use
+ * on this instance, and the CLI passes an id it has no table entry for straight through to
+ * the API, which serves it. It is listed on the operator's word; drop the note once an SDK
+ * upgrade brings a CLI whose table has it.
  */
 export const SUBSCRIPTION_MODEL_IDS: readonly string[] = [
 	'claude-fable-5-1',
 	'claude-fable-5',
+	'claude-opus-5-5',
 	'claude-opus-5',
 	'claude-opus-4-8',
 	'claude-opus-4-7',

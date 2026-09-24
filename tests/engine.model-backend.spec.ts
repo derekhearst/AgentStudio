@@ -127,6 +127,9 @@ test.describe('modelBackend', () => {
 	test('a Claude model the CLI runs is on the subscription, gateway or not', () => {
 		expect(modelBackend('claude-sonnet-5', { gatewayConfigured: false })).toBe('subscription')
 		expect(modelBackend('anthropic/claude-haiku-4.5', { gatewayConfigured: true })).toBe('subscription')
+		// Newer than the bundled CLI's model table, listed on the operator's word (see the list).
+		expect(modelBackend('claude-opus-5-5', { gatewayConfigured: false })).toBe('subscription')
+		expect(modelBackend('anthropic/claude-opus-5.5', { gatewayConfigured: true })).toBe('subscription')
 	})
 
 	test('a non-Claude model needs the gateway, and is unavailable without one', () => {
