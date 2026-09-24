@@ -27,11 +27,16 @@ test('allowedTools narrows the list and cannot widen it', () => {
 	expect(detachedRunToolNames(['web_fetch', 'delete_file'])).toEqual([])
 })
 
-test('the retired tools and ask_user are never offered', () => {
+test('the retired tools and the question tool are never offered', () => {
+	// Nobody is there to answer. `ask_user` has left the registry for the SDK's own
+	// AskUserQuestion (#4), which only the chat engine has; an agent listing either name in
+	// `allowedTools` still gets neither here.
 	const offered = new Set<string>(detachedRunToolNames())
-	for (const name of ['run_code', 'search_tools', 'ask_user']) {
+	for (const name of ['run_code', 'search_tools', 'ask_user', 'AskUserQuestion']) {
 		expect(offered.has(name), name).toBe(false)
 	}
+	expect(detachedRunToolNames(['web_search', 'ask_user', 'AskUserQuestion'])).toEqual(['web_search'])
+	expect(allToolNames as readonly string[]).not.toContain('ask_user')
 })
 
 test('every name is a real registry tool', () => {

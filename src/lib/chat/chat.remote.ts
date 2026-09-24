@@ -100,7 +100,7 @@ export const getConversation = query(conversationIdSchema, async (conversationId
 		findLiveChatRun(conversationId, user.id),
 	])
 
-	// Surface the first un-decided ask_user entry so a hard refresh during a paused question
+	// Surface the first un-decided question so a hard refresh during a paused question
 	// can resume — the stream path owns updates while connected; this is the resume seed.
 	const undecided = (activeRun?.pendingQuestions ?? []).find(
 		(entry): entry is PendingQuestionEntry => !!entry?.token && !entry.decidedAt,

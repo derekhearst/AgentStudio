@@ -83,7 +83,6 @@ test.describe('runtime/offered-tools — dispatch refuses before anything runs',
 				projectId: null,
 				offeredTools: offeredToolNames(definitions(opts.offered ?? detachedRunToolNames())),
 				approvalRequiredTools: new Set(opts.approval ?? []),
-				isOrchestrator: false,
 			},
 			{ id: 't1', name, arguments: '{}', parsedArgs: {} },
 		)
@@ -119,15 +118,21 @@ test.describe('runtime/offered-tools — dispatch refuses before anything runs',
 		expect(patches).toEqual([])
 	})
 
-	test('ask_user is refused the same way when the run did not offer it', async () => {
-		const { outcome } = await dispatch('ask_user')
-		expect(JSON.parse(outcome.toolResult.result)).toEqual({ error: notOfferedMessage('ask_user') })
+	test('a question to the user is refused the same way — nobody is there to answer', async () => {
+		// The old loop's `ask_user` branch went with the tool (#4); a model that still asks, by
+		// either name, meets the offered-list gate like any other tool the run did not offer.
+		for (const name of ['ask_user', 'AskUserQuestion']) {
+			const { outcome, emits } = await dispatch(name)
+			expect(JSON.parse(outcome.toolResult.result), name).toEqual({ error: notOfferedMessage(name) })
+			expect(emits.map((e) => e.event), name).toEqual(['tool_result'])
+		}
 	})
 
 	test('an offered name passes the gate to the next stage', async () => {
-		// ask_user offered to a run that is not the orchestrator reaches its own handler, which
-		// refuses it for its own reason: the gate let it through, and nothing ran.
-		const { outcome } = await dispatch('ask_user', { offered: ['ask_user'] })
-		expect(outcome.toolResult.result).toContain('Agents cannot ask users directly')
+		// Offered here only to prove the gate lets an offered name through: the registry no
+		// longer has an `ask_user` (#4), so the next stage answers "unknown tool", and nothing ran.
+		const { outcome, emits } = await dispatch('ask_user', { offered: ['ask_user'] })
+		expect(emits.map((e) => e.event)).toEqual(['tool_call', 'tool_result'])
+		expect(outcome.toolResult.result).toContain('Unknown tool: ask_user')
 	})
 })
