@@ -162,15 +162,19 @@ When the agent hands work to other agents, each child appears in the reply as it
 | Part | What it says |
 | --- | --- |
 | Name | The child agent's name |
-| Status | `working…`, `done`, `failed`, `refused` (turned away by the concurrency limit, the budget, plan mode, or because a child tried to delegate), or `stopped` (still working when the turn ended) |
+| Status | `working…`, `done`, `failed`, `refused` (turned away by the concurrency limit, the budget, plan mode, or because a child tried to delegate), or `stopped` (still working when the user pressed **Stop** or the turn ended) |
 | Task | The short description the parent gave it |
-| Figures | Tokens, cost, how long it took and how many tools it called, leaving out any the child did not report. Cost appears once the reply is saved, and never as "$0.00" on the Claude subscription |
+| Figures | Tokens, cost, how long it took and how many tools it called, leaving out any the child did not report. Tokens are everything the child's model calls used, added up, which is also what its usage-ledger row carries. A stopped or failed child shows what it used before it ended. Cost appears once the reply is saved, and never as "$0.00" on the Claude subscription |
 
 **Expanded**, it shows the child's own transcript: what it said and which tools it called, in order, each call with a short hint at what it touched (a file path, a search pattern, a command) and a dot for success or failure. A refused or failed child shows the reason at the top. A long transcript is shortened (at most 200 entries and 20,000 characters of text) and says so.
 
 Cards start collapsed, both while the turn runs and after a reload, because a fan-out opens several at once. A card is opened at the moment the agent asks for the child, so a child that is refused before doing anything still has a card that explains why. The delegation does not also show as a separate tool card, which it used to, repeating the child's report.
 
-The card reads the same whether it is live or reloaded: it is built from the same frames while streaming and saved with the reply afterwards. Replies saved before this change still show their children, from the text and tool names they kept.
+The card reads the same whether it is live or reloaded: it is built from the same frames while streaming and saved with the reply afterwards. Replies saved before this change still show their children, from the text and tool names they kept. A card saved before tokens were added up shows the SDK's own figure instead, which covers only the child's last model call.
+
+**Stop.** When the user presses Stop, Claude Code answers each child that is still working with an error of its own ("[Request interrupted by user for tool use]" or a similar cancellation) before the turn ends. The card reads that as `stopped`, not `failed`, and says "Stopped before it finished." A child that had a real error before Stop was pressed still shows `failed` with its reason.
+
+**A child that runs in the background.** Children normally run inside the turn. A trusted project can define an agent that always runs in the background (`background: true` in its `.claude/agents/` file), and Claude Code honours that even though the app asks for the foreground. Such a card stays `working…` until Claude Code reports that the child has ended, and then shows how it ended, with Claude Code's one-line summary as its text. It counts toward the four-at-once limit for that whole time.
 
 ### Plan approval inline
 

@@ -26,10 +26,10 @@ The agent that hands work out is the **parent**; each agent it hands work to is 
 | ---- | ------------- |
 | At most 4 children at once | A fifth request while four are still working is refused. The parent is told to wait for the running children, then hand out the rest. |
 | One level deep | A child cannot hand work to another agent. The request is refused. |
-| Each child passes the budget check | Before a child starts, the same budget check a chat passes is run for that child's own agent. A child whose agent is over its limit is refused before it spends anything. |
-| Children finish inside the turn | Children always report back before the parent's reply ends. They never keep running in the background after the parent has answered. |
-| Stop stops everything | Pressing **Stop** on the parent's turn stops every child that is still working. |
-| Each child is charged to its own agent | Every child that finishes gets its own row in the usage ledger, marked as sub-agent spend and charged to the child's agent. See [../cost/spec.md](../cost/spec.md). |
+| Each child passes the budget check | Before a child starts, the same budget check a chat passes is run for that child's own agent. A child whose agent is over its limit is refused before it spends anything. The check counts the children of the same turn that have already finished, so handing out work in wave after wave cannot run past a limit. |
+| Children finish inside the turn | The app asks for every child to run inside the turn, and children report back before the parent's reply ends. A trusted project can define an agent that always runs in the background; it still counts toward the limit of four until it ends. Nothing keeps running after the parent's turn is over. |
+| Stop stops everything | Pressing **Stop** on the parent's turn stops every child that is still working, and each of their cards shows `stopped`. |
+| Each child is charged to its own agent | Every child that spent anything gets its own row in the usage ledger, for everything its model calls used, marked as sub-agent spend and charged to the child's agent. This includes a child that failed or was stopped partway. See [../cost/spec.md](../cost/spec.md). |
 
 ### Status: Available or Paused
 
@@ -113,7 +113,7 @@ While an agent is running, its card on `/agents` and its own page show the lates
 6. If the agent asked for more than four, the extra requests are refused. The agent waits for the running children to report back, then asks again for the rest.
 7. The parent reads every child's report and writes the final answer.
 
-A refused child still gets a card, which says why it was refused. A child that was still working when the user pressed **Stop** is shown as stopped.
+A refused child still gets a card, which says why it was refused. A child that was still working when the user pressed **Stop** is shown as stopped, not failed, with the tokens it used before it stopped.
 
 ### Hand a plan over from Plan or Research
 
@@ -176,4 +176,5 @@ Research and Plan cannot run shell commands, edit files in place, push code or o
 - A child can never hand work to another agent.
 - A child whose agent is over a blocking budget limit is refused before it starts. A child with no agent row of its own (the SDK's built-in helper agents) is checked, and charged, as the parent's agent.
 - A child never gets its own git worktree or a separate permission mode. It works in the parent's workspace under the parent's permission mode.
-- Scripted fan-out (the CLI's `Workflow` tool) is switched off, so every child goes through the same checks.
+- Scripted fan-out (the CLI's `Workflow` tool) is switched off, so every child goes through the same checks. So is the CLI's `SendMessage` tool, which could wake a child that had already finished without any of those checks.
+- A child's usage row is written the moment the child finishes, not at the end of the turn. That is what lets the budget check for the next child see it.

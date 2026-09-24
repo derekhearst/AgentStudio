@@ -109,7 +109,7 @@ Edge cases:
 
 ### Delegated children (#32)
 
-A turn that handed work to other agents writes one extra row per child that finished, with source `subagent`. The turn's total does not change; the children's share is moved out of the parent's row onto their own.
+A turn that handed work to other agents writes one extra row for each child that spent anything, with source `subagent`. The turn's total does not change: the children's share is moved out of the parent's row onto their own.
 
 | Field | Value on a child's row |
 | --- | --- |
@@ -117,19 +117,21 @@ A turn that handed work to other agents writes one extra row per child that fini
 | `runId` | The parent's run, so cost per run still adds up in one query |
 | `agentId` | The child's own agent. A child with no agent row of ours (the SDK's built-in helper agents) is charged to the parent's agent |
 | `model` | The model the child ended on, else the parent's |
-| Tokens | The usage the SDK reports for the child (see below) |
+| Tokens | Everything the child's model calls used, added up (see below) |
 | `cost` | Zero on the Claude subscription, like the parent's row. On the gateway, priced from the model catalogue |
-| `metadata` | `conversationId`, `toolUseId` (the delegation call), `subagentType`, `sdkAgentId`, `subscription`, and `usageBasis: 'final_call'` |
+| `metadata` | `conversationId`, `toolUseId` (the delegation call), `subagentType`, `sdkAgentId`, `subscription`, `status` (how the child ended), `usageBasis` and, when the calls were counted, `modelCalls` |
 
 How the numbers fit together:
 
 1. The SDK reports the whole turn's usage, children included, in the result's per-model totals. That is the turn figure described above.
-2. For each child, the SDK's typed result carries a usage figure. In the installed SDK (bundled CLI 2.1.278) that figure is the child's **last model call**, not everything it spent. The SDK reports no per-child total anywhere else.
-3. So each child's row carries its last call, and the same tokens (and, on the gateway, the same cost) are subtracted from the parent's `chat` row. Nothing is counted twice. The rest of a child's spend stays on the parent's row, which is where all of it was before.
-4. When the turn figure is the main agent's alone (a resumed session with no previous total to subtract), the children were never in it, so their rows are added rather than carved out.
-5. A child that was refused, failed or was stopped reports no usage and gets no row. Whatever it spent stays in the parent's figure.
+2. The app adds up each child's own spend as the child works. Every model call the child makes reaches the app with its token counts, and the app adds them up per child, counting each call once. `usageBasis` is `model_calls` for such a row.
+3. The SDK's own per-child figure is not used on its own. In the installed SDK (bundled CLI 2.1.278), the usage in a child's result is only its **last model call**, not everything it spent. A child that made 30 calls would be charged for one. The app uses that figure alone only when it saw none of the child's calls, and then `usageBasis` is `final_call`.
+4. Each child's tokens (and, on the gateway, its cost) are subtracted from the parent's `chat` row. Nothing is counted twice. If a figure ever comes up short, the difference stays on the parent's row, which is where all of it was before.
+5. When the turn figure is the main agent's alone (a resumed session with no previous total to subtract), the children were never in it, so their rows are added rather than carved out.
+6. A child that failed or was stopped partway still gets a row for what it spent before it ended. A child that was refused before it started spent nothing and gets no row.
+7. A child's row is written as soon as the child finishes, not when the turn ends. The parent's row is written when the turn ends, as before.
 
-The assistant message and the conversation total still show the whole turn: the parent's row plus its children's. The child's cost is also stamped on its card in the chat.
+The assistant message and the conversation total still show the whole turn: the parent's row plus its children's. The child's cost and token count are also shown on its card in the chat.
 
 What changes for anyone reading the ledger: agent-scoped budget limits now see what an agent spent as a delegate, and `/activity` shows `subagent` as a source.
 
@@ -195,6 +197,8 @@ Before starting a new run (or before a new LLM call inside a run), the system ch
 **Limits from Settings → Budget** — the daily and monthly limits on the Settings page are budget limits like any other. Each becomes a global `block` limit for its period with a warning at 80% of the limit. The server keeps these rows in step with the Settings fields whenever settings are saved or reset, and before every budget check. It only touches the rows it created (their ids are kept in the settings' `budgetConfig.limitIds`). Clearing a limit in Settings switches its row off instead of deleting it, so the alert history stays. A settings save waits while the server is recording a new limit row, so saving settings at the same moment a chat checks its budget never loses track of that row. A lost row would go on blocking at its old amount after the limit was raised or cleared. Before 2026-09-23 the Settings limits were only drawn as progress bars in /review, and nothing enforced them.
 
 **Delegated children (#32)** — each child an agent hands work to is checked before it starts, with the same check a chat turn passes, scoped to the child's own agent. The parent's check only looked at the parent's agent, so without this a fan-out could walk straight through a limit set on the agents it delegates to. A blocked child records the same alert and review item a blocked chat does, and the parent is told the budget is exhausted and not to retry. A check that fails or takes longer than 10 seconds refuses the child.
+
+What the check counts: everything spent before the turn, plus every child of this turn that has already finished, because a child's ledger row is written the moment it finishes. So an agent that hands out work in waves (four children, then four more, and so on) is stopped once the finished waves have reached the limit, not only on its next turn. Two things are not counted yet when a child is checked: its siblings that are still running, and the parent's own model calls in this turn, whose row is written when the turn ends. A single wave can therefore go past a limit by what that wave spends. On the Claude subscription every row costs $0, so a dollar limit never blocks a child there.
 
 Enforcement order: `run` → `agent` → `project` → `global`. The most restrictive blocking limit among all active limits wins. Warn thresholds are evaluated independently, so several limits can warn at the same check. Each one still alerts only once per period (see below).
 

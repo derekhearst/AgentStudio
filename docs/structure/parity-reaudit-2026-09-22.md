@@ -495,12 +495,24 @@ Cancellation needed no `stopTask`: a foreground child runs on the parent turn's 
 controller (bundled CLI), so Stop's `interrupt()` ends every child with the turn, and
 `perTaskStopAffordance` is never declared. Each child is a collapsed card in the reply
 (`SubagentBlockCard`) with status, tokens, cost and duration, expanding to its own
-transcript built from the `subagent_*` frames. Each completed child gets one `subagent`
-`llm_usage` row (parent `runId`, the child's own `agentId`), carved out of the parent's row
-because `modelUsage` already includes children and the SDK's per-child `usage` is the child's
-last model call only. No migration. Left for later: child run rows (option C in the triage),
-a per-child stop control, and worktree isolation. See [../agents/spec.md](../agents/spec.md)
-and [../cost/spec.md](../cost/spec.md).
+transcript built from the `subagent_*` frames. Each child that spent anything gets one
+`subagent` `llm_usage` row (parent `runId`, the child's own `agentId`), carved out of the
+parent's row because `modelUsage` already includes children. The row's tokens are added up
+over the child's own model calls as they stream past, because the SDK's per-child `usage` is
+the child's last model call only. The row is written the moment the child's card closes, so
+the budget check for the next child sees the children of the same turn that already
+finished. No migration.
+
+Review follow-ups, same day: Stop's children read `stopped`, not `failed` (the CLI answers a
+child cut short with an error result of its own before the turn ends); a child that a
+trusted project's agent definition sends to the background (`background: true` wins over the
+call's `run_in_background: false` in the CLI) keeps its concurrency slot until its
+`task_notification`, so the cap holds; and `SendMessage`, which can resume a finished agent
+outside any `Agent` call, is switched off.
+
+Left for later: child run rows (option C in the triage), a per-child stop control, and
+worktree isolation. See [../agents/spec.md](../agents/spec.md) and
+[../cost/spec.md](../cost/spec.md).
 
 ### #4 — AskUserQuestion
 
