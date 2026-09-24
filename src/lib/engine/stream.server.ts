@@ -45,6 +45,7 @@ import type { McpProvenance, RunMcpConnectors } from './mcp-connectors'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
+import { watchConnectorStatus } from './mcp-status-watch'
 import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
@@ -68,6 +69,8 @@ export type EngineQuerySource = AsyncIterable<SDKMessage> & {
 	interrupt?: () => Promise<unknown>
 	stopTask?: (taskId: string) => Promise<unknown>
 	getContextUsage?: () => Promise<unknown>
+	/** #17 — every MCP server's status; see `./mcp-status-watch`. */
+	mcpServerStatus?: () => Promise<unknown>
 	close?: () => void
 }
 
@@ -577,6 +580,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 	})
 
+	// #17 — a connector still connecting when init was sent is checked again as the turn runs.
+	const connectorStatus = watchConnectorStatus({
+		names: input.mcpConnectors?.keys() ?? [],
+		readStatus: session.mcpServerStatus ? () => session.mcpServerStatus!() : null,
+	})
+
 	try {
 		for await (const message of session) {
 			const msg = message as Record<string, any>
@@ -594,6 +603,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
 				continue
+			}
+
+			const lateConnectorNotice = await connectorStatus.observe(msg)
+			if (lateConnectorNotice) {
+				blocks.push({ kind: 'notice', notice: lateConnectorNotice })
+				await emit('notice', lateConnectorNotice)
 			}
 
 			/*

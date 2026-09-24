@@ -172,3 +172,74 @@ test.describe('a connector’s tools through the engine', () => {
 		expect(outcomes[0].hook).toBe('deny')
 	})
 })
+
+/**
+ * A connector the CLI was still connecting when it sent `system/init` — the normal case, since
+ * MCP start-up does not block the turn — is asked about again once the turn is under way, through
+ * the session's `mcpServerStatus()`. See `src/lib/engine/mcp-status-watch.ts`.
+ */
+test.describe('a connector that fails after the turn began', () => {
+	const INIT = {
+		type: 'system',
+		subtype: 'init',
+		tools: [],
+		mcp_servers: [
+			{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+			{ name: 'github', status: 'pending', source: 'dynamic' },
+		],
+	}
+	const REPLY = { type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'hi' }] } }
+
+	async function turn(mcpConnectors: EngineRunInput['mcpConnectors']) {
+		const frames: Frame[] = []
+		/** The message the loop had last handed out when the session was asked, per ask. */
+		const askedAfter: string[] = []
+		let last = ''
+		const summary = await runEngineStream({
+			prompt: 'go',
+			options: {},
+			workspaceRoot: WS,
+			bashPolicy: 'sandboxed',
+			requiresApproval: () => false,
+			mcpConnectors,
+			createQuery: (): EngineQuerySource => ({
+				async *[Symbol.asyncIterator]() {
+					for (const message of [INIT, REPLY, RESULT]) {
+						last = message.type
+						yield message as never
+					}
+				},
+				mcpServerStatus: async () => {
+					askedAfter.push(last)
+					return [
+						{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+						{ name: 'github', status: 'failed', source: 'dynamic' },
+					]
+				},
+			}),
+			emit: async (event, payload) => {
+				frames.push({ event, payload: (payload ?? {}) as Record<string, unknown> })
+			},
+		})
+		return { frames, askedAfter, summary }
+	}
+
+	test('is named in a warning that is kept in the transcript', async () => {
+		const { frames, askedAfter, summary } = await turn(CONNECTORS)
+
+		// Init said nothing (pending is not a failure); the ask once the reply arrived did.
+		expect(askedAfter).toEqual(['assistant'])
+		const notices = frames.filter((f) => f.event === 'notice')
+		expect(notices).toHaveLength(1)
+		expect(notices[0].payload.kind).toBe('mcp_unavailable')
+		expect(String(notices[0].payload.detail)).toContain('github (could not connect)')
+		const kept = summary.blocks.filter((b) => b.kind === 'notice')
+		expect(kept).toHaveLength(1)
+	})
+
+	test('a run without connectors never asks the session', async () => {
+		const { frames, askedAfter } = await turn(null)
+		expect(askedAfter).toEqual([])
+		expect(frames.filter((f) => f.event === 'notice')).toEqual([])
+	})
+})

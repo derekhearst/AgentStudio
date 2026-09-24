@@ -134,48 +134,66 @@ function backgroundTasks(value: unknown): BackgroundTask[] {
 	return tasks
 }
 
-/** Statuses in `system/init`'s `mcp_servers` that mean a server's tools are not there. */
+/** Statuses in an MCP server list that mean a server's tools are not there, and how to say so. */
 const UNAVAILABLE_MCP_STATUS: Record<string, string> = {
 	failed: 'could not connect',
 	'needs-auth': 'needs a sign-in',
 }
 
+/** One server whose tools are missing, as `mcpServersDown` reads it. `name` is still untrusted text. */
+export type McpServerDown = { name: string; status: string }
+
 /**
- * The connectors that `system/init` reports as unusable, or null when they all came up.
+ * The servers in an MCP server list — `system/init`'s `mcp_servers`, or what
+ * `Query.mcpServerStatus()` returns — whose status means their tools are not there.
  *
  * Only servers that are not our own in-process one (`source: 'sdk'`) count — those are the
  * operator's connectors (#17). `pending` is not a failure: MCP startup does not block the turn,
- * so a slow server is still connecting when init is sent. Server names are the configuration's
- * keys, which the SDK calls untrusted text; they are reduced to their safe characters and
- * clipped before they reach a notice.
+ * so a slow server is still connecting when init is sent (`./mcp-status-watch` asks again
+ * later). Anything that is not an array reads as "nothing down".
  */
-function mcpUnavailableNotice(msg: Record<string, unknown>): SdkInterpretation | null {
-	if (!Array.isArray(msg.mcp_servers)) return null
-	const down: string[] = []
-	for (const entry of msg.mcp_servers) {
+export function mcpServersDown(list: unknown): McpServerDown[] {
+	if (!Array.isArray(list)) return []
+	const down: McpServerDown[] = []
+	for (const entry of list) {
 		const server = asRecord(entry)
 		const name = str(server?.name)
 		const status = str(server?.status)
 		if (!name || !status || server?.source === 'sdk') continue
-		const why = UNAVAILABLE_MCP_STATUS[status]
-		if (!why) continue
-		down.push(`${name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)} (${why})`)
+		if (!UNAVAILABLE_MCP_STATUS[status]) continue
+		down.push({ name, status })
 	}
-	if (down.length === 0) return null
-	const shown = down.slice(0, 5).join(', ') + (down.length > 5 ? `, and ${down.length - 5} more` : '')
-	return notice(
-		'mcp_unavailable',
-		'warn',
-		down.length === 1 ? 'A connector is unavailable this turn' : `${down.length} connectors are unavailable this turn`,
-		`${shown}. Their tools are missing from this turn; test the connection on Settings → Connectors.`,
-		true,
-	)
+	return down
+}
+
+/**
+ * One kept warning naming the connectors in `down`, or null when there are none.
+ *
+ * Server names are the configuration's keys, which the SDK calls untrusted text; they are
+ * reduced to their safe characters and clipped before they reach a notice.
+ */
+export function mcpUnavailableNotice(down: readonly McpServerDown[]): RunNotice | null {
+	const named = down.flatMap(({ name, status }) => {
+		const why = UNAVAILABLE_MCP_STATUS[status]
+		return why ? [`${name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40)} (${why})`] : []
+	})
+	if (named.length === 0) return null
+	const shown = named.slice(0, 5).join(', ') + (named.length > 5 ? `, and ${named.length - 5} more` : '')
+	return {
+		kind: 'mcp_unavailable',
+		level: 'warn',
+		title: named.length === 1 ? 'A connector is unavailable this turn' : `${named.length} connectors are unavailable this turn`,
+		detail: `${shown}. Their tools are missing from this turn; test the connection on Settings → Connectors.`,
+		persist: true,
+	}
 }
 
 function systemNotice(subtype: string, msg: Record<string, unknown>): SdkInterpretation | null {
 	switch (subtype) {
-		case 'init':
-			return mcpUnavailableNotice(msg)
+		case 'init': {
+			const unavailable = mcpUnavailableNotice(mcpServersDown(msg.mcp_servers))
+			return unavailable ? { kind: 'notice', notice: unavailable } : null
+		}
 
 		case 'compact_boundary':
 			return notice('compacted', 'info', compactionTitle(asRecord(msg.compact_metadata)), null, true)
