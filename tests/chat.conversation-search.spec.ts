@@ -12,6 +12,8 @@ import { SNIPPET_START, SNIPPET_STOP } from '../src/lib/chat/conversation-search
  *   - a file path in a tool call finds the turn by its full path, its file name, a partial
  *     path, one segment, and a prefix of that segment while typing
  *   - prose finds it too, and the snippet carries the highlight markers
+ *   - the snippet shows a short message whole and a long one around the match — never just
+ *     the matched word
  *   - archived chats are left out unless asked for; another user's are never returned
  *   - a search of only stop words still finds titles
  *   - the backfill indexes a message written behind the indexer's back, and rewrites a row
@@ -104,6 +106,53 @@ test.describe('conversation search', () => {
 			expect(proseHit?.match?.role).toBe('user')
 			expect(proseHit?.match?.createdAt).toBeInstanceOf(Date)
 			expect(proseHit?.title).toBe(`${prefix} Engine work`)
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('the snippet shows a short message whole, and a long one around the match', async () => {
+		const prefix = uniquePrefix('conv-search-snippet')
+		const shortWord = uniqueWord()
+		const tinyWord = uniqueWord()
+		const longWord = uniqueWord()
+		const userId = await getActiveUserId()
+		const { indexMessage, searchUserConversations } = await import('../src/lib/chat/message-search.server')
+		const sql = getSql()
+		const mark = (word: string) => `${SNIPPET_START}${word}${SNIPPET_STOP}`
+
+		try {
+			const conversationId = await seedConversation(`${prefix} snippets`, userId)
+			const filler = 'The quick brown fox jumps over the lazy dog while the engineer reviews the pull request carefully. '
+			const bodies = [
+				`fix the ${shortWord} bug now`,
+				// Every word around the match is three letters or fewer, which Postgres will not end an excerpt on.
+				`${tinyWord} it`,
+				`${filler.repeat(5)}Then we fix the ${longWord} bug now and redeploy. ${filler.repeat(5)}`,
+			]
+			for (const [index, content] of bodies.entries()) {
+				const [message] = await sql<{ id: string }[]>`
+					insert into messages (conversation_id, role, content, metadata, tool_calls, sequence)
+					values (${conversationId}, 'user', ${content}, '{}'::jsonb, '[]'::jsonb, ${index + 1})
+					returning id
+				`
+				await indexMessage({ id: message.id, conversationId, role: 'user', content })
+			}
+
+			const snippetFor = async (word: string) => {
+				const hit = (await searchUserConversations(userId, word)).find((h) => h.conversationId === conversationId)
+				expect(hit?.match, `a message matched ${word}`).toBeTruthy()
+				return hit!.match!.snippet
+			}
+
+			// Short messages are shown whole — the words around the match included.
+			expect(await snippetFor(shortWord)).toBe(`fix the ${mark(shortWord)} bug now`)
+			expect(await snippetFor(tinyWord)).toBe(`${mark(tinyWord)} it`)
+
+			// A long one is cut down to the part around the match, with words on both sides.
+			const long = await snippetFor(longWord)
+			expect(long).toContain(`fix the ${mark(longWord)} bug now`)
+			expect(long.length).toBeLessThan(bodies[2].length / 2)
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

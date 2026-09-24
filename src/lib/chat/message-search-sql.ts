@@ -78,7 +78,35 @@ export function backfillBatchQuery(cursor: string | null, batchSize: number): SQ
 	`
 }
 
-export const HEADLINE_OPTIONS = `StartSel="${SNIPPET_START}", StopSel="${SNIPPET_STOP}", MaxFragments=2, MaxWords=18, MinWords=6, FragmentDelimiter=" … "`
+/**
+ * A message this short is its own snippet: the whole of it, with the matches marked. It fits
+ * in the three lines the sidebar shows.
+ */
+export const SNIPPET_WHOLE_BODY_MAX_CHARS = 100
+
+/** `ts_headline` options for a message short enough to show whole. */
+export const WHOLE_BODY_HEADLINE_OPTIONS = `StartSel="${SNIPPET_START}", StopSel="${SNIPPET_STOP}", HighlightAll=true`
+
+/**
+ * `ts_headline` options for a longer message: up to two excerpts of about 18 words, each
+ * centred on a match.
+ *
+ * `ShortWord=0` matters. By default Postgres will not start or end an excerpt on a word of
+ * three letters or fewer, and trims them off the edges — which, when the excerpt reaches the
+ * start or end of the message, can trim everything but the match itself: "fix the login
+ * bug now" came back as just "login". Short messages are shown whole instead (above), and
+ * this keeps the edges of longer ones.
+ */
+export const HEADLINE_OPTIONS = `StartSel="${SNIPPET_START}", StopSel="${SNIPPET_STOP}", MaxFragments=2, MaxWords=18, MinWords=6, ShortWord=0, FragmentDelimiter=" … "`
+
+/** The highlighted snippet for `body` — see the two option sets above. */
+export function snippetSql(body: SQL, tsq: SQL): SQL {
+	return sql`case
+		when length(${body}) <= ${SNIPPET_WHOLE_BODY_MAX_CHARS}
+			then ts_headline('english', ${body}, ${tsq}, ${WHOLE_BODY_HEADLINE_OPTIONS})
+		else ts_headline('english', ${body}, ${tsq}, ${HEADLINE_OPTIONS})
+	end`
+}
 
 /** The Postgres text query for a search: `(exact OR segmented) AND prefix`. Null when empty. */
 export function textQuery(raw: string): SQL | null {
@@ -139,7 +167,7 @@ export function contentSearchQuery(input: { userId: string; tsq: SQL; includeArc
 			c.archived_at,
 			m.role,
 			m.created_at as message_created_at,
-			ts_headline('english', ms.body, ${tsq}, ${HEADLINE_OPTIONS}) as snippet
+			${snippetSql(sql`ms.body`, tsq)} as snippet
 		from top
 		join ${messageSearch} ms on ms.message_id = top.message_id
 		join ${conversations} c on c.id = top.conversation_id
