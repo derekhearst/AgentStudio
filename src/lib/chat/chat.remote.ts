@@ -19,6 +19,7 @@ import { BUILTIN_AGENT_KEYS } from '$lib/agents/builtin-agents.server'
 import { insertMessageWithSequence } from '$lib/chat/insert-message.server'
 import { listArchivedConversations, listRecentConversations } from '$lib/chat/conversation-list.server'
 import { setConversationArchivedForUser, setConversationPinnedForUser } from '$lib/chat/conversation-lifecycle.server'
+import { deleteConversationForUser } from '$lib/chat/conversation-delete.server'
 import { scheduleMessageIndex, searchUserConversations } from '$lib/chat/message-search.server'
 import { SEARCH_QUERY_MAX_CHARS, SEARCH_QUERY_MIN_CHARS } from '$lib/chat/conversation-search'
 import { findLiveChatRun } from '$lib/runs/live-chat-run.server'
@@ -141,9 +142,10 @@ export const createConversation = command(createConversationSchema, async (input
 	return created
 })
 
+/** #18 — stops the conversation's live turn first; see `deleteConversationForUser`. */
 export const deleteConversation = command(conversationIdSchema, async (conversationId) => {
 	const user = requireAuthenticatedRequestUser()
-	await db.delete(conversations).where(and(eq(conversations.id, conversationId), eq(conversations.userId, user.id)))
+	await deleteConversationForUser(user.id, conversationId)
 	return { success: true }
 })
 
