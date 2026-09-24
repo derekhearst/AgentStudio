@@ -36,7 +36,7 @@ import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approva
 import { createAskUserHost } from '$lib/chat/ask-user-host.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
-import { ledgerCostOverride, priceGatewayTurn, refuseUnrunnableModel } from '$lib/engine/gateway-run.server'
+import { ledgerCostOverride, priceGatewayTurn, resolveRunnableModel } from '$lib/engine/gateway-run.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
@@ -123,15 +123,31 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
-	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
+	const {
+		routedModel: requestedModel,
+		reasoningEffort,
+		modelSelection: requestedSelection,
+	} = resolveModelConfig({
 		body,
 		settings: currentSettings,
 	})
 
 	// A model nothing here can run is refused before the message is saved or a run is
 	// started, so it leaves no orphan turn behind (#9). `buildEngineOptions` still checks.
-	const unrunnable = refuseUnrunnableModel(routedModel)
-	if (unrunnable) return json({ error: unrunnable }, { status: 400 })
+	// A chat whose stored model has been retired moves to the settings default instead.
+	const runnable = resolveRunnableModel({
+		requested: requestedModel,
+		stored: conversation.model,
+		fallback: currentSettings.defaultModel,
+	})
+	if (!runnable.ok) return json({ error: runnable.message }, { status: 400 })
+	const routedModel = runnable.model
+	const modelSelection = runnable.replaced
+		? {
+				source: 'settingsDefault' as const,
+				reason: `Default model from settings — this chat's model (${runnable.replaced}) can no longer run`,
+			}
+		: requestedSelection
 
 	const parentResult = await resolveParentMessage({
 		conversationId: body.conversationId,
