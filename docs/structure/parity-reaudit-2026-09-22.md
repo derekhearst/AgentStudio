@@ -401,7 +401,8 @@ that nothing pretends otherwise any more:
   refuses the Read the CLI suggests), and to `tee` into the workspace instead.
 - **Delete.** Deleting a conversation interrupts its live run before the row goes. With no
   `perTaskStopAffordance` declared, the CLI's interrupt also kills its background tasks
-  (`sdk.d.ts`).
+  (`sdk.d.ts`). It shares one delete path with #18, which checks ownership first and waits
+  up to ten seconds for the stopped turn to wind down.
 
 Not done:
 - A command outliving its turn (option B: one `query()` per conversation, fed turn by turn,
