@@ -36,6 +36,7 @@ import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approva
 import { createAskUserHost } from '$lib/chat/ask-user-host.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
+import { ledgerCostOverride, priceGatewayTurn, refuseUnrunnableModel } from '$lib/engine/gateway-run.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
@@ -75,9 +76,12 @@ import { resolveToolScope } from '$lib/engine/tool-scope'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
-	singleUserMessageStream,
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
+import { runWithResumeFallback, userTurnMessages, withTurnResume } from '$lib/engine/turn-input'
+import { supportsFileCheckpoints, turnPromptContent } from '$lib/chat/turn-plan'
+import { planTurn, recordTurnJoinInBackground } from '$lib/chat/turn-plan.server'
+import { isConversationRewinding } from '$lib/chat/rewind.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
 import { createChatRunHooks } from '$lib/hooks/chat-run-hooks.server'
 import { logger } from '$lib/observability/logger'
@@ -112,12 +116,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (liveRunId) {
 		return json({ error: 'This conversation already has a turn in progress.', runId: liveRunId }, { status: 409 })
 	}
+	// #24 — a rewind restoring this conversation's files owns its session and workspace for a moment.
+	if (isConversationRewinding(body.conversationId)) {
+		return json({ error: 'Files are being restored in this conversation. Try again in a moment.' }, { status: 409 })
+	}
 
 	const currentSettings = await getOrCreateSettings(user.id)
 	const { routedModel, reasoningEffort, modelSelection } = resolveModelConfig({
 		body,
 		settings: currentSettings,
 	})
+
+	// A model nothing here can run is refused before the message is saved or a run is
+	// started, so it leaves no orphan turn behind (#9). `buildEngineOptions` still checks.
+	const unrunnable = refuseUnrunnableModel(routedModel)
+	if (unrunnable) return json({ error: unrunnable }, { status: 400 })
 
 	const parentResult = await resolveParentMessage({
 		conversationId: body.conversationId,
@@ -126,6 +139,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	})
 	if (!parentResult.ok) return json({ error: parentResult.error }, { status: 400 })
 	const parentMessageId = parentResult.parentMessageId
+
+	/*
+	 * What this turn sends, and how it starts its SDK session. A regenerate — after an edit
+	 * too — sends the user row's own text and attachments and cuts the session back to the
+	 * turn before it, so the model sees exactly the kept history. See `$lib/chat/turn-plan`.
+	 */
+	const planned = await planTurn({
+		conversationId: body.conversationId,
+		regenerate: Boolean(body.regenerate),
+		sdkSessionId: conversation.sdkSessionId,
+		pivotMessageId: parentMessageId,
+		body,
+	})
+	if (!planned.ok) return json({ error: planned.error }, { status: 400 })
+	const turn = planned.turn
 
 	// A conversation with no SDK session yet is on its first exchange as far as the
 	// engine is concerned, which is also when the title gets generated.
@@ -172,7 +200,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const skillSummariesText = await buildSkillSummariesText({
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 		skillTopK: resolveSkillTopK(currentSettings),
 	})
 	if (skillSummariesText) {
@@ -187,7 +215,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const memorySlot = await buildMemoryRecallSlot({
 		settings: currentSettings,
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 	})
 	if (memorySlot) contextSlots.push(memorySlot)
 
@@ -340,8 +368,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * warning the user actually sees instead of a silent drop.
 	 */
 	const preparedPrompt = await prepareAttachmentPrompt({
-		text: body.content ?? '',
-		attachments: body.attachments,
+		text: turn.text,
+		attachments: turn.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
 		io: createAttachmentIo(workspace.context),
 	}).catch(abandonSetup)
@@ -380,6 +408,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		parentIsClaude: isClaudeModel(routedModel),
 	}).catch(abandonSetup)
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
+	// #24 — back files up before the agent changes them, where the workspace outlives the turn.
+	const fileCheckpointing = supportsFileCheckpoints(workspace.context)
 
 	let engineOptions
 	try {
@@ -393,7 +423,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
-			resumeSessionId: conversation.sdkSessionId ?? undefined,
+			resumeSessionId: turn.attempts.first.resumeSessionId,
+			resumeSessionAt: turn.attempts.first.resumeSessionAt,
+			fileCheckpointing,
 			tools: {
 				userId: user.id,
 				runId: run.id,
@@ -503,12 +535,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
 
-				const summary = await runEngineStream(
+				const summary = await runWithResumeFallback(turn.attempts, async (attempt) => runEngineStream(
 					{
-						prompt: preparedPrompt.content
-							? singleUserMessageStream(preparedPrompt.content)
-							: preparedPrompt.text,
-						options: engineOptions,
+						// One user message with a uuid we chose: the row's join to the transcript.
+						prompt: userTurnMessages(turnPromptContent(preparedPrompt, attempt.preamble), attempt.sdkUserUuid),
+						options: withTurnResume(engineOptions, attempt),
 						emit,
 						/*
 						 * Every completed call gets a ledger row. Before this, only `web_search`
@@ -573,9 +604,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								.catch((error) =>
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
+							recordTurnJoinInBackground(parentMessageId, {
+								uuid: attempt.sdkUserUuid,
+								sessionId,
+								cwd: workspace.root,
+								checkpointed: fileCheckpointing,
+							})
 						},
 						// What the resumed session had already spent, so this turn logs its own share.
-						usageBaseline: await loadSessionUsageBaseline(body.conversationId, conversation.sdkSessionId),
+						usageBaseline: await loadSessionUsageBaseline(body.conversationId, attempt.resumeSessionId),
 						// Settings-only view; `permissionMode` composes with it inside the engine's
 						// `resolveToolGate`, which is what decides allow / ask / deny.
 						requiresApproval: (name) =>
@@ -607,7 +644,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
-				})
+				}), (reason) =>
+					logger.warn('[chat/stream] the session could not be cut back; starting a fresh one', {
+						runId: run.id,
+						reason,
+					}),
+				)
 
 				// Fold the attachment notice into the persisted turn so the reloaded
 				// message matches what the user watched stream in.
@@ -628,8 +670,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				// Subscription runs have no per-token price, so record tokens and force the
 				// dollar figure to zero rather than inventing one from list pricing. A gateway
-				// run logs this turn's share of the SDK's estimate; when that share cannot be
-				// told apart (`costUsd: null`), the tokens are priced from the model table.
+				// run prices this turn's tokens from the OpenRouter catalogue (#9) — the SDK's
+				// own figure is a guess at a Claude rate for a model it has no price for.
+				const gatewayCost = claudeRun ? null : await priceGatewayTurn(routedModel, summary.usage)
 				const messageCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
@@ -640,8 +683,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: claudeRun ? 0 : (summary.usage.costUsd ?? undefined),
-					metadata: { conversationId: body.conversationId, subscription: claudeRun },
+					costOverride: ledgerCostOverride(gatewayCost),
+					metadata: {
+						conversationId: body.conversationId,
+						subscription: claudeRun,
+						...(gatewayCost ? { backend: 'gateway', costBasis: gatewayCost.costBasis } : {}),
+					},
 				})
 
 				const assistantMessage = await persistAssistantMessage({
@@ -663,6 +710,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
+						// Where a later edit of the next message cuts the session back to.
+						sdkTailUuid: summary.sdkTailUuid ?? undefined,
 						// The next turn's usage baseline — see `loadSessionUsageBaseline`.
 						sessionUsage: summary.sessionUsage ?? undefined,
 						numTurns: summary.numTurns,
@@ -680,7 +729,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				maybeGenerateTitle({
 					isFirstExchange,
-					userContent: body.content ?? '',
+					userContent: turn.text,
 					assistantContent: summary.text,
 					conversationId: body.conversationId,
 				})
@@ -705,7 +754,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						runId: run.id,
 						userId: user.id,
 						conversationId: body.conversationId,
-						userContent: body.content,
+						userContent: turn.text,
 						assistantContent: summary.text,
 						toolCalls: [],
 					})

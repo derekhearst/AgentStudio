@@ -91,13 +91,13 @@ Sources:
 
 - Left rail: navigation + running sessions dock + recent sessions
 - Center: chat thread + run HUD + composer + inline action cards
-- Right workbench: mode-aware tabs for artifacts, plans, research, diffs, evaluations, PRs
+- Right rail (chat only): Preview and Files (what the agent changed in this chat), folded to a thin strip until something is opened. See [../chat-console/chat-console.md](../chat-console/chat-console.md)
 
 ### Mobile shell
 
 - Bottom navigation for primary areas
 - Thread-first canvas
-- Right workbench becomes bottom sheet tabs
+- The chat's right rail becomes a drawer opened from the chat header
 - Blocking approvals/questions appear as sticky cards above composer
 - Detail pages (an agent, a skill, a project, a run, a trace, the jobs and hooks views) show a **Back** button in the page header beside the menu button below the desktop breakpoint, where the breadcrumbs are hidden. On wide screens the breadcrumb trail holds the parent link instead. An installed app has no browser Back button, so on phones and tablets this button is the way up. Its label names where it goes, for example "Back to Agents".
 
@@ -225,7 +225,7 @@ The following components implement the canonical desktop and mobile shells. Doma
 | ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Left rail        | `src/lib/chat-console/ConsoleNavContent.svelte` | Nav groups, recent chats, and a collapsible "Manage" section for the system pages. |
 | Center canvas    | `<main>` in `src/lib/chat-console/ChatConsoleShell.svelte` | Thread and composer.                                             |
-| Right rail       | `src/lib/chat-console/ChatConsoleRail.svelte` | Shown on chat and home only (`showRail`).                                           |
+| Right rail       | `src/lib/chat-console/ChatConsoleRail.svelte` | Conversation pages only (`showRail`). Collapses to a 40px strip; expanded or folded is remembered per user. |
 
 > This table described a layout built around `src/lib/ui/Sidebar.svelte`, `RunningSessionsDock.svelte`
 > and `SidePanel.svelte`. The console redesign replaced all three and none of them were
@@ -238,7 +238,7 @@ The following components implement the canonical desktop and mobile shells. Doma
 | ------------------ | ---------------------------------- | --------------------------------------- |
 | Bottom nav         | `src/lib/ui/MobileNav.svelte`      | Hides on chat detail route (slide-off). |
 | Full-screen canvas | `<main>` (full viewport)           | No border radius or padding on mobile.  |
-| Right workbench    | Not shown inline; bottom sheet TBD | Phase 3.1 work.                         |
+| Right rail         | `src/lib/chat-console/MobileRightDrawer.svelte` | The same rail in a drawer, opened from the chat header's rail button. |
 
 ### Action cards
 

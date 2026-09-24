@@ -209,8 +209,11 @@ export function formatBytes(n: number): string {
 /**
  * Rail tab identifiers. Lives here rather than in `preview.remote.ts` because a
  * `*.remote.ts` module may only export remote functions.
+ *
+ * #14 removed Research and Activity. A row stored with either still reads back fine:
+ * `getRailPreviewState` maps any tab it does not know to Preview.
  */
-export const RAIL_TABS = ['Preview', 'Research', 'Files', 'Activity'] as const
+export const RAIL_TABS = ['Preview', 'Files'] as const
 export type RailTab = (typeof RAIL_TABS)[number]
 
 export type RailPreviewState = {

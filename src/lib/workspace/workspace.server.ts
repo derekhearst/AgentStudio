@@ -67,9 +67,39 @@ export type WorkspaceContext = {
 }
 
 /**
+ * Which of the five workspace shapes a context resolves to. This is the one place the
+ * priority order lives; `resolveWorkspaceRoot` builds its path from the answer.
+ *
+ * - `persistent` — the agent's opt-in stable directory; every turn starts in the same one
+ * - `worktree`   — a fresh git worktree per run
+ * - `project`    — the bound project's checkout; every turn starts in the same one
+ * - `run`        — a fresh, empty directory per run
+ * - `user`       — the bare per-user root (no run, no project: admin and legacy callers)
+ */
+export type WorkspaceKind = 'persistent' | 'worktree' | 'project' | 'run' | 'user'
+
+export function workspaceKind(
+	ctx: Pick<WorkspaceContext, 'persistentKey' | 'worktree' | 'runId' | 'projectId'>,
+): WorkspaceKind {
+	if (ctx.persistentKey) return 'persistent'
+	if (ctx.worktree && ctx.runId) return 'worktree'
+	if (ctx.projectId) return 'project'
+	if (ctx.runId) return 'run'
+	return 'user'
+}
+
+/**
+ * Whether the next turn starts in the same directory as the last one. Only then does a
+ * path someone picked from that directory still mean something when the turn runs.
+ */
+export function workspaceCarriesOver(kind: WorkspaceKind): boolean {
+	return kind === 'persistent' || kind === 'project'
+}
+
+/**
  * Resolve the absolute root directory for a tool execution context.
  *
- * Resolution priority (most-specific wins):
+ * Resolution priority (most-specific wins, see `workspaceKind`):
  * - With `persistentKey`:        ${sandboxRoot}/<userId>/persistent/<key>   (Phase 2 — opt-in stable)
  * - Else with `worktree` + runId: ${sandboxRoot}/<userId>/worktrees/<runId> (Phase 4 — git worktree)
  * - Else with `projectId`:        ${sandboxRoot}/<userId>/projects/<projectId> (project-bound chat)
@@ -83,23 +113,18 @@ export type WorkspaceContext = {
 export function resolveWorkspaceRoot(ctx: WorkspaceContext): string {
 	const userId = sanitize(ctx.userId, 'userId')
 	const root = ctx.sandboxRoot || DEFAULT_SANDBOX_ROOT
-	if (ctx.persistentKey) {
-		const key = sanitize(ctx.persistentKey, 'persistentKey')
-		return resolve(root, userId, 'persistent', key)
+	switch (workspaceKind(ctx)) {
+		case 'persistent':
+			return resolve(root, userId, 'persistent', sanitize(ctx.persistentKey!, 'persistentKey'))
+		case 'worktree':
+			return resolve(root, userId, 'worktrees', sanitize(ctx.runId!, 'runId'))
+		case 'project':
+			return resolve(root, userId, 'projects', sanitize(ctx.projectId!, 'projectId'))
+		case 'run':
+			return resolve(root, userId, 'runs', sanitize(ctx.runId!, 'runId'))
+		case 'user':
+			return resolve(root, userId)
 	}
-	if (ctx.worktree && ctx.runId) {
-		const runId = sanitize(ctx.runId, 'runId')
-		return resolve(root, userId, 'worktrees', runId)
-	}
-	if (ctx.projectId) {
-		const projectId = sanitize(ctx.projectId, 'projectId')
-		return resolve(root, userId, 'projects', projectId)
-	}
-	if (ctx.runId) {
-		const runId = sanitize(ctx.runId, 'runId')
-		return resolve(root, userId, 'runs', runId)
-	}
-	return resolve(root, userId)
 }
 
 /** A run's workspace, resolved once so every consumer agrees on it. */

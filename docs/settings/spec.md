@@ -99,7 +99,7 @@ The Tool Approval panel lists every AgentStudio tool a chat can call, and each o
 
 The `/settings` route provides a UI for all editable settings grouped by category:
 
-- **Models** — default model, transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
+- **Models** — default model (only models the chat engine can run here are offered, and saving any other is refused — see [../llm/llm.md](../llm/llm.md)), transcription model, and the read-aloud model and voice (picked from OpenRouter's speech catalogue, with a preview button; see [../speech/speech.md](../speech/speech.md)). Reset returns the read-aloud pair to its defaults. The Auto-read switch is not a setting: it is stored per device in the browser.
 - **Memory** — enable/disable, top-k, reranking
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%

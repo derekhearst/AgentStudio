@@ -61,6 +61,8 @@ Every event the runtime emits is written to `run_events` in the same transaction
 - Resuming a run from mid-point (reconnect, restart)
 - Replaying events to late-joining observers
 
+The run's page, `/runs/<id>`, shows that log as a timeline: every tool call, its result, approvals, questions and the final `done`. It is where a chat's tool activity lives since the chat's rail lost its Activity tab (#14). From a chat, open it with **Run → Timeline** in a reply's stats popover, or by clicking the **running** chip at the top of the chat while a turn is in progress.
+
 ### Resumable streaming
 
 A chat run does not depend on the browser staying connected. If the page reloads, the network drops for a moment, or a proxy closes an idle connection, the run keeps working on the server and keeps writing its events.

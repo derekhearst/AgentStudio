@@ -23,8 +23,12 @@
 	 * gate spec checks every page reachable before an owner exists is on it.
 	 */
 	const isChromeless = $derived(rendersWithoutShell(page.url.pathname));
-	const isChatRoute = $derived(page.url.pathname.startsWith('/chat'));
-	const isChatOrHome = $derived(isChatRoute || page.url.pathname === '/');
+	/**
+	 * The right rail belongs to a conversation (#14): it previews that chat's workspace and
+	 * lists what its agent changed. The home page has no conversation, so it has no rail —
+	 * it used to show whichever chat had been open last.
+	 */
+	const isChatRoute = $derived(page.url.pathname.startsWith('/chat/'));
 
 	if (browser) {
 		const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -91,7 +95,7 @@
 {#if isChromeless}
 	{@render children()}
 {:else}
-	<ChatConsoleShell activePath={page.url.pathname} showRail={isChatOrHome}>
+	<ChatConsoleShell activePath={page.url.pathname} showRail={isChatRoute}>
 		{@render children()}
 	</ChatConsoleShell>
 {/if}
