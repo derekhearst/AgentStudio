@@ -84,9 +84,8 @@ The Research agent isn't only an initiator. Once a report or earlier findings ar
 
 1. `/research/{id}` shows the run's status, sub-questions, sources and live trace. It refreshes every few seconds while the run is going and stops once it has ended.
 2. The page has a **Cancel** button. Cancelling marks the run canceled and cancels its background job. The run stops at its next safe point and stays canceled.
-3. In a chat linked to runs (for example the automation's conversation), the right-hand console's **Research** tab lists the chat's five most recent runs with their status and progress.
-4. `/research` lists recent runs alongside generated images.
-5. When a run fails, its error shows on its page and its job shows as failed in the review inbox. No notification is sent.
+3. `/research` lists recent runs alongside generated images.
+4. When a run fails, its error shows on its page and its job shows as failed in the review inbox. No notification is sent.
 
 ## Roles and permissions
 

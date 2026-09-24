@@ -82,7 +82,7 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Connectors (Slack, M365, Salesforce…) | **absent** | — | write-capable connectors, Claude Tag for Slack |
 | Computer use | **far behind** | `browser_screenshot` only | screen access, click, navigate (research preview) |
 | Artifacts / side-panel documents | **n/a** | removed in #13 — files on disk and git instead | versioned, publishable, in-place draft editing |
-| Preview a file or a website in a side panel | **even** (#29, #14) | right rail, folded to a strip until something is opened (remembered per user): Preview tab renders markdown, highlighted code, images, PDFs, directory listing, sandboxed URL iframe, selection persists per conversation; Files tab lists every file the agent changed in the chat with +/- counts and opens it in Preview. Run activity is on `/runs/<id>`, linked from each reply | artifact + document preview |
+| Preview a file or a website in a side panel | **even** (#29, #14) | right rail, folded to a strip until something is opened (remembered per user): Preview tab renders markdown, highlighted code, images, PDFs, directory listing, sandboxed URL iframe, selection persists per conversation; Files tab lists every file the agent created or edited in the chat, with +/- counts and a "new" badge for created files, and opens it in Preview. Run activity is on `/runs/<id>`, linked from each reply | artifact + document preview |
 | Inline charts and visualizations | **absent** | markdown only | interactive charts, diagrams, Claude Design |
 | Conversation rename | **even** | `updateConversationMeta` | same |
 | Pin / archive / folders | **absent** (#18) | delete only | full |
