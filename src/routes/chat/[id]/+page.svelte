@@ -1092,6 +1092,7 @@
 							streamingBlocks,
 							{ agentId: payload.agentId, conversationId: payload.conversationId },
 							payload.name,
+							payload.label ?? null,
 						);
 					}
 
@@ -1105,10 +1106,11 @@
 					}
 
 					if (eventName === 'subagent_done') {
-						streamingBlocks = applySubagentDone(streamingBlocks, {
-							agentId: payload.agentId,
-							conversationId: payload.conversationId,
-						});
+						streamingBlocks = applySubagentDone(
+							streamingBlocks,
+							{ agentId: payload.agentId, conversationId: payload.conversationId },
+							payload,
+						);
 					}
 
 					if (eventName === 'metrics') {
@@ -1684,6 +1686,10 @@
 								status={block.status}
 								toolCalls={block.toolCalls}
 								expanded={block.expanded}
+								transcript={block.transcript}
+								transcriptTruncated={block.transcriptTruncated ?? false}
+								details={block.details}
+								error={block.error ?? null}
 							/>
 						{:else if block.kind === 'text' && block.content}
 							<div class="assistant-message">

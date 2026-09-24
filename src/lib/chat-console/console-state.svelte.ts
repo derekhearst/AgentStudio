@@ -16,7 +16,7 @@ export type ConsoleStreamingBlock =
 			executionMs?: number | null;
 	  }
 	| { kind: 'thinking'; id: string; content: string }
-	| { kind: 'subagent'; id: string; agentName: string; task: string; status: 'running' | 'completed' | 'failed' };
+	| { kind: 'subagent'; id: string; agentName: string; task: string; status: 'running' | 'completed' | 'failed' | 'stopped' };
 
 export type ConsoleLiveContext = {
 	tokenEstimate: number | null;

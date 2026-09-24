@@ -12,8 +12,9 @@
 
 // Relative rather than `$lib/...`: `chat.model-tag.spec.ts` imports this module directly in
 // the plain Playwright loader, where the SvelteKit alias is not guaranteed to resolve.
-import type { ToolResultDetails } from '../engine/tool-result-details'
+import type { SubagentDetails, ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
+import type { SubagentTranscriptEntry } from '../engine/subagent-transcript'
 import { readAskUserAnswers } from './ask-user-answers'
 
 export type SavedBlock =
@@ -42,6 +43,13 @@ export type SavedBlock =
 			task: string
 			content: string
 			success: boolean
+			/** #32 — absent on blocks persisted before it; see `StreamBlock` in `$lib/runs/runs.schema`. */
+			status?: 'running' | 'completed' | 'failed' | 'stopped'
+			transcript?: SubagentTranscriptEntry[]
+			transcriptTruncated?: boolean
+			details?: SubagentDetails
+			error?: string | null
+			costUsd?: number | null
 	  }
 
 /** Coerce a JSONB column value (object, JSON string, or raw) into a record. */
