@@ -22,6 +22,12 @@ export const appSettings = pgTable('app_settings', {
 		.$type<{
 			dailyLimit: number | null
 			monthlyLimit: number | null
+			/**
+			 * The `budget_limits` rows these two limits are enforced through, written by
+			 * `syncSettingsBudgetLimits`. Kept here so the rows Settings owns are never
+			 * confused with limits created any other way.
+			 */
+			limitIds?: { day?: string | null; month?: string | null }
 		}>()
 		.notNull()
 		.default({ dailyLimit: null, monthlyLimit: null }),
@@ -30,9 +36,9 @@ export const appSettings = pgTable('app_settings', {
 			reservedResponsePct: number
 			autoCompactThresholdPct: number
 			/**
-			 * Tool names whose results should never be trimmed by trimHistoricalToolResults.
-			 * Use for tools whose output the model should be able to refer back to indefinitely
-			 * (e.g. request_plan_approval). Empty / unset = trim by default rules.
+			 * Tool names whose old results the pre-engine chat loop never trimmed. Nothing reads
+			 * it any more: the Agent SDK manages the conversation's context itself, and the
+			 * in-house trimming went with the rest of that loop (#8). Kept so stored rows parse.
 			 */
 			preserveToolResults?: string[]
 		}>()
@@ -41,7 +47,6 @@ export const appSettings = pgTable('app_settings', {
 	toolConfig: jsonb('tool_config')
 		.$type<{
 			approvalRequiredTools: string[]
-			programmaticToolCallingEnabled?: boolean
 		}>()
 		.notNull()
 		.default({ approvalRequiredTools: [] }),

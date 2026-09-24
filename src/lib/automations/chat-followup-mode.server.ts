@@ -181,8 +181,7 @@ async function runAutomationWithAgent(args: {
 			conversationId: conversation.id,
 			model,
 			initialMessages: llmMessages,
-			initialTools: definition.tools,
-			computeTools: async () => definition.tools,
+			tools: definition.tools,
 			maxRounds: 10, // automations are bounded — no human in the loop to course-correct
 			approvalRequiredTools: new Set<string>(), // no approval surface in a detached run
 			isOrchestrator: false,
@@ -190,7 +189,6 @@ async function runAutomationWithAgent(args: {
 			persistentKey: definition.persistentKey,
 			worktree: definition.worktree,
 			projectId: conversation.projectId ?? null,
-			spawnSubagent: undefined,
 		})
 
 		const cost = await logLlmUsage({

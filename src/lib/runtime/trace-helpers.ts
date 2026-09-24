@@ -2,7 +2,7 @@
  * Best-effort wrappers around the observability run-trace surface.
  *
  * The runtime opens a `run_traces` row at loop start so spans can append as
- * the loop progresses, and flips it to `completed` at the end. Both calls go
+ * the loop progresses, and flips it to how the run ended. Both calls go
  * through dynamic imports so the runtime stays loadable in test contexts that
  * don't wire up observability — and both swallow errors with a warning so a
  * trace-write failure can never abort a chat run.
@@ -22,12 +22,15 @@ export function openRunTrace(input: { runId: string; conversationId: string }): 
 	})()
 }
 
-/** Flip the `run_traces` row to `completed`. Fire-and-forget. */
-export function closeRunTrace(runId: string): void {
+/**
+ * Flip the `run_traces` row to how the run ended. Fire-and-forget. It used to always say
+ * `completed`, and a loop that threw left the row `running` for good.
+ */
+export function closeRunTrace(runId: string, status: 'completed' | 'failed' = 'completed'): void {
 	void (async () => {
 		try {
 			const { finishRunTrace } = await import('$lib/observability/traces.server')
-			await finishRunTrace({ runId, status: 'completed' })
+			await finishRunTrace({ runId, status })
 		} catch (err) {
 			logger.warn('[runtime] finishRunTrace failed (non-fatal)', { err })
 		}
@@ -39,8 +42,7 @@ export function closeRunTrace(runId: string): void {
  * the tools prefix gets cached when stable. OpenRouter forwards this to
  * Anthropic; other providers ignore the field. camelCase `cacheControl`
  * matches the OpenRouter SDK input shape (it converts to `cache_control` on
- * the wire). Done every round so progressive-disclosure refreshes still get
- * the marker.
+ * the wire). The loop marks its fixed tool list once per run.
  *
  * Pure transform — does not mutate the input array.
  */

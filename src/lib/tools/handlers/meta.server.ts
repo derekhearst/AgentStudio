@@ -1,20 +1,17 @@
 /**
  * "Meta" tool handlers — tools that operate on the runtime/loop itself rather than
  * an external resource:
- *   - search_tools: free-text query over the registry; matches load into the next round
  *   - request_plan_approval: planner→implementer agent handoff (mandatory approval)
  *   - ask_user: only the chat-stream loop fulfills this; the dispatcher reaches it as a
  *     defensive fallback (e.g. someone executes the tool directly without going through
  *     the loop) — return a 'not directly executable' error.
- *   - run_code: programmatic-tool-calling subprocess (delegates to run-code.server)
- *   - run_subagent: stateless one-shot LLM call — used as a fallback when the
- *     orchestrator-only path isn't available (the loop has its own special-case branch
- *     that uses spawnSubagent for full agent dispatch).
+ *   - run_subagent: stateless one-shot LLM call. The chat engine does not register it
+ *     (delegation is the SDK's Task tool); the MCP endpoint still lists it.
  */
 
 import { eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
-import { searchToolsRegistry, toolSchemas } from '../tool-schemas'
+import { toolSchemas } from '../tool-schemas'
 import { toolUserContext } from '../sandbox.server'
 import { resolveConversationFromRunId } from '../run-scope.server'
 import { logger } from '$lib/observability/logger'
@@ -28,36 +25,6 @@ export const metaHandlers: Record<string, ToolHandler> = {
 			tool: call.name,
 			input,
 			error: 'ask_user must be handled by chat streaming flow and cannot run directly.',
-			executionMs: Date.now() - startedAt,
-		}
-	},
-
-	search_tools: async (call, { startedAt }) => {
-		const input = toolSchemas.search_tools.parse(call.arguments)
-		const ctx = toolUserContext.getStore()
-		const hits = searchToolsRegistry(input.query, input.limit ?? 10)
-		// Register matches into the per-run loaded set so they appear in the tools array
-		// on the next round. Done via a callback the runtime exposes — the runtime owns
-		// the actual Set and refreshes its computeTools() each round.
-		const matchedNames = hits.map((h) => h.name)
-		if (matchedNames.length > 0 && ctx?.runtime?.loadSearchableTools) {
-			try {
-				ctx.runtime.loadSearchableTools(matchedNames)
-			} catch (err) {
-				logger.warn('[search_tools] loadSearchableTools callback threw', { err })
-			}
-		}
-		return {
-			success: true,
-			tool: call.name,
-			input,
-			result: {
-				matches: hits.map((h) => ({ name: h.name, description: h.description })),
-				note:
-					matchedNames.length === 0
-						? `No tools matched "${input.query}". Try different keywords or check the spelling.`
-						: `Loaded ${matchedNames.length} tool${matchedNames.length === 1 ? '' : 's'} for the next round: ${matchedNames.join(', ')}. Call them on the next turn — they're now in your tools array.`,
-			},
 			executionMs: Date.now() - startedAt,
 		}
 	},
@@ -152,34 +119,6 @@ export const metaHandlers: Record<string, ToolHandler> = {
 				success: false,
 				tool: call.name,
 				error: err instanceof Error ? err.message : 'Agent switch failed',
-				executionMs: Date.now() - startedAt,
-			}
-		}
-	},
-
-	run_code: async (call, { startedAt }) => {
-		const input = toolSchemas.run_code.parse(call.arguments)
-		const { runCodeTool } = await import('../run-code.server')
-		try {
-			const result = await runCodeTool({ code: input.code, timeoutMs: input.timeoutMs })
-			return {
-				success: result.exitCode === 0 && !result.timedOut,
-				tool: call.name,
-				input,
-				result,
-				error: result.timedOut
-					? `run_code timed out after ${result.durationMs}ms`
-					: result.exitCode !== 0
-						? `run_code exited with code ${result.exitCode}: ${result.stderr.slice(-1000) || 'no stderr'}`
-						: undefined,
-				executionMs: Date.now() - startedAt,
-			}
-		} catch (err) {
-			return {
-				success: false,
-				tool: call.name,
-				input,
-				error: err instanceof Error ? err.message : String(err),
 				executionMs: Date.now() - startedAt,
 			}
 		}

@@ -50,19 +50,26 @@ Delivery rows are written for every subscription attempted. A notification with 
 
 ## Notification Categories
 
-Notification preferences are stored in `appSettings.notificationPrefs` and control which categories are sent:
+Notification preferences are stored in `appSettings.notificationPrefs` and control which categories are sent. Every notification the server sends goes through one sender (`notifyUser`), which checks the user's switch for its category first. A switched-off category is skipped completely: no push and no in-app row. A user who has never saved the page gets every category, as the switches show.
 
-| Key             | Description                                    |
-| --------------- | ---------------------------------------------- |
-| `taskCompleted` | Task transitions to `completed` or `failed`    |
-| `needsInput`    | Agent pauses waiting for `ask_user` answer     |
-| `agentErrors`   | Agent encounters a hard error during execution |
+| Key             | Switch in Settings | What it sends today |
+| --------------- | ------------------ | ------------------- |
+| `taskCompleted` | Task completed     | A research run finished its report |
+| `needsInput`    | Needs input        | A chat run has been waiting for a tool approval or an answer to an `ask_user` question for a minute. Not straight away: someone watching the chat answers in seconds. The run gives up after five minutes, so this leaves about four to answer. The notification links to the chat |
+| `agentErrors`   | Agent errors       | An automation run failed for good, or a check failed on a pull request an agent opened |
+
+Two kinds of notification are sent whatever these switches say, because the user set each one up on purpose and turns it off where they set it up:
+
+- **Monitor pushes.** A monitor whose action is "send a push" sends it. Turn the monitor off to stop it.
+- **Budget alerts.** When a budget limit reaches its warning level or its limit, the user is told once per limit and period. Clear the limit to stop it.
+
+Before 2026-09-23 these switches were saved and never read, so turning "Agent errors" off changed nothing, and no "Needs input" notification was ever sent.
 
 ## Key Functions
 
 | Function                            | Purpose                                                                             |
 | ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `sendNotification(userId, payload)` | Persists to `notifications` table + sends push to all active subscriptions for user |
+| `notifyUser({ userId, category, payload })` | The one sender: skips a switched-off category, then persists to the `notifications` table and sends push to every subscription. Never throws |
 | `upsertPushSubscription(input)`     | Registers or updates a device push subscription                                     |
 | `removePushSubscription(endpoint)`  | Removes a subscription (user unsubscribed or browser expired)                       |
 | `getVapidPublicKey()`               | Returns the VAPID public key for client-side push registration                      |
@@ -106,10 +113,12 @@ If these are not set, push delivery is skipped silently (in-app notifications st
 
 Notifications are emitted by:
 
-- `tasks/` — task completed, task failed
-- `runs/` — agent needs input, agent error
-- `observability/` — review item requires action
-- `cost/` — budget warn and block threshold events
+- `research/` — research report complete (`taskCompleted`)
+- `runs/` — a chat run still waiting on the user after a minute (`needsInput`)
+- `automations/` — an automation run that failed for good (`agentErrors`)
+- `source-control/` — a failed check on an agent's pull request (`agentErrors`)
+- `monitors/` — a monitor whose action is a push (always sent)
+- `cost/` — budget warn and block threshold events (always sent)
 
 ## Rewrite Authority
 

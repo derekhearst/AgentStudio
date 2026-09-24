@@ -75,8 +75,8 @@ async function applyAgent(
 
 		const baseConfig: Record<string, unknown> = (existing?.config as Record<string, unknown> | undefined) ?? {}
 		const nextConfig: Record<string, unknown> = { ...baseConfig, sourceSlug: source.slug }
-		// Tool Search Tool replaces capability groups; drop the legacy field if it was set on
-		// the existing row by an older version of this loader.
+		// Capability groups were retired and nothing reads them; drop the legacy field if it
+		// was set on the existing row by an older version of this loader.
 		delete nextConfig.capabilityGroups
 
 		if (existing) {

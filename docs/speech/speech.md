@@ -103,7 +103,7 @@ Auto-read is stored in the browser, not on the account, so it cannot be turned o
 | --- | --- |
 | The model or voice is not accepted | The provider's own message, for example `Unknown voice "zz". Supported voices: …` |
 | OpenRouter is out of credits | That OpenRouter could not bill the request |
-| A budget limit blocks it | "Budget limit reached", with the limit that blocked it |
+| A budget limit blocks it | "Budget limit reached", with the limit that blocked it. A budget alert is recorded, as for a blocked chat |
 | Too many requests | That the provider is rate limiting, and to try again shortly |
 | OpenRouter is down or slow | That the provider failed, or took too long to answer |
 | No API key on the server | That read-aloud needs `OPENROUTER_API_KEY` |

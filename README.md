@@ -28,11 +28,11 @@ Reusable instruction sets agents load on demand, managed at `/skills`. A skill e
 
 ### Settings
 
-Settings persist default model, transcription and read-aloud (text-to-speech) model and voice, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits.
+Settings persist default model, transcription and read-aloud (text-to-speech) model and voice, theme, notification preferences, per-tool approval requirements, context window configuration, and budget limits. The daily and monthly budget limits block new chat and automation runs once spend reaches them, alert at 80% and 100%, and show as headroom on `/activity` (see [`docs/cost/spec.md`](docs/cost/spec.md)); the notification switches decide which notifications are sent (see [`docs/notifications/spec.md`](docs/notifications/spec.md)).
 
 Settings → System is a read-only checklist of what the deployment provides: the database and its migrations, the Claude sign-in, the workspace folder, the shell sandbox, the model gateway and each integration (OpenRouter, web search, GitHub, push, external cron). These are environment settings, not stored in the app; each row names the variable that controls it and never shows its value.
 
-Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved.
+Tool execution approvals are configured per tool in Settings. Tools marked for approval pause execution until approved. See [docs/tools/tools.md](docs/tools/tools.md) for what each kind of run can call, how approvals work, and how code runs (through the sandboxed shell; the separate `run_code` tool was retired).
 
 ### Database Bootstrap
 
@@ -206,6 +206,7 @@ Notes:
 - Master implementation order: `docs/structure/implementation-order.md`
 - Architecture refactor plan: `docs/structure/plan.md`
 - Runtime spec: `docs/runtime/spec.md`
+- Tools (what agents can call, approvals, code execution): `docs/tools/tools.md`
 - Chat plan: `docs/chat/plan.md`
 - Chat spec (composer shortcuts, attachments, safe rendering): `docs/chat/spec.md`
 - Memory spec: `docs/memory/spec.md`

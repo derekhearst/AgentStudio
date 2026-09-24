@@ -1,4 +1,3 @@
-import { and, desc, eq } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { images, type ImageRow } from './images.schema'
 
@@ -10,7 +9,8 @@ import { images, type ImageRow } from './images.schema'
  * audit row visible in the /research feed. Failures are swallowed by the
  * caller (image generation must succeed even if the audit insert fails).
  *
- * `listImagesForUser` powers the /research feed.
+ * The /research feed reads the table itself (`$lib/research/library.remote`), scoped to
+ * the signed-in user.
  */
 
 export type RecordGeneratedImageInput = {
@@ -39,30 +39,4 @@ export async function recordGeneratedImage(input: RecordGeneratedImageInput): Pr
 		})
 		.returning()
 	return row
-}
-
-export async function listImagesForUser(
-	userId: string,
-	opts: { limit?: number } = {},
-): Promise<ImageRow[]> {
-	return db
-		.select()
-		.from(images)
-		.where(eq(images.userId, userId))
-		.orderBy(desc(images.createdAt))
-		.limit(opts.limit ?? 50)
-}
-
-export async function getImageById(imageId: string): Promise<ImageRow | null> {
-	const [row] = await db.select().from(images).where(eq(images.id, imageId)).limit(1)
-	return row ?? null
-}
-
-export async function getImageForUser(userId: string, imageId: string): Promise<ImageRow | null> {
-	const [row] = await db
-		.select()
-		.from(images)
-		.where(and(eq(images.id, imageId), eq(images.userId, userId)))
-		.limit(1)
-	return row ?? null
 }

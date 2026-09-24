@@ -11,9 +11,10 @@
  * client secret, the VAPID private key and the gateway token — into a tool result that is
  * sent to the model provider and stored in the run's events.
  *
- * The retired in-house shell never had this problem: it built a minimal env of its own
- * (`run_code` still does). This is that rule applied to the CLI. An allow-list rather than
- * a deny-list, because the secrets this app grows next will not be added to a deny-list.
+ * The retired in-house shell never had this problem: it built a minimal env of its own (so
+ * did `run_code`, retired in #69). This is that rule applied to the CLI. An allow-list
+ * rather than a deny-list, because the secrets this app grows next will not be added to a
+ * deny-list.
  *
  * What survives: what a process needs to run at all (the executable path, the home and temp
  * directories, locale, the Windows system variables), how to reach the network (proxies,

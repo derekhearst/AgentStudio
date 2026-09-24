@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import {
+	acquireGlobalStateLock,
 	authenticateContext,
 	expectNoHorizontalOverflow,
 	getActiveAdminUserId,
@@ -16,7 +17,18 @@ import { DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE } from '../../src/lib/speech/speec
  * Asserts each mutation persists to the `app_settings` table for the active admin
  * user AND that an `audit_events` row is written (settings.updated / settings.reset)
  * via the existing governance wrappers.
+ *
+ * Saving a daily limit creates an enabled global block limit in `budget_limits`, which the
+ * budget gate checks before every run. So this holds the same `budget-state` then
+ * `settings-state` locks as the other budget and settings specs, and removes any limit rows
+ * it caused before putting the settings back — a stray one would block the owner's chats.
  */
+
+type BudgetConfig = {
+	dailyLimit: number | null
+	monthlyLimit: number | null
+	limitIds?: Record<string, string | null>
+}
 
 test.describe('/settings — CRUD lifecycle', () => {
 	test('read → update budget + memory → reset', async ({ page, context }) => {
@@ -24,6 +36,7 @@ test.describe('/settings — CRUD lifecycle', () => {
 		await authenticateContext(context)
 		const sql = getSql()
 		const userId = await getActiveAdminUserId()
+		const releases = [await acquireGlobalStateLock('budget-state'), await acquireGlobalStateLock('settings-state')]
 
 		// Snapshot the current settings so the reset assertion can compare back to defaults
 		// regardless of what the admin had configured before the test ran.
@@ -31,12 +44,15 @@ test.describe('/settings — CRUD lifecycle', () => {
 			{
 				default_model: string
 				transcription_model: string
-				budget_config: { dailyLimit: number | null; monthlyLimit: number | null } | null
+				budget_config: BudgetConfig | null
 				memory_config: { topK: number; enabled: boolean } | null
 				tts_model: string
 				tts_voice: string
 			}[]
-		>`select default_model, transcription_model, budget_config, memory_config, tts_model, tts_voice from app_settings where user_id = ${userId}`
+		>`
+			select default_model, transcription_model, budget_config, memory_config, tts_model, tts_voice from app_settings
+			where user_id = ${userId} order by created_at asc limit 1
+		`
 
 		try {
 			await withErrorCapture(page, async () => {
@@ -119,18 +135,29 @@ test.describe('/settings — CRUD lifecycle', () => {
 
 				// ── Reset: click Reset
 				await page.getByRole('button', { name: 'Reset' }).click()
-				await pollDb(
+				const [reset] = await pollDb(
 					() => sql<
-						{ budget_config: { dailyLimit: number | null } | null; transcription_model: string; tts_model: string; tts_voice: string }[]
+						{ budget_config: BudgetConfig | null; transcription_model: string; tts_model: string; tts_voice: string }[]
 					>`
-						select budget_config, transcription_model, tts_model, tts_voice from app_settings where user_id = ${userId}
+						select budget_config, transcription_model, tts_model, tts_voice from app_settings
+						where user_id = ${userId} order by created_at asc limit 1
 					`,
 					(rows) =>
-						rows[0]?.budget_config?.dailyLimit !== sentinelDaily &&
+						rows[0]?.budget_config?.dailyLimit === null &&
+						rows[0]?.budget_config?.monthlyLimit === null &&
 						rows[0]?.transcription_model === defaultTranscriptionModel &&
 						rows[0]?.tts_model === DEFAULT_TTS_MODEL &&
 						rows[0]?.tts_voice === DEFAULT_TTS_VOICE,
-					{ description: 'reset wiped the sentinel daily limit and restored the transcription and read-aloud defaults' },
+					{ description: 'reset cleared the budget limits and restored the transcription and read-aloud defaults' },
+				)
+
+				// The limit the save made enforceable is switched off by the reset, not left blocking.
+				const dailyLimitId = reset.budget_config?.limitIds?.day
+				expect(dailyLimitId, 'reset keeps the id of the daily limit row it switches off').toBeTruthy()
+				await pollDb(
+					() => sql<{ enabled: boolean }[]>`select enabled from budget_limits where id = ${dailyLimitId!}`,
+					(rows) => rows[0]?.enabled === false,
+					{ description: 'reset switched off the daily limit row the save created' },
 				)
 
 				// Audit invariant: settings.reset row written
@@ -151,18 +178,33 @@ test.describe('/settings — CRUD lifecycle', () => {
 				})
 			})
 		} finally {
-			// Best-effort restore of pre-test settings via direct SQL (don't poll the UI for this).
-			if (snapshot) {
-				await sql`
-					update app_settings
-					set default_model = ${snapshot.default_model},
-					    transcription_model = ${snapshot.transcription_model},
-					    budget_config = ${sql.json(snapshot.budget_config ?? {})},
-					    memory_config = ${sql.json(snapshot.memory_config ?? {})},
-					    tts_model = ${snapshot.tts_model},
-					    tts_voice = ${snapshot.tts_voice}
-					where user_id = ${userId}
+			try {
+				// Best-effort restore of pre-test settings via direct SQL (don't poll the UI for this).
+				// First the limit rows the save created: restoring the snapshot drops their ids, and
+				// nothing else would ever switch them off. A row the snapshot already named is kept;
+				// the budget gate brings it back to the restored amount on its next check.
+				const [current] = await sql<{ budget_config: BudgetConfig | null }[]>`
+					select budget_config from app_settings where user_id = ${userId} order by created_at asc limit 1
 				`
+				const before = Object.values(snapshot?.budget_config?.limitIds ?? {})
+				const created = Object.values(current?.budget_config?.limitIds ?? {}).filter(
+					(id): id is string => typeof id === 'string' && !before.includes(id),
+				)
+				if (created.length) await sql`delete from budget_limits where id in ${sql(created)}`
+				if (snapshot) {
+					await sql`
+						update app_settings
+						set default_model = ${snapshot.default_model},
+						    transcription_model = ${snapshot.transcription_model},
+						    budget_config = ${sql.json(snapshot.budget_config ?? {})},
+						    memory_config = ${sql.json(snapshot.memory_config ?? {})},
+						    tts_model = ${snapshot.tts_model},
+						    tts_voice = ${snapshot.tts_voice}
+						where user_id = ${userId}
+					`
+				}
+			} finally {
+				for (const release of releases.reverse()) await release()
 			}
 		}
 	})
