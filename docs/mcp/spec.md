@@ -35,6 +35,8 @@ Index `mcp_servers_user_idx` on `user_id`. Audit actions `mcp_server.created`, `
 | `src/lib/engine/mcp-connectors.ts` | Pure. Name rule, the run's connector map (`buildRunMcpConnectors`), `connectorCallVerdict`, `connectorDisallowedTools`, `composeMcpServers`. |
 | `src/lib/engine/permission-mode.ts` | `resolveToolGate` applies an external tool's policy (`externalPolicy`). |
 | `src/lib/engine/tool-decision.ts` | `decideToolCall` takes the SDK's provenance and consults `connectorCallVerdict` after the scope check and before containment and the gate. |
+| `src/lib/engine/sdk-notices.ts` | `mcpServersDown` / `mcpUnavailableNotice`: the `mcp_unavailable` warning, from `system/init` or from a later status list. |
+| `src/lib/engine/mcp-status-watch.ts` | Pure apart from the injected session call and clock. Asks `Query.mcpServerStatus()` again while the turn runs, for connectors that were still `pending` in init. |
 | `src/lib/mcp/mcp-config.ts` | Pure. URL, header, token and timeout rules; the secrets document and its edit patch; the SDK config. Shared with the settings form. |
 | `src/lib/mcp/mcp.server.ts` | CRUD scoped to the caller, the Test button's bookkeeping, `loadRunMcpServers`. |
 | `src/lib/mcp/mcp-probe.server.ts` | The Test button's MCP client (`@modelcontextprotocol/sdk`), through `createGuardedFetch`. |
@@ -74,7 +76,8 @@ The PreToolUse hook and `canUseTool` pass the SDK's `mcp_server` / `mcpServer`. 
 
 ## Notices
 
-- `system/init` whose `mcp_servers` lists a non-`sdk` server as `failed` or `needs-auth` → one persisted `mcp_unavailable` warning naming them (names reduced to `[a-zA-Z0-9_-]`, 40 characters). `pending` is ignored.
+- `system/init` whose `mcp_servers` lists a non-`sdk` server as `failed` or `needs-auth` → one persisted `mcp_unavailable` warning naming them (names reduced to `[a-zA-Z0-9_-]`, 40 characters). `pending` is not a failure.
+- In the bundled CLI (0.3.278) MCP start-up is non-blocking (`MCP_CONNECTION_NONBLOCKING` unless set to `false`) and `alwaysLoad` is never set, so a remote connector is normally `pending` in init. `watchConnectorStatus` (`mcp-status-watch.ts`), fed every message by `runEngineStream`, therefore asks `Query.mcpServerStatus()` (the `mcp_status` control request) once the turn is under way: on `assistant`, `user`, `stream_event` and `tool_progress` messages, never on init or `result` (the SDK closes the CLI's stdin when the first `result` arrives, before the loop sees it). It asks only while one of the run's connectors is unsettled (not yet `connected`, `failed`, `needs-auth` or `disabled`), at least 2 s apart, at most 15 times, each ask abandoned after 1 s. A connector newly `failed` or `needs-auth` → one persisted `mcp_unavailable` warning. Each connector is reported once per turn, init's report included, and only the run's own connector keys are considered. A connector that fails after the last ask goes unreported.
 - Skipped at run start → one live-only `mcp_unavailable` warning.
 
 ## The connection test
@@ -82,7 +85,7 @@ The PreToolUse hook and `canUseTool` pass the SDK's `mcp_server` / `mcpServer`. 
 `probeMcpServer({ transport, url, headers, allowedPrivateHosts?, timeoutMs? })`:
 
 - `StreamableHTTPClientTransport` or `SSEClientTransport`, both given the guarded fetch, which every request (including the SSE stream and its POST endpoint) goes through.
-- One 10 s deadline for the whole exchange; aborting it tears down any open stream. `connect`, then `tools/list` only if the server declares the `tools` capability, following `nextCursor` for at most 20 pages / 500 tools.
+- One 10 s deadline for the whole exchange; aborting it tears down any open stream. `connect`, then `tools/list` only if the server declares the `tools` capability, following `nextCursor` for at most 20 pages / 500 tools. `toolSnapshot` drops a tool with no name or a name over 128 characters (the policy key limit) instead of clipping it.
 - 401 / `UnauthorizedError` → `needsAuth` with "wants credentials" or "refused the credentials"; 403, 404, 405 (HTTP transport), egress refusals, timeouts, `ENOTFOUND`, `ECONNREFUSED` each get their own message. Anything else is quoted with every header value, and a bearer token on its own, replaced by `[redacted]`.
 - `testMcpServer` records `last_*`; a success replaces `tools_snapshot`, a failure keeps it.
 
@@ -90,12 +93,13 @@ The PreToolUse hook and `canUseTool` pass the SDK's `mcp_server` / `mcpServer`. 
 
 | Spec | Pins |
 | --- | --- |
-| `tests/mcp.config.spec.ts` | Name, URL, header and token rules; the secrets patch; the SDK config; stored policy normalisation. |
+| `tests/mcp.config.spec.ts` | Name, URL, header and token rules (including the reserved names); the secrets patch; the SDK config; stored policy normalisation. |
 | `tests/engine.connectors.spec.ts` | `connectorCallVerdict`, policy lookup under the CLI's spelling, `resolveToolGate` across modes, `decideToolCall`, `composeMcpServers`. |
-| `tests/engine.connectors-stream.spec.ts` | The same through `runEngineStream` with a scripted SDK: allow runs without a card, block never asks, ask shows the card with its token, unknown servers and mismatched provenance are refused. |
+| `tests/engine.connectors-stream.spec.ts` | The same through `runEngineStream` with a scripted SDK: allow runs without a card, block never asks, ask shows the card with its token, unknown servers and mismatched provenance are refused. A connector `pending` in init and `failed` on the later ask gets one kept warning; a run with no connectors never asks. |
+| `tests/engine.mcp-status-watch.spec.ts` | When the watch asks (not for init, the result, a run with no connectors, or once everything settled; spaced out and capped), what it reports (once per connector, the run's own only), and that a failing or silent ask reports nothing. |
 | `tests/engine.external-tools.spec.ts` | The classification with no policy at all. |
 | `tests/engine.sdk-notices.spec.ts` | The `system/init` notice. |
 | `tests/mcp.probe.spec.ts` | The probe against the hand-written MCP server in `tests/mcp-fixture.ts`, both transports, and the egress guard in front of it. |
 | `tests/mcp.server.spec.ts` | The rows against the live database: encryption, validation, edits, audit, the Test bookkeeping, run start. |
-| `tests/crud/mcp.crud.spec.ts` | The page on desktop and mobile. |
+| `tests/crud/mcp.crud.spec.ts` | The page on desktop and mobile, including an On/Off switch that springs back when its save fails. |
 | `tests/chat.connector-tool-labels.spec.ts`, `tests/costs.tool-call-ledger.spec.ts` | Card labels and the ledger's `mcp:<name>` provider. |

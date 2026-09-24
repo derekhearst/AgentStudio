@@ -445,13 +445,14 @@ policy. See [docs/mcp/mcp.md](../mcp/mcp.md) and [spec.md](../mcp/spec.md).
   server name from any source but `sdk` is refused. With no provenance, Allow asks.
 - The gate: Block refuses in every mode; Allow runs in Ask and Accept-edits unless "Require
   approval for all tools" is on; Plan refuses every connector tool; Bypass runs the rest.
-- `system/init` reporting a connector `failed` or `needs-auth` becomes one `mcp_unavailable`
-  notice. Tool cards read "Create Issue in progress · github"; ledger rows carry
-  `provider: 'mcp:<name>'`.
+- A connector `failed` or `needs-auth` becomes one `mcp_unavailable` notice: from
+  `system/init`, or, since remote servers are normally still `pending` there (MCP start-up does
+  not block the turn), from `mcpServerStatus()` asked again while the turn runs. Tool cards read
+  "Create Issue in progress · github"; ledger rows carry `provider: 'mcp:<name>'`.
 
 Left open: stdio servers (they would run outside the shell sandbox with the CLI's login, and
 the image has no node/python), OAuth-only servers (the SDK exposes no OAuth control to hosts),
-per-agent assignment, live status via `mcpServerStatus()`, and inline approval cards for a
+per-agent assignment, live status on the settings page, and inline approval cards for a
 subagent's connector calls. Credentials reach the CLI as `--mcp-config` argv; that is safe only
 while the agent's shell keeps its own PID namespace (bubblewrap) — see mcp.md.
 

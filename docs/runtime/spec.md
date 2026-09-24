@@ -111,6 +111,8 @@ When the context window approaches capacity:
 
 ### MCP server lifecycle
 
+> What runs today is different: remote MCP servers are added on Settings → Connectors and handed to the Claude engine for each chat turn. See [Connectors](../mcp/mcp.md). The design below is not built.
+
 For each `McpServerRef` in `environment.mcpServers`:
 
 1. At run start, `buildEnvironment` opens connections to all assigned MCP servers (spawns stdio process or opens SSE/HTTP client).
@@ -165,7 +167,7 @@ When the answer is "ask", the chat shows an **Allow / Deny card** for the call. 
 | --- | --- |
 | `.claude/settings.json`, `.claude/settings.local.json` | permissions, environment and hooks — hooks run outside the sandbox |
 | `.claude/hooks/`, `.claude/commands/`, `.claude/agents/`, `.claude/skills/` | what the agent can be told to do |
-| `.mcp.json` | which tool servers connect |
+| `.mcp.json` | nothing today: since #17 the engine loads only AgentStudio's own tool server and the servers on Settings → Connectors, never this file (see [Connectors](../mcp/mcp.md)). It stays protected so this rule does not depend on that |
 | `CLAUDE.md`, `CLAUDE.local.md` | only for a trusted project, where they are part of every prompt |
 
 A shell command cannot get around this in a **trusted** project: the sandbox makes the project's `.claude/settings.json` and `settings.local.json`, the `.claude/hooks/`, `skills/`, `commands/`, `agents/` and `rules/` folders, `.mcp.json`, `CLAUDE.md` and `CLAUDE.local.md` read-only to shell commands, so a command that tries to write one fails. Only the files at the project's top level are covered this way; a `CLAUDE.md` in a subfolder is protected by the approval card only. On a host with no sandbox, every shell command needs approval anyway. In a project that is not trusted, the agent does not load any of these files, so a shell command that writes one cannot change what the agent is told or allowed.

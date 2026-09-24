@@ -59,7 +59,7 @@ Once a test has listed the tools, open **Tools** on the connector card. Each too
 1. When a turn starts, AgentStudio loads your enabled connectors.
 2. For each one it checks the URL again and resolves the server's host name under the same rule the Test button uses. A connector whose host now points at a private address, or whose credentials cannot be decrypted, is left out, and the chat shows a note naming it.
 3. The rest are handed to the Claude engine beside AgentStudio's own tool server. Tools you blocked are removed from what the assistant sees.
-4. If the engine reports that a connector could not connect or needs a sign-in, the chat shows a warning naming it; its tools are simply missing from that turn.
+4. The engine connects to the connectors in the background, so a turn never waits for a slow one. When the turn starts, most connectors are still connecting. AgentStudio asks the engine about them again while the turn runs: every 2 seconds or more, up to 15 times, until each one has connected or failed. If one could not connect or needs a sign-in, the chat shows a warning naming it, and its tools are missing from that turn. A connector that fails only after the turn's last step is not reported. The **Test** button says why it fails.
 5. Each call to a connector's tool goes through the approval rules below. Its card in the chat reads like "Create Issue in progress · github".
 6. Each call is counted in the usage ledger under its full tool name, with the connector recorded as its provider.
 
@@ -103,7 +103,7 @@ How a call to a connector's tool is decided, by the conversation's permission mo
 ### Names
 
 - Lower-case letters and digits, separated by single hyphens; at most 32 characters. With no underscores, `mcp__<name>__<tool>` splits in exactly one place, and the engine spells the name exactly as saved.
-- Reserved: `agentstudio` (ours), the engine's own server names (`workspace`, `ide`, `memory`, `hearthbot`) and anything starting with `claude`.
+- Reserved: `agentstudio` (ours), the engine's own server names (`workspace`, `ide`, `memory`, `hearthbot`, `computer-use`, `remote-devices`) and anything starting with `claude`.
 - Unique per user, and fixed after creation.
 
 ### URLs
@@ -123,6 +123,7 @@ How a call to a connector's tool is decided, by the conversation's permission mo
 
 - Call timeout: optional, 1 second to 10 minutes; blank leaves the engine's default.
 - The Test button waits 10 seconds and reads at most 500 tools over at most 20 pages.
+- A tool whose name is longer than 128 characters is left out of the tool list, because no policy can be saved for a name that long. It always asks.
 - The engine's generic MCP resource readers (`ListMcpResourcesTool`, `ReadMcpResourceTool`, `ReadMcpResourceDirTool`) are turned off on every run: they name the server in an argument, so a connector's policy could not see which one a read went to. AgentStudio's own server publishes no resources.
 
 ## Security notes
@@ -130,13 +131,14 @@ How a call to a connector's tool is decided, by the conversation's permission mo
 - **Trust is keyed on the connector's row, never on a name the server chooses.** A call to `mcp__<server>__<tool>` is refused unless `<server>` is one of the connectors this turn loaded, and the engine's own report of where the tool came from agrees (a server passed by AgentStudio, under that key). A call that carries AgentStudio's own server name but comes from anywhere other than AgentStudio's in-process server is refused. If the engine reports nothing about a call's origin, an allowed tool asks instead of running.
 - **Credentials reach the engine process as a command-line argument**, because that is how the Agent SDK hands servers to the CLI. In production the agent's shell runs in a sandbox with its own process table, so it cannot read another process's arguments; on a host without the sandbox, every shell command already asks for approval. Credentials are never put in the engine's environment, which the shell inherits.
 - **Run start narrows, but does not close, the DNS window.** The engine connects to a connector itself, outside the egress guard. AgentStudio resolves each host just before handing it over and leaves out any that resolves privately, but the engine resolves the name again when it connects.
+- **The engine may follow redirects.** For the same reason, the engine's own connection is not bound by the Test button's rule against redirects. A server that answers with a redirect could send the engine, and the token or headers, to another address. Only add servers you trust with those credentials.
 
 ## Not supported yet
 
 - **Local (stdio) servers.** A stdio server is a program the engine starts. It would run outside the shell sandbox, as the container user, with the engine's own login token in its environment — a much larger grant than a remote server. The production image also has no Node or Python toolchain for the usual `npx` / `uvx` servers. This needs its own decision.
 - **OAuth-only servers.** The Agent SDK gives hosts no control over an MCP OAuth sign-in, so this needs AgentStudio to run the discovery, client registration and token refresh itself. Servers that accept a personal access token (GitHub's remote MCP server, for example) work today with the bearer token.
 - **Per-agent connectors.** Every unscoped chat gets every enabled connector.
-- **Live status.** The page shows the last test, not whether the engine is connected right now; a turn whose connector failed says so in the chat.
+- **Live status.** The page shows the last test, not whether the engine is connected right now. In a chat, a connector that could not connect or needs a sign-in is named in a warning, as long as it is found during the turn (see step 4 of [What happens in a chat turn](#what-happens-in-a-chat-turn)).
 - **Approval cards inside a subagent.** A connector tool called by a delegated agent asks in the approval dock rather than on an inline card.
 
 ## What was checked in the SDK
@@ -147,6 +149,8 @@ Verified against `@anthropic-ai/claude-agent-sdk` 0.3.278 (`sdk.d.ts`, `sdk.mjs`
 - `strictMcpConfig: true` becomes `--strict-mcp-config`, which ignores every MCP configuration except the servers passed in `mcpServers`; the bundled CLI's own message confirms that claude.ai connectors are not loaded when MCP servers are restricted to explicitly passed config.
 - Process-transport servers reach the CLI as `--mcp-config <json>` on its command line.
 - `canUseTool` receives `mcpServer: { name, source }` and the `PreToolUse` hook receives `mcp_server` for MCP tools. `source` is `sdk` only for an in-process server the host registered, `dynamic` for a server passed through `mcpServers`; the typings say to key trust on `source` and to treat unknown values as configured, never as `sdk`.
-- `system/init` lists `mcp_servers` with `name`, `status` (`connected`, `failed`, `needs-auth`, `pending`, `disabled`) and `source`. MCP start-up does not block the turn, so `pending` is not treated as a failure.
+- `system/init` lists `mcp_servers` with `name`, `status` (`connected`, `failed`, `needs-auth`, `pending`, `disabled`) and `source`. MCP start-up does not block the turn (the bundled CLI connects in the background unless `MCP_CONNECTION_NONBLOCKING` is set to false, and AgentStudio never sets `alwaysLoad`), so a remote connector is usually still `pending` there, and `pending` is not treated as a failure.
+- `Query.mcpServerStatus()` sends the `mcp_status` control request and returns the same per-server statuses. Control requests go over the CLI's stdin, which the SDK closes when the turn's first `result` arrives. So AgentStudio asks while the turn is under way (on the model's messages and tool results), and never at the result.
+- Besides `ide` and the `claude…` family, the CLI special-cases two server names exactly: `computer-use` and `remote-devices`. Both are reserved.
 - The CLI builds a tool's name as `mcp__<server>__<tool>`, rewriting any character outside `[a-zA-Z0-9_-]` in either part to `_`, and splits a name on `__`. Tool policies are matched under that spelling.
 - `McpServerToolPolicy` (`always_allow` / `always_ask` / `always_deny` on a server's config) exists but is documented only for `mcp_set_servers`; AgentStudio does not use it, so there is no second allow path outside its own gate.
