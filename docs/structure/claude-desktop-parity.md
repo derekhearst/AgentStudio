@@ -53,14 +53,14 @@ This is the Cowork comparison, and it is the one I got wrong in the first draft:
 | Diff rendering | **far behind** (#16) | raw JSON in a tool card | inline diffs with per-hunk accept/reject |
 | Checkpoints and rewind | **far behind** (#24) | rewinds the transcript only; files stay written | auto-checkpoint per turn, Esc-Esc or `/rewind`, restore code / conversation / both |
 | Todo list | **absent** (#21) | nothing consumes it | pinned, updated in place |
-| Terminal / command output | **far behind** (#26) | JSON-escaped blob in a card, nothing streams | streamed terminal output |
+| Terminal / command output | **behind**, narrowly (#26, #35 landed) | a terminal card: the command, its output with colour codes cleaned out, the last 20 lines first with Show all, copy, and an exit-code badge. A background command streams its output into the card while the turn runs; an ordinary command shows elapsed seconds only, because the SDK sends no output until it finishes | streamed terminal output |
 | Git worktrees | **absent** | one working directory per project | worktree-per-agent with cleanup safety |
 | Repo import and clone | **win** | first-class: import creates a project, clones into a sandbox, sidecar repo row | you point it at a directory |
 | Commit / push / PR | **even** | approval-gated tools, PR recorded and surfaced in `/review` | same, plus richer GitHub triggers |
 | Code review of a PR | **absent** | — | `/ultrareview`, merge-aware follow-up reviews |
 | CI watch and fix | **even** (#20 landed) | an opened PR's checks are watched (webhook, or polling every few minutes) for up to 14 days; a red check opens a review item and a notification, and **Fix it** hands the failure back to the conversation that wrote the code — a button, not an automatic run | cloud sessions react to CI |
 | Hooks | **even** | `/settings/hooks`, event bus, skill hooks, per-agent bindings. Until the September 2026 audit the bus was never called on the chat engine path, so bindings and the built-in activity hooks only fired for automations; chats now raise run, tool, approval and question events too ([hooks.md](../hooks/hooks.md)) | same idea, dialog-managed |
-| Background tasks | **behind** (#35) | the job queue backgrounds automations and research; inside a chat turn a long command blocks the turn | background bash that survives turns, with a completion notice |
+| Background tasks | **behind** (#35 landed, turn-scoped) | the job queue backgrounds automations and research. Inside a chat turn the agent can background a command: a header chip with a stop button, live output in its card, a completion notice with the exit code. Commands end with the turn (the engine closes Claude Code after each reply); the card, a transcript notice and the agent's instructions all say so, and deleting a conversation stops its turn and commands first. Keeping one alive between messages needs a conversation-long session, not built | background bash that survives turns, with a completion notice |
 | Session cost accounting | **win** | per-run rows, `/runs/[id]`, a ledger row per tool call, and the `/activity` usage strip (#38). Built-in calls write $0 call-count rows again since the ledger fix; tool calls made through the older loop (agent-attached automations, monitors, PR fix) are still not counted | session cost in a dialog |
 
 ## Chat
@@ -135,7 +135,7 @@ Ordered for how this box is used — NAS host, repeating jobs, files rarely open
 
 **Wave 3 — the session surface.**
 
-[#29](https://github.com/derekhearst/AgentStudio/issues/29) preview pane · [#19](https://github.com/derekhearst/AgentStudio/issues/19) permission modes · [#24](https://github.com/derekhearst/AgentStudio/issues/24) filesystem checkpoints · [#21](https://github.com/derekhearst/AgentStudio/issues/21) todo list · [#16](https://github.com/derekhearst/AgentStudio/issues/16) diff view · [#26](https://github.com/derekhearst/AgentStudio/issues/26) terminal output · [#35](https://github.com/derekhearst/AgentStudio/issues/35) background work in a turn
+[#29](https://github.com/derekhearst/AgentStudio/issues/29) preview pane · [#19](https://github.com/derekhearst/AgentStudio/issues/19) permission modes · [#24](https://github.com/derekhearst/AgentStudio/issues/24) filesystem checkpoints · [#21](https://github.com/derekhearst/AgentStudio/issues/21) todo list · [#16](https://github.com/derekhearst/AgentStudio/issues/16) diff view · [#26](https://github.com/derekhearst/AgentStudio/issues/26) terminal output (landed) · [#35](https://github.com/derekhearst/AgentStudio/issues/35) background work in a turn (landed, turn-scoped)
 
 **Wave 4 — the long tail.**
 

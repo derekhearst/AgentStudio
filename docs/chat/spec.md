@@ -194,6 +194,44 @@ On mobile, the right panel collapses into a bottom sheet tab drawer.
 
 Approval requests and `ask_user` questions render inline in the thread, but are also reflected in the global Review Inbox. Resolving from either place updates the same durable state.
 
+### Command output
+
+When the agent runs a shell command, the reply shows it as a small terminal instead of a generic tool card. It looks the same while the turn runs and after a reload.
+
+- The first line is the command. Below it is what the command printed, in a fixed-width font with its line breaks kept. Normal output and error output are shown separately; error output is red.
+- Colour codes, terminal links, window titles and redrawn progress bars are cleaned out, so the text reads as plain text. A progress bar that redraws itself on one line shows only its last state (`100%`, not `10% 50% 100%`).
+- Long output opens on its **last 20 lines**, because that is where a command says how it went. **Show all N lines** opens the rest and **Show last 20 lines** folds it back. **Copy output** always copies everything.
+- The card opens on its own when there is output, when the command failed, or when it ran in the background.
+- One badge says how it ended: `exit 2` for a command that failed with an exit code, `failed`, `interrupted`, `timed out`, or no badge for a command that succeeded. Claude Code only reports an exit code for a failed command and for a finished background command, so a successful ordinary command shows no badge rather than `exit 0`.
+- Some commands use an exit code to mean something other than failure (for example, `grep` returns 1 when it finds nothing). When Claude Code explains the code ("No matches found"), the card shows the explanation.
+- Each stream keeps its last 16,000 characters. When earlier output was cut, the card says so.
+
+### Background commands
+
+The agent can start a command in the background, such as a dev server, a watcher or a long build, and keep working while it runs.
+
+1. The command's card opens straight away with a **live** badge. What the command prints appears in the card about once a second. The card follows the newest line, unless you have scrolled up to read something.
+2. A chip in the header shows each running background command, with a button to stop it.
+3. When the command finishes, the badge changes to how it ended: its exit code (`exit 0`, `exit 2`), or `finished`, `failed` or `stopped`. A notice in the transcript says it finished.
+4. **Background commands end with the turn.** When the agent finishes its reply, every command it started is stopped, because the Claude Code process that ran them is closed after each turn. A command still running at that point is marked **ended with turn**, its card says "Stopped when the turn ended", and one notice in the transcript lists the commands that were stopped. The header chips clear at the same moment.
+5. The agent is told this in its instructions. It should finish any work that needs the command in the same reply, and never tell you a server is still running after it has answered. It is also told that it cannot open the command's output file itself (the file is outside its workspace), and to copy output into its workspace, for example with `tee`, when it needs to read it.
+
+A page that is reloaded mid-turn picks the card up again from the next piece of output. If it missed some output in between, the card says earlier output is missing. When the command ends, the card shows the final output that was saved with the reply.
+
+**Deleting a conversation stops it first.** If a turn is still running when a conversation is deleted, that turn is stopped, and every background command it started goes with it. Then the conversation is deleted. Before, the conversation disappeared but its turn and commands kept running, with nothing left in the app that could stop them.
+
+Rules:
+
+- The live output is read by the server from the file Claude Code writes the command's output to. The server only reads that file if Claude Code's own message named it, it sits exactly where Claude Code keeps this session's output for this command (`…/<session id>/tasks/<task id>.output`), and it is a plain file rather than a link to somewhere else. A path the agent or the command wrote is never read. If anything about the file looks wrong, the card shows no live output, but it still shows how the command ended.
+- The live pieces of output are not saved one by one. The reply saves the card's final output (its last 16,000 characters) and how the command ended, so a page that reconnects still ends up with both.
+- Background commands started by a subagent are not followed. They belong to the subagent and end with its answer.
+- When the agent stops one of its own background commands (Claude Code's `TaskStop` tool), the call is never held for approval, even on a machine without the shell sandbox where every command asks first: it can only stop a command this session started, and it names no file.
+
+What this relies on, checked against the installed Agent SDK (0.3.278, bundled Claude Code 2.1.278):
+
+- From the SDK's published types: `task_notification` reports a finished task with its task id, the id of the call that started it, `completed` / `failed` / `stopped`, a one-line summary and the output file's path. `background_tasks_changed` is the whole set of running tasks each time, and is not to be paired with the finish notices. There is no output for a running ordinary command (`tool_progress` carries elapsed seconds only). The old `BashOutput` / `TaskOutput` polling tools were removed; `BashOutput` is now only the name of the `Bash` result's shape. Without the `perTaskStopAffordance` option, which AgentStudio does not set, stopping a turn also kills its background tasks.
+- Seen in Claude Code itself, not promised by the types, so a future update could change it: the "Output is being written to: …" sentence in a backgrounded command's result, the `<session id>/tasks/<task id>.output` file layout, `KillShell` and `KillBash` as old names for `TaskStop`, and a failed command's result starting with `Exit code N`. If any of these change, the cost is quiet cards (no live output, no exit code), never a failed turn.
+
 ### Diff and artifact preview
 
 When a coding run changes files or saves artifacts, the workbench can show:
@@ -244,7 +282,7 @@ How the controls that exist today behave:
 - **Answering a question.** When the agent asks a question (`ask_user`), the answer only counts once the server has recorded it. If the question is no longer waiting (it timed out, was answered in another tab, or its turn ended), the page says so and shows the conversation as the server has it, rather than closing the question as if the answer had gone through. An answered question shows the answer under it straight away, and again after a reload. It no longer keeps a live Submit button that does nothing.
 - **Switching conversations mid-turn.** Opening another conversation while a reply is streaming shows only the other conversation. Nothing from the first one comes along: not its reply, its tool cards, its Stop button, its error message or its Retry. Leaving is not a Stop. The first turn keeps running, saves its own reply, and shows again with Stop when you go back to it.
 - **A turn that ends in an error.** Some turns end in an error after the reply was already saved, for example when the agent reaches its maximum number of steps or the model provider is overloaded. The page shows the error and keeps the one saved reply. It used to save a second, partial copy of the same reply.
-- **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it. The chips go away when the turn's stream ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
+- **Background tasks.** A command the agent starts in the background (a dev server, a watcher) shows as a chip in the header while the turn runs, with a button to stop it, and streams its output into its card (see [Background commands](#background-commands)). The chips go away when the turn ends, because ending a turn also ends the commands it started. If a stop does not work, a short message under the header says why — for example that the turn had already ended.
 - **Pinned checklist.** The panel above the composer shows the main agent's latest plan. When the agent hands a step to a subagent, the subagent's own checklist does not replace it.
 
 ### Context meter
