@@ -719,8 +719,9 @@ gone: a research run's page links back to its chat, and a reply's stats popover 
 topbar. Fixed on the way: the phone drawer rendered empty (the mobile CSS hid every
 `.console-rail`), a hydration race showed the previous chat's preview after a quick switch,
 "Open file" on the already-open file did nothing from the Files tab, and the home page showed
-the last chat's rail. The background-task chips stay in the topbar until #35 defines what a
-task row shows. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
+the last chat's rail. The background-task chips stay in the topbar: #35 kept them there, with
+a stop control each, and shows a command's live output in its own card in the thread rather
+than in a rail panel. See [`docs/chat-console/chat-console.md`](../chat-console/chat-console.md).
 
 ### #27 — TTS
 
