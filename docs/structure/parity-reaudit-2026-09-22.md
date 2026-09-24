@@ -250,7 +250,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #35 | Background work in a turn | **rebuild** — mostly shipped | chips, notices and a stop control land; the live output card is left, with #26 |
 | #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
 | #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
-| #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
+| #17 | Connect external MCP servers | **as filed** — shipped (v1) | remote HTTP/SSE servers with per-tool Allow / Ask / Block, keyed on the connector's row; stdio and OAuth left for their own decisions |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
@@ -422,6 +422,39 @@ assume the registry: `resolveToolGate`, the approval set, `logToolUsage`, and
 which config scope a server came from, which is the right thing to key trust on — never the
 name or the prefix, both of which a server chooses for itself.
 
+**Shipped (v1, 2026-09-23): options A and B of the triage** — HTTP/SSE servers with per-tool
+policy. See [docs/mcp/mcp.md](../mcp/mcp.md) and [spec.md](../mcp/spec.md).
+
+- `mcp_servers` (migration `0079`) holds one row per connector: a validated, immutable name
+  (the `mcp__<name>__` prefix, `agentstudio` and the CLI's own server names reserved), label,
+  transport, URL, the bearer token and header values encrypted as one document with
+  `APP_ENCRYPTION_KEY`, per-tool policies, the last test's tool list and outcome, enabled.
+- Settings → Connectors (`/settings/connectors`) adds, edits, tests, switches and removes
+  them and sets each tool to Allow, Ask or Block. The Test button is its own MCP client
+  (`@modelcontextprotocol/sdk`), because the `Query` handle lives for one turn; every request
+  it makes goes through a new guarded fetch (egress spelling check, per-socket address check,
+  no redirects, capped body). `MCP_ALLOWED_PRIVATE_HOSTS` is the operator's exemption for
+  servers on their own network.
+- At run start the enabled rows are merged into `mcpServers` for interactive chat runs whose
+  agent has no fixed tool list, after the URL is re-checked and the host resolved under the
+  egress rule. `strictMcpConfig: true` on every run, so nothing else loads — not a repo's
+  `.mcp.json`, not plugins, not the account's claude.ai connectors. Blocked tools go into
+  `disallowedTools`, and the CLI's generic MCP resource readers are disallowed.
+- Trust is keyed on the row: a call is refused unless its `<server>` is one of the run's
+  connectors *and* the SDK's provenance agrees (`source: 'dynamic'`, same key). Our own
+  server name from any source but `sdk` is refused. With no provenance, Allow asks.
+- The gate: Block refuses in every mode; Allow runs in Ask and Accept-edits unless "Require
+  approval for all tools" is on; Plan refuses every connector tool; Bypass runs the rest.
+- `system/init` reporting a connector `failed` or `needs-auth` becomes one `mcp_unavailable`
+  notice. Tool cards read "Create Issue in progress · github"; ledger rows carry
+  `provider: 'mcp:<name>'`.
+
+Left open: stdio servers (they would run outside the shell sandbox with the CLI's login, and
+the image has no node/python), OAuth-only servers (the SDK exposes no OAuth control to hosts),
+per-agent assignment, live status via `mcpServerStatus()`, and inline approval cards for a
+subagent's connector calls. Credentials reach the CLI as `--mcp-config` argv; that is safe only
+while the agent's shell keeps its own PID namespace (bubblewrap) — see mcp.md.
+
 ### #32 / #5 — orchestration
 
 The issue is right that #5 comes first, and right to scope out a workflow scripting language.
@@ -586,7 +619,7 @@ unless one of those is the actual goal.
 4. **#5, then #32 reshaped** — the orchestration keystone, which also deletes `$lib/runtime`
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
-6. **#17**, HTTP transport first.
+6. **#17**, HTTP transport first. **Done** (v1): HTTP/SSE with per-tool policy.
 7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four

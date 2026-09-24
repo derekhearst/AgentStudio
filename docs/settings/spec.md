@@ -104,6 +104,7 @@ The `/settings` route provides a UI for all editable settings grouped by categor
 - **Context** — compaction thresholds
 - **Budget** — daily/monthly limits, enforced; alerts at 80% and 100%
 - **Tools** — approval-required list: one tickable entry per tool (the three always-ask tools locked on), plus a switch that requires approval for every tool
+- **Connectors** (`/settings/connectors`) — remote MCP servers chats can use: add, test, switch off, remove, and Allow / Ask / Block per tool. See [../mcp/mcp.md](../mcp/mcp.md).
 - **Notifications** — per-category toggles
 - **Appearance** — theme selection
 - **Job queue** (`/settings/jobs`) and **Hook invocations** (`/settings/hooks`) — admin views of background work. **Refresh** fetches the latest rows from the server, and if they cannot be loaded the page shows the reason instead of a spinner.

@@ -1,152 +1,101 @@
-# MCP Spec
+# Connectors (MCP) — technical reference
 
-## Overview
+The overview, flows and rules in plain English are in [mcp.md](mcp.md). This page is the reference behind them: the table, where each check lives, and the contracts the specs pin.
 
-AgentStudio integrates third-party tools via the Model Context Protocol (MCP). Any MCP server — a local stdio process or a remote SSE/HTTP endpoint — can be registered, connection-tested, and made available to agents. MCP tools surface through the same capability group and approval system as first-party tools; there is no special call path for MCP.
+This replaces an earlier pre-SDK design (capability groups and `enable_capability`, a name-based auto-approve rule, `mcpServerTools` / `mcpServerAssignments` tables, an `MCP_SECRET_KEY`). None of that was built; the engine is now the Claude Agent SDK, and connectors are built on it.
 
-## Data Model
+## Data model
 
-### `mcpServers` table
+### `mcp_servers` (migration `0079_mcp_servers`)
 
-| Column       | Type      | Description                                                                 |
-| ------------ | --------- | --------------------------------------------------------------------------- |
-| `id`         | uuid      | Primary key                                                                 |
-| `userId`     | uuid?     | FK to `users` — owner; null = system-wide (admin-created, available to all) |
-| `name`       | text      | Display name (e.g., "GitHub", "Linear", "Filesystem Bridge")                |
-| `slug`       | text      | Unique per user, URL-safe — used to name the capability group `mcp/<slug>`  |
-| `transport`  | enum      | `stdio`, `sse`, `http`                                                      |
-| `command`    | text?     | `stdio` only: executable path                                               |
-| `args`       | jsonb?    | `stdio` only: argument array                                                |
-| `url`        | text?     | `sse` / `http` only: endpoint URL                                           |
-| `authMode`   | enum      | `none`, `bearer`, `header`, `oauth`                                         |
-| `authConfig` | jsonb?    | Encrypted credentials (token, header name/value, OAuth config)              |
-| `isActive`   | boolean   | When false, server is excluded from all capability groups                   |
-| `createdAt`  | timestamp |                                                                             |
-| `updatedAt`  | timestamp |                                                                             |
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | uuid | Primary key. Trust is keyed on this row. |
+| `user_id` | uuid | FK `users.id`, cascade delete. |
+| `name` | text | The SDK `mcpServers` key and the `<server>` in `mcp__<server>__<tool>`. Validated by `connectorNameProblem`; unique per user (`mcp_servers_user_name_unique`); never updated. |
+| `label` | text | Display name, at most 80 characters. |
+| `transport` | enum `mcp_transport` | `http` or `sse`. |
+| `url` | text | Validated by `checkMcpUrl`; stored as the parsed `href`. |
+| `header_names` | text[] | Names of the stored headers, sorted. Values are only in `encrypted_secrets`. |
+| `has_bearer_token` | boolean | Whether the encrypted document holds a token. |
+| `encrypted_secrets` | text, nullable | `encryptSecret(JSON.stringify({ v: 1, bearerToken, headers }))` with `APP_ENCRYPTION_KEY`; null when there are no secrets. Never selected by the list query. |
+| `tool_policies` | jsonb | `{ [toolName]: 'allow' \| 'block' }` keyed by the name `tools/list` reported. `ask` is the default and is not stored. At most 500 entries. |
+| `tools_snapshot` | jsonb | The last successful test's tools: `{ name, title, description, readOnly, destructive, openWorld }`. Display only. |
+| `enabled` | boolean | Default true. |
+| `timeout_ms` | integer, nullable | Per-call timeout handed to the SDK (1 000 – 600 000). |
+| `last_tested_at`, `last_test_ok`, `last_error` | | The last Test outcome. Cleared when transport, URL or the secrets actually change. |
+| `created_at`, `updated_at` | timestamptz | |
 
-### `mcpServerTools` table
+Index `mcp_servers_user_idx` on `user_id`. Audit actions `mcp_server.created`, `mcp_server.updated`, `mcp_server.deleted` were added to `audit_action`.
 
-Discovered tools from a registered MCP server. Refreshed on registration and on demand.
+## Modules
 
-| Column        | Type      | Description                           |
-| ------------- | --------- | ------------------------------------- |
-| `id`          | uuid      | Primary key                           |
-| `mcpServerId` | uuid      | FK to `mcpServers`                    |
-| `name`        | text      | Tool name as returned by `list_tools` |
-| `description` | text      | Tool description                      |
-| `inputSchema` | jsonb     | JSON Schema for tool parameters       |
-| `refreshedAt` | timestamp | When this record was last discovered  |
+| Module | Role |
+| --- | --- |
+| `src/lib/engine/mcp-connectors.ts` | Pure. Name rule, the run's connector map (`buildRunMcpConnectors`), `connectorCallVerdict`, `connectorDisallowedTools`, `composeMcpServers`. |
+| `src/lib/engine/permission-mode.ts` | `resolveToolGate` applies an external tool's policy (`externalPolicy`). |
+| `src/lib/engine/tool-decision.ts` | `decideToolCall` takes the SDK's provenance and consults `connectorCallVerdict` after the scope check and before containment and the gate. |
+| `src/lib/mcp/mcp-config.ts` | Pure. URL, header, token and timeout rules; the secrets document and its edit patch; the SDK config. Shared with the settings form. |
+| `src/lib/mcp/mcp.server.ts` | CRUD scoped to the caller, the Test button's bookkeeping, `loadRunMcpServers`. |
+| `src/lib/mcp/mcp-probe.server.ts` | The Test button's MCP client (`@modelcontextprotocol/sdk`), through `createGuardedFetch`. |
+| `src/lib/tools/egress-fetch.server.ts` | A `fetch` behind the egress guard: spelling check, per-socket address check (`guardedLookup`), no redirects, capped streamed body. |
+| `src/lib/mcp/mcp.remote.ts` | Remote functions: list, create, update, set enabled, set tool policies, delete, test. Each opens with `requireAuthenticatedRequestUser()`. |
+| `src/routes/settings/connectors/+page.svelte` | The page; `McpServerForm.svelte` and `McpToolPolicyList.svelte` in `src/lib/mcp/`. |
 
-### `mcpServerAssignments` table
+## Run start
 
-Controls which agents have access to which MCP servers.
+`loadRunMcpServers({ userId, runSource, toolScoped })`, called by the chat stream route beside the other per-run loads:
 
-| Column        | Type      | Description                                                               |
-| ------------- | --------- | ------------------------------------------------------------------------- |
-| `id`          | uuid      | Primary key                                                               |
-| `mcpServerId` | uuid      | FK to `mcpServers`                                                        |
-| `agentId`     | uuid?     | FK to `agents`; null = available to all agents owned by the server's user |
-| `createdAt`   | timestamp |                                                                           |
+1. Returns nothing unless `runSource === 'chat_stream'` and the agent has no fixed tool list.
+2. Loads the user's enabled rows, oldest first.
+3. Per row: the name rule, `checkMcpUrl` (with the current `MCP_ALLOWED_PRIVATE_HOSTS`), decrypting the secrets, and resolving the host with `assertPublicUrl` (3 s limit; exempt hosts skip it). A row failing any of these is skipped with a reason.
+4. Returns `servers` (SDK configs), `connectors` (the map the gate reads), `disallowedTools` (`mcp__<name>__<tool>` for every `block`), `skipped`, and one `mcp_unavailable` notice (not persisted) naming the skipped rows. Never throws.
 
----
+`buildEngineOptions` then sets:
 
-## Features
+- `mcpServers = composeMcpServers({ own, external, scoped })` — connectors first, `agentstudio` last so no key can shadow it; an external key that fails the name rule is dropped; a scoped run gets none.
+- `strictMcpConfig: true` on every run.
+- `disallowedTools` += `ListMcpResourcesTool`, `ReadMcpResourceTool`, `ReadMcpResourceDirTool`, and (unscoped runs) the connectors' blocked tools.
 
-### Transport modes
+External names are never added to `allowedTools`, which the SDK treats as an auto-allow list.
 
-**stdio** — the runtime spawns the server as a child process using the configured `command` and `args`. Communication is via stdin/stdout using MCP JSON-RPC. The process lifetime is scoped to the run; it is killed when the run ends or errors. Used for local tools: filesystem bridges, local database clients, CLI wrappers.
+## Deciding a call
 
-**SSE** — the runtime opens a persistent Server-Sent Events connection to the configured URL. Used for hosted services that implement the MCP SSE transport (e.g., self-hosted MCP gateways).
+For a name `mcp__<server>__<tool>` whose server is not `agentstudio`, `decideToolCall` with the run's connector map:
 
-**HTTP** — the runtime makes individual HTTP requests per tool call using the MCP Streamable HTTP transport. Used for stateless remote MCP services.
+1. Out of scope for a fixed tool list → deny.
+2. Provenance names `agentstudio` with a source other than `sdk` → deny.
+3. `<server>` is not one of the run's connectors → deny.
+4. Provenance present and not `{ source: 'dynamic', name: <server> }` → deny.
+5. Policy = the row's entry for `cliToolNameSegment(<tool>)` (two names the CLI spells alike take the stricter), else `ask`. With no provenance reported (`null`), `allow` becomes `ask`.
+6. `resolveToolGate`: mandatory-approval tools first (none are external); then `block` → deny in every mode; in `default` / `acceptEdits`, `allow` → allow unless `settingsRequiresApproval` (for an external name, only the `'*'` wildcard) → ask; `ask` → ask; `plan` → deny; `bypassPermissions` → allow.
 
-### One capability group per server
+The PreToolUse hook and `canUseTool` pass the SDK's `mcp_server` / `mcpServer`. The frame the chat shows when the model announces a call is decided with provenance `undefined` (not yet reported), which applies the row's policy; the hook and `canUseTool` decide again with what the SDK reported. Runs that pass no connector map (automations) keep the earlier posture: every external tool asks, and with no approval surface is refused.
 
-Each active MCP server creates a dynamic capability group named `mcp/<slug>`. This group behaves identically to first-party groups:
+## Notices
 
-- It is **not** `alwaysOn` by default.
-- The model enables it via `enable_capability('mcp/github')`.
-- Enabling injects the server's tool descriptions into the active tool set.
-- A companion skill can be associated with the server (stored in `skills` with slug `mcp/<slug>`) to guide the model on when and how to use the server's tools.
+- `system/init` whose `mcp_servers` lists a non-`sdk` server as `failed` or `needs-auth` → one persisted `mcp_unavailable` warning naming them (names reduced to `[a-zA-Z0-9_-]`, 40 characters). `pending` is ignored.
+- Skipped at run start → one live-only `mcp_unavailable` warning.
 
-This preserves the progressive disclosure model regardless of how many MCP servers are registered.
+## The connection test
 
-### Tool naming and namespacing
+`probeMcpServer({ transport, url, headers, allowedPrivateHosts?, timeoutMs? })`:
 
-MCP tool names are prefixed as `<serverSlug>__<toolName>` in the active tool set. Double underscore is used because MCP tool names may contain slashes, and the prefix must be unambiguous. For example: `github__create_issue`, `linear__create_issue`. The model calls the prefixed name; the runtime strips the prefix before forwarding to the MCP server.
+- `StreamableHTTPClientTransport` or `SSEClientTransport`, both given the guarded fetch, which every request (including the SSE stream and its POST endpoint) goes through.
+- One 10 s deadline for the whole exchange; aborting it tears down any open stream. `connect`, then `tools/list` only if the server declares the `tools` capability, following `nextCursor` for at most 20 pages / 500 tools.
+- 401 / `UnauthorizedError` → `needsAuth` with "wants credentials" or "refused the credentials"; 403, 404, 405 (HTTP transport), egress refusals, timeouts, `ENOTFOUND`, `ECONNREFUSED` each get their own message. Anything else is quoted with every header value, and a bearer token on its own, replaced by `[redacted]`.
+- `testMcpServer` records `last_*`; a success replaces `tools_snapshot`, a failure keeps it.
 
-### Tool discovery
+## Specs
 
-When a server is registered (or on admin demand from the management UI), the runtime:
-
-1. Opens a connection to the server.
-2. Calls `list_tools`.
-3. Upserts `mcpServerTools` rows (matched by `mcpServerId` + `name`).
-4. Marks stale tool rows (present in DB but not returned by `list_tools`) as soft-deleted.
-
-Discovery results are shown in the server detail UI. Tools refreshed more than 7 days ago are flagged as potentially stale.
-
-### Approval policy
-
-MCP tool calls flow through the same approval system as first-party tools. Default approval rules:
-
-- Tools whose `name` contains `write`, `create`, `update`, `delete`, `push`, `send`, or `post` require approval.
-- All other MCP tools are auto-approved.
-
-Users can override per-tool approval requirements from the server detail page or from `/settings/mcp`.
-
-### Tool output context policy
-
-MCP tool outputs are subject to the same size-capped context policy as first-party tools. Outputs larger than 4,000 tokens are archived; the model receives a summary + pointer handle and can call `read_output(handle, offset, length)` for more.
-
----
-
-## Security
-
-### stdio servers
-
-- `command` is validated against an allowlist of permitted executable paths (configurable; default: deny absolute paths outside designated tool directories and deny shell interpreters).
-- `args` are passed as an array and are not shell-expanded — no injection via argument content.
-- The subprocess environment is sanitized: app secrets and database credentials are not inherited.
-- Processes are run with a restricted working directory scoped to the run's workspace.
-
-### Remote servers
-
-- Auth tokens and header values in `authConfig` are encrypted at rest (AES-256-GCM) using a key from `MCP_SECRET_KEY` env var.
-- Plaintext credentials are never logged, never included in run events, and never returned to the client after save.
-- TLS verification is enforced for all remote connections (no `rejectUnauthorized: false`).
-
----
-
-## Management UI
-
-`/settings/mcp` — list of registered servers with transport badge, active status, tool count, and last discovery timestamp.
-
-`/settings/mcp/new` — register a new server. Form adapts to transport type: stdio shows command/args fields; SSE/HTTP shows URL and auth fields.
-
-`/settings/mcp/[id]` — server detail:
-
-- Discovered tools list with per-tool approval override
-- Agent assignment list
-- Test connection button (runs `list_tools` and shows results or error)
-- Re-discover tools button
-- Companion skill link (edit or create a `mcp/<slug>` skill)
-
-System-wide servers (created by admin with `userId = null`) appear for all users but can only be edited by admins.
-
----
-
-## Behavior Contracts
-
-- A server with `isActive = false` does not appear in any agent's capability groups, even if assigned.
-- Discovery failure (connection refused, auth error, timeout) does not fail a run. The server's capability group is unavailable for that run; the runtime emits a `hook_failure`-level warning event.
-- If an assigned server cannot connect at run start, it is silently skipped — the agent can still run without it.
-- `mcpServerTools` rows are never hard-deleted; stale rows are soft-deleted and excluded from the capability group but preserved for audit.
-- System-wide servers are available to all users' agents; user-scoped servers are only available to the owning user's agents.
-- Slugs are unique per user and immutable after creation.
-
-## References
-
-- [Model Context Protocol specification](https://spec.modelcontextprotocol.io/)
-- [MCP Transports — stdio, SSE, HTTP](https://spec.modelcontextprotocol.io/specification/architecture/transports/)
-- **Internal:** `src/lib/mcp/`, `src/routes/settings/mcp/`
+| Spec | Pins |
+| --- | --- |
+| `tests/mcp.config.spec.ts` | Name, URL, header and token rules; the secrets patch; the SDK config; stored policy normalisation. |
+| `tests/engine.connectors.spec.ts` | `connectorCallVerdict`, policy lookup under the CLI's spelling, `resolveToolGate` across modes, `decideToolCall`, `composeMcpServers`. |
+| `tests/engine.connectors-stream.spec.ts` | The same through `runEngineStream` with a scripted SDK: allow runs without a card, block never asks, ask shows the card with its token, unknown servers and mismatched provenance are refused. |
+| `tests/engine.external-tools.spec.ts` | The classification with no policy at all. |
+| `tests/engine.sdk-notices.spec.ts` | The `system/init` notice. |
+| `tests/mcp.probe.spec.ts` | The probe against the hand-written MCP server in `tests/mcp-fixture.ts`, both transports, and the egress guard in front of it. |
+| `tests/mcp.server.spec.ts` | The rows against the live database: encryption, validation, edits, audit, the Test bookkeeping, run start. |
+| `tests/crud/mcp.crud.spec.ts` | The page on desktop and mobile. |
+| `tests/chat.connector-tool-labels.spec.ts`, `tests/costs.tool-call-ledger.spec.ts` | Card labels and the ledger's `mcp:<name>` provider. |

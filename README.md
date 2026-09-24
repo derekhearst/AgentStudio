@@ -12,6 +12,10 @@ Replies can be read aloud: a speaker button on each reply plays it through an Op
 
 Creation workflows are chat-led: New Agent and New Skill actions launch a fresh conversation with a seeded creation prompt. The assistant gathers missing requirements (optionally with ask_user), then executes directly with tool-level approvals where configured.
 
+### Connectors
+
+Chats can use the tools of remote MCP servers — GitHub's remote MCP server, an issue tracker, a self-hosted tool — added on Settings → Connectors (`/settings/connectors`). A connector is a Streamable HTTP or SSE server with an optional bearer token and headers, stored encrypted. The page tests the connection, lists the server's tools, and sets each tool to Allow, Ask or Block; every tool asks by default, Plan mode refuses them, and blocked tools are hidden from the assistant. Connectors join interactive chats whose agent has no fixed tool list, and the engine loads no other MCP servers (`strictMcpConfig`). Local (stdio) and OAuth-only servers are not supported yet. See [docs/mcp/mcp.md](docs/mcp/mcp.md).
+
 ### Agents
 
 Autonomous agents with custom roles, system prompts, and model assignments. Agents are created and managed via the chat orchestrator. The agents page lists every agent with its status — Available or Paused — and lets you pause or resume a custom agent: a paused agent is not offered for delegation and its automations and monitors are skipped, but you can still chat with it. Agent detail pages allow editing the assigned model, system prompt and hook bindings; hooks run for an agent's chats as well as its automations (see [docs/hooks/hooks.md](docs/hooks/hooks.md)). The Plan and Research agents hand an approved plan to another agent — usually Chat or Autonomous — and find its id with the read-only `list_agents` tool. See [docs/agents/agents.md](docs/agents/agents.md).
@@ -89,6 +93,8 @@ cp .env.example .env
 - `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`
 - `ORIGIN`
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `APP_ENCRYPTION_KEY` (only needed if connecting GitHub from the Connections panel at `/projects` for repo sync, clone, push, and PR creation). Server-side git ignores the host's own git configuration — credential managers, URL rewrites, a global identity — so nothing needs setting up there. A corporate certificate authority goes in the server's environment (`GIT_SSL_CAINFO`, `GIT_SSL_CAPATH` or `SSL_CERT_FILE`), not a global `http.sslCAInfo`, which is not read; see [docs/source-control/spec.md](docs/source-control/spec.md#running-git-safely).
+- `APP_ENCRYPTION_KEY` is also what encrypts connector tokens and headers: without it, a connector that needs credentials cannot be saved.
+- `MCP_ALLOWED_PRIVATE_HOSTS` (optional; connectors reach the public internet only — list hosts on your own network, comma- or space-separated, that a connector may use anyway). See [docs/mcp/mcp.md](docs/mcp/mcp.md#urls).
 - `GITHUB_WEBHOOK_SECRET` (only needed to ingest `pull_request` / `check_run` events at `POST /api/webhooks/github`; missing → endpoint returns 503)
 - `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` (only needed for non-Claude models, which run through an Anthropic-compatible gateway)
 - `CRON_SECRET` (optional; lets an external scheduler fire `POST /api/cron` with `Authorization: Bearer <secret>` when the in-process scheduler is turned off; unset → only a signed-in session can fire it)
@@ -218,6 +224,7 @@ Notes:
 - Hooks (what runs when, on chats and automations): `docs/hooks/hooks.md`
 - Skills (including export and import): `docs/skills/skills.md`
 - Read aloud (text-to-speech, auto-read): `docs/speech/speech.md`
+- Connectors (remote MCP servers chats can use): `docs/mcp/mcp.md`
 
 ## Background Jobs
 
@@ -270,4 +277,5 @@ bun run bench:longmemeval:smoke --dataset=oracle --limit=5
 - `/monitors` Long-horizon monitors — watch a condition, act when it changes ([docs](docs/monitors/monitors.md))
 - `/observability/logs` Server-side log viewer (warn/error events, filterable, mobile-friendly)
 - `/settings` App configuration, including the read-only System checklist
+- `/settings/connectors` Remote MCP servers: add, test, per-tool Allow/Ask/Block ([docs](docs/mcp/mcp.md))
 - `POST /api/tts` Read-aloud: one chunk of reply text in, MP3 out ([docs](docs/speech/speech.md))
