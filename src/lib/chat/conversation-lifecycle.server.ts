@@ -32,32 +32,32 @@ const lifecycleColumns = {
 	archivedAt: conversations.archivedAt,
 }
 
+/** Pin or unpin one of the user's conversations. Null when the user has no such conversation. */
 export async function setConversationPinnedForUser(
 	userId: string,
 	conversationId: string,
 	pinned: boolean,
-): Promise<ConversationLifecycleState> {
+): Promise<ConversationLifecycleState | null> {
 	const [row] = await db
 		.update(conversations)
 		.set(pinned ? { pinnedAt: new Date(), archivedAt: null } : { pinnedAt: null })
 		.where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
 		.returning(lifecycleColumns)
-	if (!row) throw new Error('Conversation not found')
-	return row
+	return row ?? null
 }
 
+/** Archive or unarchive one of the user's conversations. Null when the user has no such conversation. */
 export async function setConversationArchivedForUser(
 	userId: string,
 	conversationId: string,
 	archived: boolean,
-): Promise<ConversationLifecycleState> {
+): Promise<ConversationLifecycleState | null> {
 	const [row] = await db
 		.update(conversations)
 		.set(archived ? { archivedAt: new Date(), pinnedAt: null } : { archivedAt: null })
 		.where(and(eq(conversations.id, conversationId), eq(conversations.userId, userId)))
 		.returning(lifecycleColumns)
-	if (!row) throw new Error('Conversation not found')
-	return row
+	return row ?? null
 }
 
 /**

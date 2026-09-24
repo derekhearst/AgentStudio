@@ -90,8 +90,9 @@ test.describe('conversation lifecycle — the rules', () => {
 		try {
 			const id = await seedConversation(`${prefix} mine`, userId)
 			const stranger = randomUUID()
-			await expect(setConversationPinnedForUser(stranger, id, true)).rejects.toThrow('Conversation not found')
-			await expect(setConversationArchivedForUser(stranger, id, true)).rejects.toThrow('Conversation not found')
+			// Not found for them — the remote functions answer 404 — and nothing changes.
+			expect(await setConversationPinnedForUser(stranger, id, true)).toBeNull()
+			expect(await setConversationArchivedForUser(stranger, id, true)).toBeNull()
 			const row = await lifecycleRow(id)
 			expect(row?.pinned_at).toBeNull()
 			expect(row?.archived_at).toBeNull()

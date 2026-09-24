@@ -1,4 +1,5 @@
 import { command, query } from '$app/server'
+import { error } from '@sveltejs/kit'
 import { and, asc, desc, eq, gt, isNull, ne, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '$lib/db.server'
@@ -440,6 +441,7 @@ const setConversationPinnedSchema = z.object({ id: z.string().uuid(), pinned: z.
 export const setConversationPinned = command(setConversationPinnedSchema, async ({ id, pinned }) => {
 	const user = requireAuthenticatedRequestUser()
 	const state = await setConversationPinnedForUser(user.id, id, pinned)
+	if (!state) error(404, 'Conversation not found')
 	return { success: true as const, ...state }
 })
 
@@ -452,6 +454,7 @@ const setConversationArchivedSchema = z.object({ id: z.string().uuid(), archived
 export const setConversationArchived = command(setConversationArchivedSchema, async ({ id, archived }) => {
 	const user = requireAuthenticatedRequestUser()
 	const state = await setConversationArchivedForUser(user.id, id, archived)
+	if (!state) error(404, 'Conversation not found')
 	return { success: true as const, ...state }
 })
 
