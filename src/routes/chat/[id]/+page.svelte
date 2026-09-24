@@ -43,6 +43,7 @@
 		parseJsonFallback,
 		getAskUserQuestionsFromTool,
 		getAskUserAnswersFromTool,
+		isAskUserToolName,
 		type AskUserOption,
 		type AskUserQuestion,
 	} from '$lib/chat/tool-block-helpers';
@@ -1007,7 +1008,7 @@
 					}
 
 					if (eventName === 'tool_result') {
-						if (payload.name === 'ask_user') {
+						if (isAskUserToolName(payload.name)) {
 							pendingAskUser = null;
 							askUserModalOpen = false;
 						}
@@ -1153,7 +1154,7 @@
 							const fullText = getPartialText(streamingBlocks);
 							const completedToolCalls = getCompletedToolCalls(streamingBlocks);
 							const hasAskUserTool = completedToolCalls.some(
-								(call) => String(call.name ?? '') === 'ask_user'
+								(call) => isAskUserToolName(call.name)
 							);
 							if (!hasAskUserTool && (fullText.trim() || completedToolCalls.length > 0)) {
 								pendingAssistantDrafts = [
@@ -1626,7 +1627,7 @@
 				-->
 				{:else if streaming && !pendingMessageId}
 					{#each streamingBlocks as block (block.id)}
-						{#if block.kind === 'tool' && block.name === 'ask_user'}
+						{#if block.kind === 'tool' && isAskUserToolName(block.name)}
 							{@const askQuestions = getAskUserQuestionsFromTool(block)}
 							{@const askAnswers = getAskUserAnswersFromTool(block)}
 							{@const askLive = block.status === 'pending' || block.status === 'approved' || block.status === 'executing'}
@@ -1652,7 +1653,7 @@
 							<TodoListCard details={block.details} />
 						{:else if block.kind === 'notice'}
 							<RunNoticeCard notice={block.notice} />
-						{:else if block.kind === 'tool' && block.name !== 'ask_user'}
+						{:else if block.kind === 'tool' && !isAskUserToolName(block.name)}
 							<ToolCallCard
 								name={block.name}
 								argumentsText={block.arguments}

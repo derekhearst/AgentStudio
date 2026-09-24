@@ -12,6 +12,7 @@
 		type SavedBlock,
 	} from './message-bubble-helpers';
 	import type { ChatMessageMetadata, PersistedToolCall } from './streaming-blocks';
+	import { isAskUserToolName } from '$lib/engine/ask-user-question';
 
 	type MessageRow = {
 		id: string;
@@ -254,7 +255,7 @@
 		{#if normalizedToolCalls.length > 0}
 			<div class="mb-2 w-full space-y-2">
 				{#each normalizedToolCalls as call, idx (`${message.id}-${idx}`)}
-				{#if call.name === 'ask_user'}
+				{#if isAskUserToolName(call.name)}
 					{@const askQuestions = getAskUserQuestions(call.arguments, call.result)}
 					{#if askQuestions.length > 0}
 						{#each askQuestions as q}

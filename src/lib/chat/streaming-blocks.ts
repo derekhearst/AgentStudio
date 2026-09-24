@@ -10,6 +10,7 @@
  */
 
 import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
+import { ASK_USER_QUESTION_TOOL, LEGACY_ASK_USER_TOOL, isAskUserToolName } from '../engine/ask-user-question'
 import type { ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
 
@@ -693,15 +694,18 @@ export function applyToolResult(
 	const finalStatus = payload.success ? ('completed' as const) : ('failed' as const)
 	const resultText = payload.result ?? (payload.success ? 'Success' : 'Tool execution failed')
 	/*
-	 * #81 — an ask_user card is keyed by the host's answer token (the `ask_user` frame) and
-	 * its result by the SDK's tool_use id, so the two never met: the card stayed open with its
-	 * Submit button and an empty block was appended instead. The result belongs to the oldest
-	 * card still waiting for one — a card whose id is still its token — and the card takes the
-	 * SDK's id with it, so a replayed result finds it directly.
+	 * #81 — a retired `ask_user` card was keyed by the host's answer token (the `ask_user`
+	 * frame) and its result by the SDK's tool_use id, so the two never met: the card stayed
+	 * open with its Submit button and an empty block was appended instead. The result belongs
+	 * to the oldest card still waiting for one — a card whose id is still its token — and the
+	 * card takes the SDK's id with it, so a replayed result finds it directly.
+	 *
+	 * An AskUserQuestion card (#4) is opened under the tool_use id itself, so its result finds
+	 * it by id like any other call's.
 	 */
 	const askUserCard =
-		payload.name === 'ask_user' && !blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
-			? blocks.findIndex((b) => b.kind === 'tool' && b.name === 'ask_user' && !!b.token && b.id === b.token)
+		payload.name === LEGACY_ASK_USER_TOOL && !blocks.some((b) => b.kind === 'tool' && b.id === payload.id)
+			? blocks.findIndex((b) => b.kind === 'tool' && b.name === LEGACY_ASK_USER_TOOL && !!b.token && b.id === b.token)
 			: -1
 	const idx = askUserCard !== -1 ? askUserCard : blocks.findIndex((b) => b.kind === 'tool' && b.id === payload.id)
 	if (idx === -1) {
@@ -728,10 +732,11 @@ export function applyToolResult(
 		}
 	}
 	const existing = blocks[idx]
-	// An answered ask_user card is already marked completed by `applyAskUserAnswered`.
+	// An answered question card is already marked completed by `applyAskUserAnswered`.
 	const unexpected =
 		askUserCard === -1 &&
 		existing.kind === 'tool' &&
+		!isAskUserToolName(existing.name) &&
 		existing.status !== 'executing' &&
 		existing.status !== 'approved'
 	return {
@@ -753,9 +758,9 @@ export function applyToolResult(
 }
 
 /**
- * The server recorded the user's answers to an ask_user card (#81): show it answered now,
+ * The server recorded the user's answers to a question card (#81): show it answered now,
  * rather than with its Submit button still live until the call's `tool_result` arrives. The
- * card keeps its token as its id, so that result still finds it (`applyToolResult`).
+ * card keeps its id, so that result still finds it (`applyToolResult`).
  */
 export function applyAskUserAnswered(
 	blocks: StreamingBlock[],
@@ -763,7 +768,7 @@ export function applyAskUserAnswered(
 	answers: Record<string, string>,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'tool' && b.name === 'ask_user' && b.token === token
+		b.kind === 'tool' && isAskUserToolName(b.name) && b.token === token
 			? { ...b, status: 'completed' as const, result: JSON.stringify({ answers }) }
 			: b,
 	)
@@ -773,6 +778,9 @@ export function applyAskUserAnswered(
  * `ask_user` event — append a synthetic executing tool block carrying the
  * questions so the AskUserCard can render inline. Skips the append when a tool
  * block with the same id already exists (idempotent re-emit).
+ *
+ * The frame names the tool: `AskUserQuestion`, with the SDK's tool_use id as its id (#4), or
+ * `ask_user` from a run that predates it. A frame that names none is the former.
  */
 export function applyAskUser(
 	blocks: StreamingBlock[],
@@ -788,7 +796,7 @@ export function applyAskUser(
 		{
 			kind: 'tool' as const,
 			id: payload.id,
-			name: payload.name ?? 'ask_user',
+			name: payload.name ?? ASK_USER_QUESTION_TOOL,
 			arguments: askUserArgs,
 			status: 'executing' as const,
 			expanded: true,
