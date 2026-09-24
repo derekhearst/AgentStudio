@@ -19,6 +19,8 @@ import {
  * archived chat back. Then the sidebar: the row menu does each of these, pinned chats sit in
  * their own group on top, the Archived view finds and restores a chat, delete asks first and
  * leaves the chat that was open, and on a phone the menu button is there without hovering.
+ * On a phone the home page's "Recent chats" are the latest chats, not the pinned ones the
+ * server lists first.
  */
 
 async function seedConversation(title: string, userId: string | null) {
@@ -331,6 +333,35 @@ test.describe('conversation lifecycle — the sidebar', () => {
 			await menu.getByRole('menuitem', { name: 'Archive' }).click()
 			await expect(chatItem(nav, id)).toHaveCount(0)
 			expect((await lifecycleRow(id))?.archived_at).not.toBeNull()
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('on a phone, the home page’s recent chats are the latest ones, not the pinned ones', async ({ page }, testInfo) => {
+		test.skip(testInfo.project.name !== 'mobile', 'the home page lists recent chats only where the sidebar is hidden')
+		test.setTimeout(60_000)
+		const prefix = uniquePrefix('conv-life-home')
+		const userId = await getActiveUserId()
+		const sql = getSql()
+		await authenticateContext(page.context())
+
+		try {
+			// Five chats pinned just now but quiet for years: the server lists them first.
+			for (let i = 0; i < 5; i++) {
+				const id = await seedConversation(`${prefix} pinned ${i}`, userId)
+				await sql`update conversations set pinned_at = now(), updated_at = now() - interval '10 years' where id = ${id}`
+			}
+			// Five fresh ones, so there are always five newer than the pinned ones.
+			for (let i = 0; i < 5; i++) await seedConversation(`${prefix} fresh ${i}`, userId)
+
+			await page.goto('/', { waitUntil: 'domcontentloaded' })
+			await waitForHydration(page)
+			const heading = page.getByRole('heading', { name: 'Recent chats' })
+			await expect(heading).toBeVisible({ timeout: 15_000 })
+			const section = heading.locator('xpath=..')
+			await expect(section.locator('a[href^="/chat/"]')).toHaveCount(5)
+			await expect(section.getByText(`${prefix} pinned`)).toHaveCount(0)
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}
