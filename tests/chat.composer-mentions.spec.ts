@@ -8,11 +8,14 @@ import {
 	getActiveUserId,
 	getBuiltinChatAgentId,
 	getSql,
+	readEnvVar,
 	seedProject,
 	uniquePrefix,
 	waitForHydration,
 } from './helpers'
 import { sse } from './chat-stream-script'
+import { SUBSCRIPTION_MODEL_IDS } from '../src/lib/engine/model-backend'
+import { claudeDisplayName } from '../src/lib/llm/engine-models'
 
 /**
  * #22 — `@` file mentions and the `/` command palette, driven through the chat page on both
@@ -41,7 +44,7 @@ async function seedChat(prefix: string, options: { withProject: boolean; model?:
 	}
 	const [row] = await sql<{ id: string }[]>`
 		insert into conversations (user_id, agent_id, project_id, title, model, total_tokens, total_cost)
-		values (${userId}, ${await getBuiltinChatAgentId()}, ${projectId}, ${`${prefix} convo`}, ${options.model ?? 'anthropic/claude-sonnet-4'}, 0, '0')
+		values (${userId}, ${await getBuiltinChatAgentId()}, ${projectId}, ${`${prefix} convo`}, ${options.model ?? 'claude-sonnet-5'}, 0, '0')
 		returning id
 	`
 	return { conversationId: row.id, projectPath }
@@ -94,19 +97,12 @@ async function holdMentionSearches(page: Page) {
 }
 
 /**
- * The OpenRouter model catalogue in the order the app lists it (by name), or null when it
- * cannot be reached. It answers without a key, which is also how the app's picker gets it.
+ * Whether the test server runs with an LLM gateway (#9). Without one (CI's posture) the
+ * engine's model list is exactly the subscription's Claude models.
  */
-async function modelCatalogue(): Promise<Array<{ id: string; name: string }> | null> {
-	try {
-		const response = await fetch('https://openrouter.ai/api/v1/models', { signal: AbortSignal.timeout(15_000) })
-		if (!response.ok) return null
-		const body = (await response.json()) as { data?: Array<{ id: string; name: string }> }
-		return (body.data ?? []).map(({ id, name }) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
-	} catch {
-		return null
-	}
-}
+const gatewayConfigured = ['LLM_GATEWAY_URL', 'LLM_GATEWAY_TOKEN'].every(
+	(name) => Boolean((process.env[name] ?? readEnvVar(name))?.trim()),
+)
 
 /** A tap on a phone, a click on a desktop: the row has to take either without losing focus. */
 async function pick(locator: ReturnType<Page['locator']>, testInfo: TestInfo) {
@@ -428,37 +424,77 @@ test.describe('chat composer — / commands', () => {
 		}
 	})
 
-	test('/model starts on the current model, even one past the first 50 that loads after the list opens', async ({
+	test('/model lists only the models that can run here, and starts on the current one however it is spelled', async ({
 		page,
 	}) => {
 		test.setTimeout(90_000)
-		const catalogue = await modelCatalogue()
-		test.skip(!catalogue || catalogue.length < 120, 'the OpenRouter model catalogue is not reachable from here')
-		// Well past the 50 rows the list shows with nothing typed.
-		const current = catalogue![100]
+		// Stored in OpenRouter's spelling, as older conversations are: the engine list has it as
+		// `claude-sonnet-4-5`, and it is still the current model (#9).
+		const stored = 'anthropic/claude-sonnet-4.5'
+		const currentName = claudeDisplayName('claude-sonnet-4-5')
 		const prefix = uniquePrefix('composer-model')
 		let seeded: Seeded | null = null
 		try {
 			await authenticateContext(page.context())
-			seeded = await seedChat(prefix, { withProject: false, model: current.id })
+			seeded = await seedChat(prefix, { withProject: false, model: stored })
 			const sends = await recordSends(page, seeded.conversationId)
 			const composer = await openChat(page, seeded.conversationId)
 
-			// The first /model on the page: the list opens before the composer has the catalogue.
+			// The first /model on the page: the list opens before the composer has the models.
 			await composer.click()
 			await composer.pressSequentially('/model ')
 			const list = page.getByRole('listbox', { name: /\/model/ })
 			const options = list.getByRole('option')
-			await expect(options).toHaveCount(50, { timeout: 30_000 })
-			// The current model leads the list, marked and highlighted, so Enter keeps it.
-			await expect(options.first()).toContainText(current.name)
-			await expect(options.first()).toContainText('current')
-			await expect(options.first()).toHaveAttribute('aria-selected', 'true')
-			await expect(list.locator('[aria-selected="true"]')).toHaveCount(1)
+			if (!gatewayConfigured) {
+				// The same list as the model pill: the subscription's Claude models and nothing from
+				// OpenRouter's catalogue, whose other rows would fail on the first message.
+				await expect(options).toHaveCount(SUBSCRIPTION_MODEL_IDS.length, { timeout: 30_000 })
+				await expect(list).not.toContainText('Gateway')
+				await expect(list).not.toContainText('/')
+			}
+			// The current model is marked and highlighted once the list arrives, so Enter keeps it.
+			const highlighted = list.locator('[aria-selected="true"]')
+			await expect(highlighted).toHaveCount(1, { timeout: 30_000 })
+			await expect(highlighted).toContainText(currentName)
+			await expect(highlighted).toContainText('current')
 			await composer.press('Enter')
 
-			await expect(page.getByTestId('composer-notice')).toContainText(`Model: ${current.name}`)
+			await expect(page.getByTestId('composer-notice')).toContainText(`Model: ${currentName}`)
 			await expect(composer).toHaveValue('')
+			expect(sends).toHaveLength(0)
+		} finally {
+			await cleanup(prefix, seeded)
+		}
+	})
+
+	test('/effort on a non-Claude model says reasoning is off instead of opening its list', async ({ page }) => {
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('composer-effort-gateway')
+		let seeded: Seeded | null = null
+		try {
+			await authenticateContext(page.context())
+			// A gateway model runs with thinking off (#9), so the reasoning pill is disabled.
+			seeded = await seedChat(prefix, { withProject: false, model: 'moonshotai/kimi-k2' })
+			const sends = await recordSends(page, seeded.conversationId)
+			const composer = await openChat(page, seeded.conversationId)
+			await expect(page.getByRole('button', { name: 'Reasoning effort' }).filter({ visible: true })).toBeDisabled()
+
+			// In the palette the command is listed but switched off, with the pill's reason.
+			await composer.click()
+			await composer.pressSequentially('/eff')
+			const effortRow = page.getByRole('listbox', { name: 'Commands' }).getByRole('option', { name: /\/effort/ })
+			await expect(effortRow).toHaveAttribute('aria-disabled', 'true')
+			await expect(effortRow).toContainText('Reasoning is off for gateway models')
+
+			// Typed out in full, it says why rather than opening the levels, and nothing is sent.
+			await composer.pressSequentially('ort high')
+			await expect(suggest(page)).toContainText('Reasoning is off for gateway models')
+			await expect(page.getByRole('listbox', { name: /\/effort/ })).toHaveCount(0)
+			await composer.press('Enter')
+			await expect(page.getByTestId('composer-notice')).toContainText('Reasoning is off for gateway models')
+			await expect(page.getByRole('button', { name: 'Reasoning effort' }).filter({ visible: true })).toContainText(
+				'reasoning:off',
+			)
 			expect(sends).toHaveLength(0)
 		} finally {
 			await cleanup(prefix, seeded)

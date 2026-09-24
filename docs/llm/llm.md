@@ -36,7 +36,7 @@ The app's smaller features — conversation titles, memory, monitors' yes/no che
 
 Three pickers choose the model a chat runs on. All three list only engine models:
 
-1. **The chat composer**, for the conversation in front of you.
+1. **The chat composer**, for the conversation in front of you: its model pill, and the `/model` command in its `/` palette, which lists the same models (a gateway row there says "Gateway · paid" beside its id).
 2. **Settings → Model & AI → Default Model**, for new conversations.
 3. **An agent's configuration** (`/agents/[id]`), for conversations that agent starts — from a monitor, a pull-request fix, and so on.
 
@@ -102,7 +102,7 @@ Nothing else from the server's environment reaches it, the same as for any turn 
 - **Off by default.** No gateway settings means Claude only. Both `LLM_GATEWAY_URL` and `LLM_GATEWAY_TOKEN` are needed; an empty value counts as unset.
 - **Only models the gateway serves are offered.** If the gateway's model list cannot be fetched, no gateway models are offered (the app retries a minute later) rather than guessing.
 - **Only gateway models that can use tools are offered.** Claude Code sends its tools with every request and expects a text answer. A model OpenRouter's catalogue lists without tool support, or that answers only in images or audio, would fail on the first message, so it is left out. A model the catalogue does not list at all (a local model behind LiteLLM) is offered, since nothing says it cannot run.
-- **Reasoning is off on gateway models.** Claude's adaptive thinking and effort levels are Anthropic features; whether a gateway passes them on to another model is unverified, so a gateway turn runs with thinking off and the composer's reasoning control is disabled.
+- **Reasoning is off on gateway models.** Claude's adaptive thinking and effort levels are Anthropic features; whether a gateway passes them on to another model is unverified, so a gateway turn runs with thinking off and the composer's reasoning control is disabled, as is its `/effort` command, which says why instead of opening its list.
 - **Cost.** A Claude turn records its tokens and $0. A gateway turn is priced from OpenRouter's catalogue over that turn's own tokens — input, output, and cached prompt tokens at the catalogue's cache prices where it lists them. The ledger row notes `backend: gateway` and where the price came from (`costBasis`): `catalogue`, or `cli-estimate` for a model the catalogue does not price (Claude Code's own estimate), or `unpriced` when there is neither. An unpriced turn is recorded like any other call the ledger cannot price: at $0, marked unpriced with the reason, and with a warning in the server log. Claude Code's own estimate is not used when the catalogue has a price, because for a model it does not know it guesses at a Claude rate.
 - **Budgets apply.** Gateway turns count toward budget limits like any other metered spend.
 - **Tool use is weaker off Claude.** Claude Code is built for Claude models; OpenRouter says other models may not work correctly through it, and multi-step tool use is where they fall short. The gateway is a deliberate, labelled choice, never a default.

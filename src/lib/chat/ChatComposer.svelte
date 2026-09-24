@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ModelSelector from '$lib/llm/ModelSelector.svelte'
-	import { getAvailableModels } from '$lib/llm/models.remote'
+	import { getEngineModels } from '$lib/llm/models.remote'
 	import AgentSelector, { type AgentChoice } from '$lib/chat/AgentSelector.svelte'
 	import ComposerSuggestMenu, { type SuggestItem } from '$lib/chat/ComposerSuggestMenu.svelte'
 	import Icon from '$lib/chat-console/Icon.svelte'
@@ -32,7 +32,7 @@
 		type ComposerChoice,
 		type ComposerCommand,
 	} from '$lib/chat/composer-commands'
-	import { isClaudeModel } from '$lib/engine/model-backend'
+	import { isClaudeModel, normalizeModelId } from '$lib/engine/model-backend'
 
 	type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 
@@ -94,6 +94,7 @@
 	let reasoningRoot: HTMLDivElement | undefined = $state()
 	// A gateway run has thinking off whatever is picked (#9), so the control says so.
 	const reasoningAvailable = $derived(isClaudeModel(model))
+	const REASONING_OFF_FOR_GATEWAY = 'Reasoning is off for gateway models'
 	const selectedReasoningLabel = $derived(
 		reasoningAvailable ? (REASONING_OPTIONS.find((option) => option.value === reasoningEffort)?.label ?? 'off') : 'off'
 	)
@@ -237,14 +238,18 @@
 	let notice = $state<{ text: string; tone: 'info' | 'error' } | null>(null)
 	let noticeTimer: ReturnType<typeof setTimeout> | undefined
 
-	/** The model list for `/model`, fetched the first time the palette asks for it. */
-	let models = $state.raw<Array<{ id: string; name: string }> | null>(null)
+	/**
+	 * The model list for `/model`, fetched the first time the palette asks for it. The same
+	 * engine list the model pill offers (#9): only models that can run here, each with the
+	 * backend that runs it, so the palette cannot pick a model the next send would refuse.
+	 */
+	let models = $state.raw<Array<{ id: string; name: string; backend?: 'subscription' | 'gateway' }> | null>(null)
 	let modelsRequested = false
 	function modelList() {
 		if (!modelsRequested) {
 			modelsRequested = true
-			getAvailableModels()
-				.then((list) => (models = list))
+			getEngineModels()
+				.then((list) => (models = list.models))
 				.catch(() => (models = []))
 		}
 		return models
@@ -254,7 +259,11 @@
 	const builtinCommands = $derived.by(() => {
 		const list: ComposerCommand[] = []
 		if (onModelChange) {
-			list.push(modelCommand({ current: () => model, models: modelList, pick: (id) => onModelChange?.(id) }))
+			// The engine list spells ids the CLI's way; a conversation can still store the
+			// OpenRouter spelling (`anthropic/claude-sonnet-4.5`), which is the same model.
+			list.push(
+				modelCommand({ current: () => normalizeModelId(model), models: modelList, pick: (id) => onModelChange?.(id) }),
+			)
 		}
 		if (onAgentChange && agentChoices.length > 0) {
 			list.push(
@@ -262,7 +271,14 @@
 			)
 		}
 		if (onReasoningEffortChange) {
-			list.push(effortCommand({ current: () => reasoningEffort, pick: (effort) => onReasoningEffortChange?.(effort) }))
+			list.push(
+				effortCommand({
+					current: () => reasoningEffort,
+					pick: (effort) => onReasoningEffortChange?.(effort),
+					// The reasoning pill is disabled on a gateway model (#9); so is its command.
+					unavailable: () => (reasoningAvailable ? null : REASONING_OFF_FOR_GATEWAY),
+				}),
+			)
 		}
 		if (onAddFiles) list.push(attachCommand(() => onAddFiles?.()))
 		if (speechSupported && onMicClick) {
@@ -349,6 +365,19 @@
 		}
 		const command = findCommand(allCommands, trigger.name)
 		if (!command?.argument) return null
+		// Typed straight to `/effort ` on a gateway model, say: no list to pick from, just why.
+		const unavailable = command.unavailable?.() ?? null
+		if (unavailable) {
+			return {
+				kind: 'hint',
+				title: `/${command.name} ${command.argument.placeholder}`,
+				items: [],
+				initial: 0,
+				loading: false,
+				emptyText: unavailable,
+				footer: null,
+			}
+		}
 		if (command.argument.kind === 'text') {
 			return {
 				kind: 'hint',
@@ -543,6 +572,8 @@
 		if (view.kind === 'choice') {
 			const choice = view.entries[index]
 			if (!choice) return
+			const unavailable = view.command.unavailable?.()
+			if (unavailable) return showNotice(unavailable, 'error')
 			const rest = stripCommand(value, { consumeLine: true })
 			applyEdit({ value: rest, caret: rest.length })
 			await runCommand(view.command, choice.id)
@@ -736,7 +767,7 @@
 					<button
 						type="button"
 						class="console-pill"
-						title={reasoningAvailable ? 'Reasoning effort' : 'Reasoning is off for gateway models'}
+						title={reasoningAvailable ? 'Reasoning effort' : REASONING_OFF_FOR_GATEWAY}
 						aria-label="Reasoning effort"
 						aria-expanded={reasoningMenuOpen}
 						disabled={busy || !reasoningAvailable}

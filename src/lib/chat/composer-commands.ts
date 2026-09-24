@@ -138,16 +138,30 @@ export const REASONING_OPTIONS: ReadonlyArray<{ value: ReasoningEffort; label: s
 
 type Chooser<T> = (value: T) => unknown
 
+/**
+ * What a model row says beside its name: its id, and for a model the paid gateway runs (#9)
+ * that it is billed per token, as the model picker's "Gateway · paid" badge says.
+ */
+export function modelChoiceDetail(model: { id: string; backend?: 'subscription' | 'gateway' }): string {
+	return model.backend === 'gateway' ? `Gateway · paid · ${model.id}` : model.id
+}
+
 export function modelCommand(input: {
 	current: () => string
-	models: () => ReadonlyArray<{ id: string; name: string }> | null
+	/** The models that can run here (the engine list), or null while it loads. */
+	models: () => ReadonlyArray<{ id: string; name: string; backend?: 'subscription' | 'gateway' }> | null
 	pick: Chooser<string>
 }): ComposerCommand {
 	const choices = (): ComposerChoice[] | null => {
 		const models = input.models()
 		if (!models) return null
 		const current = input.current()
-		return models.map((model) => ({ id: model.id, label: model.name, detail: model.id, current: model.id === current }))
+		return models.map((model) => ({
+			id: model.id,
+			label: model.name,
+			detail: modelChoiceDetail(model),
+			current: model.id === current,
+		}))
 	}
 	return {
 		name: 'model',
@@ -183,12 +197,18 @@ export function agentCommand(input: {
 	}
 }
 
-export function effortCommand(input: { current: () => ReasoningEffort; pick: Chooser<ReasoningEffort> }): ComposerCommand {
+export function effortCommand(input: {
+	current: () => ReasoningEffort
+	pick: Chooser<ReasoningEffort>
+	/** Why the reasoning control is disabled (a gateway model runs with thinking off), or null. */
+	unavailable?: () => string | null
+}): ComposerCommand {
 	return {
 		name: 'effort',
 		aliases: ['reasoning', 'think'],
 		description: 'Set how hard the model thinks before answering',
 		source: 'app',
+		unavailable: input.unavailable,
 		argument: {
 			kind: 'choice',
 			placeholder: '<level>',

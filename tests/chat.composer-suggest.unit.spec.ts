@@ -324,6 +324,35 @@ test.describe('palette commands', () => {
 		expect(log.calls).toEqual(['model:openai/gpt-6', 'agent:a2', 'effort:high'])
 	})
 
+	test('/model marks a gateway row as paid, as the model picker does (#9)', () => {
+		const model = modelCommand({
+			current: () => 'claude-sonnet-5',
+			models: () => [
+				{ id: 'claude-sonnet-5', name: 'Claude Sonnet 5', backend: 'subscription' },
+				{ id: 'moonshotai/kimi-k2', name: 'Kimi K2', backend: 'gateway' },
+			],
+			pick: () => {},
+		})
+		const choices = model.argument?.kind === 'choice' ? model.argument.choices() : null
+		expect(choices?.map((choice) => choice.detail)).toEqual(['claude-sonnet-5', 'Gateway · paid · moonshotai/kimi-k2'])
+		// The id is still what a typed `/model kimi` resolves to and what the pick receives.
+		expect(resolveChoice(choices ?? [], 'kimi')?.id).toBe('moonshotai/kimi-k2')
+	})
+
+	test('/effort follows the reasoning control: off on a gateway model, and says why (#9)', () => {
+		let gateway = false
+		const effort = effortCommand({
+			current: () => 'none',
+			pick: () => {},
+			unavailable: () => (gateway ? 'Reasoning is off for gateway models' : null),
+		})
+		expect(effort.unavailable?.()).toBeNull()
+		gateway = true
+		expect(effort.unavailable?.()).toBe('Reasoning is off for gateway models')
+		// Without the option it is always available, as before.
+		expect(effortCommand({ current: () => 'none', pick: () => {} }).unavailable?.() ?? null).toBeNull()
+	})
+
 	test('a typed choice resolves by exact label or id first, then fuzzily', () => {
 		const choices = [
 			{ id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5' },
