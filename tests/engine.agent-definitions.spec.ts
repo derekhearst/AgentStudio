@@ -103,6 +103,13 @@ test.describe('which model a subagent gets', () => {
 		).toBe('claude-sonnet-5')
 	})
 
+	test('a Claude id the CLI cannot run inherits rather than failing the delegation (#9)', () => {
+		// OpenRouter's slug for Sonnet 4 is no Anthropic id, and Opus 4.1 has been retired.
+		for (const model of ['anthropic/claude-sonnet-4', 'claude-opus-4-1', 'anthropic/claude-3-haiku']) {
+			expect(agentDefinitionFrom(row({ model }), { parentIsClaude: true })?.definition.model, model).toBe('inherit')
+		}
+	})
+
 	test('a gateway run inherits instead of naming one', () => {
 		// The gateway sets ANTHROPIC_MODEL process-wide, so a subagent naming a different
 		// backend would be ignored or billed to the wrong place.

@@ -25,7 +25,7 @@
  * messaging token, which a child CLI must not inherit. `ANTHROPIC_*` from the server is
  * dropped on purpose too: a Claude run is meant to be on the subscription login, and an
  * inherited API key would silently move it onto per-token billing. A gateway run gets its
- * three `ANTHROPIC_*` variables explicitly.
+ * own `ANTHROPIC_*` variables explicitly, from `./gateway-env`.
  *
  * Pure, so the spec can check exactly which names cross.
  */
@@ -106,7 +106,7 @@ export function engineEnvAllows(name: string): boolean {
 
 /**
  * Build the CLI's environment from the server's, keeping only what `engineEnvAllows`, then
- * layering `extra` on top (the gateway's `ANTHROPIC_*`). Undefined values are dropped, and
+ * layering `extra` on top. Undefined values are dropped, and
  * the original spelling of each name is kept.
  */
 export function buildEngineEnv(

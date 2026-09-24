@@ -36,6 +36,7 @@ import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approva
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
+import { ledgerCostOverride, priceGatewayTurn, refuseUnrunnableModel } from '$lib/engine/gateway-run.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
@@ -125,6 +126,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		body,
 		settings: currentSettings,
 	})
+
+	// A model nothing here can run is refused before the message is saved or a run is
+	// started, so it leaves no orphan turn behind (#9). `buildEngineOptions` still checks.
+	const unrunnable = refuseUnrunnableModel(routedModel)
+	if (unrunnable) return json({ error: unrunnable }, { status: 400 })
 
 	const parentResult = await resolveParentMessage({
 		conversationId: body.conversationId,
@@ -692,8 +698,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				// Subscription runs have no per-token price, so record tokens and force the
 				// dollar figure to zero rather than inventing one from list pricing. A gateway
-				// run logs this turn's share of the SDK's estimate; when that share cannot be
-				// told apart (`costUsd: null`), the tokens are priced from the model table.
+				// run prices this turn's tokens from the OpenRouter catalogue (#9) — the SDK's
+				// own figure is a guess at a Claude rate for a model it has no price for.
+				const gatewayCost = claudeRun ? null : await priceGatewayTurn(routedModel, summary.usage)
 				const messageCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
@@ -704,8 +711,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: claudeRun ? 0 : (summary.usage.costUsd ?? undefined),
-					metadata: { conversationId: body.conversationId, subscription: claudeRun },
+					costOverride: ledgerCostOverride(gatewayCost),
+					metadata: {
+						conversationId: body.conversationId,
+						subscription: claudeRun,
+						...(gatewayCost ? { backend: 'gateway', costBasis: gatewayCost.costBasis } : {}),
+					},
 				})
 
 				const assistantMessage = await persistAssistantMessage({

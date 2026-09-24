@@ -8,8 +8,9 @@
  *                 subscription and cost nothing per token.
  *
  *   Everything  → ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN pointed at a gateway
- *   else          that serves the Anthropic Messages API (LiteLLM et al). Same
- *                 agent loop, same tools, different model behind it.
+ *   else          that serves the Anthropic Messages API (OpenRouter's Anthropic
+ *                 endpoint, LiteLLM et al). Same agent loop, same tools, different
+ *                 model behind it, billed per token. See `./gateway-env`.
  *
  * Either way the CLI gets an allow-listed environment, never the server's own — see
  * `./engine-env`.
@@ -23,10 +24,12 @@ import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-
 import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
 import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
+import { buildGatewayEnv } from './gateway-env'
+import { gatewayConfig } from './gateway.server'
+import { modelBackend, normalizeModelId, unrunnableModelMessage } from './model-backend'
 import { engineSandboxSettings } from './engine-sandbox'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
-import { env } from '$env/dynamic/private'
 import { buildToolServer, ENGINE_MCP_SERVER, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
 import {
@@ -37,29 +40,10 @@ import {
 	type RunSurface,
 } from './permission-mode'
 
-/** Models that run natively on the Claude Code CLI login. */
-const CLAUDE_MODEL_PREFIXES = ['claude-', 'opus', 'sonnet', 'haiku']
-
-/**
- * Strip an OpenRouter-style vendor prefix.
- *
- * Conversations created before the engine migration carry ids like
- * `anthropic/claude-sonnet-4`, because everything used to be routed through
- * OpenRouter. The Agent SDK wants the bare id. Without this, every pre-existing
- * Claude conversation looks like a third-party model and fails closed on the
- * gateway path.
- */
-export function normalizeModelId(model: string): string {
-	const slash = model.indexOf('/')
-	if (slash === -1) return model
-	const vendor = model.slice(0, slash).toLowerCase()
-	return vendor === 'anthropic' ? model.slice(slash + 1) : model
-}
-
-export function isClaudeModel(model: string): boolean {
-	const normalized = normalizeModelId(model).toLowerCase()
-	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
-}
+// Which backend runs a model, and the id it is sent as, live in `./model-backend` so the
+// picker and the specs can read them without `$env`. Re-exported: callers look here.
+export { isClaudeModel, modelBackend, normalizeModelId, type EngineBackend } from './model-backend'
+export { isGatewayConfigured } from './gateway.server'
 
 /** AgentStudio's six-level control mapped onto the SDK's five effort levels. */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
@@ -144,27 +128,13 @@ export type EngineOptionsInput = {
 }
 
 /**
- * Gateway env for non-Claude models. Returns undefined when the gateway isn't
- * configured, so the caller can fail loudly rather than silently falling back
- * to Claude and billing the wrong backend.
+ * Thrown for a model nothing here can run — a non-Claude model with no gateway configured,
+ * or a Claude id the CLI cannot run — rather than silently falling back to another model
+ * and billing the wrong backend.
  */
-function gatewayEnv(model: string): Record<string, string> | undefined {
-	const baseUrl = env.LLM_GATEWAY_URL
-	const token = env.LLM_GATEWAY_TOKEN
-	if (!baseUrl || !token) return undefined
-
-	return buildEngineEnv(process.env, {
-		ANTHROPIC_BASE_URL: baseUrl,
-		ANTHROPIC_AUTH_TOKEN: token,
-		ANTHROPIC_MODEL: model,
-	})
-}
-
 export class GatewayNotConfiguredError extends Error {
 	constructor(model: string) {
-		super(
-			`Model "${model}" needs an Anthropic-compatible gateway, but LLM_GATEWAY_URL / LLM_GATEWAY_TOKEN are not set.`,
-		)
+		super(unrunnableModelMessage(model))
 		this.name = 'GatewayNotConfiguredError'
 	}
 }
@@ -209,16 +179,22 @@ export function sandboxAvailable(): boolean {
 }
 
 export function buildEngineOptions(input: EngineOptionsInput): Options {
-	const claude = isClaudeModel(input.model)
-	const sdkModel = claude ? normalizeModelId(input.model) : input.model
-	const proxyEnv = claude ? undefined : gatewayEnv(input.model)
-
-	if (!claude && !proxyEnv) throw new GatewayNotConfiguredError(input.model)
-	const cliEnv = proxyEnv ?? buildEngineEnv(process.env)
+	const gateway = gatewayConfig()
+	const backend = modelBackend(input.model, { gatewayConfigured: gateway !== null })
+	if (backend === 'unavailable') throw new GatewayNotConfiguredError(input.model)
+	const gatewayRun = backend === 'gateway' && gateway !== null
+	// A Claude id in the CLI's spelling; a gateway model under the gateway's own id.
+	const sdkModel = gatewayRun ? input.model : normalizeModelId(input.model)
+	const cliEnv = gatewayRun
+		? buildGatewayEnv({ model: input.model, gateway, source: process.env })
+		: buildEngineEnv(process.env)
 	const cliAuthEnv = engineAuthEnvNames(cliEnv)
 	const scopedBuiltins = scopeBuiltinTools(input.toolScope)
 
-	const { thinking, effort } = resolveThinking(input.reasoningEffort)
+	// Adaptive thinking and `effort` are Anthropic parameters. Whether a gateway passes them
+	// on to a non-Anthropic model — or rejects the request — is not something to find out on
+	// a paid run, so a gateway run has thinking off and sends no effort (#9).
+	const { thinking, effort } = gatewayRun ? resolveThinking('none') : resolveThinking(input.reasoningEffort)
 
 	const agents = input.agents && Object.keys(input.agents).length > 0 ? input.agents : null
 

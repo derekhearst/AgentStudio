@@ -65,7 +65,7 @@ After a restore, the page warns you if some of the listed files were **not** put
 
 ### Compacting a conversation
 
-**Compact Conversation** (in the context panel) sends the SDK's own `/compact` command. The SDK summarises the conversation and starts the session again from that summary, so the next turns really do use less context; the reply shows a "Context compacted" notice.
+**Compact Conversation** (in the context ring's popover in the chat header), or typing `/compact` in the message box, sends the SDK's own `/compact` command. The SDK summarises the conversation and starts the session again from that summary, so the next turns really do use less context; the reply shows a "Context compacted" notice.
 
 When you switch to a model with a smaller context window and the conversation would fill more of it than the auto-compact threshold in settings, the page runs the same `/compact` first, then switches. The notice after the switch says whether compaction ran or failed.
 

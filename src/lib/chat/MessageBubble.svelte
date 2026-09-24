@@ -82,6 +82,9 @@
 		return typeof value === 'number' && value > 0 ? value : null;
 	});
 
+	/** #14 — the run that produced this reply; its page holds the full tool timeline. */
+	const runId = $derived(typeof message.metadata?.runId === 'string' && message.metadata.runId ? message.metadata.runId : null);
+
 	const savedBlocks = $derived.by(() => {
 		const blocks = message.metadata?.blocks;
 		return Array.isArray(blocks) ? (blocks as SavedBlock[]) : null;
@@ -344,6 +347,10 @@
 						<span class="text-right">{message.totalMs ?? 'n/a'}{message.totalMs !== null ? 'ms' : ''}</span>
 						<span class="opacity-70">Tok/s</span>
 						<span class="text-right">{message.tokensPerSec ?? 'n/a'}</span>
+						{#if runId}
+							<span class="opacity-70">Run</span>
+							<a class="link link-hover text-right" href="/runs/{runId}" title="Every tool call and event in this run">Timeline</a>
+						{/if}
 					</div>
 				</div>
 			</div>

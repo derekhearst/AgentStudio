@@ -1,7 +1,7 @@
 import { db } from '$lib/db.server'
 import { llmUsage, toolUsage } from '$lib/costs/usage.schema'
 import { listModels } from '$lib/llm/models.server'
-import { createModelPriceTable, createUnpricedWarner } from '$lib/costs/model-pricing'
+import { createModelPriceTable, createUnpricedWarner, type ModelPrice } from '$lib/costs/model-pricing'
 
 export type LlmUsageSource =
 	| 'chat'
@@ -44,6 +44,24 @@ type LogInput = {
 
 const priceTable = createModelPriceTable(listModels)
 const warnUnpriced = createUnpricedWarner()
+
+/**
+ * A model's per-token prices from the OpenRouter catalogue, cache prices included, or null
+ * when there is no price to be had (the catalogue never loaded, or does not list the model).
+ * For the gateway's per-turn pricing (`$lib/engine/gateway-run.server`), which prices cached
+ * prompt tokens separately. Served from the same table as the ledger, so a failed catalogue
+ * refresh keeps pricing from the previous copy here too.
+ */
+export async function getModelPricing(modelId: string): Promise<ModelPrice | null> {
+	const pricing = await priceTable.lookup(modelId)
+	if (pricing.status !== 'priced') return null
+	return {
+		promptPrice: pricing.promptPrice,
+		completionPrice: pricing.completionPrice,
+		cacheReadPrice: pricing.cacheReadPrice ?? null,
+		cacheWritePrice: pricing.cacheWritePrice ?? null,
+	}
+}
 
 export function calculateCost(
 	tokensIn: number,

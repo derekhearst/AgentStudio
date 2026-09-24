@@ -112,6 +112,72 @@ Rules that keep this honest:
 3. The same rules apply whether the conversation is on a Claude model or a third-party model routed through the gateway. A gateway model that cannot see images will simply not use them; nothing about the delivery path changes.
 4. Files attached on the new-chat page (`/`) go with the first message, exactly as if they had been attached inside the conversation. The new-chat page used to upload them, show them, and then send only the text.
 
+### Composer shortcuts: `@` file mentions and `/` commands
+
+The message box has two shortcuts. Both work from the keyboard, and both work on a phone by tapping.
+
+#### Mentioning a file with `@`
+
+Typing `@` at the start of a word opens a list of the files and folders in the chat's workspace. As you keep typing, the list narrows to the closest matches. The letters only have to appear in order, so `pnt` finds `PinnedTodoPanel.svelte`, and a match in a file's name ranks above the same letters spread across folder names. Picking an entry writes its path into the message as inline code (for example `src/lib/app.ts`) followed by a space. Nothing is sent. The **@ Context** button does the same as typing `@`.
+
+Which files are listed depends on where the chat's next turn will run:
+
+| The chat is… | The list shows |
+| --- | --- |
+| Bound to a project | The project's working folder |
+| Talking to an agent that keeps a persistent workspace | That workspace |
+| Neither | Nothing. Each turn in such a chat starts in a fresh, empty folder, so a file the last turn wrote is not where the next turn will look. The list says so and suggests binding the chat to a project. |
+| Not created yet (the new-chat page) | No `@` list and no **@ Context** button |
+
+Rules:
+
+1. A path is relative to the folder the next turn starts in, so the agent can open it exactly as written.
+2. Folders that are never worth mentioning and are often huge are skipped: `.git`, `node_modules`, build output (`build`, `dist`, `.next`, `.svelte-kit`, `.turbo`, `target`), caches, coverage reports and Python virtual environments. Other dot-folders stay, so project knowledge (`.agentstudio/knowledge`), `.github` and `.claude` can be mentioned.
+3. Symbolic links are never followed or listed. A link the agent made, or one a cloned repository contains, cannot be used to see files elsewhere on the server.
+4. Only names reach the browser. File contents and full server paths never do.
+5. A very large workspace is searched only up to 20,000 entries, 16 folders deep or 1.5 seconds of scanning, whichever comes first, and the list says when that happened. The list of files is remembered for 15 seconds, so a brand-new file can take that long to appear.
+6. Only the conversation's owner can search its files. Asking about someone else's conversation gets the same answer as asking about one that does not exist.
+7. The path goes in as inline code, not as `@path`, so what the model receives does not depend on how the Agent SDK happens to treat an `@`.
+
+#### Running a command with `/`
+
+Typing `/` as the very first character of the message opens the command palette. The **/ Commands** button does the same. Every command is an action the app already has a button for; the palette is a quicker way to reach it, and it calls exactly what that button calls. When that button is switched off, the command is too, and it says why instead of running.
+
+| Command | What it does | Available |
+| --- | --- | --- |
+| `/compact` | Compacts the conversation to free up context: runs the Agent SDK's own `/compact`, which summarises the conversation and starts the session again from that summary (see [chat.md](chat.md#compacting-a-conversation)). The same as Compact on the context meter | In a chat, when no reply is running |
+| `/model <model>` | Switches the model for the next message. It lists the same models as the model picker: only models that can run here, with gateway models marked "Gateway · paid" (see [docs/llm/llm.md](../llm/llm.md)) | Everywhere |
+| `/agent <agent>` | Hands the conversation to another agent | Everywhere, when there are agents to pick |
+| `/research <question>` | Starts a deep research run on the question and opens its page | In a chat |
+| `/plan` | Turns plan mode on or off. Plan mode is read-only: the agent plans instead of making changes. Turning it off goes back to Ask. It never switches to Bypass, which still needs the confirmation on the mode chip | In a chat, when no reply is running |
+| `/effort <level>` (also `/reasoning`, `/think`) | Sets how hard the model thinks before answering | Everywhere, except on a gateway model, which always runs with reasoning off |
+| `/attach` | Opens the file picker | Everywhere |
+| `/voice` | Starts or stops dictation | Where the browser supports it, and not while the last recording is still being turned into text |
+
+How it behaves:
+
+1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and starts highlighted, so Enter keeps it. Typing after the command narrows the list (`/model sonnet`), and the best match is then highlighted instead.
+2. A list shows 50 entries at a time; a deployment with a large gateway can offer more models than that. When the current model is not among those 50, it is shown first, so it is never missing from the list. A conversation whose model is stored in OpenRouter's spelling (`anthropic/claude-sonnet-4.5`) still finds its model marked current. A model that can no longer run here is not in the list at all; the model pill marks it "Unavailable". The first time the list opens on a page it may still be loading; the highlight lands on the current model when the list arrives, unless you have already moved it with the arrow keys or the pointer.
+3. `/research` takes free text: type the question on the same line, after the command, and press Enter. Anything on the lines below is left in the message box.
+4. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
+5. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
+6. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds. The message box can be open while a reply is still running, when the agent has paused to ask you a question. `/compact` and `/plan` then say that a reply is running rather than acting: the Compact button does nothing until the reply ends, and the mode chip is switched off because a running reply keeps the mode it started with.
+7. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
+
+#### Keyboard and touch
+
+| Key | With a list open |
+| --- | --- |
+| Up / Down | Move through the list (it wraps around) |
+| Enter or Tab | Take the highlighted entry |
+| Escape | Close the list. It stays closed until the cursor leaves that word |
+| Enter or Tab, while the file list is still searching | Nothing yet. Pick from the list once it arrives, or press Escape to close it and send the message as typed |
+| Enter, when the list has finished and is empty | Sends the message as typed |
+
+While a Japanese, Chinese or Korean input method is composing, Enter confirms the composition. It never sends the message or picks from a list; before this, Enter could send half-composed text.
+
+On a phone the **Attach**, **@ Context** and **/ Commands** buttons sit in a row above the message box (before this they did nothing). Tapping an entry in a list picks it without closing the keyboard. The list opens above the message box, or below it when the box is near the top of the screen, as on the new-chat page.
+
 ### Starting a conversation from the new-chat page
 
 The new-chat page (`/`) greets the owner by the display name they gave during first-run setup ("Good morning, Alex"). If no name was given, the greeting is just "Good morning".
@@ -178,17 +244,9 @@ The workbench shows a live run HUD with:
 
 ### Right panel
 
-The right panel is always visible and uses the same set of tabs in all modes. Tab content adapts to what is relevant for the current mode and active run. The panel is partially implemented; some tabs are functional, others are planned.
+The right rail has two tabs, the same for every agent: **Preview** (a file or web page) and **Files** (the files the agent changed in this chat, with +/- counts). It is folded to a thin strip until something opens a preview or the user expands it, and remembers per user whether it was left expanded. On a phone it is a drawer opened from the chat header. The mode-aware tab set this section used to describe (Run HUD, Memory, Task, PR) was never built, and #14 settled on the smaller rail instead. See [../chat-console/chat-console.md](../chat-console/chat-console.md) for the full behaviour.
 
-| Tab         | Agent mode                                                                                | Research mode                 | Plan mode                     | Chat mode              |
-| ----------- | ----------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------- | ---------------------- |
-| **Files**   | Changed files list, unified diff preview                                                  | Read-only file browser        | Read-only file browser        | Read-only file browser |
-| **Run HUD** | Agent, round, active tool, subagents, token+cost budget, pending approvals, blocked state | Progress events, source count | Plan graph, estimate summary  | —                      |
-| **Memory**  | Context window inspector, active memory refs                                              | Active memory refs            | Active memory refs            | Active memory refs     |
-| **Task**    | Linked task, sub-tasks, approval controls, evaluator status                               | Linked task                   | Linked task, success criteria | Linked task            |
-| **PR**      | Pull request status, diff summary, pending review items                                   | —                             | —                             | —                      |
-
-On mobile, the right panel collapses into a bottom sheet tab drawer.
+A run's tool calls and events are on its own page, `/runs/<id>`, linked from each reply's stats popover and from the **running** chip at the top of the chat.
 
 ### Inline approvals and answers
 
@@ -249,7 +307,7 @@ How the controls that exist today behave:
 
 ### Context meter
 
-The context meter above the composer, and the same figure in the right rail, estimate how much of the model's context window the conversation fills. It adds up:
+The context meter above the composer, and the context ring in the chat's header (on desktop as well as mobile, since #14 moved it out of the right rail), estimate how much of the model's context window the conversation fills. It adds up:
 
 | Part | Where the figure comes from |
 | --- | --- |
@@ -268,7 +326,7 @@ Editing one of your messages, or regenerating the last reply, cuts the SDK sessi
 
 ### Mobile and compact layout
 
-On mobile, the right panel collapses into a bottom sheet or tab drawer. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
+On mobile, the right rail is a drawer opened from the chat header. The workbench preserves the same actions, but prioritizes the thread and current blocker state.
 
 ### Reading replies aloud
 
@@ -310,6 +368,8 @@ The renderer checks itself when the app starts by running a set of known attack 
 - Nothing the model writes can run script in the app, and displaying a reply never loads any image except an uploaded attachment.
 - After an edit or regenerate the model sees exactly the kept conversation plus the message being answered — never the dropped replies, and never a placeholder prompt.
 - Restoring files happens before any message changes, and a restore that fails leaves the conversation as it was. Uncommitted changes in an imported repository are never overwritten without an explicit confirmation.
+- A path offered by `@` is one the next turn can open as written: it is relative to the folder that turn starts in, and it never reaches through a symbolic link.
+- A palette command calls the same handler as the button it stands in for. The palette has no copy of its own of any action.
 
 ## Roles & Permissions
 
@@ -317,6 +377,7 @@ The renderer checks itself when the app starts by running a set of known attack 
 | -------------------------------- | ------------------ |
 | View own workbench sessions      | Authenticated user |
 | Approve own plan or tool request | Owner user, admin  |
+| Search a conversation's files with `@` | The conversation's owner |
 | Resolve another user's item      | Admin only         |
 | View admin observability panes   | Admin only         |
 
@@ -328,10 +389,10 @@ The current implementation is a baseline, not a constraint. This domain may be r
 
 This domain follows [../ui/spec.md](../ui/spec.md) and defines the primary app-shell experience.
 
-- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and mode-aware right panel tabs.
+- Surfaces: session list (with agent filter, project grouping, and expandable run tree), chat thread canvas, composer, mode selector, live run HUD, inline action cards, and the right rail (Preview + Files).
 - States and badges: running, blocked, needs-input, queued interjection, completed, failed, and pending approvals count.
 - Blocking actions: plan approvals, tool approvals, and ask_user responses must resolve through durable review items.
-- Mobile behavior: right panel collapses to bottom-sheet tabs; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
+- Mobile behavior: the right rail opens as a drawer from the chat header; blocking cards remain visible near composer; session tree uses progressive disclosure to avoid deep nested panes.
 
 ## References
 
