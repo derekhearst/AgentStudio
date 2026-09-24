@@ -375,13 +375,26 @@ export function exportFileNames(title: string, date: Date, extension: 'md' | 'js
 			.slice(0, 60)
 			.replace(/-+$/g, '') || 'conversation'
 	const readable =
-		title
-			.replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, ' ')
-			.replace(/\s+/g, ' ')
-			.trim()
-			.slice(0, 80)
-			.trim() || 'conversation'
+		firstCodePoints(
+			title
+				.replace(LONE_SURROGATE, '')
+				.replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, ' ')
+				.replace(/\s+/g, ' ')
+				.trim(),
+			80,
+		).trim() || 'conversation'
 	return { ascii: `${slug}-${day}.${extension}`, utf8: `${readable}-${day}.${extension}` }
+}
+
+/** Half of a surrogate pair with no other half: not valid Unicode, and `encodeURIComponent` throws on it. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
+/**
+ * The first `max` characters of `text`, counted in code points. `slice` counts UTF-16 units,
+ * so cutting there can split an emoji into a lone surrogate.
+ */
+function firstCodePoints(text: string, max: number): string {
+	return Array.from(text).slice(0, max).join('')
 }
 
 /** The `Content-Disposition` header value for an export download. */

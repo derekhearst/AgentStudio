@@ -212,6 +212,20 @@ test.describe('conversation export — the formatter', () => {
 			`attachment; filename="fix-the-login-page-cafe-2-2026-09-23.md"; filename*=UTF-8''Fix%20the%20login%20page%20caf%C3%A9%202-2026-09-23.md`,
 		)
 	})
+
+	test('file names: an emoji at the cut is kept whole, never split into half a character', () => {
+		// 79 characters and then an emoji, which is two UTF-16 units: a cut at 80 units lands
+		// between them, and the lone half made `encodeURIComponent` throw (a 500 on download).
+		const names = exportFileNames(`${'x'.repeat(79)}😀 more`, at, 'md')
+		expect(names.utf8).toBe(`${'x'.repeat(79)}😀-2026-09-23.md`)
+		expect(() => exportContentDisposition(names)).not.toThrow()
+		expect(exportContentDisposition(names)).toContain(`filename*=UTF-8''${'x'.repeat(79)}%F0%9F%98%80-2026-09-23.md`)
+
+		// A title that already carries a lone half (it can arrive through JSON) is cleaned too.
+		const broken = exportFileNames('half \uD83D here', at, 'json')
+		expect(broken.utf8).toBe('half here-2026-09-23.json')
+		expect(() => exportContentDisposition(broken)).not.toThrow()
+	})
 })
 
 test.describe('conversation export — the download route', () => {
