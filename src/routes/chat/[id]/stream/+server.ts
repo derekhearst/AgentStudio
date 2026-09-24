@@ -74,6 +74,7 @@ import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
 import { prepareRunWorkspace, type RunWorkspace } from '$lib/workspace/workspace.server'
 import { resolveToolScope } from '$lib/engine/tool-scope'
+import { loadRunMcpServers } from '$lib/mcp/mcp.server'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
@@ -429,6 +430,16 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	// #24 — back files up before the agent changes them, where the workspace outlives the turn.
 	const fileCheckpointing = supportsFileCheckpoints(workspace.context)
 
+	/*
+	 * #17 — the operator's connectors, loaded per run like the two above so an edit on Settings →
+	 * Connectors takes effect on the next turn. None for an agent with a fixed tool list. Never
+	 * throws: a connector that cannot be used is left out and named in a notice.
+	 */
+	const connectors = await loadRunMcpServers({ userId: user.id, runSource: RUN_SOURCE, toolScoped: Boolean(toolScope) })
+	if (connectors.skipped.length > 0) {
+		logger.warn('[chat/stream] connectors left out of the run', { runId: run.id, skipped: connectors.skipped })
+	}
+
 	let engineOptions
 	try {
 		engineOptions = buildEngineOptions({
@@ -438,6 +449,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			reasoningEffort,
 			systemPrompt: assembled.systemPrompt,
 			toolScope,
+			externalMcp: connectors,
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
@@ -557,6 +569,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 * behaviour never was.
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
+				for (const notice of connectors.notices) await emit('notice', notice)
 
 				// #32 — the concurrency cap, the one-level rule and each child's budget check, and a
 				// ledger row for each child the moment it reports back. One for the turn: a resume
@@ -656,6 +669,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 							approvalRequiredTools.has('*') || approvalRequiredTools.has(name),
 						permissionMode: permission.mode,
 						toolScope,
+						mcpConnectors: connectors.connectors,
 						approvalToken: approvalTokenFor,
 						// #4 — the SDK's AskUserQuestion, shown as the question card and in /review.
 						askUser: createAskUserHost({ runId: run.id, emit }),

@@ -318,3 +318,58 @@ test.describe('rate limits and progress', () => {
 		expect(interpretSdkMessage({ type: 'tool_progress', tool_use_id: 'toolu_1' })).toBeNull()
 	})
 })
+
+test.describe('connectors at the start of a turn (#17)', () => {
+	const init = (mcp_servers: unknown) => ({ type: 'system', subtype: 'init', tools: [], mcp_servers })
+
+	test('every server up, or still connecting, says nothing', () => {
+		expect(
+			interpretSdkMessage(
+				init([
+					{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+					{ name: 'github', status: 'connected', source: 'dynamic' },
+					// MCP startup does not block the turn, so a slow server is not a failure.
+					{ name: 'linear', status: 'pending', source: 'dynamic' },
+				]),
+			),
+		).toBeNull()
+		expect(interpretSdkMessage(init([]))).toBeNull()
+		expect(interpretSdkMessage({ type: 'system', subtype: 'init' })).toBeNull()
+	})
+
+	test('a connector that failed or needs a sign-in is named in one kept warning', () => {
+		const result = interpretSdkMessage(
+			init([
+				{ name: 'agentstudio', status: 'connected', source: 'sdk' },
+				{ name: 'github', status: 'failed', source: 'dynamic' },
+				{ name: 'linear', status: 'needs-auth', source: 'dynamic' },
+			]),
+		)
+
+		expect(result?.kind).toBe('notice')
+		if (result?.kind !== 'notice') return
+		expect(result.notice.kind).toBe('mcp_unavailable')
+		expect(result.notice.level).toBe('warn')
+		expect(result.notice.persist).toBe(true)
+		expect(result.notice.title).toBe('2 connectors are unavailable this turn')
+		expect(result.notice.detail).toContain('github (could not connect)')
+		expect(result.notice.detail).toContain('linear (needs a sign-in)')
+	})
+
+	test('our own in-process server is never reported as a connector', () => {
+		expect(interpretSdkMessage(init([{ name: 'agentstudio', status: 'failed', source: 'sdk' }]))).toBeNull()
+	})
+
+	test('a server name is untrusted text: reduced to safe characters and clipped', () => {
+		const result = interpretSdkMessage(
+			init([{ name: `<img src=x onerror=alert(1)>${'a'.repeat(80)}`, status: 'failed', source: 'dynamic' }]),
+		)
+
+		expect(result?.kind === 'notice' && result.notice.title).toBe('A connector is unavailable this turn')
+		const detail = result?.kind === 'notice' ? (result.notice.detail ?? '') : ''
+		const shown = detail.split(' (')[0]
+		expect(shown).toMatch(/^[a-zA-Z0-9_-]+$/)
+		expect(shown.length).toBeLessThanOrEqual(40)
+		expect(detail).not.toContain('<')
+	})
+})

@@ -45,9 +45,11 @@ import { resolveBashPolicy, type BashPolicy } from './workspace-guard'
 import type { ConversationPermissionMode } from './permission-mode'
 import { decideToolCall, type ToolDecisionContext } from './tool-decision'
 import type { ToolScope } from './tool-scope'
+import type { McpProvenance, RunMcpConnectors } from './mcp-connectors'
 import { toolResultDetails, type ToolResultDetails } from './tool-result-details'
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
+import { watchConnectorStatus } from './mcp-status-watch'
 import { createBackgroundShells } from './background-shells.server'
 import { ASK_USER_QUESTION_TOOL, answerAskUserQuestion, type AskUserHost } from './ask-user-question'
 import { askUserQuestionDetails } from './tool-result-details'
@@ -97,6 +99,8 @@ export type EngineQuerySource = AsyncIterable<SDKMessage> & {
 	interrupt?: () => Promise<unknown>
 	stopTask?: (taskId: string) => Promise<unknown>
 	getContextUsage?: () => Promise<unknown>
+	/** #17 — every MCP server's status; see `./mcp-status-watch`. */
+	mcpServerStatus?: () => Promise<unknown>
 	close?: () => void
 }
 
@@ -153,6 +157,12 @@ export type EngineRunInput = {
 	 * anything else is considered. Omit for every tool.
 	 */
 	toolScope?: ToolScope | null
+	/**
+	 * #17 — the operator's connectors loaded for this run, with each one's per-tool policy
+	 * (`./mcp-connectors`). A call to any other external server is refused. Omit to keep the
+	 * posture from before connectors: every external tool asks.
+	 */
+	mcpConnectors?: RunMcpConnectors | null
 	/**
 	 * Whether the per-tool *settings* alone require human approval — i.e. the tool is in
 	 * `settings.toolConfig.approvalRequiredTools` (or the `'*'` wildcard), unioned with
@@ -479,8 +489,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		scope: input.toolScope ?? null,
 		// Read off what the SDK is actually told, so it cannot drift from `settingSources`.
 		projectConfigLoaded: (input.options.settingSources ?? []).includes('project'),
+		connectors: input.mcpConnectors ?? null,
 	}
-	const decide = (name: string, args: unknown) => decideToolCall(decisionContext, name, args)
+	// `provenance` is the SDK's report of the call's MCP server; the frame decision below has none yet.
+	const decide = (name: string, args: unknown, provenance?: McpProvenance | null) =>
+		decideToolCall(decisionContext, name, args, provenance)
 	// Tools whose `tool_call` frame has already gone out, so the approval path
 	// doesn't emit a second one.
 	const callEmitted = new Set<string>()
@@ -552,7 +565,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		if (hookInput.hook_event_name !== 'PreToolUse') return {}
 		const name = bareToolName(hookInput.tool_name)
 		// A host-owned tool is allowed here unless it is out of scope (`./tool-decision`).
-		const decision = decide(name, hookInput.tool_input)
+		const decision = decide(name, hookInput.tool_input, hookInput.mcp_server ?? null)
 
 		/*
 		 * #32 — a delegation the gate would let through also meets admission control: the
@@ -617,7 +630,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 		// Always installed. The hook above routes every 'ask' here, and a run with nobody to
 		// answer still needs this to refuse rather than hang.
-		canUseTool: async (toolName, toolInput, { signal, toolUseID, agentID }): Promise<PermissionResult> => {
+		canUseTool: async (toolName, toolInput, { signal, toolUseID, agentID, mcpServer }): Promise<PermissionResult> => {
 			const name = bareToolName(toolName)
 			// The host answers AskUserQuestion itself (#4): it renders its own card, so no
 			// tool_call / tool_pending frame may go out, and the answers go back as the input.
@@ -637,7 +650,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			const id = claimToolUseId(name, toolInput, toolUseID)
 			if (toolUseID) await awaitAnnouncement(id)
 
-			const gate = decide(name, toolInput)
+			const gate = decide(name, toolInput, mcpServer ?? null)
 
 			/** Moves the UI's pending block to "executing" using the same id. */
 			const allow = async (): Promise<PermissionResult> => {
@@ -724,6 +737,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 		},
 	})
 
+	// #17 — a connector still connecting when init was sent is checked again as the turn runs.
+	const connectorStatus = watchConnectorStatus({
+		names: input.mcpConnectors?.keys() ?? [],
+		readStatus: session.mcpServerStatus ? () => session.mcpServerStatus!() : null,
+	})
+
 	try {
 		for await (const message of session) {
 			const msg = message as Record<string, any>
@@ -742,6 +761,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
 				continue
+			}
+
+			const lateConnectorNotice = await connectorStatus.observe(msg)
+			if (lateConnectorNotice) {
+				blocks.push({ kind: 'notice', notice: lateConnectorNotice })
+				await emit('notice', lateConnectorNotice)
 			}
 
 			/*

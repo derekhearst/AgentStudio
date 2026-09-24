@@ -561,6 +561,13 @@
       "when": 1790201242224,
       "tag": "0079_conversation_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790222398978,
+      "tag": "0080_mcp_servers",
+      "breakpoints": true
     }
   ]
 }

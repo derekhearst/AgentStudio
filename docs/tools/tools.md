@@ -4,10 +4,11 @@
 
 Tools are the actions an agent can take during a conversation: search the web, read a PDF, open a pull request, schedule an automation, and so on. When the agent decides it needs one, it asks for it by name, AgentStudio runs it, and the result goes back to the agent.
 
-An agent in a chat has two kinds of tools:
+An agent in a chat has two kinds of tools, and a third when you have added connectors:
 
 - **Claude's own tools**, which come with the Claude Agent SDK: reading, writing and editing files (`Read`, `Write`, `Edit`), finding files (`Glob`, `Grep`), running commands (`Bash`), handing work to another agent (`Agent`), and asking you a question (`AskUserQuestion`, shown as a question card — see [../chat/spec.md](../chat/spec.md#questions-from-the-agent)).
 - **AgentStudio's tools**, about 45 of them, which do things only this app can do: its web search, projects, source control, agents, automations, monitors, skills, and image and video generation.
+- **Connectors' tools**, from remote MCP servers you added on Settings → Connectors. They are named `mcp__<connector>__<tool>`, are not on the Tool Approval list, and follow each connector's own Allow / Ask / Block setting. See [../mcp/mcp.md](../mcp/mcp.md).
 
 This page is about AgentStudio's tools. [`spec.md`](spec.md) describes an earlier design (capability groups and `enable_capability`) that is no longer how the app works, apart from its sections on web access safety and web tool limits, which are current.
 
@@ -84,6 +85,7 @@ The conversation's permission mode (Plan only, Ask, Accept edits, Bypass) applie
 
 - **Claude Agent SDK.** AgentStudio's tools are handed to it as an in-process tool server, so the agent sees them next to Claude's own.
 - **MCP endpoint (`/api/mcp`).** Other programs can call AgentStudio's tools over the Model Context Protocol. It offers every AgentStudio tool except the ones that only work inside a chat: the three mandatory-approval tools (there is nobody to press Allow) and `set_project_context` (there is no conversation to bind). They are not listed, and a request to run one is refused before anything happens.
+- **Connectors.** Remote MCP servers you add on Settings → Connectors join interactive chats beside AgentStudio's own tool server; nothing else is loaded as an MCP server. See [../mcp/mcp.md](../mcp/mcp.md).
 - **OpenRouter.** The old loop sends its tools to models through OpenRouter.
 - **GitHub.** The source-control tools use your connected GitHub account.
 - **SearXNG.** `web_search` goes to the self-hosted search engine.

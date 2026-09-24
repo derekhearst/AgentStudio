@@ -55,6 +55,17 @@ export const REMOVED_BUILTIN_TOOLS: ReadonlySet<string> = new Set(['BashOutput',
 export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Workflow', 'SendMessage'] as const
 
 /**
+ * The CLI's generic MCP resource readers, refused on every run (#17).
+ *
+ * They take the server to read from as an *argument*, so they are not `mcp__`-qualified and
+ * the SDK reports no provenance for them: the connector policy — which is keyed on the
+ * server a call belongs to — could not see which connector a read went to. Our own
+ * in-process server publishes no resources, so nothing of ours is lost. Names checked
+ * against the bundled CLI (0.3.278), which registers exactly these three.
+ */
+export const DISALLOWED_MCP_RESOURCE_TOOLS = ['ListMcpResourcesTool', 'ReadMcpResourceTool', 'ReadMcpResourceDirTool'] as const
+
+/**
  * The CLI's current name for each built-in it has renamed, keyed by the old name.
  *
  * The same table the SDK applies to permission rules (`Task` → `Agent` and so on in

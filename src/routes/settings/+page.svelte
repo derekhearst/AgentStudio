@@ -15,6 +15,7 @@
 	import PageHeader from '$lib/ui/PageHeader.svelte';
 	import SettingsNav from '$lib/settings/SettingsNav.svelte';
 	import SettingsToolApprovalPanel from '$lib/settings/panels/SettingsToolApprovalPanel.svelte';
+	import SettingsConnectorsPanel from '$lib/settings/panels/SettingsConnectorsPanel.svelte';
 	import SettingsModelPanel from '$lib/settings/panels/SettingsModelPanel.svelte';
 	import SettingsContextPanel from '$lib/settings/panels/SettingsContextPanel.svelte';
 	import SettingsMemoryPanel from '$lib/settings/panels/SettingsMemoryPanel.svelte';
@@ -51,6 +52,7 @@
 		{ id: 'model', label: 'Model & AI', color: 'primary', keywords: 'model ai default transcription voice audio speech read aloud tts text-to-speech' },
 		{ id: 'context', label: 'Context Window', color: 'secondary', keywords: 'context window reserved response compact threshold compaction' },
 		{ id: 'tools', label: 'Tool Approval', color: 'secondary', keywords: 'tools sandbox coding skills agents image generation toggle approval' },
+		{ id: 'connectors', label: 'Connectors', color: 'info', keywords: 'connectors mcp servers remote external tools integrations oauth token' },
 		{ id: 'memory', label: 'Memory Palace', color: 'accent', keywords: 'memory palace recall mining embeddings rerank topk' },
 		{ id: 'notifications', label: 'Notifications', color: 'accent', keywords: 'notification task completed needs input agent errors' },
 		{ id: 'budget', label: 'Budget', color: 'warning', keywords: 'budget daily monthly limit cost' },
@@ -373,6 +375,15 @@
 					{#if isVisible('tools')}
 						<div id="sec-tools" data-settings-section class="scroll-mt-4">
 							<SettingsToolApprovalPanel toolConfig={settings.toolConfig} {searchQuery} />
+						</div>
+					{/if}
+
+					<!-- ════════════════════════════════════════════════
+					     CONNECTORS (#17 — their own page)
+					     ════════════════════════════════════════════════ -->
+					{#if isVisible('connectors')}
+						<div id="sec-connectors" data-settings-section class="scroll-mt-4">
+							<SettingsConnectorsPanel />
 						</div>
 					{/if}
 

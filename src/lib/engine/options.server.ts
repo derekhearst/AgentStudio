@@ -21,7 +21,8 @@
  */
 
 import type { EffortLevel, Options, ThinkingConfig } from '@anthropic-ai/claude-agent-sdk'
-import { DISALLOWED_BUILTIN_TOOLS } from './builtin-tools'
+import { DISALLOWED_BUILTIN_TOOLS, DISALLOWED_MCP_RESOURCE_TOOLS } from './builtin-tools'
+import { composeMcpServers, type ExternalMcpInput } from './mcp-connectors'
 import { resolveSettingSources } from './setting-sources'
 import { buildEngineEnv, engineAuthEnvNames } from './engine-env'
 import { buildGatewayEnv } from './gateway-env'
@@ -31,7 +32,7 @@ import { engineSandboxSettings } from './engine-sandbox'
 import { ASK_USER_QUESTION_SETTINGS, ASK_USER_QUESTION_TOOL_CONFIG } from './ask-user-question'
 import { scopeBuiltinTools, type ToolScope } from './tool-scope'
 import type { EngineAgentDefinition } from './agent-definitions'
-import { buildToolServer, ENGINE_MCP_SERVER, type ToolServerContext } from './tools.server'
+import { buildToolServer, type ToolServerContext } from './tools.server'
 import { bubblewrapAvailable } from '$lib/tools/sandbox-exec.server'
 import {
 	resolveEffectivePermissionMode,
@@ -126,6 +127,12 @@ export type EngineOptionsInput = {
 	 * SDK's own general-purpose agent is still reachable, but nothing of ours is.
 	 */
 	agents?: Record<string, EngineAgentDefinition>
+	/**
+	 * #17 — the operator's enabled connectors (HTTP/SSE MCP servers) and the tools they block,
+	 * from `$lib/mcp/mcp.server`'s `loadRunMcpServers`. Merged beside our own server for an
+	 * unscoped run only; see `./mcp-connectors`.
+	 */
+	externalMcp?: ExternalMcpInput | null
 }
 
 /**
@@ -215,7 +222,18 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		model: sdkModel,
 		thinking,
 		...(effort ? { effort } : {}),
-		mcpServers: { [ENGINE_MCP_SERVER]: buildToolServer(input.tools, input.toolScope?.inHouse) },
+		mcpServers: composeMcpServers({
+			own: buildToolServer(input.tools, input.toolScope?.inHouse),
+			external: input.externalMcp?.servers,
+			scoped: Boolean(input.toolScope),
+		}),
+		/*
+		 * Only the servers above exist (#17): no repo `.mcp.json`, no user or plugin servers, and
+		 * — per the bundled CLI's own message — no claude.ai account connectors, which a
+		 * subscription-logged-in CLI would otherwise load and bypass mode would run unasked.
+		 * Connectors are the operator's rows on Settings → Connectors, nothing else.
+		 */
+		strictMcpConfig: true,
 		/*
 		 * A scoped run restricts: `tools` is the SDK's availability list for its built-ins, and
 		 * the MCP server above registers only the scoped in-house tools. `allowedTools` is
@@ -223,7 +241,11 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 * gate for the very tools a read-only agent was scoped to. See `./tool-scope`.
 		 */
 		...(scopedBuiltins ? { tools: scopedBuiltins } : {}),
-		disallowedTools: [...DISALLOWED_BUILTIN_TOOLS],
+		disallowedTools: [
+			...DISALLOWED_BUILTIN_TOOLS,
+			...DISALLOWED_MCP_RESOURCE_TOOLS,
+			...(input.toolScope ? [] : (input.externalMcp?.disallowedTools ?? [])),
+		],
 		/*
 		 * Always set, never omitted. The SDK reads an omitted `settingSources` as "load
 		 * everything", so leaving it off silently merged any repo-committed

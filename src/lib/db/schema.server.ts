@@ -31,6 +31,7 @@ import * as researchSchema from '$lib/research/research.schema'
 import * as imagesSchema from '$lib/images/images.schema'
 import * as observabilitySchema from '$lib/observability/observability.schema'
 import * as sourceControlSchema from '$lib/source-control/source-control.schema'
+import * as mcpSchema from '$lib/mcp/mcp.schema'
 
 export const schema = {
 	...authSchema,
@@ -56,6 +57,7 @@ export const schema = {
 	...imagesSchema,
 	...observabilitySchema,
 	...sourceControlSchema,
+	...mcpSchema,
 }
 
 export type AppSchema = typeof schema

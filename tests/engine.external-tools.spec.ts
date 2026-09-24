@@ -21,8 +21,10 @@ import {
  * describe tools we wrote, so `mcp__anything__file_read` classified as read-only and plan
  * mode let it run.
  *
- * Nothing external is configurable yet — the table and the settings UI are the other half
- * of #17. These tests exist so that half cannot land on a gate that fails open.
+ * These pin the classification with no connector policy at all — the posture every external
+ * tool had before Settings → Connectors existed, and still the default for a tool the operator
+ * has not set. The per-tool policy and the row-keyed provenance check that sit on top of it are
+ * pinned in `engine.connectors.spec.ts`.
  */
 
 test.describe('a name from another server is not evidence', () => {

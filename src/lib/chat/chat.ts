@@ -9,6 +9,7 @@ import {
 	sanitizedText,
 	sanitizerHolds,
 } from '$lib/util/safe-markdown'
+import { OWN_MCP_SERVER, parseToolNamespace } from '$lib/engine/permission-mode'
 import hljs from 'highlight.js/lib/core'
 import bash from 'highlight.js/lib/languages/bash'
 import css from 'highlight.js/lib/languages/css'
@@ -229,7 +230,29 @@ function extractShortValue(args: unknown, candidates: string[]): string | null {
 // the shared implementation lives in `$lib/util/json` (tryParseJson).
 export { tryParseJson as parseJsonValue } from '$lib/util/json'
 
+/**
+ * A connector's tool (#17) arrives as `mcp__<server>__<tool>`. Label it by its own name and say
+ * which connector it came from — never from `TOOL_COPY`, whose entries describe our tools, and a
+ * connector's server may publish a tool under any name it likes.
+ */
+function externalToolLabel(server: string, bare: string, status: ToolCardStatus) {
+	const tool = fallbackToolLabel(bare)
+	const label =
+		status === 'denied'
+			? `${tool} was denied`
+			: status === 'failed'
+				? `${tool} failed`
+				: status === 'completed'
+					? `Completed ${tool.toLowerCase()}`
+					: `${tool} in progress`
+	return `${label} · ${server}`
+}
+
 export function getFriendlyToolLabel(name: string, args: unknown, status: ToolCardStatus = 'completed') {
+	const namespace = parseToolNamespace(name)
+	if (namespace.server && namespace.server !== OWN_MCP_SERVER) {
+		return externalToolLabel(namespace.server, namespace.bare, status)
+	}
 	const copy = TOOL_COPY[name]
 	const query = extractShortValue(args, QUERY_FIELDS)
 	const path = extractShortValue(args, PATH_FIELDS)
