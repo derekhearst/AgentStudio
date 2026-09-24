@@ -251,7 +251,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #24 | Filesystem checkpoints | **rebuild** | `enableFileCheckpointing` + `rewindFiles()`, not hand-rolled git stashes |
 | #23 | Per-project instructions | **rebuild** — shipped | `settingSources` was 90% of it; instructions and the knowledge directory close the rest |
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
-| #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
+| #32 | Multi-agent orchestration | **rebuild** — shipped | SDK `agents` + the `Agent` tool, children in the foreground and in parallel, gated by a PreToolUse hook rather than `canUseTool` |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
 | #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
 | #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
@@ -468,6 +468,39 @@ a wrapper. Two things the work decided that the plan above did not anticipate:
 
 Steps 3–5 (the concurrency cap, per-child budget, tree rendering from `tool_use_result`,
 `stopTask` cancellation) are still open and belong with #32.
+
+**Shipped (#32), 2026-09-23.** Steps 3–5 are done, but three claims in the plan above turned
+out wrong once the installed SDK (0.3.278, bundled CLI 2.1.278) was read, and the build
+follows what it actually does:
+
+- **The tool is `Agent`, not `Task`.** `Task` is the alias older CLIs used. Everything that
+  recognises a delegation accepts both names.
+- **`canUseTool` is not where a cap can live.** The `Agent` tool answers its own permission
+  check with "allow" in the modes we run, so `canUseTool` never sees a delegation. The cap
+  lives in the engine's PreToolUse hook, which fires for every call and whose answer is
+  binding (`src/lib/engine/delegation-gate.ts`). The hook refuses a fifth live child with a
+  "wait, then delegate the rest" message, refuses a child's own delegation, runs the child
+  through the chat budget gate scoped to its own agent, and rewrites the call to run in the
+  foreground with `isolation` stripped (and `model` too on a gateway parent). The CLI applies
+  an `updatedInput` carried without a decision as a plain input change (checked in the
+  bundled CLI).
+- **Backgrounded children were the wrong default, and `isolation: 'worktree'` is not free.**
+  In our one-shot query a background child is held back and killed at the CLI's print-mode
+  ceiling and reports only a token total. A foreground child runs in parallel with its
+  siblings, blocks its own call, and returns a typed `AgentOutput`. The worktree option would
+  branch the run's checkout into a copy nothing merges back or cleans up, so it is stripped;
+  the "git worktrees" row stays **absent**.
+
+Cancellation needed no `stopTask`: a foreground child runs on the parent turn's own abort
+controller (bundled CLI), so Stop's `interrupt()` ends every child with the turn, and
+`perTaskStopAffordance` is never declared. Each child is a collapsed card in the reply
+(`SubagentBlockCard`) with status, tokens, cost and duration, expanding to its own
+transcript built from the `subagent_*` frames. Each completed child gets one `subagent`
+`llm_usage` row (parent `runId`, the child's own `agentId`), carved out of the parent's row
+because `modelUsage` already includes children and the SDK's per-child `usage` is the child's
+last model call only. No migration. Left for later: child run rows (option C in the triage),
+a per-child stop control, and worktree isolation. See [../agents/spec.md](../agents/spec.md)
+and [../cost/spec.md](../cost/spec.md).
 
 ### #4 — AskUserQuestion
 

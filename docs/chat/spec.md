@@ -151,6 +151,27 @@ Each session row can be expanded into a run hierarchy tree derived from `runs.pa
 
 The tree is read-only navigation metadata. It does not create a separate conversation thread; all user-visible conversation messages remain in the session.
 
+**Status (2026-09-23): not built.** There is no `runs.parentRunId`, and delegated agents do not get runs of their own. The tree that exists today is inside the reply: see the next section.
+
+### Delegated agents in the reply (#32)
+
+When the agent hands work to other agents, each child appears in the reply as its own card, in the place where the agent asked for it. Several children asked for at once appear as several cards, one under the other, and work at the same time.
+
+**Collapsed**, a card shows:
+
+| Part | What it says |
+| --- | --- |
+| Name | The child agent's name |
+| Status | `working…`, `done`, `failed`, `refused` (turned away by the concurrency limit, the budget, plan mode, or because a child tried to delegate), or `stopped` (still working when the turn ended) |
+| Task | The short description the parent gave it |
+| Figures | Tokens, cost, how long it took and how many tools it called, leaving out any the child did not report. Cost appears once the reply is saved, and never as "$0.00" on the Claude subscription |
+
+**Expanded**, it shows the child's own transcript: what it said and which tools it called, in order, each call with a short hint at what it touched (a file path, a search pattern, a command) and a dot for success or failure. A refused or failed child shows the reason at the top. A long transcript is shortened (at most 200 entries and 20,000 characters of text) and says so.
+
+Cards start collapsed, both while the turn runs and after a reload, because a fan-out opens several at once. A card is opened at the moment the agent asks for the child, so a child that is refused before doing anything still has a card that explains why. The delegation does not also show as a separate tool card, which it used to, repeating the child's report.
+
+The card reads the same whether it is live or reloaded: it is built from the same frames while streaming and saved with the reply afterwards. Replies saved before this change still show their children, from the text and tool names they kept.
+
 ### Plan approval inline
 
 When the main agent proposes a plan, the chat thread renders it as a structured approval card:
@@ -237,7 +258,7 @@ Users can intervene mid-run from chat:
 
 How the controls that exist today behave:
 
-- **Stop** ends the current turn. The page asks the server to stop the run, and what the agent produced so far is kept as its reply. Reloading the page or losing the connection does **not** stop a run; it keeps working and the page reconnects on its own. See [../runs/spec.md](../runs/spec.md#stopping-a-run).
+- **Stop** ends the current turn. The page asks the server to stop the run, and what the agent produced so far is kept as its reply. Any delegated agent still working stops with it, and its card shows `stopped`. There is no stop button on a single child yet. Reloading the page or losing the connection does **not** stop a run; it keeps working and the page reconnects on its own. See [../runs/spec.md](../runs/spec.md#stopping-a-run).
 - **Coming back to a running turn.** Opening a conversation whose turn is still running — after a reload, or from another tab — shows that turn streaming again, with its tool and approval cards and the Stop button. Text written before you came back appears once the turn finishes.
 - **One turn at a time.** A message sent while a turn is still running is not sent. The page says so, keeps the message for Retry, and shows the running turn instead.
 - **Allow / Deny.** An approval card only shows a call as approved or denied once the server has recorded the answer. If it could not be recorded (the approval timed out, or was answered in another tab), the card keeps its buttons and says why.

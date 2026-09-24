@@ -144,15 +144,33 @@ Priority when both DB and repo file exist: controlled by `AGENT_SOURCE_PRIORITY=
 
 `config.memory.enabled` controls whether memory recall is injected at the start of the agent's runs. Defaults are profile-based (for example: on for main/coding agents, off for evaluator binding) and can be overridden per agent.
 
-### Category-based subagent routing
+### Delegation and fan-out (#5, #32)
 
-When the main agent requests a subagent, it provides a category (`coding`, `ui_design`, `research`, etc.) rather than a hard-coded agent ID. Resolver order:
+There is no category routing. (An earlier draft of this spec described an `agentCategoryBindings` resolver; it was never built.) An orchestrator run is handed up to 12 custom agents as the SDK's `Options.agents` (`loadSubagentRoster` in `src/lib/engine/agent-definitions.server.ts`), and the model delegates by calling the SDK's `Agent` tool (called `Task` by older CLIs) with the agent's key as `subagent_type`. A fan-out is several `Agent` calls in one assistant message; the CLI runs them as one parallel batch and returns their results in order.
 
-1. Project-scoped `agentCategoryBindings`
-2. Workspace-scoped `agentCategoryBindings`
-3. Main agent as fallback
+**Admission.** Every delegation passes `src/lib/engine/delegation-gate.ts`, called from the engine's PreToolUse hook. The hook is used rather than `canUseTool` because the CLI's `Agent` tool answers its own permission check with "allow" in the modes we run, so `canUseTool` is not consulted for it; a PreToolUse hook fires for every call and its answer is binding. The gate:
 
-Subagent runs are ephemeral execution instances, but they reuse persistent agent definitions by `agentId`.
+| Rule | Behaviour |
+| ---- | --------- |
+| Foreground | `run_in_background` is rewritten to `false`. A background child in a one-shot query is held back and killed at the CLI's print-mode ceiling, reports only a token total, and would free its slot before it finished. |
+| Cap | At most `MAX_CONCURRENT_SUBAGENTS` (4) children hold a slot at once. The next call is denied with "wait for the running children to finish, then delegate the rest". It is refused rather than queued: a hook that waited would be timed out by the CLI, and a timed-out hook lets the call through. The slot is reserved before the budget check awaits, so a parallel batch cannot all see the same free slot. |
+| One level | A call whose hook input carries `agent_id` (made inside a child) is refused. `Agent`, `Task` and `Workflow` are also in every definition's `disallowedTools`. |
+| Budget | The child is checked with `enforceBudgetGuard` scoped to its own agent (`src/lib/chat/stream-delegation.server.ts`) before it starts, bounded at 10 seconds. A block, a throw or a timeout is a refusal. |
+| Isolation, mode | `isolation` is stripped: `worktree` would branch the run's checkout into a copy nothing merges back or cleans up, outside what the containment guard and the approval cards know about, and `remote` always runs in the background. `mode` is stripped (the SDK documents it as ignored). |
+| Model | Stripped when the parent runs on the gateway: the tool only takes Claude aliases, which the gateway cannot serve. A Claude parent keeps it. |
+| Plan mode | `Agent` is classified as a mutation (`permission-mode.ts`), so plan mode refuses the call before it takes a slot. |
+
+Any surprise inside the gate is a refusal with a reason, never a call waved through. `Workflow`, the CLI's scripted fan-out, is in `DISALLOWED_BUILTIN_TOOLS`, since its agents are not `Agent` calls and would bypass the gate.
+
+**Verified in the installed SDK (0.3.278, bundled CLI 2.1.278).** From the typings: `AgentInput` (`sdk-tools.d.ts`) carries `subagent_type`, `model`, `run_in_background`, `isolation` and `mode`; `AgentOutput` is `completed` (with `content`, `totalTokens`, `totalDurationMs`, `totalToolUseCount`, `usage`, `resolvedModel`) or an `async_launched` / `remote_launched` placeholder; `PreToolUseHookInput` carries `agent_id` only inside a subagent; `result.usage` is the main loop only while `modelUsage` covers subagents. From the bundled CLI: a PreToolUse `updatedInput` with no `permissionDecision` is applied as a plain input change; `AgentOutput.usage` and `totalTokens` describe the child's last model call, not its whole spend; and a foreground child runs on the parent turn's own abort controller while a background one gets a fresh one.
+
+**Cancellation.** Stop calls `interrupt()` on the run's handle, which aborts the parent turn and, through the shared abort controller, every foreground child; the engine's `close()` then ends the CLI process. `perTaskStopAffordance` is never declared, so even a background task would be killed by the interrupt.
+
+**The card.** Each delegation opens a `subagent` stream block at the parent's `Agent` call (`src/lib/engine/subagent-block.ts`), so a refused child still has a card. The delegation gets no `tool` block of its own. The child's messages, routed by `parent_tool_use_id`, build an ordered transcript on the block (`src/lib/engine/subagent-transcript.ts`, capped at 200 entries and 20,000 characters). The delegation's typed result closes it with `details` (`SubagentDetails` in `tool-result-details.ts`); a card still open when the turn ends is closed as `stopped`. All new block fields are optional jsonb, so no migration.
+
+**Cost.** See [../cost/spec.md](../cost/spec.md): one `subagent` ledger row per completed child, carved out of the parent's row.
+
+**Not built.** Child `chat_runs` rows (and with them a run-tree view), a per-child stop control, and worktree isolation for a child, which needs a merge-back and cleanup story first.
 
 ### Subagent output is data, not instructions
 

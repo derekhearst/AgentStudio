@@ -20,6 +20,17 @@ There are three kinds of agent:
 
 A built-in agent can hand part of a task to a custom agent. The built-in agent is told which agents it can hand work to, and it asks for one by name. At most 12 custom agents are offered at once, newest first. Built-in agents and evaluators are never offered.
 
+The agent that hands work out is the **parent**; each agent it hands work to is a **child**. A parent can hand out several pieces of work at once (a **fan-out**). The children then work side by side, and each one reports back when it is done.
+
+| Rule | What it means |
+| ---- | ------------- |
+| At most 4 children at once | A fifth request while four are still working is refused. The parent is told to wait for the running children, then hand out the rest. |
+| One level deep | A child cannot hand work to another agent. The request is refused. |
+| Each child passes the budget check | Before a child starts, the same budget check a chat passes is run for that child's own agent. A child whose agent is over its limit is refused before it spends anything. |
+| Children finish inside the turn | Children always report back before the parent's reply ends. They never keep running in the background after the parent has answered. |
+| Stop stops everything | Pressing **Stop** on the parent's turn stops every child that is still working. |
+| Each child is charged to its own agent | Every child that finishes gets its own row in the usage ledger, marked as sub-agent spend and charged to the child's agent. See [../cost/spec.md](../cost/spec.md). |
+
 ### Status: Available or Paused
 
 Every agent is either **Available** or **Paused**.
@@ -92,6 +103,18 @@ The assistant can also pause and resume agents itself with its `pause_agent` and
 
 While an agent is running, its card on `/agents` and its own page show the latest text it has written, with a **Watch live** link to the conversation. A run that has started but not written anything yet shows an empty preview. (Both pages used to crash the moment an agent started running.)
 
+### Hand work out to several agents at once
+
+1. The user asks a built-in agent for something that splits into independent parts, for example "review these six files".
+2. The agent asks for several children in one step, one per part.
+3. Up to four children start at once. Each shows as its own card in the chat, collapsed, with the child agent's name, what it was asked to do, and whether it is still working.
+4. As each child finishes, its card shows how it ended (done, failed, refused or stopped), how many tokens it used, what it cost, how long it took, and how many tools it called.
+5. Opening a card shows the child's own transcript: what it said and which tools it called, in order.
+6. If the agent asked for more than four, the extra requests are refused. The agent waits for the running children to report back, then asks again for the rest.
+7. The parent reads every child's report and writes the final answer.
+
+A refused child still gets a card, which says why it was refused. A child that was still working when the user pressed **Stop** is shown as stopped.
+
 ### Hand a plan over from Plan or Research
 
 1. The user asks the Plan agent to plan a change, or the Research agent to research a question.
@@ -132,7 +155,7 @@ Research and Plan cannot run shell commands, edit files in place, push code or o
 
 ## Integrations
 
-- **Claude Agent SDK.** The custom agents a run may delegate to are passed to the SDK as its list of agents. The SDK describes each one in its delegation tool, `Agent`. The built-in agents' instructions point there instead of keeping a list of their own, so the two cannot disagree.
+- **Claude Agent SDK.** The custom agents a run may delegate to are passed to the SDK as its list of agents. The SDK describes each one in its delegation tool, `Agent`. The built-in agents' instructions point there instead of keeping a list of their own, so the two cannot disagree. Every delegation request passes through a check that runs before the tool does. That check enforces the rules in the table under **Delegation**, and it makes every child run to completion inside the turn instead of in the background. [spec.md](spec.md) has the details, including what was confirmed in the SDK.
 - **Automations and monitors.** Both check the agent's status before running it. See [../automations/spec.md](../automations/spec.md) and [../monitors/spec.md](../monitors/spec.md).
 - **Hooks.** The hook bindings saved on an agent's page run for its chats as well as its automations. See [../hooks/hooks.md](../hooks/hooks.md).
 - **Audit trail.** Every change of status is recorded as `agent.status.changed`.
@@ -149,3 +172,8 @@ Research and Plan cannot run shell commands, edit files in place, push code or o
 - A startup never overwrites a built-in agent's hook bindings, research settings, system prompt or identity skill. Only its name, role, switch reminder and tool list follow the code.
 - `request_plan_approval` only accepts a full agent id. `list_agents` is how the model finds one.
 - Promoting an agent to an identity skill re-uses the agent's existing identity skill when there is one.
+- At most 4 children work at once for one turn. A request past that is refused, not queued, and the parent is told to try again once the running children have reported back.
+- A child can never hand work to another agent.
+- A child whose agent is over a blocking budget limit is refused before it starts. A child with no agent row of its own (the SDK's built-in helper agents) is checked, and charged, as the parent's agent.
+- A child never gets its own git worktree or a separate permission mode. It works in the parent's workspace under the parent's permission mode.
+- Scripted fan-out (the CLI's `Workflow` tool) is switched off, so every child goes through the same checks.
