@@ -7,11 +7,11 @@
 	import ThinkingBlockCard from './ThinkingBlockCard.svelte';
 	import TodoListCard from './TodoListCard.svelte';
 	import ToolCallCard from './ToolCallCard.svelte';
+	import SavedAskUserBlock from './SavedAskUserBlock.svelte';
+	import { isAskUserToolName } from '$lib/engine/ask-user-question';
 	import {
 		askQuestionAlreadyInMessage,
 		blockHasRenderableOutput,
-		getAskUserAnswer,
-		getAskUserQuestions,
 		type SavedBlock,
 	} from './message-bubble-helpers';
 
@@ -21,7 +21,7 @@
 	 * `MessageBubble.svelte` so the bubble can be a thin layout shell.
 	 *
 	 * Block-kind dispatch:
-	 *   - tool/ask_user → inline question + (if available) the answer bubble
+	 *   - tool/AskUserQuestion (or a retired ask_user) → the question + its answer (SavedAskUserBlock)
 	 *   - tool + details → the card for that shape (diff / terminal / todo)
 	 *   - tool (other)  → ToolCallCard
 	 *   - notice        → RunNoticeCard
@@ -30,7 +30,7 @@
 	 *   - text          → rendered markdown
 	 *
 	 * `messageId` is used to compose stable per-block keys; `messageContent` is
-	 * the raw assistant text (used to suppress redundant ask_user prompts that
+	 * the raw assistant text (used to suppress redundant question prompts that
 	 * already appear in the message body).
 	 */
 
@@ -58,25 +58,8 @@
 </script>
 
 {#each blocks as block, idx (`${messageId}-block-${idx}`)}
-	{#if block.kind === 'tool' && block.name === 'ask_user'}
-		{@const askQuestions = getAskUserQuestions(block.arguments, block.result)}
-		{#if askQuestions.length > 0}
-			{#each askQuestions as q}
-				{#if !askQuestionAlreadyHere(q.question ?? q.header)}
-					<div class="assistant-message mb-2">
-						<div class="markdown-body">{@html renderMarkdown(q.question ?? q.header)}</div>
-					</div>
-				{/if}
-				{@const answer = getAskUserAnswer(block.result, q.header, askQuestions.map((question) => question.header))}
-				{#if answer}
-					<div class="mb-2 ml-auto w-fit max-w-[85%]">
-						<div class="user-bubble bg-base-200/80 text-base-content rounded-2xl px-4 py-2.5 shadow-sm">
-							<p class="whitespace-pre-wrap">{answer}</p>
-						</div>
-					</div>
-				{/if}
-			{/each}
-		{/if}
+	{#if block.kind === 'tool' && isAskUserToolName(block.name)}
+		<SavedAskUserBlock {block} alreadyShown={askQuestionAlreadyHere} />
 	{:else if block.kind === 'tool' && block.details?.kind === 'file_edit'}
 		<div class="mb-1.5 w-full">
 			<FileEditCard details={block.details} success={block.success !== false} />
@@ -89,7 +72,7 @@
 		<div class="mb-1.5 w-full">
 			<TodoListCard details={block.details} />
 		</div>
-	{:else if block.kind === 'tool' && block.name !== 'ask_user'}
+	{:else if block.kind === 'tool'}
 		<div class="mb-1.5 w-full">
 			<ToolCallCard
 				name={String(block.name)}

@@ -78,7 +78,7 @@ The Research agent isn't only an initiator. Once a report or earlier findings ar
 2. **Search and read** — For each sub-question, the run searches the web and reads the best few pages, several sub-questions at a time.
 3. **Reflect** — The model looks at what has been read so far and names any gaps. Each gap gets its own search-and-read pass. This repeats up to three times, and stops early when no gaps are left or the source cap is reached.
 4. **Write the report** — The model writes the cited report from all the sources. The sources it cites are marked as cited.
-5. **Finish** — The run is marked complete and the user is notified. The report is at `/research/{id}` and listed on `/research`.
+5. **Finish** — The run is marked complete and the user is notified. The report is at `/research/{id}` and listed on `/research`. If the run is linked to a conversation, that page's **Back** button and breadcrumb lead to the chat. The chat itself no longer lists its research runs: its right-hand rail lost the **Research** tab in #14, and the report is not posted into the chat.
 
 ### E) Following and cancelling a background run
 

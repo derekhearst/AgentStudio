@@ -65,7 +65,7 @@ marked.setOptions({
 
 /*
  * Everything rendered here is model output — replies, thinking, subagent results,
- * ask_user questions — and it goes straight into `{@html}` on a page that can call every
+ * the agent's questions — and it goes straight into `{@html}` on a page that can call every
  * remote function as the user. So it is sanitized at the renderer (see
  * `util/safe-markdown.ts` for the rules). This must be an object literal: `marked` only
  * honours own enumerable properties of `use({ renderer })`.
@@ -299,41 +299,4 @@ export function getWebSearchPreview(toolName: string, rawResult: unknown): WebSe
 
 export function faviconUrl(hostname: string) {
 	return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`
-}
-
-/* ── Tool result caps ──────────────────────────────────────── */
-
-export function trimToolResult(toolName: string, resultStr: string): string {
-	const limits: Record<string, number> = {
-		web_search: 6000,
-		Read: 32000,
-		Bash: 16000,
-		browser_screenshot: Infinity,
-		run_subagent: 16000,
-	}
-
-	const limit = limits[toolName] ?? 16000
-
-	if (resultStr.length <= limit) return resultStr
-
-	try {
-		const parsed = JSON.parse(resultStr)
-
-		if (toolName === 'web_search' && Array.isArray(parsed)) {
-			const trimmed = parsed.slice(0, 5).map((r: Record<string, unknown>) => ({
-				...r,
-				snippet: typeof r.snippet === 'string' ? r.snippet.slice(0, 500) : r.snippet,
-				content: typeof r.content === 'string' ? r.content.slice(0, 500) : r.content,
-			}))
-			return JSON.stringify(trimmed)
-		}
-
-		const s = JSON.stringify(parsed)
-		if (s.length > limit) {
-			return s.slice(0, limit) + `\n... [truncated from ${s.length} chars]`
-		}
-		return s
-	} catch {
-		return resultStr.slice(0, limit) + `\n... [truncated from ${resultStr.length} chars]`
-	}
 }

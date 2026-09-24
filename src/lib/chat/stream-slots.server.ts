@@ -257,10 +257,11 @@ export const BACKGROUND_COMMAND_POLICY_LINES = [
 
 const ORCHESTRATOR_TOOL_POLICY = [
 	'Tool usage policy:',
-	'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the ask_user tool.',
-	"- Do not only say you'll ask a question in plain text when ask_user is appropriate.",
-	'- Use concise questions with clear option labels, and allow freeform input when the request is open-ended.',
-	'- For ask_user: aim for ~3 prefilled answer options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question.',
+	'- If the user asks you to ask questions, gather preferences with options, or confirm choices before continuing, you MUST call the AskUserQuestion tool.',
+	"- Do not only say you'll ask a question in plain text when AskUserQuestion is appropriate.",
+	'- Use concise questions with clear option labels. The user can always pick "Other" and type their own answer, so never add an "Other" option yourself.',
+	'- For AskUserQuestion: aim for ~3 options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question. Set multiSelect when the choices are not mutually exclusive.',
+	'- When the options are things to compare by eye (layouts, snippets, configurations), give each one an HTML preview. The user sees it in a sandboxed pane, so keep it self-contained with inline styles.',
 	...BACKGROUND_COMMAND_POLICY_LINES,
 	'',
 	...SUBAGENT_RESULT_POLICY_LINES,
@@ -268,13 +269,13 @@ const ORCHESTRATOR_TOOL_POLICY = [
 
 const AGENT_TOOL_POLICY = [
 	'Tool usage policy:',
-	'- You cannot call ask_user directly in agent conversations.',
+	'- You cannot ask the user questions directly (AskUserQuestion) in agent conversations.',
 	'- If you need user input, summarize missing information and return control to orchestrator for follow-up.',
 	...BACKGROUND_COMMAND_POLICY_LINES,
 ].join('\n')
 
 /**
- * The tool-usage policy slot. Orchestrator agents get the ask_user-encouraging
+ * The tool-usage policy slot. Orchestrator agents get the AskUserQuestion-encouraging
  * variant; sub-agents get the variant that tells them they can't ask the user
  * directly. Priority 90 — high enough to be near the top, below identity and
  * project context.

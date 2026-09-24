@@ -53,7 +53,7 @@ Not every event below is raised yet. Which ones fire today, on the chat path and
 | `on_evaluator`            | `runId`, `verdict`, `findings`                                 | On evaluator result                      |
 | `on_subagent_spawn`       | `parentRunId`, `childRunId`, `agentId`                         | On `run_subagent` call                   |
 | `on_approval_required`    | `runId`, `toolName`, `args`, `token`                           | On pending approval                      |
-| `on_user_question`        | `runId`, `questions`, `token`                                  | On `ask_user` call                       |
+| `on_user_question`        | `runId`, `questions`, `token`                                  | When the agent asks a question (AskUserQuestion) |
 | `on_run_failed`           | `runId`, `error`                                               | On run error                             |
 | `on_skill_loaded`         | `runId`, `skillSlug`, `loadKind`                               | When a skill summary or body is loaded   |
 | `on_tool_output_archived` | `runId`, `toolName`, `handle`, `wasSummarized`                 | When large tool output is offloaded      |

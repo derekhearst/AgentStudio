@@ -14,7 +14,7 @@ Tools are defined in code (`src/lib/tools/catalog/`), not in the database. Their
 
 | Group      | `alwaysOn` | Tools included                                                                                    |
 | ---------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| `core`     | yes        | `web_search`, `ask_user`, `list_automations`, `enable_capability`                                 |
+| `core`     | yes        | `web_search`, `list_automations`, `enable_capability` (questions to the user are the SDK's AskUserQuestion since #4) |
 | `sandbox`  | no         | `shell`, `file_read`, `file_write`, `file_patch`, `file_replace`, `list_directory`, `delete_file` |
 | `browser`  | no         | `browser_screenshot`, `browser_click`, `browser_navigate`                                         |
 | `agents`   | no         | `run_subagent`, `propose_plan`, `list_agents`                                                     |

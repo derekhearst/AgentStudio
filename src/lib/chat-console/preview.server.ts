@@ -6,7 +6,7 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { chatRuns } from '$lib/runs/runs.schema'
 import { extractAgentWorkspaceConfig } from '$lib/chat/stream-prep.server'
-import { resolveWorkspaceRoot, safePathWithin } from '$lib/workspace/workspace.server'
+import { resolveWorkspaceRoot, safePathWithin, workspaceKind, type WorkspaceKind } from '$lib/workspace/workspace.server'
 import {
 	baseName,
 	classifyExtension,
@@ -56,6 +56,18 @@ export type ConversationWorkspace = {
 	defaultRoot: string
 }
 
+/** What `resolveConversationWorkspace` knows beyond the two roots. */
+export type ResolvedConversationWorkspace = ConversationWorkspace & {
+	/** The shape of `defaultRoot`: the latest run's workspace, or the user root before any run. */
+	kind: WorkspaceKind
+	/**
+	 * The shape the conversation's NEXT turn will run in. For `project` and `persistent`
+	 * that is `defaultRoot` itself; for `run` and `worktree` every turn gets a fresh
+	 * directory, so what is in `defaultRoot` now will not be there when the turn starts.
+	 */
+	nextTurnKind: WorkspaceKind
+}
+
 /**
  * Rebuild the workspace the conversation's tools run in.
  *
@@ -66,7 +78,7 @@ export type ConversationWorkspace = {
 export async function resolveConversationWorkspace(
 	conversationId: string,
 	userId: string,
-): Promise<ConversationWorkspace> {
+): Promise<ResolvedConversationWorkspace> {
 	const [conversation] = await db
 		.select({ id: conversations.id, userId: conversations.userId, projectId: conversations.projectId, agentId: conversations.agentId })
 		.from(conversations)
@@ -101,16 +113,19 @@ export async function resolveConversationWorkspace(
 	const sandboxRoot = process.env.SANDBOX_WORKSPACE
 
 	const containmentRoot = resolveWorkspaceRoot({ userId, sandboxRoot })
-	const defaultRoot = resolveWorkspaceRoot({
+	const context = {
 		userId,
 		runId: latestRun?.id ?? null,
 		persistentKey: workspaceConfig.persistentKey,
 		worktree: workspaceConfig.worktreeConfig,
 		projectId: conversation.projectId ?? null,
 		sandboxRoot,
-	})
+	}
+	const defaultRoot = resolveWorkspaceRoot(context)
+	// Any id stands in for the run that does not exist yet: only whether there is one matters.
+	const nextTurnKind = workspaceKind({ ...context, runId: 'next' })
 
-	return { containmentRoot, defaultRoot }
+	return { containmentRoot, defaultRoot, kind: workspaceKind(context), nextTurnKind }
 }
 
 function assertSaneInput(userPath: string) {

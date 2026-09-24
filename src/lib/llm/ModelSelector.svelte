@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { tick } from 'svelte'
-	import { getAvailableModels } from '$lib/llm/models.remote'
+	import { getAvailableModels, getEngineModels } from '$lib/llm/models.remote'
 	import type { ModelInfo } from '$lib/llm/models.server'
+	import { findEngineModel, type EngineModelBackend } from '$lib/llm/engine-models'
+	import { modelBackend, normalizeModelId, unrunnableModelMessage } from '$lib/engine/model-backend'
 	import {
 		collectAvailableModalities,
 		filterModels,
@@ -20,7 +22,16 @@
 		showChevron?: boolean
 		showBrowseBadge?: boolean
 		requireInputModality?: string
+		/**
+		 * 'engine' offers only the models the chat engine can run here, each labelled with the
+		 * backend that runs it (#9) — for the chat composer, the agent editor and the default
+		 * model. 'catalogue' is OpenRouter's whole list, for features that call OpenRouter
+		 * directly, such as transcription.
+		 */
+		surface?: 'engine' | 'catalogue'
 	}
+
+	type PickerModel = ModelInfo & { backend?: EngineModelBackend; priced?: boolean }
 
 	let {
 		value = 'claude-sonnet-5',
@@ -31,12 +42,31 @@
 		showChevron = true,
 		showBrowseBadge = true,
 		requireInputModality,
+		surface = 'catalogue',
 	}: Props = $props()
 
-	let models: ModelInfo[] = $state.raw([])
+	const isEngine = $derived(surface === 'engine')
+	let models: PickerModel[] = $state.raw([])
+	let gatewayConfigured = $state(false)
+	let loaded = $state(false)
 	$effect(() => {
-		getAvailableModels().then((m) => (models = m))
+		if (surface === 'engine') {
+			getEngineModels().then((list) => {
+				models = list.models
+				gatewayConfigured = list.gatewayConfigured
+				loaded = true
+			})
+		} else {
+			getAvailableModels().then((m) => {
+				models = m
+				loaded = true
+			})
+		}
 	})
+
+	/** Where the current value runs, once the list says whether a gateway is configured. */
+	const valueBackend = $derived(isEngine && loaded && value ? modelBackend(value, { gatewayConfigured }) : null)
+	const selectedId = $derived(isEngine ? normalizeModelId(value) : value)
 
 	// Move the modal element out of the composer's stacking context (the composer wrapper has
 	// `view-transition-name`, which creates a stacking context that traps `position: fixed`
@@ -140,7 +170,7 @@
 	const grouped = $derived(groupByCreator ? groupModelsByCreator(sorted) : null)
 
 	const selectedLabel = $derived.by(() => {
-		const found = models.find((m) => m.id === value)
+		const found = isEngine ? findEngineModel(models, value) : models.find((m) => m.id === value)
 		const fullName = found ? found.name : value
 		// Strip the "Provider: " prefix when in inline mode (composer toolbar) so the label is compact.
 		const colonIdx = fullName.indexOf(':')
@@ -192,31 +222,50 @@
 	</button>
 {/snippet}
 
-{#snippet modelCard(m: ModelInfo)}
+{#snippet modelCard(m: PickerModel)}
 	<button
 		type="button"
 		title={m.description || ''}
+		data-backend={m.backend}
 		class="hover:border-primary/40 hover:bg-base-200 flex min-w-0 cursor-pointer flex-col gap-0.5 overflow-hidden rounded-lg border bg-base-100 px-2.5 py-1.5 text-left transition {m.id ===
-		value
+		selectedId
 			? 'ring-primary/50 border-primary/60 ring-2'
 			: 'border-base-300'}"
 		onclick={() => selectModel(m.id)}
 	>
 		<div class="flex min-w-0 items-center justify-between gap-2">
 			<span class="truncate text-sm font-semibold">{m.name}</span>
-			<span class="shrink-0 whitespace-nowrap font-mono text-xs opacity-60" title="Price per 1M tokens: input · output">
-				{formatPrice(m.promptPrice)} · {formatPrice(m.completionPrice)}
-			</span>
+			{#if m.backend === 'subscription'}
+				<span class="shrink-0 whitespace-nowrap text-xs opacity-60" title="Runs on your Claude subscription: no per-token cost">
+					Included
+				</span>
+			{:else if m.backend === 'gateway' && !m.priced}
+				<span class="shrink-0 whitespace-nowrap text-xs opacity-60" title="The OpenRouter catalogue has no price for this model">
+					Price unknown
+				</span>
+			{:else}
+				<span class="shrink-0 whitespace-nowrap font-mono text-xs opacity-60" title="Price per 1M tokens: input · output">
+					{formatPrice(m.promptPrice)} · {formatPrice(m.completionPrice)}
+				</span>
+			{/if}
 		</div>
 
-		<div class="flex min-w-0 items-center gap-2 text-xs opacity-60">
-			<span class="truncate">{m.id}</span>
-			<span class="opacity-50">·</span>
-			<span class="shrink-0 whitespace-nowrap">{formatTokens(m.contextLength)}</span>
-			{#if m.modality}
-				<span class="opacity-50">·</span>
-				<span class="shrink-0 whitespace-nowrap">{m.modality}</span>
+		<div class="flex min-w-0 items-center gap-2 text-xs">
+			{#if m.backend === 'gateway'}
+				<span class="badge badge-warning badge-xs shrink-0 whitespace-nowrap" title="Runs through the LLM gateway and is billed per token">Gateway · paid</span>
+			{:else if m.backend === 'subscription'}
+				<span class="badge badge-ghost badge-xs shrink-0 whitespace-nowrap" title="Runs on your Claude subscription">Subscription</span>
 			{/if}
+			<span class="flex min-w-0 items-center gap-2 opacity-60">
+				<span class="truncate">{m.id}</span>
+				<span class="opacity-50">·</span>
+				<span class="shrink-0 whitespace-nowrap">{formatTokens(m.contextLength)}</span>
+				{#if m.modality}
+					<span class="opacity-50">·</span>
+					<!-- Gives way before the id does: the id is what tells two same-named rows apart. -->
+					<span class="min-w-0 shrink-[4] truncate">{m.modality}</span>
+				{/if}
+			</span>
 		</div>
 	</button>
 {/snippet}
@@ -232,6 +281,11 @@
 		}}
 	>
 		<span class="truncate">{selectedLabel}</span>
+		{#if valueBackend === 'gateway'}
+			<span class="badge badge-warning badge-xs shrink-0" title="Runs through the LLM gateway and is billed per token">Paid</span>
+		{:else if valueBackend === 'unavailable'}
+			<span class="badge badge-error badge-xs shrink-0" title={unrunnableModelMessage(value)}>Unavailable</span>
+		{/if}
 		{#if showChevron}
 			<span class="opacity-70">▾</span>
 		{/if}
@@ -348,6 +402,16 @@
 						</button>
 					</div>
 				</div>
+
+				{#if isEngine}
+					<p class="border-base-300 text-base-content/60 border-b px-3 py-1.5 text-xs" data-testid="engine-model-note">
+						{#if gatewayConfigured}
+							Claude models run on your subscription. Gateway models are billed per token and are less reliable at multi-step tool use.
+						{:else}
+							Claude models only: they run on your subscription. Other models need an LLM gateway (LLM_GATEWAY_URL and LLM_GATEWAY_TOKEN).
+						{/if}
+					</p>
+				{/if}
 
 				<!-- Model list -->
 				<div class="bg-base-100 min-h-0 flex-1 overflow-y-auto p-2">

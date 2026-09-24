@@ -76,7 +76,8 @@ test.describe('agent-tool-policy — readOnly policy (Research / Plan built-ins)
 	test('readOnly keeps allow-listed tools (web_search, Read, Write, request_plan_approval)', async () => {
 		const policy = await readOnlyPolicy()
 		const kept = [
-			'ask_user',
+			// The SDK's question tool (#4), which replaced the in-house `ask_user`.
+			'AskUserQuestion',
 			'Read',
 			'Write',
 			'get_pull_request',
@@ -172,11 +173,8 @@ test.describe('agent-tool-policy — the real allow-list is not quietly widened'
 			import('../src/lib/engine/builtin-tools'),
 		])
 
-		const known = new Set<string>([
-			...allToolNames,
-			...builtins.BUILTIN_FILE_TOOLS,
-			...builtins.BUILTIN_SHELL_TOOLS,
-		])
+		// The whole built-in set: since #4 the question tool is the SDK's AskUserQuestion.
+		const known = new Set<string>([...allToolNames, ...builtins.BUILTIN_TOOL_SET])
 		const unknown = READ_ONLY_TOOL_NAMES.filter((name) => !known.has(name))
 		expect(unknown, 'allow-listed tools that no longer exist').toEqual([])
 	})

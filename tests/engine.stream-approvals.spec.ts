@@ -177,24 +177,43 @@ test.describe('every call meets the gate', () => {
 })
 
 test.describe('the tools the host owns', () => {
-	test('skip both gates, and are exactly the set the settings list and MCP leave out', async () => {
-		// `builtin-tools`' HOST_OWNED_TOOLS is what the settings approval list and /api/mcp
-		// filter by, on the promise that the engine hands those calls to the host before any
-		// gate runs. The engine keeps its own copy of the set, so drive it: with every tool set
-		// to ask, a host-owned call gets no 'ask', no card and no tool_call frame (the host
-		// renders its own), and every other registry tool is asked about.
+	test('no registry tool skips the gate: with every tool set to ask, each one is asked about', async () => {
+		// `builtin-tools`' HOST_OWNED_TOOLS is the set the engine hands to the host ungated. It
+		// used to hold the in-house `ask_user`, which the settings approval list and /api/mcp
+		// had to leave out. Since #4 it holds only the SDK's AskUserQuestion, which is not a
+		// registry tool — so every registry tool must now meet the gate, and the settings list
+		// may offer a tick for each one.
 		const calls = allToolNames.map((name, i) => ({ id: `t${i}`, name: `mcp__agentstudio__${name}`, input: {} }))
-		const { outcomes, frames } = await drive({ requiresApproval: () => true }, calls)
+		const { outcomes } = await drive({ requiresApproval: () => true }, calls)
 
 		const handedOver = allToolNames.filter(
 			(_, i) => outcomes[i].hook === 'none' && outcomes[i].permission?.behavior === 'allow',
 		)
-		expect([...handedOver].sort()).toEqual([...HOST_OWNED_TOOLS].sort())
-		for (const [i, name] of allToolNames.entries()) {
-			if (!HOST_OWNED_TOOLS.has(name)) continue
-			const seen = events(frames, `t${i}`)
-			for (const frame of ['tool_call', 'tool_pending', 'tool_denied']) expect(seen, name).not.toContain(frame)
-		}
+		expect(handedOver).toEqual([])
+		for (const name of HOST_OWNED_TOOLS) expect(allToolNames as readonly string[], name).not.toContain(name)
+	})
+
+	test('AskUserQuestion skips both gates and goes to the host, with no tool frame of its own', async () => {
+		// Every approval setting on, and plan mode: a question is answered by the user in its
+		// own card, so no approval card may appear, and plan mode is exactly when one is wanted.
+		const asked: string[] = []
+		const input = { questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: 'a' }, { label: 'B', description: 'b' }] }] }
+		const { outcomes, frames } = await drive(
+			{
+				requiresApproval: () => true,
+				permissionMode: 'plan',
+				askUser: async ({ toolUseId }) => {
+					asked.push(toolUseId)
+					return { answers: { 'Which?': 'B' } }
+				},
+			},
+			[{ id: 'toolu_q1', name: 'AskUserQuestion', input }],
+		)
+		expect([...HOST_OWNED_TOOLS]).toEqual(['AskUserQuestion'])
+		expect(outcomes[0].hook).toBe('none')
+		expect(outcomes[0].permission).toEqual({ behavior: 'allow', updatedInput: { ...input, answers: { 'Which?': 'B' } } })
+		expect(asked).toEqual(['toolu_q1'])
+		for (const frame of ['tool_call', 'tool_pending', 'tool_denied']) expect(events(frames, 'toolu_q1')).not.toContain(frame)
 	})
 })
 

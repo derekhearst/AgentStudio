@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { openLeft, openRight } from '$lib/chat-console/mobile-drawer-state.svelte';
+	import { openLeft } from '$lib/chat-console/mobile-drawer-state.svelte';
 
 	type Crumb = { label: string; href?: string };
 
@@ -14,7 +14,6 @@
 		actions,
 		mobileActions,
 		showMenuButton = true,
-		showRailButton = false,
 	}: {
 		title: string;
 		crumbs?: Crumb[];
@@ -25,7 +24,6 @@
 		actions?: Snippet;
 		mobileActions?: Snippet;
 		showMenuButton?: boolean;
-		showRailButton?: boolean;
 	} = $props();
 
 	// Name the destination when a crumb points at it: "Back to Agents" says more than "Back".
@@ -120,21 +118,6 @@
 			</span>
 		{/if}
 	</div>
-	{#if showRailButton}
-		<button
-			type="button"
-			class="console-iconbtn"
-			aria-label="Open chat rail"
-			title="Open rail"
-			onclick={openRight}
-			style="width:32px;height:32px;border:1px solid var(--color-base-300);"
-		>
-			<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<rect x="3" y="4" width="18" height="16" rx="2" />
-				<line x1="15" y1="4" x2="15" y2="20" />
-			</svg>
-		</button>
-	{/if}
 	{#if mobileActions}
 		{@render mobileActions()}
 	{/if}

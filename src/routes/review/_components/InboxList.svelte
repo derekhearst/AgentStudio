@@ -10,6 +10,7 @@
 	import { describeFixRunJob } from '$lib/source-control/pr-fix';
 	import { remoteErrorMessage } from '$lib/ui/remote-error';
 	import AskUserCard from '$lib/chat/AskUserCard.svelte';
+	import type { AskQuestion } from '$lib/engine/ask-user-question';
 	import { renderMarkdown } from '$lib/chat/chat';
 
 	type Result = Awaited<ReturnType<typeof listReviewItemsQuery>>;
@@ -107,14 +108,8 @@
 		}
 	}
 
-	type QuestionPayload = {
-		questions?: Array<{
-			header: string;
-			question: string;
-			options: Array<{ label: string; description?: string; recommended?: boolean }>;
-			allowFreeformInput?: boolean;
-		}>;
-	};
+	/** As the chat run recorded them (`chat_runs.pending_questions`) — previews and multi-select included (#4). */
+	type QuestionPayload = { questions?: AskQuestion[] };
 
 	function fmtDate(d: Date | string) {
 		return new Date(d).toLocaleString();

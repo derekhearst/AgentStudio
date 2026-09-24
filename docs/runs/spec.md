@@ -21,7 +21,7 @@ A run is the durable, resumable record of one agent execution attempt. Every mes
 | `model`            | string     | Model slug used                                                                                 |
 | `state`            | enum       | `pending`, `running`, `awaiting_approval`, `awaiting_answer`, `completed`, `failed`, `canceled` |
 | `pendingApprovals` | jsonb[]    | Outstanding tool approval requests (token, toolName, args, requestedAt)                         |
-| `pendingQuestions` | jsonb[]    | Outstanding `ask_user` requests (token, questions, requestedAt)                                 |
+| `pendingQuestions` | jsonb[]    | Outstanding questions from the agent (token, questions, requestedAt, then answers and decidedAt) |
 | `streamBlocks`     | jsonb[]    | Incremental content blocks appended as the loop runs                                            |
 | `currentRound`     | integer    | Tool loop round counter for resume                                                              |
 | `cursor`           | jsonb      | Loop resume pointer (last persisted message index, last tool call)                              |
@@ -60,6 +60,8 @@ Every event the runtime emits is written to `run_events` in the same transaction
 - Reconstructing what happened in a run (debugging, audit)
 - Resuming a run from mid-point (reconnect, restart)
 - Replaying events to late-joining observers
+
+The run's page, `/runs/<id>`, shows that log as a timeline: every tool call, its result, approvals, questions and the final `done`. It is where a chat's tool activity lives since the chat's rail lost its Activity tab (#14). From a chat, open it with **Run → Timeline** in a reply's stats popover, or by clicking the **running** chip at the top of the chat while a turn is in progress.
 
 ### Resumable streaming
 
@@ -115,11 +117,16 @@ The chat's Allow / Deny card can appear a moment before step 1 has happened. An 
 
 ### Pending user questions
 
-`ask_user` follows the same pattern as approvals, written to `runs.pendingQuestions`, resolved via the answer endpoint.
+A question from the agent (the SDK's AskUserQuestion, #4) follows the same pattern as approvals: written to `runs.pendingQuestions`, resolved via the answer endpoint or /review, and the run moves to `waiting_user_input` while it waits.
+
+- Each entry keeps the questions as the card shows them — header, question text, options with descriptions, the recommended marker, any HTML previews, and whether several choices are allowed — so a reloaded page and the /review inbox show the same card. It is JSON, so none of this needed a migration.
+- Answers are recorded keyed by each question's text, which is what the SDK takes back. An entry left by the retired `ask_user` is keyed by its header instead, and still reads.
+- The token is `<run id>:ask:<tool call id>`, one per question call.
+- The run waits five minutes, then the agent is told nobody answered. A Stop ends the wait at once and closes the question's inbox item.
 
 ### Approvals and questions in the review inbox
 
-Each pending approval and each `ask_user` question also opens an item in the /review inbox, so a user who is not watching the chat can find it (and, after a minute, gets a "Needs input" notification). The item can be answered from /review — Approve, Deny, or the answer card — with the same effect as answering in the chat.
+Each pending approval and each question from the agent also opens an item in the /review inbox, so a user who is not watching the chat can find it (and, after a minute, gets a "Needs input" notification). The item can be answered from /review — Approve, Deny, or the answer card — with the same effect as answering in the chat.
 
 The item closes by itself when the prompt is settled: answered in either place (resolved, with who answered), timed out after five minutes (dismissed), or left behind by a run that ended or was reaped (dismissed by the check that runs with the reaper every five minutes). Before 2026-09-23 these items were never closed, and answering one in /review did not reach the run.
 

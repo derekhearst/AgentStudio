@@ -5,6 +5,7 @@ import { requireAuthenticatedRequestUser } from '$lib/auth/auth.server'
 import { auditSettingsUpdated, recordAuditEvent } from '$lib/governance'
 import { getSystemReadiness as readSystemReadiness } from '$lib/settings/readiness.server'
 import { SPEECH_MODEL_ID_PATTERN, SPEECH_VOICE_PATTERN } from '$lib/speech/speech'
+import { requireRunnableModelChange } from '$lib/engine/gateway.server'
 
 const settingsUpdateSchema = z.object({
 	defaultModel: z.string().trim().min(1).max(120).optional(),
@@ -63,7 +64,9 @@ export const getSettings = query(async () => {
 export const updateAppSettings = command(settingsUpdateSchema, async (input) => {
 	const user = requireAuthenticatedRequestUser()
 	const before = await getOrCreateSettings(user.id)
-	const after = await updateSettings({ ...input, userId: user.id })
+	// The default model is what the engine runs a new conversation on (#9).
+	const defaultModel = requireRunnableModelChange(input.defaultModel, before.defaultModel)
+	const after = await updateSettings({ ...input, defaultModel, userId: user.id })
 	void auditSettingsUpdated({
 		actorUserId: user.id,
 		beforeState: before as Record<string, unknown>,
