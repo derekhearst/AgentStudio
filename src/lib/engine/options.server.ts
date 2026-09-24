@@ -115,6 +115,18 @@ export type EngineOptionsInput = {
 	/** Resume a prior SDK session instead of starting a new one. */
 	resumeSessionId?: string
 	/**
+	 * With `resumeSessionId`: resume only up to and including this transcript entry — how an
+	 * edited or regenerated turn drops the turns after it (`./turn-input`). Ignored without
+	 * `resumeSessionId`, as the SDK ignores it.
+	 */
+	resumeSessionAt?: string
+	/**
+	 * #24 — back up files before the SDK's file tools change them, so `Query.rewindFiles()`
+	 * can restore them to any user message later (`./rewind.server`). Only worth it for a
+	 * workspace that outlives the turn; see `supportsFileCheckpoints`.
+	 */
+	fileCheckpointing?: boolean
+	/**
 	 * Whether this run's project has its committed settings marked trusted
 	 * (`projects.settings_trusted`). Decides whether the repo's `CLAUDE.md`, commands and
 	 * skills load — and, inseparably, its `.claude/settings.json`. See `./setting-sources`.
@@ -269,6 +281,8 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		maxTurns: input.maxTurns ?? 64,
 		...(input.cwd ? { cwd: input.cwd } : {}),
 		...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
+		...(input.resumeSessionId && input.resumeSessionAt ? { resumeSessionAt: input.resumeSessionAt } : {}),
+		...(input.fileCheckpointing ? { enableFileCheckpointing: true } : {}),
 		// Needed for token-level `delta` frames; without it text only arrives in
 		// whole-message chunks and the UI loses its typing effect.
 		includePartialMessages: true,

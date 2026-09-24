@@ -45,6 +45,7 @@ import { toolResultDetails, type ToolResultDetails } from './tool-result-details
 import { toolResultText } from './tool-result-content'
 import { interpretSdkMessage } from './sdk-notices'
 import { readTurnUsage, resultErrorMessage, type EngineUsage, type SessionUsage } from './run-result'
+import { nextTranscriptTail } from './turn-input'
 import type { EngineQueryHandle } from './run-registry.server'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
@@ -220,6 +221,12 @@ export type EngineRunSummary = {
 	 * frames. The SDK calls these estimates, so treat them as such.
 	 */
 	reasoningTokens: number
+	/**
+	 * The uuid of the last main-thread chain entry this turn wrote to the transcript, or null
+	 * when there is none to cut after (see `./turn-input`). What a later edit or regenerate
+	 * of the NEXT message passes as `resumeSessionAt`.
+	 */
+	sdkTailUuid: string | null
 }
 
 /**
@@ -235,6 +242,8 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	let sessionId: string | null = null
 	let finalText = ''
 	let reasoningTokens = 0
+	/** The transcript's last main-thread entry so far — `EngineRunSummary.sdkTailUuid`. */
+	let tailUuid: string | null = null
 
 	/*
 	 * Blocks are accumulated alongside the frames. Consecutive deltas of the same
@@ -580,6 +589,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 				sessionId = msg.session_id
 				input.onSessionId?.(sessionId)
 			}
+			tailUuid = nextTranscriptTail(tailUuid, msg)
 
 			if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
 				reasoningTokens = typeof msg.estimated_tokens === 'number' ? msg.estimated_tokens : reasoningTokens
@@ -844,6 +854,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					blocks,
 					ttftMs: typeof msg.ttft_ms === 'number' ? msg.ttft_ms : null,
 					reasoningTokens,
+					sdkTailUuid: tailUuid,
 				}
 			}
 		}
@@ -861,6 +872,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			blocks,
 			ttftMs: null,
 			reasoningTokens,
+			sdkTailUuid: tailUuid,
 		}
 	} finally {
 		/*

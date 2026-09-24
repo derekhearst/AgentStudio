@@ -75,9 +75,11 @@ import { resolveToolScope } from '$lib/engine/tool-scope'
 import {
 	formatAttachmentWarnings,
 	prepareAttachmentPrompt,
-	singleUserMessageStream,
 	type ChatAttachment,
 } from '$lib/engine/attachments.server'
+import { runWithResumeFallback, userTurnMessages, withTurnResume } from '$lib/engine/turn-input'
+import { supportsFileCheckpoints, turnPromptContent } from '$lib/chat/turn-plan'
+import { planTurn, recordTurnJoinInBackground } from '$lib/chat/turn-plan.server'
 import { createAttachmentIo } from '$lib/engine/attachment-io.server'
 import { createChatRunHooks } from '$lib/hooks/chat-run-hooks.server'
 import { logger } from '$lib/observability/logger'
@@ -127,6 +129,21 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	if (!parentResult.ok) return json({ error: parentResult.error }, { status: 400 })
 	const parentMessageId = parentResult.parentMessageId
 
+	/*
+	 * What this turn sends, and how it starts its SDK session. A regenerate — after an edit
+	 * too — sends the user row's own text and attachments and cuts the session back to the
+	 * turn before it, so the model sees exactly the kept history. See `$lib/chat/turn-plan`.
+	 */
+	const planned = await planTurn({
+		conversationId: body.conversationId,
+		regenerate: Boolean(body.regenerate),
+		sdkSessionId: conversation.sdkSessionId,
+		pivotMessageId: parentMessageId,
+		body,
+	})
+	if (!planned.ok) return json({ error: planned.error }, { status: 400 })
+	const turn = planned.turn
+
 	// A conversation with no SDK session yet is on its first exchange as far as the
 	// engine is concerned, which is also when the title gets generated.
 	const isFirstExchange = !conversation.sdkSessionId && !body.regenerate
@@ -172,7 +189,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 	const skillSummariesText = await buildSkillSummariesText({
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 		skillTopK: resolveSkillTopK(currentSettings),
 	})
 	if (skillSummariesText) {
@@ -187,7 +204,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	const memorySlot = await buildMemoryRecallSlot({
 		settings: currentSettings,
 		userId: user.id,
-		userQuery: body.content,
+		userQuery: turn.text,
 	})
 	if (memorySlot) contextSlots.push(memorySlot)
 
@@ -369,8 +386,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * warning the user actually sees instead of a silent drop.
 	 */
 	const preparedPrompt = await prepareAttachmentPrompt({
-		text: body.content ?? '',
-		attachments: body.attachments,
+		text: turn.text,
+		attachments: turn.attachments,
 		availableTools: scopedTools ? new Set(scopedTools) : null,
 		io: createAttachmentIo(workspace.context),
 	}).catch(abandonSetup)
@@ -409,6 +426,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 		parentIsClaude: isClaudeModel(routedModel),
 	}).catch(abandonSetup)
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
+	// #24 — back files up before the agent changes them, where the workspace outlives the turn.
+	const fileCheckpointing = supportsFileCheckpoints(workspace.context)
 
 	let engineOptions
 	try {
@@ -422,7 +441,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			cwd: workspace.root,
 			permissionMode: permission.mode,
 			runSource: RUN_SOURCE,
-			resumeSessionId: conversation.sdkSessionId ?? undefined,
+			resumeSessionId: turn.attempts.first.resumeSessionId,
+			resumeSessionAt: turn.attempts.first.resumeSessionAt,
+			fileCheckpointing,
 			tools: {
 				userId: user.id,
 				runId: run.id,
@@ -533,12 +554,11 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
 
-				const summary = await runEngineStream(
+				const summary = await runWithResumeFallback(turn.attempts, async (attempt) => runEngineStream(
 					{
-						prompt: preparedPrompt.content
-							? singleUserMessageStream(preparedPrompt.content)
-							: preparedPrompt.text,
-						options: engineOptions,
+						// One user message with a uuid we chose: the row's join to the transcript.
+						prompt: userTurnMessages(turnPromptContent(preparedPrompt, attempt.preamble), attempt.sdkUserUuid),
+						options: withTurnResume(engineOptions, attempt),
 						emit,
 						/*
 						 * Every completed call gets a ledger row. Before this, only `web_search`
@@ -603,9 +623,15 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 								.catch((error) =>
 									logger.warn('[chat/stream] failed to persist sdkSessionId', { error: String(error) }),
 								)
+							recordTurnJoinInBackground(parentMessageId, {
+								uuid: attempt.sdkUserUuid,
+								sessionId,
+								cwd: workspace.root,
+								checkpointed: fileCheckpointing,
+							})
 						},
 						// What the resumed session had already spent, so this turn logs its own share.
-						usageBaseline: await loadSessionUsageBaseline(body.conversationId, conversation.sdkSessionId),
+						usageBaseline: await loadSessionUsageBaseline(body.conversationId, attempt.resumeSessionId),
 						// Settings-only view; `permissionMode` composes with it inside the engine's
 						// `resolveToolGate`, which is what decides allow / ask / deny.
 						requiresApproval: (name) =>
@@ -635,7 +661,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 										return approved ? { allow: true } : { allow: false, reason: 'Denied by user' }
 									}
 								: undefined,
-				})
+				}), (reason) =>
+					logger.warn('[chat/stream] the session could not be cut back; starting a fresh one', {
+						runId: run.id,
+						reason,
+					}),
+				)
 
 				// Fold the attachment notice into the persisted turn so the reloaded
 				// message matches what the user watched stream in.
@@ -691,6 +722,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						tokensCacheRead: summary.usage.cacheReadTokens,
 						runId: run.id,
 						sdkSessionId: summary.sessionId,
+						// Where a later edit of the next message cuts the session back to.
+						sdkTailUuid: summary.sdkTailUuid ?? undefined,
 						// The next turn's usage baseline — see `loadSessionUsageBaseline`.
 						sessionUsage: summary.sessionUsage ?? undefined,
 						numTurns: summary.numTurns,
@@ -708,7 +741,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				maybeGenerateTitle({
 					isFirstExchange,
-					userContent: body.content ?? '',
+					userContent: turn.text,
 					assistantContent: summary.text,
 					conversationId: body.conversationId,
 				})
@@ -733,7 +766,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						runId: run.id,
 						userId: user.id,
 						conversationId: body.conversationId,
-						userContent: body.content,
+						userContent: turn.text,
 						assistantContent: summary.text,
 						toolCalls: [],
 					})

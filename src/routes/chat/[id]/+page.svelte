@@ -1252,6 +1252,7 @@
 	});
 
 	async function handleEdit(messageId: string, content: string) {
+		if (streaming) return;
 		try {
 			const result = await editMessage({ messageId, content });
 			if (!result || result.success !== true) {
@@ -1272,7 +1273,8 @@
 			stopThinkingInterpolation();
 
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			// The server answers the edited row itself; the content sent here is never the prompt.
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to edit message',
@@ -1305,7 +1307,7 @@
 			stopDraftInterpolation();
 			stopThinkingInterpolation();
 			await refreshAll();
-			await streamMessage('regenerate', true);
+			await streamMessage('', true);
 		} catch (error) {
 			setRecoverableError(
 				error instanceof Error ? error.message : 'Unable to regenerate response',
@@ -1615,6 +1617,7 @@
 						onEdit={handleEdit}
 						onRegenerate={handleRegenerate}
 						canRegenerate={!streaming && message.id === lastUserMessageId}
+						canEdit={!streaming}
 						modelChanged={shouldShowModelTag(displayedMessages, i)}
 					/>
 				{/each}
