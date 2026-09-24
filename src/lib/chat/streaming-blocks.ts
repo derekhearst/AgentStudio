@@ -10,7 +10,11 @@
  */
 
 import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
-import type { ToolResultDetails } from '../engine/tool-result-details'
+import {
+	appendStreamTail,
+	type BackgroundShellStatus,
+	type ToolResultDetails,
+} from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
 
 export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
@@ -43,6 +47,8 @@ export type ToolBlock = {
 	 * generic card the default rather than a fallback.
 	 */
 	details?: ToolResultDetails
+	/** Characters of a background command's output received live (#35) — see `applyShellOutput`. */
+	shellStreamed?: number
 }
 
 export type ThinkingBlock = {
@@ -102,6 +108,16 @@ export function getLatestReasoningTokens(blocks: StreamingBlock[]): number | nul
 }
 
 /**
+ * A block saved from the page is saved because its turn is over (Stop, an error, a lost
+ * stream), and a background command does not outlive its turn (#35). One still marked
+ * running would read as running forever in the saved transcript.
+ */
+function settledDetails(details: ToolResultDetails): ToolResultDetails {
+	if (details.kind !== 'shell' || details.background?.status !== 'running') return details
+	return { ...details, background: { status: 'ended_with_turn' } }
+}
+
+/**
  * Build the metadata payload that gets persisted on the assistant message row.
  * Drops empty text/thinking blocks (they're noise in the persisted history) and
  * normalizes tool blocks into `{ name, arguments, result, success, executionMs }`.
@@ -147,7 +163,7 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				executionMs: block.executionMs ?? 0,
 				// Persisted so a reloaded conversation renders the same diff / terminal / todo
 				// card as the live stream did, rather than degrading to the generic one.
-				...(block.details ? { details: block.details } : {}),
+				...(block.details ? { details: settledDetails(block.details) } : {}),
 			})
 		}
 	}
@@ -362,6 +378,74 @@ export function applyToolProgress(
 			? { ...b, elapsedSeconds: payload.elapsedSeconds }
 			: b,
 	)
+}
+
+/**
+ * `shell_output` frame (#35) — new output from a backgrounded command, added to its card.
+ *
+ * Capped to the same tail the server keeps (`appendStreamTail`), so the live card and the
+ * persisted block agree. `reset` replaces instead of adding: the first read of the output
+ * file, a truncated file, or a jump ahead to the newest output. A chunk that does not start
+ * where the card left off (a page that reconnected mid-turn missed the frames in between —
+ * they are live-only) marks the output as a tail, so the card says earlier output is missing
+ * rather than passing a fragment off as the whole thing.
+ */
+export function applyShellOutput(
+	blocks: StreamingBlock[],
+	payload: { id: string; chunk?: string; reset?: boolean; truncated?: boolean; from?: number; to?: number },
+): StreamingBlock[] {
+	const chunk = typeof payload.chunk === 'string' ? payload.chunk : ''
+	return blocks.map((b) => {
+		if (b.kind !== 'tool' || b.id !== payload.id || b.details?.kind !== 'shell') return b
+		// Already settled: `shell_task_done` carried the final output, and nothing comes after it.
+		if (b.details.background && b.details.background.status !== 'running') return b
+		const reset = payload.reset === true
+		const next = appendStreamTail(reset ? '' : b.details.stdout, chunk)
+		const gap = !reset && typeof payload.from === 'number' && payload.from !== (b.shellStreamed ?? 0)
+		return {
+			...b,
+			shellStreamed: typeof payload.to === 'number' ? payload.to : (b.shellStreamed ?? 0) + chunk.length,
+			details: {
+				...b.details,
+				stdout: next.text,
+				truncated: next.truncated || gap || payload.truncated === true || (!reset && b.details.truncated),
+				background: { status: 'running' as const },
+			},
+		}
+	})
+}
+
+/**
+ * `shell_task_done` frame (#35) — a background command finished, was stopped, or its turn
+ * ended. Carries the final output, which replaces whatever the live frames built up: it is
+ * what the server persisted, so the card now matches the saved transcript exactly.
+ */
+export function applyShellTaskDone(
+	blocks: StreamingBlock[],
+	payload: {
+		id: string
+		status?: BackgroundShellStatus
+		exitCode?: number | null
+		stdout?: string
+		truncated?: boolean
+	},
+): StreamingBlock[] {
+	const status = payload.status
+	if (status !== 'completed' && status !== 'failed' && status !== 'stopped' && status !== 'ended_with_turn') {
+		return blocks
+	}
+	return blocks.map((b) => {
+		if (b.kind !== 'tool' || b.id !== payload.id || b.details?.kind !== 'shell') return b
+		return {
+			...b,
+			details: {
+				...b.details,
+				...(typeof payload.stdout === 'string' ? { stdout: payload.stdout, truncated: payload.truncated === true } : {}),
+				...(typeof payload.exitCode === 'number' ? { exitCode: payload.exitCode } : {}),
+				background: { status },
+			},
+		}
+	})
 }
 
 export function applyToolDenied(blocks: StreamingBlock[], toolId: string): StreamingBlock[] {

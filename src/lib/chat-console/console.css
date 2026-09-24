@@ -2324,11 +2324,33 @@ a.console-crumbs__seg:hover {
 	border-radius: 999px;
 	border: 1px solid var(--color-base-300);
 	color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+	white-space: nowrap;
 }
 
 .console-term__badge.is-bg { border-color: var(--color-warning); color: var(--color-warning); }
 .console-term__badge.is-warn { border-color: var(--color-warning); color: var(--color-warning); }
 .console-term__badge.is-err { border-color: var(--color-error); color: var(--color-error); }
+.console-term__badge.is-ok { border-color: var(--color-success); color: var(--color-success); }
+.console-term__badge.is-live {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border-color: var(--color-info);
+	color: var(--color-info);
+}
+
+/* A live background command (#35): same pulse as the header's background-task chips. */
+.console-term__pulse {
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: currentColor;
+	animation: console-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.console-term__pulse { animation: none; }
+}
 
 .console-term__body {
 	border: 1px solid var(--color-base-300);
