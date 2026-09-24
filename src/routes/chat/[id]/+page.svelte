@@ -1336,9 +1336,11 @@
 		const projectedPct = nextLimit > 0 ? (contextMetrics.used / nextLimit) * 100 : 0;
 
 		if (nextLimit < currentLimit && projectedPct >= autoCompactThresholdPct) {
-			const compactionPrompt = `Please compact this conversation for handoff to a model with a smaller context window. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary.`;
-			await streamMessage(compactionPrompt, false);
-			modelSwitchNotice = `Auto-compact ran on ${currentModel.split('/').at(-1)} before switching to ${nextModel.split('/').at(-1)}.`;
+			// The SDK's own `/compact`: it really replaces the session's history with a summary.
+			await streamMessage(`/compact ${COMPACT_INSTRUCTIONS} This is a handoff to a model with a smaller context window.`, false);
+			modelSwitchNotice = streamError
+				? `Compacting before the switch to ${nextModel.split('/').at(-1)} failed; the full conversation is still in context.`
+				: `Compacted the conversation on ${currentModel.split('/').at(-1)} before switching to ${nextModel.split('/').at(-1)}.`;
 			setTimeout(() => {
 				modelSwitchNotice = null;
 			}, 5000);
@@ -1347,10 +1349,18 @@
 		model = nextModel;
 	}
 
+	/**
+	 * What `/compact` is told to keep. It used to be sent as an ordinary message asking the model
+	 * for a summary, which the SDK session then carried on top of the full history it was meant
+	 * to replace — so the context grew. `/compact` is the CLI's own command: it summarises and
+	 * starts the session again from the summary, and the turn shows a "Context compacted" notice.
+	 */
+	const COMPACT_INSTRUCTIONS =
+		'Preserve all requirements, decisions, open tasks, constraints, and the latest user intent.';
+
 	async function compactContext() {
 		if (!conversationId || streaming) return;
-		const compactionPrompt = `Please compact this conversation. Preserve all requirements, decisions, open tasks, constraints, and the latest user intent in a concise structured summary so we can continue from a smaller context.`;
-		await streamMessage(compactionPrompt, false);
+		await streamMessage(`/compact ${COMPACT_INSTRUCTIONS}`, false);
 	}
 
 	// Console-redesign — surface streaming/context data to the right rail.
