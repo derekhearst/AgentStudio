@@ -36,10 +36,17 @@ test.describe('normalizeModelId', () => {
 		['claude-haiku-4-5', 'claude-haiku-4-5'],
 		['claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001'],
 		['opus', 'opus'],
+		// The CLI spells every Claude id and alias in lower case.
+		['ANTHROPIC/Claude-Sonnet-5', 'claude-sonnet-5'],
+		['Claude-Haiku-4.5', 'claude-haiku-4-5'],
+		['Opus[1M]', 'opus[1m]'],
+		['FABLE', 'fable'],
 		// A gateway id is the gateway's to read, dots and all.
 		['moonshotai/kimi-k2', 'moonshotai/kimi-k2'],
 		['openai/gpt-4.1', 'openai/gpt-4.1'],
 		['z-ai/glm-4.6', 'z-ai/glm-4.6'],
+		// …and its case: a gateway may not treat ids case-insensitively.
+		['MoonshotAI/Kimi-K2', 'MoonshotAI/Kimi-K2'],
 	]
 	for (const [input, expected] of cases) {
 		test(`${input} → ${expected}`, () => {
@@ -55,6 +62,13 @@ test.describe('normalizeModelId', () => {
 test.describe('isClaudeModel', () => {
 	test('Claude ids in either spelling, and the CLI aliases', () => {
 		for (const id of ['claude-sonnet-5', 'anthropic/claude-haiku-4.5', 'ANTHROPIC/claude-opus-4.1', 'opus', 'sonnet', 'haiku']) {
+			expect(isClaudeModel(id), id).toBe(true)
+		}
+	})
+
+	test('every CLI alias, including the ones that do not start like a family name', () => {
+		// `fable` and `best` used to read as third-party: a paid gateway call when one was set.
+		for (const id of ['fable', 'fable[1m]', 'best', 'Best', 'opusplan', 'anthropic/fable']) {
 			expect(isClaudeModel(id), id).toBe(true)
 		}
 	})
@@ -75,7 +89,7 @@ test.describe('isSubscriptionModel', () => {
 	})
 
 	test('the snapshot ids and aliases the CLI takes, with or without [1m]', () => {
-		for (const id of ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929', 'opus', 'sonnet', 'haiku', 'fable', 'opus[1m]', 'claude-sonnet-4-5[1m]']) {
+		for (const id of ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5-20250929', 'opus', 'sonnet', 'haiku', 'fable', 'best', 'opus[1m]', 'claude-sonnet-4-5[1m]']) {
 			expect(isSubscriptionModel(id), id).toBe(true)
 		}
 	})
@@ -117,6 +131,14 @@ test.describe('modelBackend', () => {
 	test('a non-Claude model needs the gateway, and is unavailable without one', () => {
 		expect(modelBackend('moonshotai/kimi-k2', { gatewayConfigured: true })).toBe('gateway')
 		expect(modelBackend('moonshotai/kimi-k2', { gatewayConfigured: false })).toBe('unavailable')
+	})
+
+	test('a CLI alias is on the subscription, gateway or not', () => {
+		for (const gatewayConfigured of [false, true]) {
+			for (const alias of ['fable', 'fable[1m]', 'best', 'opus']) {
+				expect(modelBackend(alias, { gatewayConfigured }), `${alias}, gateway ${gatewayConfigured}`).toBe('subscription')
+			}
+		}
 	})
 
 	test('a Claude id the CLI cannot run is unavailable, and never sent to the paid gateway', () => {

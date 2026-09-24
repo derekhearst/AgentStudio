@@ -168,6 +168,19 @@ test.describe('with a gateway', () => {
 		expect(byId.has('claude-sonnet-4')).toBe(false)
 	})
 
+	test('a CLI alias is Claude too: pinned, it is a subscription row, and the gateway never gets it', () => {
+		const aliases = buildEngineModelList({
+			catalogue: [],
+			gatewayConfigured: true,
+			gatewayModelIds: ['fable', 'best'],
+			pinned: ['fable', 'best'],
+		})
+		for (const alias of ['fable', 'best']) {
+			expect(aliases.filter((m) => m.id === alias), alias).toEqual([expect.objectContaining({ backend: 'subscription' })])
+		}
+		expect(aliases.some((m) => m.backend === 'gateway')).toBe(false)
+	})
+
 	test('a gateway that could not be asked contributes nothing, rather than a guess', () => {
 		const unknown = buildEngineModelList({ catalogue: CATALOGUE, gatewayConfigured: true, gatewayModelIds: null })
 		expect(unknown.every((m) => m.backend === 'subscription')).toBe(true)

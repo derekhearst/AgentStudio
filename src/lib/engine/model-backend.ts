@@ -20,6 +20,12 @@
 /** Models that run natively on the Claude Code CLI login. */
 const CLAUDE_MODEL_PREFIXES = ['claude-', 'opus', 'sonnet', 'haiku']
 
+/** The CLI's own aliases, which it resolves to a current model itself. */
+const CLI_MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan'])
+
+/** The CLI's 1M-context suffix: `claude-sonnet-4-5[1m]`, `opus[1m]`. */
+const ONE_MILLION_SUFFIX = /\[1m\]$/i
+
 /**
  * A dotted version pair inside a Claude id: `4.5` in `claude-haiku-4.5`, `3.7` in
  * `claude-3.7-sonnet`. OpenRouter writes versions with a dot; the CLI writes them with a
@@ -36,6 +42,8 @@ const DOTTED_VERSION = /(\d+)\.(\d+)/g
  *   rows picked from the OpenRouter catalogue; without this they either look like a
  *   third-party model or reach the CLI in a form it does not know.
  * - A bare Claude id is left as it is, apart from the same dot-to-dash rewrite.
+ * - A Claude id or CLI alias is written in lower case, as the CLI spells every one of them:
+ *   `ANTHROPIC/Claude-Sonnet-5` is `claude-sonnet-5`, `Opus` is `opus`.
  * - Every other id (`moonshotai/kimi-k2`, `openai/gpt-5`) is returned unchanged: it is the
  *   gateway's own id and the gateway is what reads it.
  */
@@ -48,17 +56,23 @@ export function normalizeModelId(model: string): string {
 		if (vendor !== 'anthropic') return trimmed
 		bare = trimmed.slice(slash + 1)
 	}
-	if (!/^claude-/i.test(bare)) return bare
-	return bare.replace(DOTTED_VERSION, '$1-$2')
+	const lower = bare.toLowerCase()
+	if (lower.startsWith('claude-')) return lower.replace(DOTTED_VERSION, '$1-$2')
+	if (CLI_MODEL_ALIASES.has(lower.replace(ONE_MILLION_SUFFIX, ''))) return lower
+	return bare
 }
 
 /**
  * True when `model` names Claude, in either spelling or as a CLI alias. Such a model is the
  * subscription's to run, never the gateway's — but only one `isSubscriptionModel` accepts
  * can actually run.
+ *
+ * Every alias counts, not only the ones that begin like a family name: `fable` and `best`
+ * are Claude too, and without this a gateway would be handed them as paid calls.
  */
 export function isClaudeModel(model: string): boolean {
 	const normalized = normalizeModelId(model).toLowerCase()
+	if (CLI_MODEL_ALIASES.has(normalized.replace(ONE_MILLION_SUFFIX, ''))) return true
 	return CLAUDE_MODEL_PREFIXES.some((p) => normalized.startsWith(p))
 }
 
@@ -96,12 +110,6 @@ const SUBSCRIPTION_MODEL_SET = new Set(SUBSCRIPTION_MODEL_IDS)
 
 /** The dated snapshot ids the CLI's table gives for some of them: the same models. */
 const SUBSCRIPTION_SNAPSHOT_IDS = new Set(['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'])
-
-/** The CLI's own aliases, which it resolves to a current model itself. */
-const CLI_MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable', 'best', 'opusplan'])
-
-/** The CLI's 1M-context suffix: `claude-sonnet-4-5[1m]`, `opus[1m]`. */
-const ONE_MILLION_SUFFIX = /\[1m\]$/i
 
 /**
  * True when the subscription can run `model`: an id in `SUBSCRIPTION_MODEL_IDS` in either
