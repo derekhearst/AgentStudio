@@ -13,7 +13,8 @@ import {
  * /settings/connectors CRUD lifecycle (#17), on both projects.
  *
  * Driven through the page against the real server and database: add a connector with a bearer
- * token and a header, switch it off, run the connection test, edit its label without
+ * token and a header, switch it off, see a switch whose save fails spring back, run the
+ * connection test, edit its label without
  * re-entering the secrets, set two tools' policies, remove it. Every step checks the table as
  * well as the page.
  *
@@ -106,6 +107,25 @@ test.describe('/settings/connectors — CRUD lifecycle', () => {
 				await pollDb(readRows, (rows) => rows[0]?.enabled === false, { description: 'connector switched off' })
 				await expect(toggle).not.toBeChecked()
 				await expect(card.getByText('Off', { exact: true }).first()).toBeVisible()
+
+				// ── A switch whose save fails goes back to what the server still says
+				await page.route('**/_app/remote/**', async (route) => {
+					if (new URL(route.request().url()).pathname.endsWith('/setMcpServerEnabledCommand')) {
+						await route.fulfill({
+							status: 400,
+							contentType: 'application/json',
+							body: JSON.stringify({ type: 'error', status: 400, error: { message: 'Scripted refusal' } }),
+						})
+						return
+					}
+					await route.fallback()
+				})
+				await toggle.click()
+				await expect(page.getByRole('alert').filter({ hasText: 'Scripted refusal' })).toBeVisible()
+				await expect(toggle).not.toBeChecked()
+				await expect(card.getByText('Off', { exact: true }).first()).toBeVisible()
+				await page.unroute('**/_app/remote/**')
+				expect((await readRows())[0]?.enabled).toBe(false)
 
 				// ── The connection test: the name never resolves, so it fails, and says so
 				await card.getByRole('button', { name: 'Test', exact: true }).click()

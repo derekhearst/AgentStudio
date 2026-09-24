@@ -88,10 +88,18 @@
 		});
 	}
 
-	function toggle(connector: Connector) {
+	function toggle(connector: Connector, input: HTMLInputElement) {
 		const enabled = !connector.enabled;
 		void withBusy(connector.id, async () => {
-			replace(await setMcpServerEnabledCommand({ id: connector.id, enabled }));
+			try {
+				replace(await setMcpServerEnabledCommand({ id: connector.id, enabled }));
+			} catch (err) {
+				// `checked` is one-way: when the save fails nothing in `connectors` changes, so
+				// Svelte would leave the switch where the click put it. Put it back to what the
+				// server still says.
+				input.checked = connector.enabled;
+				throw err;
+			}
 			return enabled
 				? `${connector.label} is on for the next chat turn.`
 				: `${connector.label} is off; chats no longer load it.`;
@@ -252,7 +260,7 @@
 									class="toggle toggle-success toggle-sm"
 									checked={connector.enabled}
 									disabled={busy}
-									onchange={() => toggle(connector)}
+									onchange={(event) => toggle(connector, event.currentTarget)}
 									aria-label={`Use ${connector.label} in chats`}
 								/>
 								<span>{connector.enabled ? 'On' : 'Off'}</span>
