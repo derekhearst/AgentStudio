@@ -55,3 +55,17 @@ export function gatewayTurnCost(usage: EngineUsage, pricing: GatewayPricing | nu
 	}
 	return { costUsd: 0, costBasis: 'unpriced' }
 }
+
+/**
+ * The `costOverride` a chat turn hands the usage ledger.
+ *
+ * - No gateway cost (a subscription turn): 0 — there is no per-token price to record.
+ * - A gateway turn with a price: that price.
+ * - An unpriced gateway turn: no override, so the ledger does its own lookup, finds no price
+ *   either, and records the row the way it records every unpriced call — a zero cost marked
+ *   `unpriced` with the reason, and a warning in the log — rather than as a silent $0.
+ */
+export function ledgerCostOverride(cost: GatewayTurnCost | null): number | undefined {
+	if (!cost) return 0
+	return cost.costBasis === 'unpriced' ? undefined : cost.costUsd
+}

@@ -23,3 +23,6 @@ export async function priceGatewayTurn(model: string, usage: EngineUsage): Promi
 	const pricing = await getModelPricing(model).catch(() => null)
 	return gatewayTurnCost(usage, pricing)
 }
+
+// Re-exported so the route takes both of its gateway ledger helpers from one module.
+export { ledgerCostOverride } from './gateway-cost'

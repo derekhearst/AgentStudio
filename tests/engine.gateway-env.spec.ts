@@ -16,7 +16,7 @@
 import { expect, test } from '@playwright/test'
 import { buildGatewayEnv, GATEWAY_MODEL_ENV_NAMES, readGatewayConfig } from '../src/lib/engine/gateway-env'
 import { engineAuthEnvNames } from '../src/lib/engine/engine-env'
-import { gatewayTurnCost } from '../src/lib/engine/gateway-cost'
+import { gatewayTurnCost, ledgerCostOverride } from '../src/lib/engine/gateway-cost'
 
 const SERVER_ENV: Record<string, string> = {
 	PATH: '/usr/bin',
@@ -139,5 +139,22 @@ test.describe('gatewayTurnCost', () => {
 
 	test('with neither, the turn is recorded at zero and marked unpriced', () => {
 		expect(gatewayTurnCost({ ...usage, costUsd: null }, null)).toEqual({ costUsd: 0, costBasis: 'unpriced' })
+	})
+})
+
+test.describe('ledgerCostOverride — what the chat route hands the usage ledger', () => {
+	test('a subscription turn is recorded at zero', () => {
+		expect(ledgerCostOverride(null)).toBe(0)
+	})
+
+	test('a priced gateway turn is recorded at its price, catalogue or CLI estimate', () => {
+		expect(ledgerCostOverride({ costUsd: 0.0123, costBasis: 'catalogue' })).toBe(0.0123)
+		expect(ledgerCostOverride({ costUsd: 0, costBasis: 'catalogue' })).toBe(0)
+		expect(ledgerCostOverride({ costUsd: 9.99, costBasis: 'cli-estimate' })).toBe(9.99)
+	})
+
+	test('an unpriced gateway turn is left to the ledger, which marks it unpriced and warns', () => {
+		// An override would write a silent $0; without one the ledger does its own lookup.
+		expect(ledgerCostOverride({ costUsd: 0, costBasis: 'unpriced' })).toBeUndefined()
 	})
 })

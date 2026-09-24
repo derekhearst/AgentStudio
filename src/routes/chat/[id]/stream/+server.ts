@@ -36,7 +36,7 @@ import { enqueuePendingApproval, awaitApprovalDecision } from '$lib/runs/approva
 import { enqueuePendingQuestion, awaitQuestionAnswers } from '$lib/runs/questions.server'
 import { createRunHeartbeat, finishChatRun, markChatRunRunning } from '$lib/runs/run-lifecycle.server'
 import { loadSessionUsageBaseline } from '$lib/engine/session-usage.server'
-import { priceGatewayTurn, refuseUnrunnableModel } from '$lib/engine/gateway-run.server'
+import { ledgerCostOverride, priceGatewayTurn, refuseUnrunnableModel } from '$lib/engine/gateway-run.server'
 import { pinnedTodoListFrom } from '$lib/chat/pinned-todo'
 import {
 	buildApprovalRequiredSet,
@@ -675,7 +675,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
-					costOverride: gatewayCost ? gatewayCost.costUsd : 0,
+					costOverride: ledgerCostOverride(gatewayCost),
 					metadata: {
 						conversationId: body.conversationId,
 						subscription: claudeRun,
