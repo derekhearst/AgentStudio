@@ -201,9 +201,10 @@ export function stripCommand(value: string, options: { consumeLine: boolean }): 
 export type ParsedCommand = {
 	/** The command word, lowercased. */
 	name: string
-	/** Everything after the word, across lines, trimmed: a free-text argument. */
-	argument: string
-	/** What follows the word on its own line, trimmed: a choice's name. */
+	/**
+	 * What follows the word on its own line, trimmed: a choice's name, or a free-text argument
+	 * such as a research question. Later lines are the draft, never part of the argument.
+	 */
 	lineArgument: string
 }
 
@@ -214,7 +215,6 @@ export function parseSlashCommand(value: string): ParsedCommand | null {
 	const lineEnd = firstLineEnd(value)
 	return {
 		name: command.word.toLowerCase(),
-		argument: value.slice(command.end).trim(),
 		lineArgument: value.slice(command.end, lineEnd).trim(),
 	}
 }

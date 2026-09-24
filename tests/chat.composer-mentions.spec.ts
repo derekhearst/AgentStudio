@@ -458,6 +458,50 @@ test.describe('chat composer — / commands', () => {
 		}
 	})
 
+	test('/research takes the question on its line, and the draft below it stays', async ({ page }, testInfo) => {
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('composer-research')
+		let seeded: Seeded | null = null
+		try {
+			await authenticateContext(page.context())
+			seeded = await seedChat(prefix, { withProject: false })
+			const sends = await recordSends(page, seeded.conversationId)
+			// Record what research was asked, and refuse it, so no run starts and the page stays.
+			const asked: string[] = []
+			await page.route('**/_app/remote/**', async (route) => {
+				if (new URL(route.request().url()).pathname.endsWith('/startResearchCommand')) {
+					// The command's arguments travel base64url-encoded in `payload`.
+					const { payload } = route.request().postDataJSON() as { payload: string }
+					asked.push(Buffer.from(payload, 'base64url').toString('utf8'))
+					await route.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ type: 'error', status: 500, error: { message: 'Research is off in this test' } }),
+					})
+					return
+				}
+				await route.fallback()
+			})
+			const composer = await openChat(page, seeded.conversationId)
+
+			await composer.fill('keep this draft')
+			await pick(page.getByRole('button', { name: '/ Commands' }).filter({ visible: true }), testInfo)
+			await composer.pressSequentially('resea')
+			await composer.press('Tab')
+			await expect(composer).toHaveValue('/research \nkeep this draft')
+			await composer.pressSequentially('why is the sky blue')
+			await composer.press('Enter')
+
+			await expect.poll(() => asked.length, { timeout: 15_000 }).toBe(1)
+			expect(asked[0]).toContain('why is the sky blue')
+			expect(asked[0]).not.toContain('keep this draft')
+			await expect(composer).toHaveValue('keep this draft')
+			expect(sends).toHaveLength(0)
+		} finally {
+			await cleanup(prefix, seeded)
+		}
+	})
+
 	test('a slash that is not a command is sent as typed', async ({ page }) => {
 		test.setTimeout(60_000)
 		const prefix = uniquePrefix('composer-not-command')

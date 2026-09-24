@@ -263,7 +263,9 @@
 		}
 		if (onAddFiles) list.push(attachCommand(() => onAddFiles?.()))
 		if (speechSupported && onMicClick) {
-			list.push(voiceCommand({ recording: () => recording, toggle: () => onMicClick?.() }))
+			list.push(
+				voiceCommand({ recording: () => recording, transcribing: () => transcribing, toggle: () => onMicClick?.() }),
+			)
 		}
 		return list
 	})
@@ -569,12 +571,14 @@
 			runWith = ''
 			rest = stripCommand(value, { consumeLine: false })
 		} else if (argument.kind === 'text') {
-			if (!parsed.argument) {
+			// The text is the rest of the command's line. Lines below it are the draft the
+			// `/ Commands` button moved down, and they stay in the box, as with every command.
+			if (!parsed.lineArgument) {
 				showNotice(argument.hint, 'info')
 				return true
 			}
-			runWith = parsed.argument
-			rest = ''
+			runWith = parsed.lineArgument
+			rest = stripCommand(value, { consumeLine: true })
 		} else {
 			const choices = argument.choices()
 			if (!choices) {

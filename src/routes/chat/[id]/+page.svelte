@@ -1759,6 +1759,7 @@
 				onMentionSearch={(q) => searchWorkspaceFiles({ conversationId, q })}
 				commands={buildChatPageCommands({
 					conversationId,
+					streaming: () => streaming,
 					permissionMode: () => conversationData?.conversation.permissionMode,
 					onPermissionModeChange: (next) => {
 						if (conversationData) conversationData.conversation.permissionMode = next;

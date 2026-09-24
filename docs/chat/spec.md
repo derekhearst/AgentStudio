@@ -141,27 +141,27 @@ Rules:
 
 #### Running a command with `/`
 
-Typing `/` as the very first character of the message opens the command palette. The **/ Commands** button does the same. Every command is an action the app already has a button for; the palette is a quicker way to reach it, and it calls exactly what that button calls.
+Typing `/` as the very first character of the message opens the command palette. The **/ Commands** button does the same. Every command is an action the app already has a button for; the palette is a quicker way to reach it, and it calls exactly what that button calls. When that button is switched off, the command is too, and it says why instead of running.
 
 | Command | What it does | Available |
 | --- | --- | --- |
-| `/compact` | Asks the agent to summarise the conversation so far, to free up context. The same as Compact on the context meter | In a chat |
+| `/compact` | Asks the agent to summarise the conversation so far, to free up context. The same as Compact on the context meter | In a chat, when no reply is running |
 | `/model <model>` | Switches the model for the next message | Everywhere |
 | `/agent <agent>` | Hands the conversation to another agent | Everywhere, when there are agents to pick |
 | `/research <question>` | Starts a deep research run on the question and opens its page | In a chat |
-| `/plan` | Turns plan mode on or off. Plan mode is read-only: the agent plans instead of making changes. Turning it off goes back to Ask. It never switches to Bypass, which still needs the confirmation on the mode chip | In a chat |
+| `/plan` | Turns plan mode on or off. Plan mode is read-only: the agent plans instead of making changes. Turning it off goes back to Ask. It never switches to Bypass, which still needs the confirmation on the mode chip | In a chat, when no reply is running |
 | `/effort <level>` (also `/reasoning`, `/think`) | Sets how hard the model thinks before answering | Everywhere |
 | `/attach` | Opens the file picker | Everywhere |
-| `/voice` | Starts or stops dictation | Where the browser supports it |
+| `/voice` | Starts or stops dictation | Where the browser supports it, and not while the last recording is still being turned into text |
 
 How it behaves:
 
 1. A command that needs a choice (model, agent, effort) opens a second list. The value in effect now is marked "current" and starts highlighted, so Enter keeps it. Typing after the command narrows the list (`/model sonnet`), and the best match is then highlighted instead.
 2. The model list is long, so it shows 50 models at a time. When the current model is not among those 50, it is shown first, so it is never missing from the list. The first time the list opens on a page it may still be loading; the highlight lands on the current model when the list arrives, unless you have already moved it with the arrow keys or the pointer.
-3. `/research` takes free text: type the question after it and press Enter.
+3. `/research` takes free text: type the question on the same line, after the command, and press Enter. Anything on the lines below is left in the message box.
 4. A message that starts with a known command runs the command instead of being sent, whether it was picked from the list or typed out in full (`/effort high` works). Any other message that starts with a slash, such as `/usr/bin is missing`, is sent as typed.
 5. The rest of the message box is kept. The **/ Commands** button puts the slash on its own line above an existing draft, and the draft is still there after the command runs.
-6. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds.
+6. A short confirmation, or the reason a command could not run, shows above the message box for a few seconds. The message box can be open while a reply is still running, when the agent has paused to ask you a question. `/compact` and `/plan` then say that a reply is running rather than acting: the Compact button does nothing until the reply ends, and the mode chip is switched off because a running reply keeps the mode it started with.
 7. The palette is built so that commands the Agent SDK reports for a trusted project (its own `.claude/commands` and skills) can be listed beside these later without changing how it works.
 
 #### Keyboard and touch

@@ -219,24 +219,41 @@ export function attachCommand(open: () => unknown): ComposerCommand {
 	}
 }
 
-export function voiceCommand(input: { recording: () => boolean; toggle: () => unknown }): ComposerCommand {
+export function voiceCommand(input: {
+	recording: () => boolean
+	/** The last recording is still being turned into text; the mic button is disabled meanwhile. */
+	transcribing?: () => boolean
+	toggle: () => unknown
+}): ComposerCommand {
 	return {
 		name: 'voice',
 		aliases: ['dictate', 'mic'],
 		description: 'Start or stop dictating into the message box',
 		source: 'app',
 		status: () => (input.recording() ? 'recording' : null),
+		unavailable: () => (input.transcribing?.() ? 'Still turning the last recording into text.' : null),
 		async run() {
 			await input.toggle()
 		},
 	}
 }
 
-export function compactCommand(compact: () => unknown): ComposerCommand {
+/**
+ * Why a command that acts on the conversation cannot run now. A reply can still be running while
+ * the message box is open: an ask_user question pauses it and hands the box back to the user.
+ */
+export const REPLY_RUNNING = 'A reply is still running. Wait for it to finish, or stop it, first.'
+
+export function compactCommand(
+	compact: () => unknown,
+	options: { replyRunning?: () => boolean } = {},
+): ComposerCommand {
 	return {
 		name: 'compact',
 		description: 'Summarise the conversation so far to free up context',
 		source: 'app',
+		// The Compact button's handler does nothing while a reply runs; say so instead.
+		unavailable: () => (options.replyRunning?.() ? REPLY_RUNNING : null),
 		async run() {
 			await compact()
 		},
@@ -248,7 +265,8 @@ export function researchCommand(start: (question: string) => unknown): ComposerC
 		name: 'research',
 		description: 'Start a deep research run on a question',
 		source: 'app',
-		argument: { kind: 'text', placeholder: '<question>', hint: 'Type the question to research, then press Enter.' },
+		// The question is the rest of the command's line; lines below it stay in the box as the draft.
+		argument: { kind: 'text', placeholder: '<question>', hint: 'Type the question on this line, then press Enter.' },
 		async run(question) {
 			await start(question)
 		},
@@ -263,12 +281,18 @@ export function nextPlanMode(current: unknown): ConversationPermissionMode {
 export function planModeCommand(input: {
 	current: () => unknown
 	setMode: (mode: ConversationPermissionMode) => Promise<unknown> | unknown
+	/**
+	 * A reply is running. The mode chip is disabled then: a running turn keeps the mode it
+	 * started with, so switching now would claim a change that does not apply to it.
+	 */
+	replyRunning?: () => boolean
 }): ComposerCommand {
 	return {
 		name: 'plan',
 		description: 'Turn plan mode on or off (read-only: the agent plans instead of acting)',
 		source: 'app',
 		status: () => (normalizePermissionMode(input.current()) === 'plan' ? 'on' : null),
+		unavailable: () => (input.replyRunning?.() ? REPLY_RUNNING : null),
 		async run() {
 			const next = nextPlanMode(input.current())
 			await input.setMode(next)

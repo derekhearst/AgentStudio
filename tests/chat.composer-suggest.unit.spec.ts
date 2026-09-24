@@ -27,8 +27,10 @@ import {
 	orderCommands,
 	planModeCommand,
 	rankCommands,
+	REPLY_RUNNING,
 	researchCommand,
 	resolveChoice,
+	voiceCommand,
 	type ComposerChoice,
 	type ComposerCommand,
 } from '../src/lib/chat/composer-commands'
@@ -146,13 +148,12 @@ test.describe('composer trigger — / commands', () => {
 		expect(stripCommand('not a command', { consumeLine: true })).toBe('not a command')
 	})
 
-	test('parsing a sent message', () => {
-		expect(parseSlashCommand('/Research why\nand how')).toEqual({
-			name: 'research',
-			argument: 'why\nand how',
-			lineArgument: 'why',
-		})
-		expect(parseSlashCommand('/compact')).toEqual({ name: 'compact', argument: '', lineArgument: '' })
+	test('parsing a sent message: the argument is the command’s line, and the lines below are the draft', () => {
+		const sent = '/Research why is the sky blue\nkeep this draft'
+		expect(parseSlashCommand(sent)).toEqual({ name: 'research', lineArgument: 'why is the sky blue' })
+		// What stays in the box once /research has taken its question.
+		expect(stripCommand(sent, { consumeLine: true })).toBe('keep this draft')
+		expect(parseSlashCommand('/compact')).toEqual({ name: 'compact', lineArgument: '' })
 		expect(parseSlashCommand('/')).toBeNull()
 		expect(parseSlashCommand('hello')).toBeNull()
 	})
@@ -335,6 +336,35 @@ test.describe('palette commands', () => {
 		expect(resolveChoice(choices, 'off')?.id).toBe('none')
 		expect(resolveChoice(choices, 'zzz')).toBeNull()
 		expect(resolveChoice(choices, '')).toBeNull()
+	})
+
+	test('/compact and /plan refuse while a reply is running, as their buttons do', async () => {
+		let running = true
+		const log: string[] = []
+		const compact = compactCommand(() => log.push('compact'), { replyRunning: () => running })
+		const plan = planModeCommand({ current: () => 'default', setMode: (m) => void log.push(m), replyRunning: () => running })
+		// Paused on an ask_user question, the message box is open but the turn still runs.
+		expect(compact.unavailable?.()).toBe(REPLY_RUNNING)
+		expect(plan.unavailable?.()).toBe(REPLY_RUNNING)
+		running = false
+		expect(compact.unavailable?.()).toBeNull()
+		expect(plan.unavailable?.()).toBeNull()
+		// Built without the getter (the new-chat page has no running reply), they are always available.
+		expect(compactCommand(() => {}).unavailable?.()).toBeNull()
+		expect(log).toEqual([])
+	})
+
+	test('/voice refuses while the last recording is still being transcribed, as the mic button does', () => {
+		let transcribing = true
+		let recording = false
+		const voice = voiceCommand({ recording: () => recording, transcribing: () => transcribing, toggle: () => {} })
+		expect(voice.unavailable?.()).toMatch(/Still turning the last recording into text/)
+		transcribing = false
+		expect(voice.unavailable?.()).toBeNull()
+		// Recording is not a reason to refuse: the command is how you stop.
+		recording = true
+		expect(voice.unavailable?.()).toBeNull()
+		expect(voice.status?.()).toBe('recording')
 	})
 
 	test('a command is plain data, so an SDK-reported one can sit beside the app’s', () => {
