@@ -264,6 +264,9 @@ test.describe('conversation lifecycle — the sidebar', () => {
 			await chooseStatus(nav, 'Archived')
 			await expect(nav.getByText('Archived chats')).toBeVisible()
 			await expect(chatItem(nav, id)).toBeVisible({ timeout: 15_000 })
+			// Other workers seed chats for the same owner meanwhile. Fresh activity keeps this one
+			// among the 50 most recent, so it is sure to be listed once it is back.
+			await getSql()`update conversations set updated_at = now() where id = ${id}`
 			await (await openRowMenu(nav, id)).getByRole('menuitem', { name: 'Unarchive' }).click()
 			await expect(chatItem(nav, id)).toHaveCount(0)
 			await nav.getByRole('button', { name: 'Back to chats' }).click()
