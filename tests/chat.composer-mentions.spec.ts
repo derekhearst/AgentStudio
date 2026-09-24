@@ -405,6 +405,13 @@ test.describe('chat composer — / commands', () => {
 
 			const choices = page.getByRole('listbox', { name: /\/effort/ })
 			await expect(choices.getByRole('option')).toHaveCount(6)
+			// The list's long title ends in an ellipsis inside the menu, rather than running past a
+			// phone's edge and pushing the loading dots out of view.
+			const title = suggest(page).locator('.console-suggest__head > span').first()
+			await expect(title).toHaveCSS('text-overflow', 'ellipsis')
+			const menuBox = (await suggest(page).boundingBox())!
+			const titleBox = (await title.boundingBox())!
+			expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(menuBox.x + menuBox.width)
 			await composer.pressSequentially('hi')
 			await expect(choices.getByRole('option').first()).toContainText('high')
 			await pick(choices.getByRole('option').first(), testInfo)

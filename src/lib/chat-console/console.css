@@ -1802,9 +1802,16 @@ a.console-crumbs__seg:hover {
 	font-size: 10.5px;
 	letter-spacing: 0.02em;
 	white-space: nowrap;
+}
+/* The title is a flex child: it needs its own ellipsis, or a long one on a phone runs off the
+   edge and pushes the loading dots out of view. */
+.console-suggest__head > span:first-child {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
 }
+.console-suggest__head > .loading { flex: 0 0 auto; }
 
 .console-suggest__list {
 	margin: 0;
