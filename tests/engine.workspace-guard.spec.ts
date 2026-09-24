@@ -135,7 +135,8 @@ test('Bash never runs outside the sandbox, whatever the policy says', () => {
 test('stopping a background task is not a shell command (#35)', () => {
 	// `TaskStop` is the CLI's name for the old `KillShell`: it names no path and can only stop
 	// a task this session started, so a host with no sandbox does not ask before it — while a
-	// `Bash` call on the same host still does.
+	// `Bash` call on the same host still does. This already held before #35 (calls arrive as
+	// `TaskStop`, which was never a command tool); it is pinned because the docs now say so.
 	const WS = process.platform === 'win32' ? 'C:\\sandbox\\user-aaa' : '/sandbox/user-aaa'
 	const g = (toolName: string, toolInput: unknown) =>
 		guardWorkspaceAccess({ toolName, toolInput, workspaceRoot: WS, bashPolicy: 'ask' }).verdict

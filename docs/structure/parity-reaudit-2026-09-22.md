@@ -367,24 +367,34 @@ that nothing pretends otherwise any more:
 - **Tool names.** `BUILTIN_SHELL_TOOLS` is `['Bash', 'TaskStop']`. The old names stay
   recognised, so a stored agent list that says `KillShell` keeps working and is not turned
   into an MCP name. A scope drops `BashOutput` / `TaskOutput`. `TaskStop` is not held for
-  approval under `bashPolicy: 'ask'`.
+  approval under `bashPolicy: 'ask'` (it never was a command tool); permission modes still
+  gate it like any other tool, and plan mode refuses it.
 - **Live output.** `$lib/engine/task-output.server` finds the output file in the CLI's
   result text. It accepts the path only when all of these hold:
   - it is absolute, has no `..`, and ends `<session id>/tasks/<task id>.output`, with both
     ids the CLI's own (from `init` and the typed `backgroundTaskId`, never from text);
   - it is the only such path the text names;
   - on every read, the file is still a regular file with one link, and its real path
-    (through `$lib/workspace/containment`) keeps that shape.
+    (through `$lib/workspace/containment`) keeps that shape. It is opened `O_NOFOLLOW |
+    O_NONBLOCK`, as the CLI opens it, so a named pipe put in its place fails the check at
+    once instead of blocking a threadpool thread on `open()`.
 
   The file is read once a second on the host. `$lib/engine/background-shells.server` turns
   each read into a live-only `shell_output` frame and grows the call's persisted block to
-  the same 16k tail.
+  the same 16k tail. Because the resume replay only has persisted events, what arrived since
+  the last save also goes out as a persisted `shell_output_checkpoint`, at most every 5 s
+  and only when there is something new. A reloaded or reconnected page catches up from
+  those and keeps moving, a few seconds behind. `from` / `to` positions let a connected
+  page skip the checkpoint of what it already has.
 - **How it ended.** `task_notification` now keeps `task_id`, `tool_use_id`, `output_file`
   and the summary's exit code. The command's card settles through a persisted
   `shell_task_done` frame, which carries the final output, so a client that reconnected
-  mid-turn still gets it.
-- **The end of the turn.** A command still running when the turn ends gets one final read
-  and is marked `ended_with_turn`. One persisted notice lists the commands that were
+  mid-turn still gets it. A notification that arrives before its call's `tool_result` (the
+  CLI emits it the moment a task ends, and a command that exits at once can end before its
+  result is written) is held, and the card is created settled rather than running.
+- **The end of the turn.** A command still running when the turn ends gets one final read,
+  bounded at 2 s so a read that never returns cannot stop the engine closing the CLI or
+  sending `done`, and is marked `ended_with_turn`. One persisted notice lists the commands that were
   stopped. The page clears the header chips on `done`.
 - **The model is told.** Both tool policies say a background command only runs until the
   reply ends. They also say its output file is outside the workspace (the containment guard

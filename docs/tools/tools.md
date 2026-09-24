@@ -61,7 +61,7 @@ There is no separate code tool. The agent writes a script into the workspace and
 
 - In production, `Bash` runs inside an operating-system sandbox (bubblewrap) that keeps it to the workspace, so it runs without asking.
 - Where the sandbox is not available, such as a developer's Windows or Mac machine, every `Bash` call asks for approval first.
-- A command can run in the background (`Bash` with `run_in_background`), for a dev server or a long build. Its output streams into its card while the turn runs, and the agent can stop it with `TaskStop`, which never asks for approval. Background commands end when the agent's reply does. See [Background commands](../chat/spec.md#background-commands).
+- A command can run in the background (`Bash` with `run_in_background`), for a dev server or a long build. Its output streams into its card while the turn runs, and the agent can stop it with `TaskStop`. Stopping is not treated as running a command, so it does not ask for approval on a machine without the sandbox; the conversation's permission mode still applies. Background commands end when the agent's reply does. See [Background commands](../chat/spec.md#background-commands).
 - Claude Code's older names still work in an agent's tool list: `KillShell` and `KillBash` mean `TaskStop`. `BashOutput` and `TaskOutput` no longer exist and are ignored.
 
 A script cannot call AgentStudio's tools. The agent calls those itself, several in one step if they do not depend on each other.
