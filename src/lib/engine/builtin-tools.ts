@@ -31,8 +31,13 @@ export const BUILTIN_SHELL_TOOLS = ['Bash', 'BashOutput', 'KillShell', 'TaskStop
  * are not `Agent` calls, so none of them would meet the delegation gate — the concurrency
  * cap, the per-child budget check, the child card and the child's ledger row (#32). One
  * delegation channel, gated, rather than two with one of them open.
+ *
+ * `SendMessage`: the CLI's way to message another agent, which (read in the bundled CLI
+ * 2.1.278) also wakes an agent that has finished or been stopped ("Resuming agent …"). A
+ * parent could restart a child that way, outside any `Agent` call: no slot, no budget check,
+ * no card. The app has no agent teams for it to serve, so it is off (#32).
  */
-export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Workflow'] as const
+export const DISALLOWED_BUILTIN_TOOLS = ['WebSearch', 'WebFetch', 'Workflow', 'SendMessage'] as const
 
 /**
  * The CLI's current name for each built-in it has renamed, keyed by the old name.

@@ -55,13 +55,19 @@ import type { EngineQueryHandle } from './run-registry.server'
 import { isDelegationTool } from './builtin-tools'
 import type { DelegationGate } from './delegation-gate'
 import {
+	closeBackgroundedSubagent,
 	finishSubagentBlock,
 	openSubagentBlock,
+	recordChildSpend,
 	recordChildText,
 	recordChildToolCall,
 	recordChildToolResult,
 	stopUnfinishedSubagents,
+	type EngineSubagentBlock,
+	type SubagentDonePayload,
+	type TaskNotificationOutcome,
 } from './subagent-block'
+import { createSubagentUsageTally } from './subagent-usage'
 import type { StreamBlock } from '$lib/runs/runs.schema'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 
@@ -204,6 +210,13 @@ export type EngineRunInput = {
 	 */
 	delegation?: DelegationGate
 	/**
+	 * #32 — a delegated child's card has just closed, however it ended, carrying what the
+	 * child spent (`usage`). Awaited before the loop reads on, so a child's ledger row is
+	 * written before the parent's next delegation meets its budget check. A throw is ignored:
+	 * the ledger never ends a turn.
+	 */
+	onSubagentDone?: (block: EngineSubagentBlock) => Promise<void> | void
+	/**
 	 * Where the message stream comes from. Defaults to the SDK's `query()`.
 	 *
 	 * Only a spec passes this. See `EngineQuerySource` for why the seam exists.
@@ -333,6 +346,32 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 	 * otherwise have every sentence recorded twice.
 	 */
 	const childrenStreamingText = new Set<string>()
+	/** #32 — what each child spent, added up from its own model calls. See `./subagent-usage`. */
+	const childUsage = createSubagentUsageTally()
+	/**
+	 * A delegation's `task_notification` that came before anything could close its card: the
+	 * ending of a child the CLI sent to the background, if its launch placeholder is still to come.
+	 */
+	const taskOutcomes = new Map<string, TaskNotificationOutcome>()
+	/** Whether the turn has been sent an interrupt (Stop). See `./subagent-block`. */
+	let interrupted = false
+
+	/**
+	 * #32 — a child's card closed: free its concurrency slot, tell the page, and let the caller
+	 * book what it spent. The slot is freed here and nowhere earlier, so a child that is still
+	 * working (a background launch) keeps holding it.
+	 */
+	const closeChild = async (done: SubagentDonePayload) => {
+		input.delegation?.settle(done.agentId)
+		await emit('subagent_done', done)
+		const block = subagentBlocks.get(done.agentId)
+		if (!block || !input.onSubagentDone) return
+		try {
+			await input.onSubagentDone(block)
+		} catch {
+			// The ledger's own failure handling applies; a turn is never ended over it.
+		}
+	}
 
 	/** Fetch or open the block for a subagent, emitting `subagent_start` the first time. */
 	const subagentBlockFor = async (taskId: string) => {
@@ -615,6 +654,9 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 	input.onHandle?.({
 		interrupt: async () => {
+			// Set before the request goes out: the CLI may answer the children it cuts short
+			// before it answers the interrupt itself.
+			interrupted = true
 			await session.interrupt?.()
 		},
 		stopTask: async (taskId: string) => {
@@ -665,6 +707,14 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					interpreted.notice.kind === 'task_finished' &&
 					delegationIds.has(String(msg.tool_use_id ?? ''))
 				) {
+					// It does close the card of a child that went to the background. Otherwise it is
+					// kept, in case it came ahead of that child's launch placeholder.
+					const id = String(msg.tool_use_id)
+					const outcome: TaskNotificationOutcome = { status: msg.status, summary: msg.summary }
+					const child = subagentBlocks.get(id)
+					const closed = child ? closeBackgroundedSubagent(child, outcome) : null
+					if (closed) await closeChild(closed)
+					else taskOutcomes.set(id, outcome)
 					continue
 				}
 				if (interpreted.kind === 'notice') {
@@ -687,6 +737,12 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			// Token-level text and thinking, from includePartialMessages.
 			if (msg.type === 'stream_event') {
 				const ev = msg.event as Record<string, any> | undefined
+				// #32 — a child's model call: its id and input on start, its output count at the end.
+				if (parentToolUseId && (ev?.type === 'message_start' || ev?.type === 'message_delta')) {
+					const spend = childUsage.recordStreamEvent(parentToolUseId, ev)
+					if (spend) recordChildSpend(await subagentBlockFor(parentToolUseId), spend)
+					continue
+				}
 				if (ev?.type === 'content_block_delta') {
 					const delta = ev.delta as Record<string, any>
 					if (parentToolUseId) {
@@ -721,6 +777,11 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 			}
 
 			if (msg.type === 'assistant') {
+				// #32 — every model call a child makes carries its usage. See `./subagent-usage`.
+				if (parentToolUseId) {
+					const spend = childUsage.recordMessage(parentToolUseId, msg.message)
+					if (spend) recordChildSpend(await subagentBlockFor(parentToolUseId), spend)
+				}
 				for (const block of msg.message?.content ?? []) {
 					// #32 — a child's prose arrives as whole assistant messages (`forwardSubagentText`),
 					// unless this producer already streamed it as deltas.
@@ -892,13 +953,14 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					if (delegationIds.has(id)) {
 						// #32 — the delegation's result closes its child's card and frees its slot.
 						// No `tool` block: the card is the delegation (`./subagent-block`).
-						input.delegation?.settle(id)
-						const done = finishSubagentBlock(await subagentBlockFor(id), {
-							isError: block.is_error === true,
-							text,
-							details,
-						})
-						if (done) await emit('subagent_done', done)
+						const child = await subagentBlockFor(id)
+						recordChildSpend(child, childUsage.recordFinalCall(id, details?.kind === 'subagent' ? details.usage : null))
+						const done = finishSubagentBlock(child, { isError: block.is_error === true, text, details, interrupted })
+						// A launch placeholder closes nothing: that child is still working, in the
+						// background, and keeps its slot until its task notification.
+						const outcome = taskOutcomes.get(id)
+						const closed = done ?? (outcome ? closeBackgroundedSubagent(child, outcome) : null)
+						if (closed) await closeChild(closed)
 						// Close the approval card the call had in the parent's transcript, if any.
 						if (pendingShown.has(id)) {
 							await emit('tool_result', {
@@ -958,7 +1020,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					baseline: input.usageBaseline ?? null,
 				})
 				// A child still open was cut short with the turn (#32): close it, live and persisted.
-				for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await emit('subagent_done', done)
+				for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await closeChild(done)
 				for (let i = blocks.length - 1; i >= 0; i--) {
 					const b = blocks[i]
 					if (b.kind === 'thinking') {
@@ -984,7 +1046,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 
 		// The iterator ended without a `result` message — treat as a completed run
 		// with no usage rather than inventing numbers.
-		for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await emit('subagent_done', done)
+		for (const done of stopUnfinishedSubagents(subagentBlocks.values())) await closeChild(done)
 		return {
 			text: finalText,
 			sessionId,

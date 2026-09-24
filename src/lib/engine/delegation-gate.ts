@@ -19,9 +19,9 @@
  *
  *   foreground       `run_in_background` is rewritten to false. A background child in our
  *                    one-shot query is held back and then killed after the CLI's print-mode
- *                    ceiling, reports only a token total, and would free its slot before it
- *                    finished. A foreground child blocks its own tool call, runs in parallel
- *                    with its siblings, and returns a full typed result.
+ *                    ceiling, and reports only a token total. A foreground child blocks its
+ *                    own tool call, runs in parallel with its siblings, and returns a full
+ *                    typed result.
  *   no isolation     `isolation` is stripped. `worktree` would branch the run's checkout
  *                    into a copy nothing merges back or cleans up, outside what the
  *                    containment guard and the approval cards know about; `remote` always
@@ -45,6 +45,17 @@
  *
  * Everything fails closed. A budget check that throws or hangs, or any surprise in here, is
  * a refusal with a reason, never a call waved through.
+ *
+ * ## When a slot comes back
+ *
+ * Only when the child has really finished: its card has closed (`settle`, from
+ * `./stream.server`). A launch placeholder is not that. The rewrite above sets the call's
+ * `run_in_background`, but the CLI (2.1.278) also backgrounds a child whose agent definition
+ * says `background: true`, whatever the call says, and a trusted project's `.claude/agents/`
+ * can say so. That child answers its call at once with `async_launched` and keeps working,
+ * so it keeps its slot until its `task_notification` closes its card. The cap holds whatever
+ * a definition asks for. (A definition's `isolation` is the trusted project's own choice in
+ * the same way; the call's own `isolation` is still stripped.)
  *
  * A slot is reserved synchronously, before the budget check awaits anything. The CLI runs a
  * parallel batch's hooks concurrently, and a check-then-reserve across an `await` would let
@@ -91,7 +102,7 @@ export type DelegationGateOptions = {
 }
 
 export type DelegationRequest = {
-	/** The delegation call's tool_use id. Its result is what frees the slot (`settle`). */
+	/** The delegation call's tool_use id. The slot is freed by this id once the child finishes (`settle`). */
 	toolUseId: string
 	toolInput: unknown
 	/** The hook input's `agent_id`: set when the call was made inside a subagent. */
@@ -110,7 +121,10 @@ export type DelegationGate = {
 	 * that is asked about reaches `canUseTool`, whose answer must carry the same rewrite.
 	 */
 	admittedInput(toolUseId: string): Record<string, unknown> | null
-	/** The call's result arrived (or it will never run): free its slot. Idempotent. */
+	/**
+	 * The child has finished, or will never run: free its slot. Idempotent. Not for a launch
+	 * placeholder, whose child is still working (see the module note).
+	 */
 	settle(toolUseId: string): void
 	/** Children holding a slot right now. */
 	live(): number

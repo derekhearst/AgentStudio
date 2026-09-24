@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test'
 import type { HookCallbackMatcher, Options, PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 import { runEngineStream, type EngineRunInput, type EngineQuerySource } from '../src/lib/engine/stream.server'
 import { createDelegationGate, capReachedReason, NESTED_DELEGATION_REASON } from '../src/lib/engine/delegation-gate'
+import { STOPPED_REASON } from '../src/lib/engine/subagent-block'
+import type { EngineQueryHandle } from '../src/lib/engine/run-registry.server'
 import type { StreamBlock } from '../src/lib/runs/runs.schema'
 
 /**
@@ -26,9 +28,40 @@ function toolUse(id: string, name: string, input: unknown, parent: string | null
 	return { type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'tool_use', id, name, input }] } }
 }
 
-function childText(parent: string, text: string) {
-	return { type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'text', text }] } }
+function childText(parent: string, text: string, call?: { id: string; usage: Record<string, number> }) {
+	return {
+		type: 'assistant',
+		parent_tool_use_id: parent,
+		message: {
+			...(call ? { id: call.id, model: 'claude-haiku-4-5', usage: call.usage } : {}),
+			content: [{ type: 'text', text }],
+		},
+	}
 }
+
+/** The CLI's own answer for a delegation cut short by Stop (read in 2.1.278). */
+const INTERRUPTED = '[Request interrupted by user for tool use]'
+
+function taskNotification(toolUseId: string, status: 'completed' | 'failed' | 'stopped', summary = '') {
+	return {
+		type: 'system',
+		subtype: 'task_notification',
+		task_id: `task-${toolUseId}`,
+		tool_use_id: toolUseId,
+		status,
+		summary,
+		output_file: '',
+	}
+}
+
+/** The placeholder a child the CLI sent to the background answers its call with. */
+const launched = (agentId: string) => ({
+	status: 'async_launched',
+	agentId,
+	description: 'x',
+	prompt: 'p',
+	outputFile: '/tmp/o',
+})
 
 function toolResult(id: string, text: string, parent: string | null = null, structured?: unknown, isError = false) {
 	return {
@@ -133,12 +166,16 @@ test.describe('the hook admits a delegation', () => {
 	test('in the foreground, with isolation stripped, as a plain input rewrite', async () => {
 		const gate = createDelegationGate({ parentIsClaude: false })
 		let answer: HookAnswer = {}
+		const slots: number[] = []
 		await run(
 			async function* (options) {
 				const input = { subagent_type: 'reviewer', prompt: 'p', run_in_background: true, isolation: 'worktree', model: 'opus' }
 				yield toolUse('a1', 'Agent', input)
 				answer = (await pipeline(options, { id: 'a1', name: 'Agent', input })).hook
+				slots.push(gate.live())
 				yield toolResult('a1', 'done', null, agentOutput())
+				// Read before the turn ends, whose reset would hide a slot never given back.
+				slots.push(gate.live())
 				yield RESULT
 			},
 			{ delegation: gate },
@@ -146,8 +183,8 @@ test.describe('the hook admits a delegation', () => {
 		// No decision: the CLI applies it as an input change and leaves its own pipeline be.
 		expect(answer.permissionDecision).toBeUndefined()
 		expect(answer.updatedInput).toEqual({ subagent_type: 'reviewer', prompt: 'p', run_in_background: false })
-		// And the slot came back with the result.
-		expect(gate.live()).toBe(0)
+		// The child held a slot while it ran, and gave it back with its result.
+		expect(slots).toEqual([1, 0])
 	})
 
 	test('an older CLI calling it Task is gated the same way', async () => {
@@ -377,13 +414,65 @@ test.describe("the child's card", () => {
 		expect(children[0].status).toBe('stopped')
 	})
 
-	test('a child still running when the turn ends (Stop) is closed as stopped', async () => {
+	test('Stop: the CLI answers a running child with an interrupt error, and its card says stopped', async () => {
+		let handle: EngineQueryHandle | null = null
+		const { frames, children } = await run(
+			async function* () {
+				yield delegate('a1')
+				yield delegate('a2')
+				yield toolResult('a1', 'done', null, agentOutput())
+				yield toolUse('c2', 'Bash', { command: 'sleep 100' }, 'a2')
+				// The user presses Stop. The CLI answers the child still running with an error of
+				// its own making before the turn's result, as 2.1.278 does.
+				await handle!.interrupt()
+				yield toolResult('a2', INTERRUPTED, null, INTERRUPTED, true)
+				yield { ...RESULT, is_error: true, subtype: 'error_during_execution' }
+			},
+			{ onHandle: (h) => (handle = h) },
+		)
+		expect(children.map((c) => c.status)).toEqual(['completed', 'stopped'])
+		expect(children[1]).toMatchObject({ success: false, error: STOPPED_REASON })
+		expect(named(frames, 'subagent_done').map((f) => [f.payload.agentId, f.payload.status])).toEqual([
+			['a1', 'completed'],
+			['a2', 'stopped'],
+		])
+	})
+
+	test("after Stop, the CLI's synthetic cancellation reads as stopped too, whatever its wording", async () => {
+		let handle: EngineQueryHandle | null = null
+		const { children } = await run(
+			async function* () {
+				yield delegate('a1')
+				await handle!.interrupt()
+				yield toolResult('a1', "The user doesn't want to proceed with this tool use.", null, 'User rejected tool use', true)
+				yield RESULT
+			},
+			{ onHandle: (h) => (handle = h) },
+		)
+		expect(children[0].status).toBe('stopped')
+	})
+
+	test("the CLI's interrupt text alone is a stop; any other error, with no Stop sent, is a failure", async () => {
+		const { children } = await run(async function* () {
+			yield delegate('a1')
+			yield delegate('a2')
+			yield toolResult('a1', INTERRUPTED, null, undefined, true)
+			yield toolResult('a2', 'Agent crashed: out of memory', null, undefined, true)
+			yield RESULT
+		})
+		expect(children.map((c) => [c.status, c.error])).toEqual([
+			['stopped', STOPPED_REASON],
+			['failed', 'Agent crashed: out of memory'],
+		])
+	})
+
+	test('a child still running when the turn ends, with no answer at all, is closed as stopped', async () => {
 		const { frames, children } = await run(async function* () {
 			yield delegate('a1')
 			yield delegate('a2')
 			yield toolResult('a1', 'done', null, agentOutput())
 			yield toolUse('c2', 'Bash', { command: 'sleep 100' }, 'a2')
-			// Interrupted: the turn ends with a2 in flight.
+			// The CLI went away with a2 in flight.
 			yield { ...RESULT, is_error: true, subtype: 'error_during_execution' }
 		})
 		expect(children.map((c) => c.status)).toEqual(['completed', 'stopped'])
@@ -404,6 +493,175 @@ test.describe("the child's card", () => {
 		// Only the unrelated task's notice survives.
 		expect(named(frames, 'notice')).toHaveLength(1)
 		expect(summary.blocks.filter((b) => b.kind === 'notice')).toHaveLength(1)
+	})
+})
+
+test.describe('a child the CLI sent to the background anyway', () => {
+	// An agent definition with `background: true` (a trusted project's `.claude/agents/`) is
+	// backgrounded whatever the call's own `run_in_background` says.
+	test('keeps its slot until its task notification, so the cap still holds', async () => {
+		const gate = createDelegationGate({ parentIsClaude: true, maxConcurrent: 1 })
+		const answers: HookAnswer[] = []
+		const slots: number[] = []
+		const { frames, children } = await run(
+			async function* (options) {
+				const input = { subagent_type: 'background-reviewer', prompt: 'p' }
+				yield toolUse('a1', 'Agent', input)
+				answers.push((await pipeline(options, { id: 'a1', name: 'Agent', input })).hook)
+				// The placeholder: the call is answered, but the child is still working.
+				yield toolResult('a1', 'Async agent launched', null, launched('bg-1'))
+				slots.push(gate.live())
+				// So the next delegation still meets a full house.
+				yield toolUse('a2', 'Agent', input)
+				answers.push((await pipeline(options, { id: 'a2', name: 'Agent', input })).hook)
+				yield toolResult('a2', capReachedReason(1), null, undefined, true)
+				// The child finishes: its notification closes its card and hands its slot back.
+				yield taskNotification('a1', 'completed', 'Reviewed three files, no problems.')
+				slots.push(gate.live())
+				yield toolUse('a3', 'Agent', input)
+				answers.push((await pipeline(options, { id: 'a3', name: 'Agent', input })).hook)
+				yield toolResult('a3', 'done', null, agentOutput())
+				yield RESULT
+			},
+			{ delegation: gate },
+		)
+		expect(slots).toEqual([1, 0])
+		expect(answers.map((a) => a.permissionDecision ?? 'rewrite')).toEqual(['rewrite', 'deny', 'rewrite'])
+		expect(children.map((c) => [c.agentId, c.status])).toEqual([
+			['a1', 'completed'],
+			['a2', 'failed'],
+			['a3', 'completed'],
+		])
+		// The summary stands in for the report that never came back through the call.
+		expect(children[0].content).toBe('Reviewed three files, no problems.')
+		expect(named(frames, 'subagent_done').map((f) => f.payload.agentId)).toEqual(['a2', 'a1', 'a3'])
+		// And the notification is the card's business, not a generic notice.
+		expect(named(frames, 'notice')).toHaveLength(0)
+	})
+
+	test('its notification says how it ended, even when it comes before the placeholder', async () => {
+		const gate = createDelegationGate({ parentIsClaude: true })
+		const slots: number[] = []
+		const { children } = await run(
+			async function* (options) {
+				for (const id of ['a1', 'a2']) {
+					yield delegate(id)
+					await pipeline(options, { id, name: 'Agent', input: { subagent_type: 'reviewer', prompt: 'p' } })
+				}
+				yield toolResult('a1', 'launched', null, launched('bg-1'))
+				yield taskNotification('a1', 'failed', 'Hit the tool limit.')
+				yield taskNotification('a2', 'stopped')
+				yield toolResult('a2', 'launched', null, launched('bg-2'))
+				slots.push(gate.live())
+				yield RESULT
+			},
+			{ delegation: gate },
+		)
+		expect(slots).toEqual([0])
+		expect(children.map((c) => [c.status, c.error])).toEqual([
+			['failed', 'Hit the tool limit.'],
+			['stopped', STOPPED_REASON],
+		])
+	})
+})
+
+test.describe('what a child spent', () => {
+	const u = (input: number, output: number, cacheRead = 0) => ({
+		input_tokens: input,
+		output_tokens: output,
+		cache_creation_input_tokens: 0,
+		cache_read_input_tokens: cacheRead,
+	})
+
+	test('is added up over its model calls, not read off its last one, and rides on its done frame', async () => {
+		const { frames, children } = await run(async function* () {
+			yield delegate('a1')
+			// Call 1, split into two messages: text, then a tool call. The first carries the
+			// provisional output count.
+			yield childText('a1', 'Looking.', { id: 'msg_1', usage: u(1_000, 1) })
+			yield {
+				type: 'assistant',
+				parent_tool_use_id: 'a1',
+				message: {
+					id: 'msg_1',
+					usage: u(1_000, 80),
+					content: [{ type: 'tool_use', id: 'c1', name: 'Read', input: { file_path: 'a.ts' } }],
+				},
+			}
+			yield toolResult('c1', 'contents', 'a1')
+			// Call 2, streamed: its start, then its final count.
+			yield {
+				type: 'stream_event',
+				parent_tool_use_id: 'a1',
+				event: { type: 'message_start', message: { id: 'msg_2', usage: u(200, 1, 1_000) } },
+			}
+			yield { type: 'stream_event', parent_tool_use_id: 'a1', event: { type: 'message_delta', usage: { output_tokens: 30 } } }
+			yield childText('a1', 'All good.', { id: 'msg_2', usage: u(200, 1, 1_000) })
+			// The typed result reports the last call only.
+			yield toolResult('a1', 'All good.', null, agentOutput({ usage: u(200, 40, 1_000) }))
+			yield RESULT
+		})
+		const expected = {
+			inputTokens: 1_200,
+			outputTokens: 120,
+			cacheCreationTokens: 0,
+			cacheReadTokens: 1_000,
+			modelCalls: 2,
+			model: 'claude-haiku-4-5',
+		}
+		expect(children[0].usage).toEqual(expected)
+		expect(named(frames, 'subagent_done')[0].payload.usage).toEqual(expected)
+		// The SDK's own figure is kept as it was reported.
+		expect(children[0].details?.usage?.outputTokens).toBe(40)
+	})
+
+	test('a stopped child keeps what it spent before it was stopped', async () => {
+		const { children } = await run(async function* () {
+			yield delegate('a1')
+			yield childText('a1', 'Starting.', { id: 'msg_1', usage: u(500, 25) })
+			yield { ...RESULT, is_error: true }
+		})
+		expect(children[0]).toMatchObject({ status: 'stopped', usage: { inputTokens: 500, outputTokens: 25, modelCalls: 1 } })
+	})
+
+	test('the caller books each child the moment its card closes, before the loop reads on', async () => {
+		const booked: string[] = []
+		const seen: string[][] = []
+		await run(
+			async function* () {
+				yield delegate('a1')
+				yield delegate('a2')
+				yield toolResult('a1', 'done', null, agentOutput())
+				// The next wave's budget check would run about here, and a1 is already booked.
+				seen.push([...booked])
+				yield toolResult('a2', 'Refused: over budget', null, undefined, true)
+				yield delegate('a3')
+				yield RESULT
+			},
+			{
+				onSubagentDone: async (block) => {
+					booked.push(`${block.agentId}:${block.status}`)
+				},
+			},
+		)
+		expect(seen).toEqual([['a1:completed']])
+		expect(booked).toEqual(['a1:completed', 'a2:failed', 'a3:stopped'])
+	})
+
+	test('a caller whose booking throws does not end the turn', async () => {
+		const { summary } = await run(
+			async function* () {
+				yield delegate('a1')
+				yield toolResult('a1', 'done', null, agentOutput())
+				yield { ...RESULT, session_id: 's1' }
+			},
+			{
+				onSubagentDone: async () => {
+					throw new Error('ledger down')
+				},
+			},
+		)
+		expect(summary.sessionId).toBe('s1')
 	})
 })
 

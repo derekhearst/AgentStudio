@@ -84,6 +84,8 @@ export const SUBAGENT_DISALLOWED_TOOLS: readonly string[] = [
 	'Agent',
 	'Task',
 	'Workflow',
+	// Resumes a finished agent outside any `Agent` call — see `DISALLOWED_BUILTIN_TOOLS`.
+	'SendMessage',
 ]
 
 /**

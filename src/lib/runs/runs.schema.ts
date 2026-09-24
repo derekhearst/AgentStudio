@@ -5,6 +5,7 @@ import { conversations } from '$lib/sessions/sessions.schema'
 import type { SubagentDetails, ToolResultDetails } from '$lib/engine/tool-result-details'
 import type { RunNotice } from '$lib/engine/sdk-notices'
 import type { SubagentTranscriptEntry } from '$lib/engine/subagent-transcript'
+import type { SubagentSpend } from '$lib/engine/subagent-usage'
 
 /** Where a delegated child ended up (#32). */
 export type SubagentRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
@@ -96,6 +97,11 @@ export type StreamBlock =
 			error?: string | null
 			/** This child's ledger row's cost, stamped once it is written. */
 			costUsd?: number | null
+			/**
+			 * What the child spent, added up over every model call it made. The ledger row and the
+			 * card's token count are both this. See `$lib/engine/subagent-usage`.
+			 */
+			usage?: SubagentSpend
 	  }
 	| {
 			/**
