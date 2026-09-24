@@ -8,9 +8,11 @@
 	 * the files the dropped reply changed with their line counts, "also restore files"
 	 * (ticked by default), and — for an imported repository with uncommitted changes in those
 	 * files — a second, explicit box before anything is overwritten.
+	 *
+	 * Afterwards, `reportFileRestore()`'s notice when the restore left some listed files alone.
 	 */
 	import { untrack } from 'svelte';
-	import { rewindDialogState, settleFileRestore } from './rewind-dialog.svelte';
+	import { dismissFileRestoreNotice, rewindDialogState, settleFileRestore } from './rewind-dialog.svelte';
 	import { canContinueRestore, restoreByDefault } from './rewind-preview';
 
 	let restore = $state(false);
@@ -55,6 +57,15 @@
 		<div class="alert text-sm shadow-lg">
 			<span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
 			<span>Checking which files this would restore…</span>
+		</div>
+	</div>
+{/if}
+
+{#if rewindDialogState.notice && !pending}
+	<div class="toast toast-center toast-top z-50">
+		<div role="alert" class="alert alert-warning items-start text-sm shadow-lg" data-testid="rewind-notice">
+			<span class="min-w-0">{rewindDialogState.notice}</span>
+			<button type="button" class="btn btn-ghost btn-xs shrink-0" onclick={dismissFileRestoreNotice}>Dismiss</button>
 		</div>
 	</div>
 {/if}

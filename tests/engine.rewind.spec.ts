@@ -23,6 +23,7 @@ import {
 	blockedPreview,
 	canContinueRestore,
 	restoreByDefault,
+	restoreOutcomeNotice,
 	shouldOfferRestore,
 	unavailablePreview,
 } from '../src/lib/chat/rewind-preview'
@@ -305,6 +306,18 @@ test.describe('the dialog’s decisions', () => {
 		expect(canContinueRestore(restorable, { restore: true, acknowledge: true })).toBe(true)
 		expect(canContinueRestore(restorable, { restore: false, acknowledge: false })).toBe(true)
 		expect(canContinueRestore(blockedPreview('no'), { restore: true, acknowledge: true })).toBe(false)
+	})
+
+	test('after a restore, files a link kept the CLI from restoring are named, and a full restore says nothing', () => {
+		expect(restoreOutcomeNotice({ filesRestored: 3, skippedLinks: 0 })).toBeNull()
+		expect(restoreOutcomeNotice({ filesRestored: 0 })).toBeNull()
+		expect(restoreOutcomeNotice({ filesRestored: 4, skippedLinks: 1 })).toBe(
+			'Restored 4 of 5 files. One was not restored: it is a link, or its folder moved after this message.',
+		)
+		expect(restoreOutcomeNotice({ filesRestored: 1, skippedLinks: 2 })).toBe(
+			'Restored 1 of 3 files. 2 were not restored: they are links, or their folders moved after this message.',
+		)
+		expect(restoreOutcomeNotice({ filesRestored: 0, skippedLinks: 1 })).toContain('Restored 0 of 1 file.')
 	})
 })
 

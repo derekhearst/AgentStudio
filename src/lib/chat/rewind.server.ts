@@ -192,7 +192,15 @@ export async function previewMessageRewind(
 	}
 }
 
-export type ApplyRewindResult = { ok: true; filesRestored: number; skippedLinks: number } | { ok: false; error: string }
+export type ApplyRewindResult =
+	| {
+			ok: true
+			/** The previewed files, less the ones the CLI refused. */
+			filesRestored: number
+			/** Files left as they are because a link was in the way. The user is told. */
+			skippedLinks: number
+	  }
+	| { ok: false; error: string }
 
 /**
  * Restore the files to how they were at `messageId`.
@@ -229,13 +237,19 @@ export async function applyMessageRewind(
 
 					const result = await control.rewindFiles(target.join.uuid)
 					if (!result.canRewind) return { ok: false, error: result.error ?? 'The files could not be restored.' }
+					/*
+					 * `skippedLinks` counts tracked files the CLI refused to touch — a symlink or hard
+					 * link at the path, or a parent directory that moved. Only a real rewind reports
+					 * it (the dry run never does), so the preview's count includes them.
+					 */
+					const skippedLinks = Math.min(preview.files.length, Math.max(0, result.skippedLinks ?? 0))
 					logger.info('[chat/rewind] files restored', {
 						conversationId: target.conversationId,
 						messageId: input.messageId,
 						files: preview.files.length,
-						skippedLinks: result.skippedLinks ?? 0,
+						skippedLinks,
 					})
-					return { ok: true, filesRestored: preview.files.length, skippedLinks: result.skippedLinks ?? 0 }
+					return { ok: true, filesRestored: preview.files.length - skippedLinks, skippedLinks }
 				},
 			)
 		})

@@ -26,7 +26,7 @@
 	import type { TodoItem } from '$lib/engine/tool-result-details';
 	import MessageBubble from '$lib/chat/MessageBubble.svelte';
 	import RewindPreviewDialog from '$lib/chat/RewindPreviewDialog.svelte';
-	import { chooseFileRestore } from '$lib/chat/rewind-dialog.svelte';
+	import { chooseFileRestore, reportFileRestore } from '$lib/chat/rewind-dialog.svelte';
 	import ChatErrorNotice from '$lib/chat/ChatErrorNotice.svelte';
 	import { shouldShowModelTag } from '$lib/chat/message-bubble-helpers';
 	import ToolCallCard from '$lib/chat/ToolCallCard.svelte';
@@ -1267,6 +1267,7 @@
 			}
 
 			clearRecoverableError();
+			reportFileRestore(result);
 			// Editing creates a new branch point. Clear optimistic remnants so
 			// old assistant drafts cannot be re-shown after the server truncates history.
 			pendingAssistantDrafts = [];
@@ -1308,6 +1309,7 @@
 				return;
 			}
 			clearRecoverableError();
+			reportFileRestore(result);
 			pendingAssistantDrafts = [];
 			pendingMessageId = null;
 			streamingBlocks = [];

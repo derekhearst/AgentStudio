@@ -11,7 +11,7 @@
  */
 
 import { previewRewind } from './chat.remote'
-import { shouldOfferRestore, type RewindPreview } from './rewind-preview'
+import { restoreOutcomeNotice, shouldOfferRestore, type RewindPreview } from './rewind-preview'
 
 export type RestoreChoice = {
 	restoreFiles: boolean
@@ -27,9 +27,15 @@ type PendingRestore = {
 	resolve: (choice: RestoreChoice | null) => void
 }
 
-export const rewindDialogState = $state<{ pending: PendingRestore | null; checking: boolean }>({
+export const rewindDialogState = $state<{
+	pending: PendingRestore | null
+	checking: boolean
+	/** Said after a restore that did not put every listed file back. Stays until dismissed. */
+	notice: string | null
+}>({
 	pending: null,
 	checking: false,
+	notice: null,
 })
 
 const NO_RESTORE: RestoreChoice = { restoreFiles: false, acknowledgeUncommitted: false }
@@ -54,6 +60,7 @@ export async function chooseFileRestore(messageId: string, action: RewindAction)
 	}
 	if (!shouldOfferRestore(preview)) return NO_RESTORE
 
+	rewindDialogState.notice = null
 	return new Promise<RestoreChoice | null>((resolve) => {
 		// A second request while one is open would strand the first. Cancelling it is the safe answer.
 		rewindDialogState.pending?.resolve(null)
@@ -67,4 +74,17 @@ export function settleFileRestore(choice: RestoreChoice | null): void {
 	if (!pending) return
 	rewindDialogState.pending = null
 	pending.resolve(choice)
+}
+
+/**
+ * Tell the user how an edit or regenerate's restore went, when it did not put back every
+ * file the dialog listed. Called with the edit or regenerate's result; says nothing otherwise.
+ */
+export function reportFileRestore(result: { success?: boolean; filesRestored?: number; skippedLinks?: number } | null | undefined): void {
+	if (!result || result.success !== true) return
+	rewindDialogState.notice = restoreOutcomeNotice(result)
+}
+
+export function dismissFileRestoreNotice(): void {
+	rewindDialogState.notice = null
 }

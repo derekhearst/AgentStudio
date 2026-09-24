@@ -263,7 +263,7 @@ test.describe('edit and regenerate, with and without restoring files', () => {
 		try {
 			const { userId, conversationId, ids } = await checkpointedThread(prefix)
 			const result = await editUserMessage({ userId, messageId: ids[2], content: 'change them differently' })
-			expect(result).toEqual({ success: true, conversationId, filesRestored: 0 })
+			expect(result).toEqual({ success: true, conversationId, filesRestored: 0, skippedLinks: 0 })
 			expect((await rows(conversationId)).map((row) => row.content)).toEqual(['first', 'reply one', 'change them differently'])
 		} finally {
 			await cleanupPrefixedRecords(prefix)
@@ -299,7 +299,7 @@ test.describe('edit and regenerate, with and without restoring files', () => {
 			const deps: RewindDeps = { createQuery: control.createQuery, sandboxRoot }
 
 			const result = await editUserMessage({ userId, messageId: ids[2], content: 'edited', restoreFiles: true }, deps)
-			expect(result).toEqual({ success: true, conversationId, filesRestored: 1 })
+			expect(result).toEqual({ success: true, conversationId, filesRestored: 1, skippedLinks: 0 })
 			expect(control.calls).toEqual([
 				{ id: uuid, dryRun: true },
 				{ id: uuid, dryRun: false },
@@ -307,6 +307,26 @@ test.describe('edit and regenerate, with and without restoring files', () => {
 			expect(rowsAtRestore).toBe(4)
 			expect(control.closed()).toBeGreaterThanOrEqual(1)
 			expect((await rows(conversationId)).map((row) => row.content)).toEqual(['first', 'reply one', 'edited'])
+		} finally {
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('files the CLI would not restore because of a link are reported, not counted as restored', async () => {
+		const prefix = uniquePrefix('regen-fork-skipped-links')
+		await cleanupPrefixedRecords(prefix)
+		try {
+			const { userId, conversationId, ids, cwd } = await checkpointedThread(prefix)
+			const files = [join(cwd, 'a.txt'), join(cwd, 'b.txt'), join(cwd, 'c.txt')]
+			// Only a real rewind reports `skippedLinks`; the dry run never does.
+			const control = stubControl((_id, dryRun) =>
+				dryRun ? { canRewind: true, filesChanged: files } : { canRewind: true, filesChanged: files, skippedLinks: 2 },
+			)
+			const result = await truncateAfterMessage(
+				{ userId, conversationId, messageId: ids[2], restoreFiles: true },
+				{ createQuery: control.createQuery, sandboxRoot },
+			)
+			expect(result).toEqual({ success: true, conversationId, filesRestored: 1, skippedLinks: 2 })
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

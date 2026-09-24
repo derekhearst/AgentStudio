@@ -27,8 +27,18 @@ export type BranchInput = {
 }
 
 export type BranchResult =
-	| { success: true; conversationId: string; filesRestored: number }
+	| {
+			success: true
+			conversationId: string
+			/** Files put back as they were. */
+			filesRestored: number
+			/** Files the restore left alone because a link was in the way (`RewindFilesResult.skippedLinks`). */
+			skippedLinks: number
+	  }
 	| { success: false; error: string; rewindFailed?: true }
+
+type Restored = { filesRestored: number; skippedLinks: number }
+const NOTHING_RESTORED: Restored = { filesRestored: 0, skippedLinks: 0 }
 
 const NOT_FOUND = 'Message not found or not editable'
 const TURN_RUNNING = 'A reply is still being written. Wait for it to finish, or stop it, first.'
@@ -55,12 +65,12 @@ async function prepareBranch(
 	input: BranchInput,
 	conversationId: string,
 	deps: RewindDeps,
-): Promise<{ error: BranchResult } | { filesRestored: number }> {
+): Promise<{ error: BranchResult } | Restored> {
 	if (await findLiveChatRun(conversationId, input.userId)) return { error: { success: false, error: TURN_RUNNING } }
 	if (isConversationRewinding(conversationId)) {
 		return { error: { success: false, error: 'Files are already being restored in this conversation.' } }
 	}
-	if (!input.restoreFiles) return { filesRestored: 0 }
+	if (!input.restoreFiles) return NOTHING_RESTORED
 	const rewind = await applyMessageRewind(
 		{ userId: input.userId, messageId: input.messageId, acknowledgeUncommitted: input.acknowledgeUncommitted },
 		deps,
@@ -74,7 +84,7 @@ async function prepareBranch(
 			},
 		}
 	}
-	return { filesRestored: rewind.filesRestored }
+	return { filesRestored: rewind.filesRestored, skippedLinks: rewind.skippedLinks }
 }
 
 /** Every row after `sequence` — the turns the cut drops. Sequence, not time: two rows can share a millisecond. */
@@ -99,7 +109,7 @@ export async function editUserMessage(
 			.delete(messages)
 			.where(and(eq(messages.conversationId, target.conversationId), gt(messages.sequence, target.sequence)))
 	})
-	return { success: true, conversationId: target.conversationId, filesRestored: prepared.filesRestored }
+	return { success: true, conversationId: target.conversationId, ...prepared }
 }
 
 /** Drop everything after a user message, so its reply can be written again. */
@@ -114,5 +124,5 @@ export async function truncateAfterMessage(
 	if ('error' in prepared) return prepared.error
 
 	await deleteAfter(target.conversationId, target.sequence)
-	return { success: true, conversationId: target.conversationId, filesRestored: prepared.filesRestored }
+	return { success: true, conversationId: target.conversationId, ...prepared }
 }

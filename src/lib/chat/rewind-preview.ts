@@ -93,3 +93,21 @@ export function canContinueRestore(preview: RewindPreview, choice: { restore: bo
 	if (!preview.canRewind) return false
 	return !preview.requiresAcknowledge || choice.acknowledge
 }
+
+/**
+ * What to tell the user after a restore, or null when there is nothing to add. The CLI
+ * leaves a tracked file alone when a link is in the way — a symlink or hard link at the
+ * path, or a parent directory that moved — and only a real restore finds that out, so the
+ * dialog may have listed files that were not put back.
+ */
+export function restoreOutcomeNotice(result: { filesRestored?: number; skippedLinks?: number }): string | null {
+	const skipped = Math.max(0, result.skippedLinks ?? 0)
+	if (skipped === 0) return null
+	const restored = Math.max(0, result.filesRestored ?? 0)
+	const total = restored + skipped
+	const which =
+		skipped === 1
+			? 'One was not restored: it is a link, or its folder moved after this message.'
+			: `${skipped} were not restored: they are links, or their folders moved after this message.`
+	return `Restored ${restored} of ${total} ${total === 1 ? 'file' : 'files'}. ${which}`
+}
