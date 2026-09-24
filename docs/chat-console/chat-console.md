@@ -32,7 +32,8 @@ The rules behind these are in the [chat domain doc](../chat/chat.md); this is ho
 sidebar presents them.
 
 - **Pinned chats** sit in their own **Pinned** group above everything else, whichever way
-  the list is grouped (date, project, none).
+  the list is grouped (date, project, none), most recently pinned first. The rest of the
+  list is ordered by last activity.
 - **Each row has a "⋯" menu**: Archive, Pin to top / Unpin, Rename, Export as Markdown,
   Export as JSON and, last and in red, Delete… (which asks first). On a computer the menu
   button and a one-click **Archive** button appear when the pointer is over the row or a
@@ -42,8 +43,10 @@ sidebar presents them.
   scrolling list nor the drawer can cut it off. Clicking anywhere else, or Escape, closes it.
 - **The Status filter** (in the menu under the search box) has three views: **All** (every
   chat that is not archived), **Running** (chats with a turn in progress) and **Archived**.
-  The Archived view shows a bar with a **Back to chats** link. ("Archived" used to mean "not
-  running", and "Active" meant running; both were renamed when the real archive arrived.)
+  The Archived view shows a bar with a **Back to chats** link, and "Loading…" until the
+  archive has arrived. It is ordered, grouped by day and labelled by when each chat was
+  archived rather than by its last activity. ("Archived" used to mean "not running", and
+  "Active" meant running; both were renamed when the real archive arrived.)
 - **The search box** filters the loaded list by title and latest reply as you type. After a
   quarter-second pause it also searches the whole history on the server, and matches in
   messages and tool calls appear under **In messages**: title, an *archived* badge where it

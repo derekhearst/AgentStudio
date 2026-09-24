@@ -37,7 +37,8 @@ opens just below the row.
 
 1. Open the menu and choose **Pin to top**.
 2. The conversation moves into a **Pinned** group above all the others. It stays there
-   however old it gets, whichever way the list is grouped.
+   however old it gets, whichever way the list is grouped. The most recently pinned
+   conversation is first in the group, whatever each one's last activity.
 3. **Unpin** in the same menu puts it back in date order.
 
 ### Archive a conversation (the everyday way to tidy up)
@@ -47,7 +48,10 @@ opens just below the row.
    the memories mined from it all stay.
 3. To find it again, open the filter menu under the search box and set **Status** to
    **Archived**. The list shows archived conversations, most recently archived first, with a
-   **Back to chats** link to return.
+   **Back to chats** link to return. In this view everything goes by when a conversation was
+   archived, not when it was last used: grouped by date, one archived today sits under
+   "Today" even if nobody had touched it for a month, and the time on each row is how long
+   ago it was archived.
 4. Choose **Unarchive** from its menu to put it back. It returns to its old place in the list.
 
 A conversation also comes back on its own when the owner **sends a message in it** (for
@@ -63,7 +67,10 @@ example, by opening it from a search result and replying).
 1. Choose **Delete…** — the last item in the menu, in red.
 2. A confirmation explains what is lost and suggests archiving instead. Confirm with
    **Delete**.
-3. If that conversation was open, the app goes to the new-chat page.
+3. If the agent is still working in that conversation, its turn is stopped first, exactly
+   as the **Stop** button would stop it, and the delete waits up to ten seconds for it to
+   finish saving what it had done. Then the conversation is deleted.
+4. If that conversation was open, the app goes to the new-chat page.
 
 ### Search conversations
 
@@ -72,8 +79,10 @@ example, by opening it from a search result and replying).
    loaded.
 3. A quarter of a second after typing stops (two characters or more), the server searches the
    whole history. Results appear under **In messages**: the conversation's title, an
-   *archived* badge where it applies, when the matching message was written, and a short
-   extract with the matching words highlighted. Click one to open that conversation.
+   *archived* badge where it applies, when the matching message was written, and an extract
+   with the matching words highlighted. A short message (up to 100 characters, such as
+   "fix the login bug now") is shown whole; a longer one shows up to two short excerpts,
+   each with the words either side of a match. Click one to open that conversation.
 4. While the Archived view is open, search covers archived conversations too.
 
 What search finds:
@@ -102,7 +111,9 @@ thinking, and system notes.
 
 1. Choose **Export as Markdown** or **Export as JSON** from the menu.
 2. The file downloads, named after the conversation and the date (for example
-   `fix-the-login-page-2026-09-23.md`).
+   `fix-the-login-page-2026-09-23.md`). Browsers that support it use the readable title
+   instead, accents and emoji included, cut to its first 80 characters; a cut never splits
+   an emoji in half.
 
 | Format | What it is for | What it contains |
 | --- | --- | --- |
@@ -128,7 +139,12 @@ conversations:
 - **A conversation is in exactly one place**: pinned, in the normal list, or archived.
   Pinning an archived conversation unarchives it; archiving a pinned one unpins it.
 - **Pinning and archiving never reorder the list.** The list is ordered by last activity, and
-  putting a conversation away is not activity. Unarchiving returns it to where it was.
+  putting a conversation away is not activity. Unarchiving returns it to where it was. The
+  one exception is the Pinned group, which is ordered by when each conversation was pinned.
+  Choosing **Sort by Name** or **Project** applies inside the Pinned group too.
+- **The home page's "Recent chats"** (shown on a phone, where the sidebar is hidden) are the
+  five most recently active conversations, pinned or not. Pins do not push newer
+  conversations off that short list.
 - **Only the owner's own message brings an archived conversation back.** Automations and
   monitors that post into a conversation (a scheduled report, for example) do not — a chat
   archived on purpose should not reappear every time a job writes to it.
@@ -138,6 +154,11 @@ conversations:
 - **Other open tabs follow along**: pinning, archiving, deleting or a new chat elsewhere
   refreshes the sidebar within a couple of seconds. A rename shows in other tabs the next
   time that conversation has activity or the page is reloaded.
+- **Deleting stops a running turn first.** Otherwise the agent could carry on using tools
+  for a conversation that no longer exists, with nothing left to stop it. A delete waits at
+  most ten seconds for the stopped turn to finish, then goes ahead regardless. A turn run by
+  an automation in the background jobs worker cannot be reached this way (the same is true of
+  Stop); it is short, and its writes simply fail once the conversation is gone.
 - **What delete removes and what it keeps.** Deleting a conversation removes its messages,
   its run history (the turns, their events, approvals and evaluations) and its search index.
   The memories mined from it stay in the memory palace but lose their link back to the
@@ -147,7 +168,8 @@ conversations:
   saved; indexing never delays or fails a message. Anything missed — history from before
   search existed, or a message whose indexing failed — is indexed when the server next
   starts. When the rules for what is indexed change, the server rebuilds the index the same
-  way.
+  way. A message deleted while this catch-up is running is simply skipped; it does not stop
+  the rest from being indexed.
 - **The search extract is shown as plain text.** Highlighting is added by the app itself, so
   nothing in a message (for example, text that looks like HTML) can change how the page
   behaves.
@@ -166,7 +188,9 @@ conversations:
 | Piece | Location |
 | --- | --- |
 | Pin, archive and unarchive-on-reply rules | `src/lib/chat/conversation-lifecycle.server.ts` |
+| Delete, stopping a running turn first | `src/lib/chat/conversation-delete.server.ts` |
 | The normal and archived lists | `src/lib/chat/conversation-list.server.ts` |
+| The sidebar's order and grouping (pinned by pin time, archive by archive time) | `src/lib/chat/conversation-order.ts` |
 | What a message is indexed by | `src/lib/chat/message-search-text.ts` |
 | Turning a typed search into a query; highlight markers | `src/lib/chat/conversation-search.ts` |
 | The index writer, boot backfill and search | `src/lib/chat/message-search.server.ts`, `message-search-sql.ts` |
