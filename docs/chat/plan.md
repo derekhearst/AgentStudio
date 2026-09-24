@@ -186,6 +186,8 @@ The same `resolveReviewItem` function is used by both the chat card and the revi
 
 ## Phase 7 — Mode-aware right panel
 
+> **Superseded by #14 (2026-09).** The rail was cut down instead of made mode-aware: Preview and Files (changed in this chat), folded to a strip by default. Run activity lives on `/runs/<id>`. See `docs/chat-console/chat-console.md`.
+
 **Goal:** The right panel content changes based on active mode, providing relevant context without switching pages.
 
 ### 7.1 Panel tabs by mode
@@ -206,6 +208,8 @@ Panel open/closed state and active tab saved to `chatWorkbenchPreferences.panelL
 On narrow viewports, right panel converts to a bottom sheet with the same tabs. Active tab badge-counts pending approvals.
 
 ## Phase 8 — Diff and artifact preview
+
+> **Partly shipped by #14 (2026-09).** 8.1 is the rail's Files tab, listing every file changed in the whole chat (not just the active run) with +/- counts; a click opens the file in Preview, and the diff itself stays on the edit card in the thread. 7.2's open/closed state landed as `panelLayout.railOpen`. 8.2 no longer applies: artifacts were removed in #13.
 
 **Goal:** When a run changes files or saves artifact versions, users can review them without leaving chat.
 

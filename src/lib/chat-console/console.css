@@ -668,273 +668,179 @@ body.console-resizing-row * { cursor: row-resize !important; }
 	text-align: center;
 }
 
-/* Activity rows */
-.console-act {
-	display: grid;
-	grid-template-columns: 14px 1fr auto;
-	align-items: center;
-	gap: 8px;
-	padding: 5px 10px;
-	font-size: 11.5px;
-	border-radius: 4px;
-	margin: 0 4px;
-}
-
-.console-act:hover { background: var(--color-base-200); }
-.console-act__icon { display: flex; align-items: center; justify-content: center; }
-.console-act__title {
-	color: var(--color-base-content);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
+/* ── Rail: collapse control, collapsed strip, phone drawer (#14) ── */
+.console-rail__tablist {
+	display: flex;
+	flex: 1;
 	min-width: 0;
 }
 
-.console-act__title .det {
-	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10.5px;
-}
-
-.console-act__t {
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10px;
-	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
-}
-
-.console-act.ok .console-act__icon { color: var(--color-primary); }
-.console-act.warn .console-act__icon { color: var(--color-warning); }
-.console-act.run .console-act__icon { color: var(--color-primary); }
-.console-act.err .console-act__icon { color: var(--color-error); }
-
-.console-act .spin {
-	width: 10px;
-	height: 10px;
-	border: 1.5px solid var(--color-base-300);
-	border-top-color: var(--color-primary);
-	border-radius: 999px;
-	animation: console-spin 0.8s linear infinite;
-}
-
-@keyframes console-spin { to { transform: rotate(360deg); } }
-
-/* Research cards */
-.console-art {
-	margin: 8px 8px 12px;
-	padding: 10px 12px;
-	background: var(--color-base-200);
-	border: 1px solid var(--color-base-300);
-	border-radius: 6px;
-}
-
-.console-art.is-progress {
-	background: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 6%, transparent), transparent 60%), var(--color-base-200);
-	border-color: color-mix(in oklab, var(--color-primary) 30%, var(--color-base-300));
-}
-
-.console-art__head {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 6px;
-}
-
-.console-art__type {
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 9.5px;
-	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-	letter-spacing: 0.14em;
-	font-weight: 600;
-}
-
-.console-art__status {
+.console-rail__collapse {
+	align-self: center;
+	flex-shrink: 0;
+	width: 26px;
+	height: 26px;
 	display: inline-flex;
 	align-items: center;
-	gap: 5px;
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10px;
+	justify-content: center;
+	border-radius: 5px;
+	border: 1px solid transparent;
+	background: transparent;
 	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
+	cursor: pointer;
 }
 
-.console-art__status.run { color: var(--color-primary); }
-.console-art__status.warn { color: var(--color-warning); }
-
-.console-art__title {
-	font-size: 12.5px;
-	font-weight: 500;
+.console-rail__collapse:hover {
+	background: var(--color-base-200);
 	color: var(--color-base-content);
-	margin-bottom: 8px;
+	border-color: var(--color-base-300);
 }
 
-.console-art__progress {
-	display: grid;
-	grid-template-columns: 1fr auto;
-	gap: 8px;
+/* Folded to a column of icon buttons; ChatConsoleShell narrows the grid track to match. */
+.console-rail.is-collapsed {
 	align-items: center;
-	margin-bottom: 8px;
+	gap: 6px;
+	padding: 10px 0;
 }
 
-.console-art__bar {
-	height: 4px;
-	background: var(--color-base-300);
-	border-radius: 2px;
+.console-rail__strip-btn {
+	position: relative;
+	width: 28px;
+	height: 28px;
+	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 6px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+	cursor: pointer;
+}
+
+.console-rail__strip-btn:hover {
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+	border-color: var(--color-base-300);
+}
+
+/* The expand button sits apart from the two tab buttons below it. */
+.console-rail__strip-btn:first-child { margin-bottom: 6px; }
+
+.console-rail__strip-dot {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 6px;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--color-primary);
+}
+
+.console-rail__strip-ct {
+	position: absolute;
+	top: -3px;
+	right: -5px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 3px;
+	box-sizing: border-box;
+	border-radius: 7px;
+	background: var(--color-primary);
+	color: var(--color-primary-content);
+	font-size: 9px;
+	line-height: 14px;
+	text-align: center;
+}
+
+/* The phone's drawer copy fills the drawer, and leaves room for its close button. */
+.console-rail.is-drawer {
+	flex: 1;
+	min-height: 0;
+	border-left: 0;
+}
+
+.console-rail.is-drawer .console-rail__tabs { padding-left: 40px; }
+
+/* Files tab: what the agent changed in this chat (#14) */
+.console-files {
+	list-style: none;
+	margin: 0;
+	padding: 0 4px;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.console-files__row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 100%;
+	padding: 6px 8px;
+	border: 0;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--color-base-content);
+	font: inherit;
+	font-size: 11.5px;
+	text-align: left;
+	cursor: pointer;
+}
+
+.console-files__row:hover { background: var(--color-base-200); }
+
+.console-files__row > svg {
+	flex-shrink: 0;
+	color: color-mix(in oklab, var(--color-base-content) 45%, transparent);
+}
+
+/* The name keeps its width first; the directory shrinks (and ellipsizes) before it does. */
+.console-files__path {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
 	overflow: hidden;
 }
 
-.console-art__bar > div {
-	height: 100%;
-	background: linear-gradient(90deg, color-mix(in oklab, var(--color-primary) 60%, transparent), var(--color-primary));
-	border-radius: 2px;
+.console-files__name {
+	flex: 0 1 auto;
+	min-width: 4ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
-.console-art__pct {
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10px;
-	color: var(--color-primary);
-}
-
-.console-art__steps {
-	display: flex;
-	flex-direction: column;
-	gap: 3px;
-	font-size: 11px;
-	font-family: Consolas, 'Cascadia Code', monospace;
-}
-
-.console-art__steps .step {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	padding: 3px 0;
-	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-}
-
-.console-art__steps .step.done { color: color-mix(in oklab, var(--color-base-content) 70%, transparent); }
-.console-art__steps .step.done svg { color: var(--color-primary); }
-.console-art__steps .step.run { color: var(--color-base-content); }
-.console-art__steps .step.run .spin {
-	width: 8px;
-	height: 8px;
-	border: 1.5px solid var(--color-base-300);
-	border-top-color: var(--color-primary);
-	border-radius: 999px;
-	animation: console-spin 0.8s linear infinite;
-}
-
-.console-art__steps .step.todo .dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 999px;
-	border: 1px solid var(--color-base-300);
-	display: inline-block;
-}
-
-.console-art__meta {
-	font-family: Consolas, 'Cascadia Code', monospace;
+.console-files__dir {
+	flex: 1 1 0;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	font-size: 10.5px;
-	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-	margin-bottom: 8px;
+	color: color-mix(in oklab, var(--color-base-content) 40%, transparent);
 }
 
-.console-art__btns { display: flex; gap: 4px; }
-.console-art__btns button {
-	font: inherit;
-	font-size: 11px;
-	font-weight: 500;
-	padding: 4px 9px;
-	border-radius: 4px;
-	cursor: pointer;
-	background: var(--color-base-200);
-	border: 1px solid var(--color-base-300);
-	color: var(--color-base-content);
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	font-family: Consolas, 'Cascadia Code', monospace;
-}
-
-.console-art__btns .ghost {
-	background: transparent;
-	color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
-}
-
-.console-art__btns .ghost:hover {
-	background: var(--color-base-300);
-	color: var(--color-base-content);
-}
-
-.console-art__btns .primary {
-	background: var(--color-primary);
-	color: var(--color-primary-content);
-	border-color: var(--color-primary);
-}
-
-/* Files tab */
-.console-files__branch {
-	margin: 4px 12px 8px;
-	padding: 10px 12px;
-	background: var(--color-base-200);
-	border: 1px solid var(--color-base-300);
-	border-radius: 6px;
-	border-left: 2px solid var(--color-primary);
-}
-
-.console-files__branch .row {
-	display: flex;
-	justify-content: space-between;
-	align-items: center;
-	margin-bottom: 4px;
-}
-
-.console-files__branch .b {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 11.5px;
-	color: var(--color-base-content);
-	font-weight: 500;
-}
-
-.console-files__branch .b svg { color: var(--color-primary); }
-
-.console-files__branch .ahead {
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10px;
-	color: var(--color-primary);
-	background: color-mix(in oklab, var(--color-primary) 14%, transparent);
-	padding: 1px 6px;
+.console-files__new {
+	flex-shrink: 0;
+	font-size: 9.5px;
+	padding: 0 5px;
 	border-radius: 3px;
+	color: var(--color-success);
+	background: color-mix(in oklab, var(--color-success) 14%, transparent);
 }
 
-.console-files__branch .sub {
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-size: 10px;
-	color: color-mix(in oklab, var(--color-base-content) 50%, transparent);
-	margin-bottom: 8px;
-}
-
-.console-files__btns { display: flex; gap: 4px; }
-.console-files__btns button {
-	font: inherit;
+.console-files__stat {
+	flex-shrink: 0;
 	font-size: 11px;
-	font-weight: 500;
-	padding: 4px 9px;
-	border-radius: 4px;
-	cursor: pointer;
-	border: 1px solid var(--color-base-300);
-	display: inline-flex;
-	align-items: center;
-	gap: 5px;
-	font-family: Consolas, 'Cascadia Code', monospace;
-	background: var(--color-base-200);
-	color: var(--color-base-content);
+	font-variant-numeric: tabular-nums;
 }
 
-.console-files__btns .ghost { background: transparent; color: color-mix(in oklab, var(--color-base-content) 70%, transparent); }
-.console-files__btns .ghost:hover { background: var(--color-base-300); color: var(--color-base-content); }
+.console-files__stat.is-add { color: var(--color-success); }
+.console-files__stat.is-del { color: var(--color-error); }
 
-/* Stats footer */
 /* ── Preview pane (#29) ───────────────────────────────────────── */
 .console-rail__body.is-preview {
 	padding: 0;
@@ -1323,91 +1229,6 @@ body.console-resizing-row * { cursor: row-resize !important; }
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-
-.console-stats {
-	border-top: 1px solid var(--color-base-300);
-	background: var(--color-base-100);
-	font-family: Consolas, 'Cascadia Code', monospace;
-}
-
-.console-stats__ctx {
-	padding: 9px 12px 8px;
-	border-bottom: 1px solid var(--color-base-300);
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
-}
-
-.console-stats__ctx-row {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	font-size: 11px;
-}
-
-.console-meter {
-	height: 4px;
-	border-radius: 2px;
-	background: var(--color-base-200);
-	overflow: hidden;
-	position: relative;
-}
-
-.console-meter > .fill {
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	left: 0;
-	background: linear-gradient(90deg, var(--color-primary), color-mix(in oklab, var(--color-primary) 70%, var(--color-secondary)));
-	z-index: 1;
-}
-
-.console-meter > .reserved {
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	background: repeating-linear-gradient(
-		-45deg,
-		color-mix(in oklab, var(--color-primary) 35%, transparent),
-		color-mix(in oklab, var(--color-primary) 35%, transparent) 2px,
-		transparent 2px,
-		transparent 5px
-	);
-	z-index: 0;
-}
-
-.console-stats__row {
-	display: grid;
-	grid-template-columns: 1fr 1fr 1fr;
-	gap: 1px;
-	background: var(--color-base-300);
-}
-
-.console-stats__row > div {
-	background: var(--color-base-100);
-	padding: 8px 12px;
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-
-.console-stats .l {
-	font-size: 9.5px;
-	color: color-mix(in oklab, var(--color-base-content) 35%, transparent);
-	text-transform: uppercase;
-	letter-spacing: 0.14em;
-	font-family: Consolas, 'Cascadia Code', monospace;
-	font-weight: 600;
-}
-
-.console-stats .v {
-	font-size: 13px;
-	color: var(--color-base-content);
-	font-weight: 500;
-}
-
-.console-stats .v.lime { color: var(--color-primary); }
-.console-stats__ctx .v { font-size: 11px; }
 
 /* ── Topbar / breadcrumb ─────────────────────────────────────── */
 .console-topbar {
@@ -2144,8 +1965,10 @@ a.console-crumbs__seg:hover {
 		grid-template-columns: 1fr !important;
 	}
 
+	/* Only the rail's grid column. The phone drawer renders the same component, and hiding
+	   every .console-rail left that drawer empty (#14). */
 	.console-sb,
-	.console-rail,
+	.console-grid > .console-rail,
 	.console-resize {
 		display: none !important;
 	}
@@ -2167,9 +1990,7 @@ a.console-crumbs__seg:hover {
 /* ── Reduced motion ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
 	.console-chatrow .pulse-dot,
-	.console-chip .pulse-dot,
-	.console-art__steps .step.run .spin,
-	.console-act .spin {
+	.console-chip .pulse-dot {
 		animation: none;
 	}
 }

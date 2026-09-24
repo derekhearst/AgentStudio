@@ -10,5 +10,5 @@
 	onClose={closeAll}
 	ariaLabel="Chat rail drawer"
 >
-	<ChatConsoleRail />
+	<ChatConsoleRail variant="drawer" />
 </Drawer>

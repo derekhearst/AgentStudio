@@ -5,7 +5,8 @@
 		breakdown,
 		modelUsage = [],
 		reservedTargetPct = 30,
-		onCompact
+		onCompact,
+		compact = false
 	} = $props<{
 		used?: number;
 		total?: number;
@@ -14,6 +15,8 @@
 		modelUsage?: Array<{ label: string; value: number; color?: string }>;
 		reservedTargetPct?: number;
 		onCompact?: (() => Promise<void> | void) | undefined;
+		/** A smaller ring, for the desktop topbar, whose height matches the rail's tab bar. */
+		compact?: boolean;
 	}>();
 
 	const pct = $derived(total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0);
@@ -43,7 +46,7 @@
 	<div
 		tabindex="0"
 		role="button"
-		class="context-ring flex h-9 w-9 cursor-default items-center justify-center rounded-full border border-base-300 text-[11px] font-semibold tabular-nums"
+		class="context-ring flex cursor-default items-center justify-center rounded-full border border-base-300 font-semibold tabular-nums {compact ? 'h-7 w-7 text-[9.5px]' : 'h-9 w-9 text-[11px]'}"
 		style={`--ctx-fill:${ringDegrees}deg;`}
 		aria-label={`Context window usage ${pct}%`}
 	>

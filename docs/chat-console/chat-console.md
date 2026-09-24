@@ -5,7 +5,8 @@
 The chat console is the shell around a conversation: the left sidebar (navigation and
 recent chats), the centre thread, and the right rail. It is what the user actually looks
 at all day, so the rail's job is to hold whatever is worth keeping in view *next to* the
-conversation rather than scrolled away inside it.
+conversation rather than scrolled away inside it: a file or page to look at, and the files
+the agent changed. When there is nothing to show it stays out of the way as a thin strip.
 
 Audience: anyone touching the chat screen. Code lives in `src/lib/chat-console/`.
 
@@ -28,26 +29,82 @@ Retry) carries over. See "Switching conversations mid-turn" in the chat spec.
 
 ## The right rail
 
-The rail has four tabs.
+The rail sits to the right of a conversation. It only appears on a chat: the home page
+has no conversation, so it has no rail.
+
+It has two tabs.
 
 | Tab | What it shows |
 | --- | --- |
-| **Preview** | A file or a web page, opened on demand. The default tab. |
-| Research | Research runs started from this conversation, with live progress. |
-| Files | Source-control state for the conversation's workspace. |
-| Activity | Tool calls in the current turn, then recent earlier ones. |
+| **Preview** | A file or a web page, opened on demand. |
+| **Files** | Every file the agent changed in this chat. Click one to open it in Preview. |
 
-Below the tabs sits a permanent strip with context usage, token count, cost and latency.
-The context usage is the same estimate as the meter above the composer (see "Context
-meter" in the chat spec), so the two never disagree.
+### Collapsed until it is needed
 
-Preview is the default because the rail used to open on a tab that said "No research runs
-for this chat yet" nearly every time. Preview's empty state is an input box, so the panel
-is useful even when nothing is running.
+On a desktop or tablet screen the rail starts **folded to a thin strip** at the right edge,
+so the conversation gets the width. The strip has three buttons: expand, Preview and Files.
+The Preview button shows a dot when something is open, and the Files button shows how many
+files have changed.
 
-Preview was added as a fourth tab rather than replacing Files: Files is a placeholder for
-source-control integration, which is a separate piece of work, and "what changed in the
-repo" is a different question from "show me this thing".
+The rail expands when:
+
+- something opens a preview: "Open file" on an edit card, the preview chip on a tool call,
+  or a row in Files;
+- you click one of the strip's buttons;
+- you left it expanded last time.
+
+It folds back to the strip when you click the collapse button at the end of its tab bar,
+or when you close the preview (with nothing open there is nothing to show).
+
+Whether the rail is expanded is **remembered for you, across all your chats and devices**.
+It is saved with your workbench preferences, not with the chat, so opening a new chat keeps
+the rail the way you left it.
+
+Each browser also keeps its own copy of that choice, so when you reload a chat the rail
+appears the way you left it straight away, instead of starting as the strip and then
+jumping open a moment later. Your saved preference still has the last word: if you folded
+the rail on another device, it folds here too as soon as the preference loads.
+
+On a tablet, the rail button in the chat's header expands or folds the rail.
+
+### On a phone
+
+On a phone the rail is not beside the conversation. The rail button in the chat's header
+opens it as a drawer from the right, with the same two tabs. The drawer is opened and closed
+by hand, so it always shows the full rail and has no collapse button.
+
+Nothing you do on a phone changes the expanded-or-folded preference. Switching tabs in the
+drawer, opening a file from an edit card or from Files, and closing the preview all leave
+it alone, so your desktop rail stays the way you left it there.
+
+### Files: changed in this chat
+
+Files lists what the agent actually edited or created in this conversation. It is built
+from the edit cards already in the thread, so it needs no source control and works in any
+workspace, including the many that are not git repositories.
+
+| Column | Meaning |
+| --- | --- |
+| Name, then folder | The file, with its folder dimmed beside it. Hover for the full path. |
+| **new** | The file was created in this chat. |
+| +N / −N | Lines added and removed, added up over every edit to the file in this chat. A zero count is left out. |
+
+The most recently changed file is at the top. Edits made while a reply is still streaming
+appear as they happen. An edit that failed or was refused is not listed, and neither is a
+write that left the file exactly as it was. Edits made inside a sub-agent are not listed.
+
+### Where everything else went
+
+The rail used to have four tabs and a stats strip. Issue #14 removed what was empty most of
+the time or repeated what is shown elsewhere:
+
+| Was | Now |
+| --- | --- |
+| **Research** tab (research runs started from this chat) | The research run's own page. Its Back button and breadcrumb lead to the chat it came from. |
+| **Activity** tab (tool calls in this turn and earlier ones) | The run's own page, `/runs/<id>`, which has every tool call and event. Open it from **Run → Timeline** in a reply's stats popover, or by clicking the **running** chip at the top of the chat while a turn runs. |
+| Stats strip: context and cost | The chat's header on every screen size: the context ring (hover for the breakdown and a Compact button) and the metered cost, when there is any. |
+| Stats strip: tokens and latency | Per reply, in the reply's stats popover. |
+| Files placeholder ("main · clean", Switch, Pull) | The real Files tab above. |
 
 ## Preview
 
@@ -71,28 +128,43 @@ and say so.
 
 ### Opening something
 
-Three ways:
+Four ways:
 
 1. **Type it.** The box at the top of the tab takes a file path (relative to the chat's
    workspace, or absolute inside it) or a full `https://` URL. A bare `localhost:5173`
    counts as a URL; anything else without a scheme is treated as a path, because
    `notes.md` and a domain name are otherwise indistinguishable.
 2. **Click a tool call.** Expanding a tool call in the thread shows a preview chip for any
-   file path in its arguments and any link it produced.
-3. **Reopen the chat.** The rail restores whatever was last being looked at.
+   file path in its arguments and any link it produced. An edit card has an "Open file"
+   button.
+3. **Click a row in Files.**
+4. **Reopen the chat.** The rail restores whatever was last being looked at.
 
-### Rail state follows the conversation
+Any of the first three also expands a folded rail and switches it to Preview, even when
+that file is already the one open.
 
-The active tab and the open file or URL are stored per conversation in
-`chat_rail_preview`, keyed by conversation id and owned by a user. Closing a chat and
-coming back later puts the same thing back on screen. Nothing is remembered across
-conversations — each chat has its own.
+### What is remembered, and where
+
+| What | Remembered for | Stored in |
+| --- | --- | --- |
+| The active tab and the open file or URL | Each conversation separately | `chat_rail_preview`, one row per conversation, owned by its user |
+| Expanded or folded | You, across every chat | `chat_workbench_preferences.panel_layout.railOpen` (absent means folded), with a copy in the browser's local storage so a reload shows it at once; only changes made on a desktop or tablet screen are saved |
+| The rail's width | This browser | The browser's local storage |
+
+Closing a chat and coming back later puts the same file or page back in Preview. If the rail
+is folded, the Preview button on the strip shows a dot so you can tell something is open.
+A conversation stored with a tab that no longer exists (Research or Activity, from
+before issue #14) opens on Preview.
+
+Opening another chat clears the rail at once and then loads that chat's own selection, so
+the previous chat's file never shows under the new one, even when you switch quickly.
 
 ## Roles and permissions
 
 Single-user application. Every preview read is scoped to the signed-in user: a request for
 a conversation that is not theirs is refused, and file paths are resolved inside that
-user's own sandbox tree.
+user's own sandbox tree. The expanded/folded preference takes no conversation at all: a
+user can only read and change their own.
 
 ## Business rules and safety
 
@@ -139,3 +211,6 @@ These are the constraints that matter, and why:
 - `src/lib/chat-console/workspace-files.server.ts` and `mentions.server.ts` — the `@` file list.
 - `src/lib/tools/sandbox.server.ts` — the same workspace the agent's file tools use.
 - `/api/preview/raw` — image and PDF bytes for the rail.
+- `src/lib/engine/tool-result-details.ts` — the `file_edit` details (path, change type,
+  +/- counts) that the Files tab adds up.
+- `/runs/<id>` — a run's full event timeline, which replaced the Activity tab.
