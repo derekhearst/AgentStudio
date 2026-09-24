@@ -180,6 +180,51 @@ test.describe('tailing the output file', () => {
 		rmSync(root, { recursive: true, force: true })
 	})
 
+	test('onPoll follows every scheduled read, after its chunk, whether or not there was one', async () => {
+		const { root, file } = tasksDir()
+		writeFileSync(file, 'one\n')
+		const events: string[] = []
+		const tail = tailTaskOutput({
+			path: file,
+			anchor,
+			intervalMs: 15,
+			onChunk: (text) => {
+				events.push(`chunk:${text}`)
+			},
+			onPoll: () => {
+				events.push('poll')
+			},
+		})
+		try {
+			await expect.poll(() => events.filter((e) => e === 'poll').length).toBeGreaterThanOrEqual(3)
+			expect(events.slice(0, 3)).toEqual(['chunk:one\n', 'poll', 'poll'])
+		} finally {
+			await tail.stop()
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	test('the final read is not followed by onPoll', async () => {
+		const { root, file } = tasksDir()
+		writeFileSync(file, 'last\n')
+		const events: string[] = []
+		// A long interval: only the final read runs.
+		const tail = tailTaskOutput({
+			path: file,
+			anchor,
+			intervalMs: 60_000,
+			onChunk: (text) => {
+				events.push(`chunk:${text}`)
+			},
+			onPoll: () => {
+				events.push('poll')
+			},
+		})
+		await tail.finish()
+		expect(events).toEqual(['chunk:last\n'])
+		rmSync(root, { recursive: true, force: true })
+	})
+
 	test('a named pipe in place of the file is given up on at once, not waited on', async () => {
 		// Without O_NONBLOCK, opening a FIFO waits for a writer that never comes: the read never
 		// returns, and neither does `finish()` — nor the end of the turn that awaits it.

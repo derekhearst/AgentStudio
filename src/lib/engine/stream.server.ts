@@ -14,6 +14,7 @@
  *   notice        { kind, level, title, detail, persist }
  *   background_tasks { tasks: [{ id, type, description }] }
  *   shell_output  { id, taskId, chunk, reset, truncated, from, to }   (live-only)
+ *   shell_output_checkpoint { same }   (persisted, at most every few seconds)
  *   shell_task_done { id, taskId, status, exitCode, stdout, truncated }
  *   done          { ... }
  *
@@ -22,8 +23,8 @@
  *
  * `notice`, `background_tasks` and `tool_progress` carry what the loop used to discard —
  * see `./sdk-notices`. A client that does not know them ignores unknown frames, as it
- * always has. `shell_output` / `shell_task_done` follow a backgrounded `Bash` command
- * against its call's id — see `./background-shells.server`.
+ * always has. `shell_output` / `shell_output_checkpoint` / `shell_task_done` follow a
+ * backgrounded `Bash` command against its call's id — see `./background-shells.server`.
  *
  * `details` is the SDK's typed tool output, distilled by
  * `./tool-result-details` for the built-ins whose result is worth rendering as something
@@ -815,7 +816,7 @@ export async function runEngineStream(input: EngineRunInput): Promise<EngineRunS
 					}
 					// A backgrounded command keeps filling this block while the turn runs (#35).
 					if (details?.kind === 'shell' && details.backgroundTaskId) {
-						shells.track({ toolUseId: id, sessionId, resultText: text, details })
+						await shells.track({ toolUseId: id, sessionId, resultText: text, details })
 					}
 					blocks.push({
 						kind: 'tool',

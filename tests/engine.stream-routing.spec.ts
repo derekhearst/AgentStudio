@@ -368,6 +368,12 @@ test.describe('background commands (#35)', () => {
 			expect(live[0].payload.reset).toBe(true)
 			expect(streamedText(frames)).toBe('ready on :5173\ncompiled\n')
 
+			// The first output is also saved at once, for a page that reconnects; the rest waits
+			// for the next save a few seconds on, which this turn ends before.
+			const saved = frames.filter((f) => f.event === 'shell_output_checkpoint')
+			expect(saved.length).toBeGreaterThanOrEqual(1)
+			expect(saved[0].payload).toMatchObject({ id: 'bg1', taskId: 'b1', chunk: 'ready on :5173\n', reset: true })
+
 			const done = frames.filter((f) => f.event === 'shell_task_done')
 			expect(done).toHaveLength(1)
 			expect(done[0].payload).toMatchObject({
@@ -423,6 +429,40 @@ test.describe('background commands (#35)', () => {
 
 			const tool = toolBlock(summary.blocks)
 			expect(tool?.details?.kind === 'shell' && tool.details.background).toEqual({ status: 'ended_with_turn' })
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	test('a notification that arrives before its result settles the card, not the end of the turn', async () => {
+		// The CLI emits `task_notification` the moment a task ends, and a command that fails at
+		// once can end before its call's result is written out.
+		const { root, file } = outputFile('b1')
+		try {
+			writeFileSync(file, 'bash: nmp: command not found\n')
+			const { frames, summary } = await runGated([
+				INIT,
+				toolUse('bg1', 'Bash', { command: 'nmp run dev', run_in_background: true }),
+				notification('b1', 'bg1', 'failed', file, 'Background command "nmp run dev" failed with exit code 127'),
+				backgroundResult('bg1', 'b1', file),
+				pause(80),
+				RESULT,
+			])
+
+			// The card opens settled: its result frame already says how it ended.
+			const result = frames.find((f) => f.event === 'tool_result')
+			expect(result?.payload.details).toMatchObject({
+				background: { status: 'failed' },
+				exitCode: 127,
+				stdout: 'bash: nmp: command not found\n',
+			})
+			expect(shellOutput(frames)).toHaveLength(0)
+			expect(frames.filter((f) => f.event === 'shell_task_done')).toHaveLength(0)
+			// Not "stopped when the turn ended": it had finished.
+			expect(frames.some((f) => f.event === 'notice' && /turn ended/.test(String(f.payload.title)))).toBe(false)
+
+			const tool = toolBlock(summary.blocks)
+			expect(tool?.details?.kind === 'shell' && tool.details.background).toEqual({ status: 'failed' })
 		} finally {
 			rmSync(root, { recursive: true, force: true })
 		}

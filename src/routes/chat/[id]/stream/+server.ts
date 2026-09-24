@@ -461,8 +461,9 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 			 * compacted or that three commands are running in the background.
 			 *
 			 * `shell_output` (#35) is a background command's output, read once a second while it
-			 * runs — a row per tick would be the same flood. `shell_task_done` stays persisted:
-			 * it carries the final output, so a replay still ends with what the command printed.
+			 * runs — a row per tick would be the same flood. A reconnecting client catches up from
+			 * `shell_output_checkpoint` instead, the same output saved every few seconds, and from
+			 * `shell_task_done`, which carries the final output.
 			 */
 			const NON_PERSISTED = new Set(['delta', 'reasoning', 'tool_progress', 'shell_output'])
 

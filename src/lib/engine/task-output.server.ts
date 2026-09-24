@@ -153,13 +153,19 @@ const isContinuationByte = (byte: number) => (byte & 0xc0) === 0x80
  *
  * A file that does not exist yet is waited for. A file that stops looking like this task's
  * output (a symlink, a hard link, a named pipe, a real path somewhere else) is given up on for
- * good. Reads never overlap, and `onChunk` is awaited, so the caller sees chunks strictly in
- * order. Never throws; `onGiveUp` says why a tail went quiet.
+ * good. Reads never overlap, and `onChunk` and `onPoll` are awaited, so the caller sees chunks
+ * strictly in order. Never throws; `onGiveUp` says why a tail went quiet.
  */
 export function tailTaskOutput(input: {
 	path: string
 	anchor: TaskOutputAnchor
 	onChunk: (chunk: string, info: TaskOutputChunk) => void | Promise<void>
+	/**
+	 * After every scheduled read, whether it found anything or not — never after the final
+	 * one. Runs in the same queue as `onChunk`, so whatever it sends lands in order with the
+	 * chunks. For work that is due on a clock rather than on new output.
+	 */
+	onPoll?: () => void | Promise<void>
 	onGiveUp?: (reason: string) => void
 	intervalMs?: number
 	maxReadBytes?: number
@@ -247,7 +253,11 @@ export function tailTaskOutput(input: {
 	}
 
 	const run = (final: boolean) => {
-		chain = chain.then(() => readOnce(final)).catch(() => {})
+		chain = chain
+			.then(() => readOnce(final))
+			.catch(() => {})
+			.then(() => (final || stopped || !input.onPoll ? undefined : input.onPoll()))
+			.catch(() => {})
 		return chain
 	}
 
