@@ -100,6 +100,38 @@ test.describe('a background command on the page (#35)', () => {
 		}
 	})
 
+	test('the saved checkpoints alone keep the card moving, as a reconnected page gets them', async ({ page }) => {
+		// A page that reloads or reconnects mid-turn is replayed only what was saved: no
+		// `shell_output`, just `shell_output_checkpoint` every few seconds.
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('chat-shell-saved-live')
+		await cleanupPrefixedRecords(prefix)
+		await authenticateContext(page.context())
+		const conversation = await seedConversation(prefix, { userId: await getActiveUserId() })
+		const first = lines(3)
+		const frames = backgroundFrames(randomUUID()).filter((f) => f.event !== 'shell_output')
+		frames.push(
+			{ id: 4, event: 'shell_output_checkpoint', data: { id: 'toolu_bg1', taskId: 'b1', chunk: first, reset: true, truncated: false, from: 0, to: first.length } },
+			{ id: 5, event: 'shell_output_checkpoint', data: { id: 'toolu_bg1', taskId: 'b1', chunk: 'compiled\n', reset: false, truncated: false, from: first.length, to: first.length + 9 } },
+		)
+		const { release } = await scriptHeldRun(page, conversation.id, frames)
+
+		try {
+			await openAndSend(page, conversation.id, `${prefix} start the dev server`)
+			const card = await openCard(page)
+
+			await expect(card).toHaveAttribute('data-status', 'running')
+			await expect(card.locator('.console-term__badge')).toHaveText('live')
+			await expect(card.getByText(/row-03/)).toBeVisible()
+			await expect(card.getByText(/compiled/)).toBeVisible()
+			await expect(card.getByText('Earlier output trimmed — showing the tail.')).toHaveCount(0)
+		} finally {
+			release()
+			await page.unrouteAll({ behavior: 'ignoreErrors' })
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
 	test('a command the turn outlived says it was stopped when the turn ended', async ({ page }) => {
 		test.setTimeout(90_000)
 		const prefix = uniquePrefix('chat-shell-ended')

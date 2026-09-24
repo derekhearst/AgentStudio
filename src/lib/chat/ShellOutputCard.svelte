@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/chat-console/Icon.svelte';
 	import { cleanTerminalText, tailLines } from '$lib/chat/terminal-text';
-	import type { ShellDetails } from '$lib/engine/tool-result-details';
+	import { MAX_STREAM_CHARS, type ShellDetails } from '$lib/engine/tool-result-details';
 
 	/**
 	 * #26 — renders a `Bash` call as a terminal rather than a JSON-escaped string.
@@ -12,7 +12,9 @@
 	 * last lines with a control to show the rest — the end is where a command says how it went.
 	 *
 	 * #35 — a backgrounded command is live while its turn runs: the engine tails the CLI's
-	 * output file and the chat grows `details.stdout` from `shell_output` frames. The card
+	 * output file and the chat grows `details.stdout` from `shell_output` frames (and, on a
+	 * page that reconnected mid-turn, from the `shell_output_checkpoint` saved every few
+	 * seconds — see `applyShellOutput`). The card
 	 * follows the newest output unless the reader has scrolled up, and says how the command
 	 * ended — including "ended with turn" for one still running when the reply finished, since
 	 * background commands do not outlive their turn. A block saved before this existed has no
@@ -32,8 +34,13 @@
 	/** Lines shown before "Show all". */
 	const PREVIEW_LINES = 20;
 
-	const stdout = $derived(cleanTerminalText(details.stdout));
-	const stderr = $derived(cleanTerminalText(details.stderr));
+	/*
+	 * A stream at the cap was cut to its tail at an arbitrary character, so its first line is a
+	 * fragment (`truncated` alone covers both streams, so the length says which one it was).
+	 */
+	const clipped = (text: string) => details.truncated && text.length >= MAX_STREAM_CHARS;
+	const stdout = $derived(cleanTerminalText(details.stdout, { clipped: clipped(details.stdout) }));
+	const stderr = $derived(cleanTerminalText(details.stderr, { clipped: clipped(details.stderr) }));
 
 	let showAll = $state(false);
 	const stdoutTail = $derived(tailLines(stdout, PREVIEW_LINES));

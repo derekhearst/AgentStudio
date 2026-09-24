@@ -46,6 +46,14 @@ test.describe('terminal text', () => {
 		expect(cleanTerminalText('one\r\ntwo\r\n')).toBe('one\ntwo\n')
 	})
 
+	test('a tail cut mid-escape loses its fragment of a first line, not the rest', () => {
+		// The ESC was cut off with the head, so `[31m` is no longer an escape anything can spot.
+		expect(cleanTerminalText('[31mred start\nnext line\n', { clipped: true })).toBe('next line\n')
+		expect(cleanTerminalText('[31mred start\nnext line\n')).toBe('[31mred start\nnext line\n')
+		// A single line with nothing after it is all there is: kept.
+		expect(cleanTerminalText('one long line', { clipped: true })).toBe('one long line')
+	})
+
 	test('the last lines are what a long output shows first', () => {
 		const text = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
 		const preview = tailLines(text, 20)
@@ -110,8 +118,23 @@ test.describe('the live card (#35)', () => {
 		expect(detailsOf(blocks).truncated).toBe(true)
 	})
 
+	test('a saved checkpoint the card already has changes nothing; one that overlaps adds only what is new', () => {
+		let blocks: StreamingBlock[] = [shellBlock()]
+		blocks = applyShellOutput(blocks, { id: 'bg1', chunk: 'one\n', reset: true, from: 0, to: 4 })
+		blocks = applyShellOutput(blocks, { id: 'bg1', chunk: 'two\n', reset: false, from: 4, to: 8 })
+
+		// A connected page gets the checkpoint of what it already has, just after it.
+		expect(applyShellOutput(blocks, { id: 'bg1', chunk: 'two\n', reset: false, from: 4, to: 8 })).toEqual(blocks)
+		const sameReset = applyShellOutput(blocks, { id: 'bg1', chunk: 'one\ntwo\n', reset: true, from: 0, to: 8 })
+		expect(detailsOf(sameReset)).toMatchObject({ stdout: 'one\ntwo\n', truncated: false })
+
+		// A page that reconnected has up to 8; the replayed checkpoint covers 4 to 12.
+		const caughtUp = applyShellOutput(blocks, { id: 'bg1', chunk: 'two\nsix\n', reset: false, from: 4, to: 12 })
+		expect(detailsOf(caughtUp)).toMatchObject({ stdout: 'one\ntwo\nsix\n', truncated: false })
+	})
+
 	test('a chunk that does not start where the card left off marks the output as a tail', () => {
-		// A page that reconnected mid-turn missed the live-only frames in between.
+		// Output the page never saw: a chunk cut to the cap, or frames lost on the way.
 		let blocks: StreamingBlock[] = [shellBlock()]
 		blocks = applyShellOutput(blocks, { id: 'bg1', chunk: 'late\n', reset: false, from: 900, to: 905 })
 		expect(detailsOf(blocks).stdout).toBe('late\n')

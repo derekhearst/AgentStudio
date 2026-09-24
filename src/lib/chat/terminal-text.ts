@@ -27,10 +27,22 @@ function overwriteLine(line: string): string {
 	return line.split('\r').reduce((screen, segment) => segment + screen.slice(segment.length), '')
 }
 
-/** Strip escapes and control characters, and resolve carriage-return redraws. */
-export function cleanTerminalText(text: string): string {
+/**
+ * Strip escapes and control characters, and resolve carriage-return redraws.
+ *
+ * `clipped` says the text is the tail of something longer, cut at an arbitrary character. Its
+ * first line is then a fragment, and can start with half an escape sequence — `[31m` with its
+ * ESC cut off — that no pattern here can tell from real text. So that line is dropped, as long
+ * as there is a line after it; the card already says earlier output was trimmed.
+ */
+export function cleanTerminalText(text: string, options: { clipped?: boolean } = {}): string {
 	if (!text) return ''
-	const stripped = text.replace(OSC, '').replace(CSI, '').replace(SHORT_ESCAPE, '')
+	let source = text
+	if (options.clipped) {
+		const firstBreak = source.indexOf('\n')
+		if (firstBreak >= 0 && firstBreak < source.length - 1) source = source.slice(firstBreak + 1)
+	}
+	const stripped = source.replace(OSC, '').replace(CSI, '').replace(SHORT_ESCAPE, '')
 	// CRLF is a line break, not a redraw.
 	const lines = stripped.replace(/\r\n/g, '\n').split('\n').map(overwriteLine)
 	return lines.join('\n').replace(CONTROL, '')

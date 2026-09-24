@@ -1051,7 +1051,7 @@
 					}
 
 					// #35 — a backgrounded command's live output, and how it ended.
-					if (eventName === 'shell_output') {
+					if (eventName === 'shell_output' || eventName === 'shell_output_checkpoint') {
 						streamingBlocks = applyShellOutput(streamingBlocks, payload as Parameters<typeof applyShellOutput>[1]);
 					}
 					if (eventName === 'shell_task_done') {

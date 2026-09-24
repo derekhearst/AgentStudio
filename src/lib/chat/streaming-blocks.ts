@@ -47,7 +47,7 @@ export type ToolBlock = {
 	 * generic card the default rather than a fallback.
 	 */
 	details?: ToolResultDetails
-	/** Characters of a background command's output received live (#35) — see `applyShellOutput`. */
+	/** Characters of a background command's output the card has, since its last reset (#35) — see `applyShellOutput`. */
 	shellStreamed?: number
 }
 
@@ -381,14 +381,24 @@ export function applyToolProgress(
 }
 
 /**
- * `shell_output` frame (#35) — new output from a backgrounded command, added to its card.
+ * `shell_output` and `shell_output_checkpoint` frames (#35) — output from a backgrounded
+ * command, added to its card.
+ *
+ * `shell_output` arrives about once a second and is live-only. `shell_output_checkpoint` is
+ * the same output saved every few seconds, and the resume replay delivers it, so a page that
+ * reloaded or reconnected mid-turn — which gets only saved frames from then on — still catches
+ * up and keeps moving, a few seconds behind. A connected page gets both; the positions
+ * (`from` / `to`, in characters since the last reset) sort that out:
+ *
+ * - `reset` replaces instead of adding: the first read of the output file, a truncated file,
+ *   or a jump ahead to the newest output.
+ * - A chunk that ends where the card already is, or before, is one it has. One that overlaps
+ *   adds only its new part.
+ * - A chunk that starts past where the card left off means output was missed, so the card is
+ *   marked as a tail rather than passing a fragment off as the whole thing.
  *
  * Capped to the same tail the server keeps (`appendStreamTail`), so the live card and the
- * persisted block agree. `reset` replaces instead of adding: the first read of the output
- * file, a truncated file, or a jump ahead to the newest output. A chunk that does not start
- * where the card left off (a page that reconnected mid-turn missed the frames in between —
- * they are live-only) marks the output as a tail, so the card says earlier output is missing
- * rather than passing a fragment off as the whole thing.
+ * persisted block agree.
  */
 export function applyShellOutput(
 	blocks: StreamingBlock[],
@@ -400,11 +410,20 @@ export function applyShellOutput(
 		// Already settled: `shell_task_done` carried the final output, and nothing comes after it.
 		if (b.details.background && b.details.background.status !== 'running') return b
 		const reset = payload.reset === true
-		const next = appendStreamTail(reset ? '' : b.details.stdout, chunk)
-		const gap = !reset && typeof payload.from === 'number' && payload.from !== (b.shellStreamed ?? 0)
+		const have = b.shellStreamed ?? 0
+		const to = typeof payload.to === 'number' ? payload.to : (reset ? 0 : have) + chunk.length
+		const from = typeof payload.from === 'number' ? payload.from : to - chunk.length
+		let added = chunk
+		let gap = false
+		if (!reset) {
+			if (to <= have) return b
+			if (from > have) gap = true
+			else added = chunk.slice(Math.max(0, chunk.length - (to - have)))
+		}
+		const next = appendStreamTail(reset ? '' : b.details.stdout, added)
 		return {
 			...b,
-			shellStreamed: typeof payload.to === 'number' ? payload.to : (b.shellStreamed ?? 0) + chunk.length,
+			shellStreamed: to,
 			details: {
 				...b.details,
 				stdout: next.text,
