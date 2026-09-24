@@ -41,7 +41,7 @@ import { agents as agentsTable } from '$lib/agents/agents.schema'
 import { PAUSED_AGENT_STATUS } from '$lib/agents/agent-status'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { logger } from '$lib/observability/logger'
-import { buildAgentDefinitions, type EngineAgentDefinition } from './agent-definitions'
+import { buildAgentRoster, type EngineAgentDefinition } from './agent-definitions'
 
 /** How many agents may be described to the model at once. See the module note. */
 export const MAX_SUBAGENTS = 12
@@ -62,6 +62,12 @@ export type SubagentLoadInput = {
 	parentIsClaude: boolean
 }
 
+/** What a run may delegate to, and which `agents` row each offered key names (#32). */
+export type SubagentRoster = {
+	definitions: Record<string, EngineAgentDefinition>
+	agentIdByKey: Record<string, string>
+}
+
 /**
  * Build the `Options.agents` map for a run. Never throws: a failure here costs delegation,
  * and losing the turn over it would be a worse trade.
@@ -69,7 +75,15 @@ export type SubagentLoadInput = {
 export async function loadSubagentDefinitions(
 	input: SubagentLoadInput,
 ): Promise<Record<string, EngineAgentDefinition>> {
-	if (!input.parentIsOrchestrator) return {}
+	return (await loadSubagentRoster(input)).definitions
+}
+
+/**
+ * The same, plus the row id behind each key — what the delegation gate's budget check and
+ * the child's ledger row are attributed to. Never throws, for the same reason.
+ */
+export async function loadSubagentRoster(input: SubagentLoadInput): Promise<SubagentRoster> {
+	if (!input.parentIsOrchestrator) return { definitions: {}, agentIdByKey: {} }
 
 	try {
 		const rows = await db
@@ -99,6 +113,7 @@ export async function loadSubagentDefinitions(
 			rows.map(async (row) => {
 				const allowedTools = configAllowedTools(row.config)
 				return {
+					id: row.id,
 					name: row.name,
 					role: row.role,
 					// The same resolution the parent's identity slot uses, so editing an agent's
@@ -111,9 +126,9 @@ export async function loadSubagentDefinitions(
 			}),
 		)
 
-		return buildAgentDefinitions(resolved, { parentIsClaude: input.parentIsClaude })
+		return buildAgentRoster(resolved, { parentIsClaude: input.parentIsClaude })
 	} catch (err) {
 		logger.warn('[engine] failed to load subagent definitions; delegation disabled for this run', { err })
-		return {}
+		return { definitions: {}, agentIdByKey: {} }
 	}
 }

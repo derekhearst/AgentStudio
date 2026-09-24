@@ -160,15 +160,15 @@ test.describe('subagent routing (#5)', () => {
 			RESULT,
 		])
 
-		// The parent's transcript shows the delegation, not the child's individual calls.
-		const parentToolFrames = frames.filter((f) => f.event === 'tool_call')
-		expect(parentToolFrames.map((f) => f.payload.name)).toEqual(['Task'])
+		// The parent's transcript shows the delegation as the child's card (#32), and neither
+		// the delegation nor the child's individual calls as tool calls of the parent's.
+		expect(frames.filter((f) => f.event === 'tool_call')).toHaveLength(0)
+		expect(frames.filter((f) => f.event === 'subagent_start').map((f) => f.payload.agentId)).toEqual(['task1'])
 
 		expect(frames.filter((f) => f.event === 'subagent_tool_call')).toHaveLength(1)
 		expect(frames.filter((f) => f.event === 'subagent_tool_result')).toHaveLength(1)
 
-		// The parent's `Task` has no result in this script, so it closes no tool block — and
-		// the child's `Read`, which does have one, did not open a block in the parent either.
+		// Neither the delegation nor the child's `Read` opened a tool block in the parent.
 		const toolBlocks = summary.blocks.filter((b) => b.kind === 'tool')
 		expect(toolBlocks).toHaveLength(0)
 		expect(summary.blocks.filter((b) => b.kind === 'subagent')).toHaveLength(1)

@@ -19,9 +19,18 @@ import {
 import {
 	appendStreamTail,
 	type BackgroundShellStatus,
+	type SubagentDetails,
 	type ToolResultDetails,
 } from '../engine/tool-result-details'
+import type { SubagentSpend } from '../engine/subagent-usage'
 import type { RunNotice } from '../engine/sdk-notices'
+import {
+	appendTranscriptText,
+	appendTranscriptToolCall,
+	settleTranscriptToolCall,
+	type SubagentTranscript,
+	type SubagentTranscriptEntry,
+} from '../engine/subagent-transcript'
 
 export type ToolStatus = 'pending' | 'approved' | 'executing' | 'completed' | 'failed' | 'denied'
 
@@ -65,6 +74,8 @@ export type ThinkingBlock = {
 	expanded: boolean
 }
 
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped'
+
 export type SubagentBlock = {
 	kind: 'subagent'
 	id: string
@@ -73,9 +84,18 @@ export type SubagentBlock = {
 	conversationId: string | null
 	task: string
 	content: string
-	status: 'running' | 'completed' | 'failed'
+	status: SubagentStatus
 	toolCalls: Array<{ name: string; success?: boolean }>
 	expanded: boolean
+	/** #32 — what the child said and did, in order, built from the same frames. */
+	transcript: SubagentTranscriptEntry[]
+	transcriptTruncated?: boolean
+	/** The SDK's typed result, from `subagent_done`: report, tokens, duration. */
+	details?: SubagentDetails
+	/** Why it failed, was refused or stopped. */
+	error?: string | null
+	/** What it spent over all its model calls, from `subagent_done`. */
+	usage?: SubagentSpend
 }
 
 export type NoticeBlock = {
@@ -158,6 +178,15 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				task: block.task,
 				content: block.content,
 				success: block.status === 'completed',
+				// #32 — a partial save (Stop, an error) keeps the child's card as it was, not a
+				// bare name: its transcript, its result and how it ended. A child still running
+				// when the save happens was cut short by it.
+				status: block.status === 'running' ? 'stopped' : block.status,
+				...(block.transcript.length > 0 ? { transcript: block.transcript } : {}),
+				...(block.transcriptTruncated ? { transcriptTruncated: true } : {}),
+				...(block.details ? { details: block.details } : {}),
+				...(block.error ? { error: block.error } : {}),
+				...(block.usage ? { usage: block.usage } : {}),
 			})
 		} else {
 			out.push({
@@ -487,13 +516,23 @@ export type SubagentStartPayload = {
 }
 
 /**
- * Append a new subagent block. Collapses any open thinking blocks so the new
- * subagent span gets visual focus.
+ * Append a new subagent block, collapsed (#32): a fan-out opens several at once, and each
+ * card expands to its own transcript on demand. Collapses any open thinking blocks too.
+ *
+ * Idempotent: a resumed stream replays `subagent_start`, and a second card for the same
+ * delegation would split its transcript in two.
  */
 export function applySubagentStart(
 	blocks: StreamingBlock[],
 	payload: SubagentStartPayload,
 ): StreamingBlock[] {
+	if (
+		blocks.some(
+			(b) => b.kind === 'subagent' && b.agentId === payload.agentId && b.conversationId === payload.conversationId,
+		)
+	) {
+		return blocks
+	}
 	return [
 		...blocks.map((b) => (b.kind === 'thinking' ? { ...b, expanded: false } : b)),
 		{
@@ -506,12 +545,26 @@ export function applySubagentStart(
 			content: '',
 			status: 'running' as const,
 			toolCalls: [],
-			expanded: true,
+			transcript: [],
+			expanded: false,
 		},
 	]
 }
 
 type SubagentTargetMatch = { agentId: string; conversationId: string | null }
+
+function isTarget(b: StreamingBlock, target: SubagentTargetMatch): b is SubagentBlock {
+	return b.kind === 'subagent' && b.agentId === target.agentId && b.conversationId === target.conversationId
+}
+
+/** Apply a transcript change to a live block, keeping the helpers' shape. */
+function withTranscript(
+	block: SubagentBlock,
+	change: (t: SubagentTranscript) => SubagentTranscript,
+): Pick<SubagentBlock, 'transcript' | 'transcriptTruncated'> {
+	const next = change({ entries: block.transcript ?? [], truncated: block.transcriptTruncated === true })
+	return { transcript: next.entries, ...(next.truncated ? { transcriptTruncated: true } : {}) }
+}
 
 /** Append a delta chunk to the currently-running subagent block matching the target. */
 export function applySubagentDelta(
@@ -520,25 +573,26 @@ export function applySubagentDelta(
 	content: string,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, content: b.content + content }
+		isTarget(b, target)
+			? { ...b, content: b.content + content, ...withTranscript(b, (t) => appendTranscriptText(t, content)) }
 			: b,
 	)
 }
 
-/** Append a tool call entry to the matching subagent block. */
+/** Append a tool call entry to the matching subagent block. `label` hints at what it touched. */
 export function applySubagentToolCall(
 	blocks: StreamingBlock[],
 	target: SubagentTargetMatch,
 	name: string,
+	label?: string | null,
 ): StreamingBlock[] {
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, toolCalls: [...b.toolCalls, { name }] }
+		isTarget(b, target)
+			? {
+					...b,
+					toolCalls: [...b.toolCalls, { name }],
+					...withTranscript(b, (t) => appendTranscriptToolCall(t, name, label)),
+				}
 			: b,
 	)
 }
@@ -561,20 +615,40 @@ export function applySubagentToolResult(
 		const updatedTools = b.toolCalls.map((tc, i) =>
 			i === b.toolCalls.length - 1 && tc.name === name ? { ...tc, success } : tc,
 		)
-		return { ...b, toolCalls: updatedTools }
+		return { ...b, toolCalls: updatedTools, ...withTranscript(b, (t) => settleTranscriptToolCall(t, name, success)) }
 	})
 }
 
-/** Mark the matching subagent block completed and collapse it. */
+/** What `subagent_done` carries. Every field is optional: older servers sent only the target. */
+export type SubagentDonePayload = {
+	success?: boolean
+	status?: Exclude<SubagentStatus, 'running'>
+	details?: SubagentDetails
+	error?: string | null
+	usage?: SubagentSpend
+}
+
+/**
+ * Close the matching subagent block. Its status is the one the server sent — completed,
+ * failed, or stopped with the turn (#32) — or completed when the payload predates it.
+ */
 export function applySubagentDone(
 	blocks: StreamingBlock[],
 	target: SubagentTargetMatch,
+	payload: SubagentDonePayload = {},
 ): StreamingBlock[] {
+	const status: Exclude<SubagentStatus, 'running'> =
+		payload.status ?? (payload.success === false ? 'failed' : 'completed')
 	return blocks.map((b) =>
-		b.kind === 'subagent' &&
-		b.agentId === target.agentId &&
-		b.conversationId === target.conversationId
-			? { ...b, status: 'completed' as const, expanded: false }
+		isTarget(b, target)
+			? {
+					...b,
+					status,
+					expanded: false,
+					...(payload.details ? { details: payload.details } : {}),
+					...(payload.error ? { error: payload.error } : {}),
+					...(payload.usage ? { usage: payload.usage } : {}),
+				}
 			: b,
 	)
 }

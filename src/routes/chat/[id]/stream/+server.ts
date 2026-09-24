@@ -67,7 +67,8 @@ import { resolveBashPolicy } from '$lib/engine/workspace-guard'
 import { runEngineStream } from '$lib/engine/stream.server'
 import { claimRun, registerRunHandle } from '$lib/engine/run-registry.server'
 import { turnInProgress } from '$lib/runs/live-chat-run.server'
-import { loadSubagentDefinitions } from '$lib/engine/agent-definitions.server'
+import { loadSubagentRoster } from '$lib/engine/agent-definitions.server'
+import { createChatDelegation } from '$lib/chat/stream-delegation.server'
 import { projects } from '$lib/projects/projects.schema'
 import { toolCallLedgerEntry } from '$lib/costs/tool-call-ledger'
 import { logToolUsage } from '$lib/costs/usage'
@@ -418,11 +419,12 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 	 * The agents this run may delegate to (#5). Loaded per run, like the trust flag above:
 	 * an agent created or paused between turns has to take effect on the next one.
 	 */
-	const subagents = await loadSubagentDefinitions({
+	const roster = await loadSubagentRoster({
 		parentAgentId: agent.id,
 		parentIsOrchestrator: isOrchestrator,
 		parentIsClaude: isClaudeModel(routedModel),
 	}).catch(abandonSetup)
+	const subagents = roster.definitions
 	const toolScope = resolveToolScope(scopedTools, { delegation: Object.keys(subagents).length > 0 })
 	// #24 — back files up before the agent changes them, where the workspace outlives the turn.
 	const fileCheckpointing = supportsFileCheckpoints(workspace.context)
@@ -556,12 +558,26 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 				 */
 				if (attachmentNotice) await emit('delta', { content: attachmentNotice })
 
+				// #32 — the concurrency cap, the one-level rule and each child's budget check, and a
+				// ledger row for each child the moment it reports back. One for the turn: a resume
+				// fallback (#24) only retries an attempt that produced nothing, so no child ran in it.
+				const delegation = createChatDelegation({
+					userId: user.id,
+					conversationId: body.conversationId,
+					parentAgentId: conversation.agentId ?? null,
+					agentIdByKey: roster.agentIdByKey,
+					parentIsClaude: isClaudeModel(routedModel),
+					routedModel,
+					runId: run.id,
+				})
 				const summary = await runWithResumeFallback(turn.attempts, async (attempt) => runEngineStream(
 					{
 						// One user message with a uuid we chose: the row's join to the transcript.
 						prompt: userTurnMessages(turnPromptContent(preparedPrompt, attempt.preamble), attempt.sdkUserUuid),
 						options: withTurnResume(engineOptions, attempt),
 						emit,
+						delegation: delegation.gate,
+						onSubagentDone: delegation.ledger.record,
 						/*
 						 * Every completed call gets a ledger row. Before this, only `web_search`
 						 * and the media generators wrote one, so the entire built-in filesystem
@@ -680,10 +696,18 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 					else summary.blocks.unshift({ kind: 'text', content: attachmentNotice })
 				}
 
+				const claudeRun = isClaudeModel(routedModel)
+				// #32 — the children's rows are carved out of the turn's usage rather than added to
+				// it, and each child's cost is on its card before the blocks persist.
+				const { parentUsage, childCostUsd } = await delegation.ledger.settle({
+					blocks: summary.blocks,
+					usage: summary.usage,
+					coverage: summary.usageIncludesSubagents,
+				})
+
 				await persistRunBlocks(run.id, summary.blocks)
 
 				const totalMs = Date.now() - startedAt
-				const claudeRun = isClaudeModel(routedModel)
 				const tokensPerSec =
 					totalMs > 0 && summary.usage.outputTokens > 0
 						? Math.round((summary.usage.outputTokens / (totalMs / 1000)) * 100) / 100
@@ -691,16 +715,17 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 
 				// Subscription runs have no per-token price, so record tokens and force the
 				// dollar figure to zero rather than inventing one from list pricing. A gateway
-				// run prices this turn's tokens from the OpenRouter catalogue (#9) — the SDK's
-				// own figure is a guess at a Claude rate for a model it has no price for.
-				const gatewayCost = claudeRun ? null : await priceGatewayTurn(routedModel, summary.usage)
-				const messageCost = await logLlmUsage({
+				// run prices the parent's own tokens from the OpenRouter catalogue (#9) — the SDK's
+				// own figure is a guess at a Claude rate for a model it has no price for. Its
+				// children were carved out above and priced on their own rows (#32).
+				const gatewayCost = claudeRun ? null : await priceGatewayTurn(routedModel, parentUsage)
+				const parentCost = await logLlmUsage({
 					source: 'chat',
 					model: routedModel,
-					tokensIn: summary.usage.inputTokens,
-					tokensOut: summary.usage.outputTokens,
-					tokensCacheWrite: summary.usage.cacheCreationTokens,
-					tokensCacheRead: summary.usage.cacheReadTokens,
+					tokensIn: parentUsage.inputTokens,
+					tokensOut: parentUsage.outputTokens,
+					tokensCacheWrite: parentUsage.cacheCreationTokens,
+					tokensCacheRead: parentUsage.cacheReadTokens,
 					userId: user.id,
 					runId: run.id,
 					agentId: conversation.agentId ?? null,
@@ -711,6 +736,8 @@ export const POST: RequestHandler = async ({ request, locals }) => {
 						...(gatewayCost ? { backend: 'gateway', costBasis: gatewayCost.costBasis } : {}),
 					},
 				})
+				// The turn's cost, children included: what the message and the conversation total show.
+				const messageCost = childCostUsd > 0 ? (parseFloat(parentCost) + childCostUsd).toPrecision(15) : parentCost
 
 				const assistantMessage = await persistAssistantMessage({
 					conversationId: body.conversationId,

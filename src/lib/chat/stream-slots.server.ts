@@ -17,7 +17,7 @@ import { logger } from '$lib/observability/logger'
 import { loadAgentIdentityContent } from '$lib/chat/agent-switch.server'
 import { buildOrchestratorPrompt } from '$lib/agents/orchestrator'
 import { builtinHandoffNote } from '$lib/agents/builtin-agents.server'
-import { SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
+import { DELEGATION_POLICY_LINES, SUBAGENT_RESULT_POLICY_LINES } from '$lib/agents/subagent-result'
 import { db } from '$lib/db.server'
 import type { agents as agentsTable } from '$lib/agents/agents.schema'
 import type { getSettings } from '$lib/settings'
@@ -263,6 +263,8 @@ const ORCHESTRATOR_TOOL_POLICY = [
 	'- For AskUserQuestion: aim for ~3 options per question. Prefer asking more focused questions (split complex choices across multiple questions) rather than listing many options in one question. Set multiSelect when the choices are not mutually exclusive.',
 	'- When the options are things to compare by eye (layouts, snippets, configurations), give each one an HTML preview. The user sees it in a sandboxed pane, so keep it self-contained with inline styles.',
 	...BACKGROUND_COMMAND_POLICY_LINES,
+	'',
+	...DELEGATION_POLICY_LINES,
 	'',
 	...SUBAGENT_RESULT_POLICY_LINES,
 ].join('\n')

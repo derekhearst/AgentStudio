@@ -2,9 +2,14 @@ import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid 
 import { users } from '$lib/auth/auth.schema'
 import { agents } from '$lib/agents/agents.schema'
 import { conversations } from '$lib/sessions/sessions.schema'
-import type { ToolResultDetails } from '$lib/engine/tool-result-details'
+import type { SubagentDetails, ToolResultDetails } from '$lib/engine/tool-result-details'
 import type { RunNotice } from '$lib/engine/sdk-notices'
 import type { AskQuestion } from '$lib/engine/ask-user-question'
+import type { SubagentTranscriptEntry } from '$lib/engine/subagent-transcript'
+import type { SubagentSpend } from '$lib/engine/subagent-usage'
+
+/** Where a delegated child ended up (#32). */
+export type SubagentRunStatus = 'running' | 'completed' | 'failed' | 'stopped'
 
 export const chatRunStateEnum = pgEnum('chat_run_state', [
 	'queued',
@@ -76,6 +81,26 @@ export type StreamBlock =
 			task: string
 			content: string
 			success: boolean
+			/*
+			 * #32 — all optional, so a block persisted before them still renders (from
+			 * `content` and `success`, as it always did). jsonb, so no migration.
+			 */
+			/** `stopped` is a child still running when the turn ended — Stop, or an interrupt. */
+			status?: SubagentRunStatus
+			/** What the child said and did, in order. See `$lib/engine/subagent-transcript`. */
+			transcript?: SubagentTranscriptEntry[]
+			transcriptTruncated?: boolean
+			/** The SDK's typed result for the delegation: report, totals, usage. */
+			details?: SubagentDetails
+			/** Why the delegation failed or was refused, when it did not complete. */
+			error?: string | null
+			/** This child's ledger row's cost, stamped once it is written. */
+			costUsd?: number | null
+			/**
+			 * What the child spent, added up over every model call it made. The ledger row and the
+			 * card's token count are both this. See `$lib/engine/subagent-usage`.
+			 */
+			usage?: SubagentSpend
 	  }
 	| {
 			/**

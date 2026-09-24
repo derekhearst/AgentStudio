@@ -276,6 +276,14 @@ export function buildEngineOptions(input: EngineOptionsInput): Options {
 		 */
 		forwardSubagentText: true,
 		/*
+		 * `perTaskStopAffordance` is deliberately never set (#32). Declared, an interrupt would
+		 * spare running background agents and leave each to be stopped one at a time; absent,
+		 * the CLI "fails closed … an interrupt kills background tasks" (sdk.d.ts). Children run
+		 * in the foreground anyway (`./delegation-gate`), as tool calls inside the turn, so the
+		 * parent's Stop — `interrupt()`, then `close()` in the engine's `finally` — ends them
+		 * with it. Setting this would be the one way to break that.
+		 */
+		/*
 		 * #4 — the SDK's own AskUserQuestion, answered by the chat's question card through
 		 * `canUseTool` (`./ask-user-question`): HTML option previews, and a question that never
 		 * answers itself (`askUserQuestionTimeout: 'never'`, a Settings field, not an Option).

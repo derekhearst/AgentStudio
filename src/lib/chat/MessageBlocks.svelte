@@ -101,8 +101,14 @@
 				conversationId={block.conversationId}
 				task={block.task}
 				content={block.content}
-				status={block.success ? 'completed' : 'failed'}
+				status={block.status ?? (block.success ? 'completed' : 'failed')}
 				expanded={false}
+				transcript={block.transcript ?? []}
+				transcriptTruncated={block.transcriptTruncated ?? false}
+				details={block.details}
+				error={block.error ?? null}
+				costUsd={block.costUsd ?? null}
+				usage={block.usage}
 			/>
 		</div>
 	{:else if block.kind === 'text' && block.content?.trim()}

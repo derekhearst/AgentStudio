@@ -47,6 +47,8 @@ export type EngineAgentDefinition = {
 
 /** What the mapper needs from an `agents` row, named so callers cannot pass the wrong thing. */
 export type AgentRowForDefinition = {
+	/** The `agents` row id. Optional so a spec can build a definition from a bare row. */
+	id?: string
 	name: string
 	role: string
 	/** Already resolved — an identity skill may have overridden `systemPrompt`. */
@@ -78,6 +80,15 @@ export const SUBAGENT_DISALLOWED_TOOLS: readonly string[] = [
 	// A child has no stream to ask down. The old loop refused its `ask_user` for
 	// non-orchestrators; the SDK's question tool is refused the same way.
 	ASK_USER_QUESTION_TOOL,
+	// The tree is one level deep (#32). A child that could delegate would hold one of the
+	// parent's concurrency slots while waiting on slots of its own, and the parent could
+	// deadlock on its own grandchildren. The delegation gate refuses a nested call as well;
+	// this keeps the tool out of the child's list so it is never offered in the first place.
+	'Agent',
+	'Task',
+	'Workflow',
+	// Resumes a finished agent outside any `Agent` call — see `DISALLOWED_BUILTIN_TOOLS`.
+	'SendMessage',
 ]
 
 /**
@@ -150,12 +161,30 @@ export function buildAgentDefinitions(
 	rows: readonly AgentRowForDefinition[],
 	options: { parentIsClaude: boolean },
 ): Record<string, EngineAgentDefinition> {
-	const out: Record<string, EngineAgentDefinition> = {}
+	return buildAgentRoster(rows, options).definitions
+}
+
+/**
+ * The offered agents, plus which `agents` row each key names.
+ *
+ * The SDK only ever hands back the key (`subagent_type` on the `Agent` call), and two things
+ * need the row behind it (#32): the budget check a child must pass before it starts, which
+ * applies that agent's own limits, and the child's ledger row, which is attributed to it.
+ * Built in the same pass as the definitions so the two can never disagree about who won a
+ * key collision.
+ */
+export function buildAgentRoster(
+	rows: readonly AgentRowForDefinition[],
+	options: { parentIsClaude: boolean },
+): { definitions: Record<string, EngineAgentDefinition>; agentIdByKey: Record<string, string> } {
+	const definitions: Record<string, EngineAgentDefinition> = {}
+	const agentIdByKey: Record<string, string> = {}
 	for (const row of rows) {
 		const built = agentDefinitionFrom(row, options)
 		if (!built) continue
-		if (built.key in out) continue
-		out[built.key] = built.definition
+		if (built.key in definitions) continue
+		definitions[built.key] = built.definition
+		if (row.id) agentIdByKey[built.key] = row.id
 	}
-	return out
+	return { definitions, agentIdByKey }
 }
