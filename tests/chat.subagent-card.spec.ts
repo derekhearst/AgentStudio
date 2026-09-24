@@ -53,6 +53,16 @@ const details = (overrides: Partial<SubagentDetails> = {}): SubagentDetails => (
 	...overrides,
 })
 
+/** What the engine added up over the child's model calls: 48,200 tokens in all. */
+const spend = {
+	inputTokens: 2_000,
+	outputTokens: 1_200,
+	cacheCreationTokens: 5_000,
+	cacheReadTokens: 40_000,
+	modelCalls: 6,
+	model: 'claude-sonnet-4-5',
+}
+
 test.describe("the Agent tool's typed result", () => {
 	test('a completed child: report, totals and its final call usage', () => {
 		const out = toolResultDetails('Agent', {
@@ -171,6 +181,12 @@ test.describe('the live blocks the page builds from frames', () => {
 		expect(block.details?.totalTokens).toBe(12_345)
 	})
 
+	test("done carries what the child spent, and a save keeps it", () => {
+		const blocks = applySubagentDone(start(), target, { success: true, status: 'completed', details: details(), usage: spend })
+		expect(child(blocks).usage).toEqual(spend)
+		expect(getSerializableBlocksForMetadata(blocks)[0]).toMatchObject({ usage: spend })
+	})
+
 	test('done without a payload is the old server: completed', () => {
 		expect(child(applySubagentDone(start(), target)).status).toBe('completed')
 		expect(child(applySubagentDone(start(), target, { status: 'stopped', error: 'Stopped' })).status).toBe('stopped')
@@ -221,6 +237,12 @@ test.describe("the card's wording", () => {
 		expect(subagentCardStats({ transcript: [{ kind: 'tool', name: 'Read' }] })).toEqual(['1 tool'])
 	})
 
+	test("tokens are everything the child's calls used, not the SDK's last-call figure", () => {
+		expect(subagentCardStats({ details: details(), usage: spend, transcript: [] })[0]).toBe('48k tokens')
+		// A block saved before the calls were added up falls back to the SDK's figure.
+		expect(subagentCardStats({ details: details(), usage: null, transcript: [] })[0]).toBe('12k tokens')
+	})
+
 	test('an old block renders from its text and call names; a silent child from its report', () => {
 		expect(subagentCardEntries({ content: 'said', toolCalls: [{ name: 'Read', success: true }] })).toEqual([
 			{ kind: 'text', text: 'said' },
@@ -262,6 +284,7 @@ async function seedConversationWithChildren(prefix: string) {
 				{ kind: 'text', text: `${prefix} the child concluded` },
 			],
 			details: details({ totalToolUseCount: 1 }),
+			usage: spend,
 			costUsd: 0.25,
 		},
 		{
@@ -274,6 +297,18 @@ async function seedConversationWithChildren(prefix: string) {
 			success: false,
 			status: 'failed',
 			error: 'Refused: 4 delegated agents are already running. Wait for the running children to finish, then delegate the rest.',
+		},
+		{
+			kind: 'subagent',
+			agentId: 'toolu_a3',
+			agentName: 'tester',
+			conversationId: null,
+			task: 'Run the suite',
+			content: '',
+			success: false,
+			status: 'stopped',
+			error: 'Stopped before it finished.',
+			usage: { ...spend, inputTokens: 800, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, modelCalls: 1 },
 		},
 		{ kind: 'text', content: `${prefix} done` },
 	]
@@ -296,12 +331,13 @@ test.describe('the rendered card', () => {
 			await page.goto(`/chat/${conv.id}`, { waitUntil: 'domcontentloaded' })
 
 			const cards = page.getByTestId('subagent-card').filter({ visible: true })
-			await expect(cards).toHaveCount(2, { timeout: 30_000 })
+			await expect(cards).toHaveCount(3, { timeout: 30_000 })
 
 			const done = cards.nth(0)
 			await expect(done).toHaveAttribute('data-status', 'completed')
 			await expect(done.getByTestId('subagent-card-status')).toHaveText('done')
-			await expect(done.getByTestId('subagent-card-stats')).toContainText('12k tokens')
+			// Everything its calls used, not the SDK's last-call 12k.
+			await expect(done.getByTestId('subagent-card-stats')).toContainText('48k tokens')
 			await expect(done.getByTestId('subagent-card-stats')).toContainText('$0.25')
 			await expect(done.getByTestId('subagent-card-stats')).toContainText('4.2s')
 			// Collapsed: the transcript is there but not shown.
@@ -324,6 +360,12 @@ test.describe('the rendered card', () => {
 			await expect(refused.getByTestId('subagent-card-status')).toHaveText('refused')
 			await refused.locator('summary').click()
 			await expect(refused).toContainText('Wait for the running children to finish')
+
+			// Stop reads as stopped, not failed, with what it spent before it was stopped.
+			const stopped = cards.nth(2)
+			await expect(stopped).toHaveAttribute('data-status', 'stopped')
+			await expect(stopped.getByTestId('subagent-card-status')).toHaveText('stopped')
+			await expect(stopped.getByTestId('subagent-card-stats')).toContainText('800 tokens')
 		} finally {
 			await cleanupPrefixedRecords(prefix)
 		}

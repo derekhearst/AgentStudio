@@ -11,6 +11,7 @@
 
 import { parseJsonFallback } from '$lib/chat/tool-block-helpers'
 import type { SubagentDetails, ToolResultDetails } from '../engine/tool-result-details'
+import type { SubagentSpend } from '../engine/subagent-usage'
 import type { RunNotice } from '../engine/sdk-notices'
 import {
 	appendTranscriptText,
@@ -80,6 +81,8 @@ export type SubagentBlock = {
 	details?: SubagentDetails
 	/** Why it failed, was refused or stopped. */
 	error?: string | null
+	/** What it spent over all its model calls, from `subagent_done`. */
+	usage?: SubagentSpend
 }
 
 export type NoticeBlock = {
@@ -160,6 +163,7 @@ export function getSerializableBlocksForMetadata(blocks: StreamingBlock[]): Arra
 				...(block.transcriptTruncated ? { transcriptTruncated: true } : {}),
 				...(block.details ? { details: block.details } : {}),
 				...(block.error ? { error: block.error } : {}),
+				...(block.usage ? { usage: block.usage } : {}),
 			})
 		} else {
 			out.push({
@@ -511,6 +515,7 @@ export type SubagentDonePayload = {
 	status?: Exclude<SubagentStatus, 'running'>
 	details?: SubagentDetails
 	error?: string | null
+	usage?: SubagentSpend
 }
 
 /**
@@ -532,6 +537,7 @@ export function applySubagentDone(
 					expanded: false,
 					...(payload.details ? { details: payload.details } : {}),
 					...(payload.error ? { error: payload.error } : {}),
+					...(payload.usage ? { usage: payload.usage } : {}),
 				}
 			: b,
 	)

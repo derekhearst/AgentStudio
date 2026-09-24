@@ -1690,6 +1690,7 @@
 								transcriptTruncated={block.transcriptTruncated ?? false}
 								details={block.details}
 								error={block.error ?? null}
+								usage={block.usage}
 							/>
 						{:else if block.kind === 'text' && block.content}
 							<div class="assistant-message">

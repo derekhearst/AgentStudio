@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { renderMarkdown } from './chat';
 	import type { SubagentDetails } from '$lib/engine/tool-result-details';
+	import type { SubagentSpend } from '$lib/engine/subagent-usage';
 	import type { SubagentTranscriptEntry } from '$lib/engine/subagent-transcript';
 	import {
 		subagentCardEntries,
@@ -30,6 +31,7 @@
 		details = undefined,
 		error = null,
 		costUsd = null,
+		usage = undefined,
 	} = $props<{
 		agentName: string;
 		agentId: string;
@@ -44,6 +46,8 @@
 		details?: SubagentDetails;
 		error?: string | null;
 		costUsd?: number | null;
+		/** What it spent over all its model calls. Absent on blocks persisted before it was counted. */
+		usage?: SubagentSpend;
 	}>();
 
 	const isRunning = $derived(status === 'running');
@@ -52,7 +56,7 @@
 
 	const statusLabel = $derived(subagentStatusLabel(status, error));
 	const entries = $derived(subagentCardEntries({ transcript, content, toolCalls, details }));
-	const stats = $derived(subagentCardStats({ details, costUsd, transcript: entries }));
+	const stats = $derived(subagentCardStats({ details, costUsd, usage, transcript: entries }));
 
 	const accentClass = $derived(
 		isProblem ? 'border-l-2 border-error/60 pl-1.5' : isRunning ? 'border-l-2 border-primary/50 pl-1.5' : '',

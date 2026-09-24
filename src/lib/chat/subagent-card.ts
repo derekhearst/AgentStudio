@@ -7,6 +7,7 @@
  */
 
 import type { SubagentDetails } from '../engine/tool-result-details'
+import { spendTokenTotal, type SubagentSpend } from '../engine/subagent-usage'
 import { transcriptFromLegacy, type SubagentTranscriptEntry } from '../engine/subagent-transcript'
 
 export type SubagentCardStatus = 'running' | 'completed' | 'failed' | 'stopped'
@@ -19,7 +20,7 @@ export function subagentStatusLabel(status: SubagentCardStatus, error?: string |
 	return error && /\brefused\b/i.test(error) ? 'refused' : 'failed'
 }
 
-/** `12.3k tokens`. The SDK's figure: the child's context at the end plus its final answer. */
+/** `12.3k tokens`. */
 export function formatSubagentTokens(tokens: number | null | undefined): string | null {
 	if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) return null
 	if (tokens < 1_000) return `${Math.round(tokens)} tokens`
@@ -46,16 +47,23 @@ export function formatSubagentCost(costUsd: number | null | undefined): string |
 	return costUsd < 0.01 ? `$${costUsd.toFixed(4)}` : `$${costUsd.toFixed(2)}`
 }
 
-/** The small facts under the name, in reading order, leaving out whatever is unknown. */
+/**
+ * The small facts under the name, in reading order, leaving out whatever is unknown.
+ *
+ * Tokens are every token the child's model calls used, added up (`usage`), which is what its
+ * ledger row carries. A block saved before that was counted falls back to the SDK's own
+ * `totalTokens`, which is only the child's last call: its context at the end plus its answer.
+ */
 export function subagentCardStats(input: {
 	details?: SubagentDetails | null
 	costUsd?: number | null
+	usage?: SubagentSpend | null
 	transcript: readonly SubagentTranscriptEntry[]
 }): string[] {
 	const toolCount =
 		input.details?.totalToolUseCount ?? input.transcript.filter((entry) => entry.kind === 'tool').length
 	return [
-		formatSubagentTokens(input.details?.totalTokens),
+		formatSubagentTokens(spendTokenTotal(input.usage) ?? input.details?.totalTokens),
 		formatSubagentCost(input.costUsd),
 		formatSubagentDuration(input.details?.totalDurationMs),
 		toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? '' : 's'}` : null,

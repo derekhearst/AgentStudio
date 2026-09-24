@@ -15,6 +15,7 @@
 import type { SubagentDetails, ToolResultDetails } from '../engine/tool-result-details'
 import type { RunNotice } from '../engine/sdk-notices'
 import type { SubagentTranscriptEntry } from '../engine/subagent-transcript'
+import type { SubagentSpend } from '../engine/subagent-usage'
 import { readAskUserAnswers } from './ask-user-answers'
 
 export type SavedBlock =
@@ -50,6 +51,7 @@ export type SavedBlock =
 			details?: SubagentDetails
 			error?: string | null
 			costUsd?: number | null
+			usage?: SubagentSpend
 	  }
 
 /** Coerce a JSONB column value (object, JSON string, or raw) into a record. */

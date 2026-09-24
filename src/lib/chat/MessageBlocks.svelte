@@ -125,6 +125,7 @@
 				details={block.details}
 				error={block.error ?? null}
 				costUsd={block.costUsd ?? null}
+				usage={block.usage}
 			/>
 		</div>
 	{:else if block.kind === 'text' && block.content?.trim()}
