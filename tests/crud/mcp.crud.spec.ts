@@ -7,6 +7,7 @@ import {
 	pollDb,
 	uniquePrefix,
 	withErrorCapture,
+	waitForHydration,
 } from '../helpers'
 
 /**
@@ -58,7 +59,8 @@ test.describe('/settings/connectors — CRUD lifecycle', () => {
 		try {
 			await withErrorCapture(page, async () => {
 				await page.goto('/settings/connectors')
-				await page.waitForLoadState('domcontentloaded')
+				// The header's buttons are server-rendered; a click before hydration has no handler.
+				await waitForHydration(page)
 				await expect(page.getByRole('heading', { name: 'Connectors', exact: true }).first()).toBeVisible()
 
 				// ── Create
