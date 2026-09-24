@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 import { db } from '$lib/db.server'
 import { appSettings } from '$lib/settings/settings.schema'
 import { syncSettingsBudgetLimits } from '$lib/costs/budget.server'
@@ -48,15 +48,34 @@ export const DEFAULT_SETTINGS = {
 } as const
 
 export async function getOrCreateSettings(userId: string) {
-	const [existing] = await db
+	const [existing] = await readSettingsRow(userId)
+	if (existing) return existing
+
+	// app_settings has no unique index on user_id, so a check-then-insert raced: the first
+	// requests of a fresh instance each saw no row and each inserted one. Everything reads the
+	// oldest row, so the extras were harmless but piled up. Serialise creation per user with a
+	// transaction-scoped advisory lock and check again inside it.
+	return db.transaction(async (tx) => {
+		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`app_settings:${userId}`}))`)
+		const [raced] = await readSettingsRow(userId, tx)
+		if (raced) return raced
+		return insertDefaultSettings(userId, tx)
+	})
+}
+
+type SettingsExecutor = Pick<typeof db, 'select' | 'insert'>
+
+function readSettingsRow(userId: string, executor: SettingsExecutor = db) {
+	return executor
 		.select()
 		.from(appSettings)
 		.where(eq(appSettings.userId, userId))
 		.orderBy(asc(appSettings.createdAt))
 		.limit(1)
-	if (existing) return existing
+}
 
-	const [created] = await db
+async function insertDefaultSettings(userId: string, executor: SettingsExecutor) {
+	const [created] = await executor
 		.insert(appSettings)
 		.values({
 			userId,
