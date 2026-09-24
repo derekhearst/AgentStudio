@@ -75,7 +75,9 @@ function splitPath(path: string): { name: string; dir: string } {
  * - Lists are read in order, oldest first: saved messages by sequence, then the live turn.
  * - A block with an `id` is counted once even when two lists hold it.
  * - Only successful `file_edit` blocks count; a write that changed nothing
- *   (`unavailable: 'no_change'`) is not a change.
+ *   (`unavailable: 'no_change'`) is not a change. A created file always is: replies saved
+ *   before `tool-result-details` learned to diff a new file stored every `Write` create as
+ *   `no_change`, and those files belong on the list too.
  * - Counts add up across edits, and a file created at any point stays `create`.
  */
 export function collectChangedFiles(blockLists: Iterable<BlockList | null | undefined>): ChangedFile[] {
@@ -93,7 +95,7 @@ export function collectChangedFiles(blockLists: Iterable<BlockList | null | unde
 			}
 			if (failed(block) || !isFileEdit(block.details)) continue
 			const details = block.details
-			if (details.unavailable === 'no_change') continue
+			if (details.unavailable === 'no_change' && details.changeType !== 'create') continue
 
 			order += 1
 			const path = details.path.trim()

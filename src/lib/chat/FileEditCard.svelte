@@ -40,12 +40,18 @@
 		details.changeType === 'create' ? 'Created' : details.tool === 'Write' ? 'Rewrote' : 'Edited'
 	);
 
+	// A created file's diff is its contents, so it has no lines only when it is empty — or
+	// when it was saved before new files were diffed, as "no change". It is never "no change".
 	const emptyReason = $derived(
-		details.unavailable === 'no_change'
-			? 'No changes — the file already matched what was written.'
-			: details.unavailable === 'diff_missing'
-				? 'The diff is unavailable for this edit (the previous contents were too large to diff).'
-				: ''
+		details.changeType === 'create'
+			? details.unavailable === 'none' && details.additions === 0
+				? 'An empty new file.'
+				: 'A new file — open it to see its contents.'
+			: details.unavailable === 'no_change'
+				? 'No changes — the file already matched what was written.'
+				: details.unavailable === 'diff_missing'
+					? 'The diff is unavailable for this edit (the previous contents were too large to diff).'
+					: ''
 	);
 
 	type NumberedLine = { text: string; cls: string; no: number | null };
