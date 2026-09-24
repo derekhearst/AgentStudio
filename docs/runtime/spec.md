@@ -57,7 +57,7 @@ A stateful event bus for one run. The Session is the only thing that touches SSE
 | `getMessages`     | () => Promise\<LlmMessage[]\> | Loads current message history                    |
 | `appendMessage`   | (m) => Promise\<void\>        | Persists a message                               |
 | `pendingApproval` | (req) => Promise\<boolean\>   | Blocks until user approves or denies a tool call |
-| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Blocks until user answers via `ask_user`         |
+| `pendingQuestion` | (req) => Promise\<Answer[]\>  | Retired with `ask_user` (#4): these runs are unattended and never ask; chat questions are the SDK's AskUserQuestion |
 
 ## Features
 

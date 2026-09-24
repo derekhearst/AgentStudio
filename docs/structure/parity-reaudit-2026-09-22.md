@@ -253,7 +253,7 @@ plan), **fold** (belongs inside another issue), **delete** (close it).
 | #17 | Connect external MCP servers | **as filed** | plumbing confirmed trivial; the policy layer is the actual work |
 | #32 | Multi-agent orchestration | **rebuild** | use SDK `agents` + the Task tool instead of a bespoke fan-out tool |
 | #5 | Port subagents to SDK subagents | **as filed** — shipped | keystone; `Options.agents` + `Task`, `run_subagent` retired |
-| #4 | Native AskUserQuestion | **as filed** | `toolConfig.askUserQuestion.previewFormat` confirmed present |
+| #4 | Native AskUserQuestion | **as filed** — shipped | the SDK's tool answered through `canUseTool`; HTML previews, multi-select, Other, timeout `never` |
 | #18 | Conversation pin/archive/search/export | **as filed**, trimmed | all four are cheap; make archive the default action, not delete |
 | #22 | Slash commands and `@`-mentions | **split** | build `@` now; `/` should wait for `settingSources` |
 | #38 | Usage digest | **rebuild** | fix the ledger first, then ship the header strip; the digest agent is the last 20% |
@@ -477,6 +477,34 @@ timeout: `never` is the right default for a self-hosted single-user box where th
 may be asleep — an auto-continue that picks an option unattended is exactly the failure this
 app's `/review` inbox exists to avoid.
 
+**Shipped (#4).** The in-house `ask_user` is gone — schema, handler, the old loop's branch and
+the engine's special cases — and the SDK's own AskUserQuestion is on for every chat run:
+`toolConfig.askUserQuestion.previewFormat: 'html'` and `settings.askUserQuestionTimeout:
+'never'` (a Settings field, not an Option). What the installed SDK (0.3.278, CLI 2.1.278) was
+read for rather than assumed:
+
+- the tool's own permission check always asks, so every call reaches `canUseTool`; the host
+  answers by allowing with `updatedInput.answers` (question text → answer, multi-select
+  comma-separated), which the CLI's `call()` reads back and echoes as
+  `tool_use_result.answers`;
+- the CLI only enables the tool in SDK mode when a permission prompt tool is set, which
+  `canUseTool` always provides (`--permission-prompt-tool stdio`);
+- in `html` mode the CLI rejects previews that are whole documents or carry
+  `<script>`/`<style>` — validation of the model, not a promise, so the card still renders
+  each preview in an `<iframe sandbox="">` whose document forbids every load.
+
+The engine hands the call to the run's `askUser` host, which records it on
+`chat_runs.pending_questions` (opening the /review item and the needs-input push, as before)
+and emits the `ask_user` frame under the SDK's tool_use id. The card was rebuilt around a
+header chip, option cards with the recommended badge, the preview pane, multi-select and an
+automatic "Other", and the same card answers from /review. Unattended runs: a subagent's
+question is refused in `canUseTool` (and the tool is in every subagent's `disallowedTools`);
+automations, monitors and CI-fix runs never had it and the old loop's offered-list gate
+refuses it; a chat question nobody answers is released after five minutes, or at once on
+Stop. The question is exempt from approval settings and permission modes (plan mode is when
+it is most wanted) but not from an agent's tool scope; `READ_ONLY_TOOL_NAMES` carries
+`AskUserQuestion` in place of `ask_user`, which the #67 decision should check.
+
 ### #18 — conversation lifecycle
 
 All four parts are cheap and worth doing. Two opinions:
@@ -587,7 +615,7 @@ unless one of those is the actual goal.
    (#8) and gets worktrees for free.
 5. **#23 via `settingSources`**, then the `/` half of #22 on top of it.
 6. **#17**, HTTP transport first.
-7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), **#4**, **#18**, **#14**.
+7. The cheap independents whenever: ~~**#27 delete**~~ (finished instead), ~~**#4**~~ (shipped), **#18**, **#14**.
 
 Rough shape of it: items 1–3 are maybe a week of work that makes five issues small, and four
 of the open issues (#27 plus the obsolete halves of #24, #32 and #35) should be closed or
