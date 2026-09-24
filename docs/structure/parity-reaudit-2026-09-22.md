@@ -512,7 +512,9 @@ over the app's existing actions (option B of the triage).
 - `/` offers `/compact`, `/model`, `/agent`, `/research`, `/plan`, `/effort`, `/attach` and
   `/voice`, each calling the handler its button calls. Commands are plain data with a
   `source`, so the SDK list (`supportedCommands()`, cached from `init` / `commands_changed`)
-  can be merged in later without changing the palette.
+  can be merged in later without changing the palette. With #9, `/model` lists the same
+  runnable engine models as the model pill, and `/effort` is switched off on a gateway model,
+  as the reasoning pill is.
 - Still open for the SDK half: caching the command list on the conversation (control
   requests only work mid-turn), routing `/compact` to the SDK's real compaction, and handling
   `local_command_output` and `conversation_reset` in the stream loop.
