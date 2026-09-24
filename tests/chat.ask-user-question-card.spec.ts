@@ -160,14 +160,87 @@ test.describe('the live question card', () => {
 			// One question: no counter.
 			await expect(card.getByText(/Question \d\/\d/)).toHaveCount(0)
 
-			await card.getByRole('button', { name: /^Top bar/ }).click()
-			// Typing in Other replaces the option on a single-select question.
+			const topBar = card.getByRole('button', { name: /^Top bar/ })
+			const other = card.getByRole('button', { name: 'Other', exact: true })
+			const submit = card.getByRole('button', { name: 'Submit', exact: true })
+			await topBar.click()
+			// Clicking "Other" itself chooses it: the option goes, the caret goes to the box, and
+			// there is nothing to send until something is typed.
+			await other.click()
+			await expect(other).toHaveAttribute('aria-pressed', 'true')
+			await expect(topBar).toHaveAttribute('aria-pressed', 'false')
+			await expect(card.getByPlaceholder('Type your own answer')).toBeFocused()
+			await expect(submit).toBeDisabled()
+			await expectReadableWidth(other.getByText('Other', { exact: true }))
+
+			// Back to the option; then typing in Other replaces it on a single-select question.
+			await topBar.click()
+			await expect(other).toHaveAttribute('aria-pressed', 'false')
 			await card.getByPlaceholder('Type your own answer').fill('Tabs along the bottom')
-			await expect(card.getByRole('button', { name: /^Top bar/ })).toHaveAttribute('aria-pressed', 'false')
-			await card.getByRole('button', { name: 'Submit', exact: true }).click()
+			await expect(topBar).toHaveAttribute('aria-pressed', 'false')
+			await expect(other).toHaveAttribute('aria-pressed', 'true')
+			await submit.click()
 			await expect.poll(() => posted.length).toBe(1)
 			expect(posted[0].answers).toEqual({ [LAYOUT.question]: 'Tabs along the bottom' })
 			await expect(card.locator('.user-bubble', { hasText: 'Tabs along the bottom' })).toBeVisible()
+		} finally {
+			release()
+			await page.unrouteAll({ behavior: 'ignoreErrors' })
+			await cleanupPrefixedRecords(prefix)
+		}
+	})
+
+	test('a keyboard user can choose an option and Tab past "Other" to Submit', async ({ page }) => {
+		// Focusing "Other" used to choose it, which cleared the option on the way to Submit and
+		// left the question unanswerable from the keyboard.
+		test.setTimeout(90_000)
+		const prefix = uniquePrefix('chat-auq-keys')
+		await cleanupPrefixedRecords(prefix)
+		await authenticateContext(page.context())
+		const conversation = await seedConversation(prefix, { userId: await getActiveUserId() })
+		const runId = randomUUID()
+		const [layout] = PENDING
+		const { release } = await scriptHeldRun(page, conversation.id, [
+			{ id: 1, event: 'context_stats', data: { runId, tokenEstimate: 10, contextWindow: 200_000 } },
+			{ id: 2, event: 'ask_user', data: { id: 'toolu_keys', name: 'AskUserQuestion', token: `${runId}:ask:toolu_keys`, questions: [layout] } },
+		])
+		const posted: Array<{ answers: Record<string, string> }> = []
+		await page.route(
+			(url) => url.pathname === `/chat/${conversation.id}/ask-user`,
+			(route) => {
+				posted.push(route.request().postDataJSON())
+				return route.fulfill({ json: { resolved: true } })
+			},
+		)
+
+		try {
+			await openAndSend(page, conversation.id, `${prefix} lay it out`)
+			const card = page.getByRole('main').locator('.ask-user-card').first()
+			await expect(card.getByText(LAYOUT.question)).toBeVisible({ timeout: 30_000 })
+			const topBar = card.getByRole('button', { name: /^Top bar/ })
+			const otherBox = card.getByPlaceholder('Type your own answer')
+			const submit = card.getByRole('button', { name: 'Submit', exact: true })
+
+			await topBar.focus()
+			await page.keyboard.press('Space')
+			await expect(topBar).toHaveAttribute('aria-pressed', 'true')
+
+			// Tab through the rest of the options, "Other", its box and the preview to Submit.
+			let passedOtherBox = false
+			for (let presses = 0; presses < 12; presses += 1) {
+				if (await submit.evaluate((el) => el === document.activeElement)) break
+				await page.keyboard.press('Tab')
+				if (await otherBox.evaluate((el) => el === document.activeElement)) passedOtherBox = true
+			}
+			expect(passedOtherBox).toBe(true)
+			await expect(submit).toBeFocused()
+			await expect(topBar).toHaveAttribute('aria-pressed', 'true')
+			await expect(card.getByRole('button', { name: 'Other', exact: true })).toHaveAttribute('aria-pressed', 'false')
+			await expect(submit).toBeEnabled()
+
+			await page.keyboard.press('Enter')
+			await expect.poll(() => posted.length).toBe(1)
+			expect(posted[0].answers).toEqual({ [LAYOUT.question]: 'Top bar' })
 		} finally {
 			release()
 			await page.unrouteAll({ behavior: 'ignoreErrors' })

@@ -198,19 +198,29 @@ export function toggleOption(question: AskQuestion, selection: AskSelection, lab
 	return { ...selection, selected }
 }
 
-/** Type into "Other". On a single-select question that is choosing it over the options. */
+/**
+ * Type into "Other". On a single-select question, text there is choosing it over the options;
+ * an edit that leaves the box blank does not take away an option the user chose.
+ */
 export function writeOther(question: AskQuestion, selection: AskSelection, text: string): AskSelection {
 	const otherChosen = text.trim().length > 0 || (!question.multiSelect && selection.otherChosen)
 	return {
-		selected: question.multiSelect ? selection.selected : [],
+		selected: question.multiSelect || !otherChosen ? selection.selected : [],
 		other: text,
 		otherChosen,
 	}
 }
 
-/** Focus "Other": a single-select question drops its option, so the answer is what gets typed. */
-export function focusOther(question: AskQuestion, selection: AskSelection): AskSelection {
-	if (question.multiSelect) return selection
+/**
+ * Click "Other" itself: a single-select question drops its option, so the answer is what gets
+ * typed; a multi-select one toggles it, like any other checkbox.
+ *
+ * Only an explicit click does this — never focus. "Other" sits between the options and
+ * Submit in tab order, so choosing it on focus cleared a keyboard user's option on their way
+ * to Submit and left the question unanswerable from the keyboard.
+ */
+export function chooseOther(question: AskQuestion, selection: AskSelection): AskSelection {
+	if (question.multiSelect) return { ...selection, otherChosen: !selection.otherChosen }
 	return { selected: [], other: selection.other, otherChosen: true }
 }
 

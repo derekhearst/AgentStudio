@@ -2,7 +2,7 @@
 	import AskUserPreview from './AskUserPreview.svelte';
 	import {
 		EMPTY_SELECTION,
-		focusOther,
+		chooseOther,
 		optionLabel,
 		previewOption,
 		toggleOption,
@@ -17,11 +17,13 @@
 	 *
 	 * Controlled: the parent holds the selection (`AskUserCard`, `AskUserModal`), so moving
 	 * between questions keeps what was chosen. Every rule about what a click means lives in
-	 * `$lib/engine/ask-user-question` — `toggleOption`, `writeOther`, `focusOther` — where the
+	 * `$lib/engine/ask-user-question` — `toggleOption`, `writeOther`, `chooseOther` — where the
 	 * specs can reach it.
 	 *
 	 *   - Single-select: choosing an option replaces the previous one, and typing in "Other"
-	 *     replaces the option. Multi-select: options toggle, and "Other" text is added to them.
+	 *     (or clicking "Other" itself) replaces the option. Multi-select: options toggle, and
+	 *     "Other" text is added to them. Focus alone never changes the answer, so a keyboard
+	 *     user can Tab past "Other" to Submit without losing the option they chose.
 	 *   - "Other" is always offered for the SDK's AskUserQuestion — the model is told never to
 	 *     add one itself. Only a question from the retired `ask_user` could turn it off.
 	 *   - A preview is the model's HTML, rendered only inside a sandboxed frame
@@ -52,6 +54,15 @@
 	function pick(label: string) {
 		focused = label;
 		onChange?.(toggleOption(question, selection, label));
+	}
+
+	let otherInput = $state<HTMLTextAreaElement | null>(null);
+
+	/** "Other" clicked: choose it, and put the caret where the answer goes. */
+	function pickOther() {
+		const next = chooseOther(question, selection);
+		onChange?.(next);
+		if (next.otherChosen) otherInput?.focus();
 	}
 
 	const pickedClasses = 'border-primary bg-primary/10 ring-1 ring-primary/30';
@@ -123,7 +134,18 @@
 						? pickedClasses
 						: idleClasses}"
 				>
-					<label for={`${uid}-other`} class="flex min-w-0 items-center gap-2.5 text-sm">
+					<!--
+						A button, not a label: clicking "Other" chooses it, while merely tabbing through
+						it (or into the box) leaves the chosen option alone. Typing chooses it too.
+					-->
+					<button
+						type="button"
+						class="flex w-full min-w-0 cursor-pointer items-center gap-2.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60"
+						aria-pressed={selection.otherChosen}
+						aria-controls={`${uid}-other`}
+						{disabled}
+						onclick={pickOther}
+					>
 						<span
 							class="flex h-4 w-4 shrink-0 items-center justify-center border {multi ? 'rounded' : 'rounded-full'} {selection.otherChosen
 								? 'border-primary bg-primary text-primary-content'
@@ -137,14 +159,15 @@
 							{/if}
 						</span>
 						<span>Other</span>
-					</label>
+					</button>
 					<textarea
 						id={`${uid}-other`}
+						bind:this={otherInput}
 						class="textarea textarea-bordered textarea-sm min-h-14 w-full min-w-0 resize-y"
 						placeholder="Type your own answer"
+						aria-label="Your own answer"
 						value={selection.other}
 						{disabled}
-						onfocus={() => onChange?.(focusOther(question, selection))}
 						oninput={(event) => onChange?.(writeOther(question, selection, event.currentTarget.value))}
 					></textarea>
 				</div>

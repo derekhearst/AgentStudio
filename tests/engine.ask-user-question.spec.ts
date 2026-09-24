@@ -11,7 +11,7 @@ import {
 	answerAskUserQuestion,
 	answerKey,
 	answersByQuestion,
-	focusOther,
+	chooseOther,
 	isAskUserToolName,
 	optionLabel,
 	previewDocument,
@@ -143,7 +143,7 @@ test.describe('what the user picked', () => {
 		s = toggleOption(Q1, s, 'Sidebar (Recommended)')
 		expect(selectionAnswer(Q1, s)).toBe('Sidebar (Recommended)')
 
-		s = focusOther(Q1, s)
+		s = chooseOther(Q1, s)
 		expect(s.selected).toEqual([])
 		expect(selectionAnswer(Q1, s)).toBe('') // chose Other, typed nothing yet
 		s = writeOther(Q1, s, '  A hamburger menu  ')
@@ -160,11 +160,26 @@ test.describe('what the user picked', () => {
 		s = toggleOption(Q2, s, 'Search')
 		s = toggleOption(Q2, s, 'Export')
 		s = toggleOption(Q2, s, 'Export')
-		expect(focusOther(Q2, s)).toBe(s)
 		s = writeOther(Q2, s, 'Dark mode')
+		expect(selectionAnswer(Q2, s)).toBe('Search, Share, Dark mode')
+		// Clicking "Other" is a checkbox here: off drops the text from the answer, on brings it back.
+		s = chooseOther(Q2, s)
+		expect(selectionAnswer(Q2, s)).toBe('Search, Share')
+		s = chooseOther(Q2, s)
 		expect(selectionAnswer(Q2, s)).toBe('Search, Share, Dark mode')
 		s = writeOther(Q2, s, '   ')
 		expect(selectionAnswer(Q2, s)).toBe('Search, Share')
+	})
+
+	test('single-select: an option survives an empty "Other" until the user types or clicks it', () => {
+		// The card no longer chooses "Other" on focus (a keyboard user tabs through it on the way
+		// to Submit); only typing or clicking "Other" itself replaces the option.
+		let s = toggleOption(Q1, EMPTY_SELECTION, 'Top bar')
+		s = writeOther(Q1, s, '')
+		expect(selectionAnswer(Q1, s)).toBe('Top bar')
+		s = writeOther(Q1, s, 'Tabs')
+		expect(s.selected).toEqual([])
+		expect(selectionAnswer(Q1, s)).toBe('Tabs')
 	})
 
 	test('the card submits only answered questions, keyed by question text', () => {
