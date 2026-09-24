@@ -505,6 +505,12 @@ Stop. The question is exempt from approval settings and permission modes (plan m
 it is most wanted) but not from an agent's tool scope; `READ_ONLY_TOOL_NAMES` carries
 `AskUserQuestion` in place of `ask_user`, which the #67 decision should check.
 
+Review follow-ups: the bundled CLI marks AskUserQuestion `isConcurrencySafe`, so one assistant
+message can open several cards at once. Each inline card now answers under its own token (the
+page's single `pendingAskUser` is only what the composer and the modal answer, and it passes to
+the newest card still open when its own is settled). "Other" is chosen by typing in it or
+clicking it, no longer by focus, so a keyboard user can pick an option and Tab to Submit.
+
 ### #18 — conversation lifecycle
 
 All four parts are cheap and worth doing. Two opinions:

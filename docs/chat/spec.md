@@ -208,9 +208,11 @@ When the agent needs a decision from you before it carries on, it asks with **As
 | Preview | For options that are easier to compare by eye (a layout, a snippet, a configuration), a small rendered picture of what the choice produces. It shows the option under your pointer or keyboard, otherwise the one you chose, otherwise the recommended one. Beside the options on a wide screen, below them on a phone |
 | Other | Always there: type your own answer instead of — or, on a "choose any" question, as well as — the options |
 
-Some questions say **Choose any that apply**: tick as many options as you like. The rest take one answer, and typing in Other replaces the option you picked. With several questions the card steps through them (Question 1/3, Next, Submit), and Submit waits until every question has an answer.
+Some questions say **Choose any that apply**: tick as many options as you like. The rest take one answer, and typing in Other (or clicking Other itself) replaces the option you picked. Just moving through Other with the keyboard changes nothing, so you can pick an option and Tab on to Submit. With several questions the card steps through them (Question 1/3, Next, Submit), and Submit waits until every question has an answer.
 
 **How you answer.** In the card, in the chat composer (typing a reply while a question is waiting answers it), or from the /review inbox, which shows the same card. Whichever comes first counts. Once the server has recorded it, the card shows each question with your answer under it, and so does the conversation after a reload.
+
+**Several questions at once.** The agent can ask more than one AskUserQuestion in the same step, so two or three cards can be waiting side by side. Each card sends its answer for its own question only. A reply typed in the composer (or given in the modal) goes to the newest card still waiting; once that one is answered, the next one still waiting takes its place.
 
 **If nobody answers.** The question waits five minutes, like a tool approval. After a minute you get a "Needs input" notification. After five, the agent is told nobody answered and that it must not assume an answer — it carries on only with what does not depend on it, or ends its turn and says what it needs. Stopping the run settles the question at once. A question never answers itself: the SDK's own idle auto-continue (`askUserQuestionTimeout`) is set to `never`, because on a box that runs while you sleep an auto-picked option is a decision you never saw.
 
